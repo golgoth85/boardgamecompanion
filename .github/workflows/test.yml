@@ -11,6 +11,10 @@ permissions:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    env:
+      BGC_CONFIG_DIR: /tmp/boardgamecompanion/config
+      BGC_IMPORT_DIR: /tmp/boardgamecompanion/import
+      BGC_MANUALS_DIR: /tmp/boardgamecompanion/manuals
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
