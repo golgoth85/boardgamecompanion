@@ -179,8 +179,8 @@ def _extract_results(body: dict[str, Any]) -> list[Any]:
 def _normalize_title(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(char for char in text if not unicodedata.combining(char))
-    text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    return re.sub(r"\s+", " ", text)
+    text = "".join(char.lower() if char.isalnum() else " " for char in text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _as_int(value: Any) -> int | None:
