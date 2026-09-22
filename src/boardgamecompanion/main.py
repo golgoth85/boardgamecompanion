@@ -18,7 +18,10 @@ from boardgamecompanion.floppy import (
     FloppyClient,
     FloppyConfig,
     FloppyError,
+    FloppyPlanChanged,
+    apply_floppy_sync,
     build_sync_preview,
+    load_floppy_links,
     local_owned_games,
 )
 from boardgamecompanion.settings import settings
@@ -52,6 +55,11 @@ def floppy_http_error(exc: FloppyError) -> HTTPException:
     if exc.kind in {"timeout", "unreachable"}:
         return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=502, detail=str(exc))
+
+
+class FloppySyncRequest(BaseModel):
+    plan_hash: str = Field(min_length=64, max_length=64)
+    batch_size: int = Field(default=20, ge=1, le=50)
 
 
 class FloppySettingsUpdate(BaseModel):
@@ -263,7 +271,7 @@ def floppy_preview() -> dict[str, object]:
     if client is None:
         raise HTTPException(
             status_code=409,
-            detail="Floppy is not configured. Set BGC_FLOPPY_URL and BGC_FLOPPY_API_KEY.",
+            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
         )
 
     database = get_database()
@@ -271,14 +279,57 @@ def floppy_preview() -> dict[str, object]:
 
     try:
         remote_games = client.boardgames()
+        collection_entries = client.collection_entries()
+        capabilities = client.schema_capabilities()
     except FloppyError as exc:
         raise floppy_http_error(exc) from exc
 
-    preview = build_sync_preview(local_owned_games(database), remote_games)
-    preview["mode"] = "read_only"
-    preview["apply_supported"] = False
+    preview = build_sync_preview(
+        local_owned_games(database),
+        remote_games,
+        collection_entries,
+        load_floppy_links(database),
+    )
+    preview["mode"] = "dry_run"
+    preview["apply_supported"] = bool(capabilities.get("write_contract_ready"))
+    preview["schema"] = capabilities
     preview["note"] = (
-        "Write sync stays disabled until the live Floppy OpenAPI contract "
-        "for media tracking and collection creation has been validated."
+        "Sync is add-only: it never removes Floppy media, collection entries, "
+        "history, or local BoardGameCompanion records."
     )
     return preview
+
+
+@app.post("/api/integrations/floppy/sync", tags=["integrations"])
+def floppy_sync(payload: FloppySyncRequest) -> dict[str, object]:
+    client = get_floppy_client()
+    if client is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
+        )
+
+    capabilities = client.schema_capabilities()
+    if not capabilities.get("write_contract_ready"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The configured Floppy instance does not expose the validated "
+                "media + collection write contract."
+            ),
+        )
+
+    database = get_database()
+    database.initialize()
+
+    try:
+        return apply_floppy_sync(
+            database,
+            client,
+            expected_plan_hash=payload.plan_hash,
+            batch_size=payload.batch_size,
+        )
+    except FloppyPlanChanged as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FloppyError as exc:
+        raise floppy_http_error(exc) from exc
