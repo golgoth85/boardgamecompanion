@@ -8,6 +8,23 @@ const importResult = document.querySelector("#importResult");
 const submitImport = document.querySelector("#submitImport");
 const cancelImport = document.querySelector("#cancelImport");
 const closeImport = document.querySelector("#closeImport");
+const settingsDialog = document.querySelector("#settingsDialog");
+const settingsButton = document.querySelector("#settingsButton");
+const settingsForm = document.querySelector("#settingsForm");
+const closeSettings = document.querySelector("#closeSettings");
+const cancelSettings = document.querySelector("#cancelSettings");
+const saveSettings = document.querySelector("#saveSettings");
+const saveTestSettings = document.querySelector("#saveTestSettings");
+const floppyUrl = document.querySelector("#floppyUrl");
+const floppyApiKey = document.querySelector("#floppyApiKey");
+const floppyTimeout = document.querySelector("#floppyTimeout");
+const floppyVerifyTls = document.querySelector("#floppyVerifyTls");
+const floppyClearToken = document.querySelector("#floppyClearToken");
+const clearTokenRow = document.querySelector("#clearTokenRow");
+const floppyUrlHint = document.querySelector("#floppyUrlHint");
+const floppyTokenHint = document.querySelector("#floppyTokenHint");
+const floppyTimeoutHint = document.querySelector("#floppyTimeoutHint");
+const settingsResult = document.querySelector("#settingsResult");
 const toast = document.querySelector("#toast");
 
 const state = {
@@ -23,6 +40,8 @@ const state = {
 let searchTimer;
 let catalogRequestController;
 let importInProgress = false;
+let settingsBusy = false;
+let currentFloppySettings = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -105,6 +124,123 @@ async function api(url, options) {
     throw new Error(message);
   }
   return response.json();
+}
+
+function setSettingsBusy(busy) {
+  settingsBusy = busy;
+  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
+    if (control) control.disabled = busy;
+  }
+  saveSettings.textContent = busy ? "Salvataggio…" : "Salva";
+  saveTestSettings.textContent = busy ? "Verifica…" : "Salva e verifica";
+}
+
+function closeSettingsDialog() {
+  if (!settingsBusy && settingsDialog.open) {
+    settingsDialog.close();
+  }
+}
+
+function applyFloppySettingsToForm(data) {
+  currentFloppySettings = data;
+  floppyUrl.value = data.url || "";
+  floppyApiKey.value = "";
+  floppyTimeout.value = String(data.timeout_seconds ?? 8);
+  floppyVerifyTls.checked = data.verify_tls !== false;
+  floppyClearToken.checked = false;
+
+  const overrides = data.overrides || {};
+  floppyUrl.disabled = Boolean(overrides.url);
+  floppyApiKey.disabled = Boolean(overrides.api_key);
+  floppyTimeout.disabled = Boolean(overrides.timeout_seconds);
+  floppyVerifyTls.disabled = Boolean(overrides.verify_tls);
+
+  floppyUrlHint.textContent = overrides.url
+    ? "Override attivo da variabile Docker."
+    : "Salvato localmente in /config.";
+
+  if (overrides.api_key) {
+    floppyTokenHint.textContent = "Token configurato tramite variabile Docker.";
+    clearTokenRow.hidden = true;
+  } else if (data.api_key_configured) {
+    floppyTokenHint.textContent = "Token configurato. Lascia vuoto per mantenerlo invariato.";
+    clearTokenRow.hidden = false;
+  } else {
+    floppyTokenHint.textContent = "Nessun token configurato.";
+    clearTokenRow.hidden = true;
+  }
+
+  floppyTimeoutHint.textContent = overrides.timeout_seconds
+    ? "Override attivo da variabile Docker."
+    : "Intervallo consentito: 1–60 secondi.";
+}
+
+async function openSettingsDialog() {
+  settingsResult.hidden = true;
+  settingsResult.textContent = "";
+  settingsDialog.showModal();
+  setSettingsBusy(true);
+  try {
+    const data = await api("/api/settings/floppy");
+    applyFloppySettingsToForm(data);
+  } catch (error) {
+    settingsResult.hidden = false;
+    settingsResult.textContent = error.message;
+  } finally {
+    setSettingsBusy(false);
+  }
+}
+
+async function persistFloppySettings({verifyAfter = false} = {}) {
+  if (settingsBusy) return;
+  setSettingsBusy(true);
+  settingsResult.hidden = true;
+
+  const payload = {
+    url: floppyUrl.value.trim(),
+    api_key: floppyApiKey.disabled || !floppyApiKey.value.trim()
+      ? null
+      : floppyApiKey.value.trim(),
+    clear_api_key: !floppyClearToken.disabled && floppyClearToken.checked,
+    timeout_seconds: Number(floppyTimeout.value || 8),
+    verify_tls: floppyVerifyTls.checked,
+  };
+
+  try {
+    const saved = await api("/api/settings/floppy", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    applyFloppySettingsToForm(saved);
+    settingsResult.hidden = false;
+    settingsResult.innerHTML = "<strong>Impostazioni salvate.</strong>";
+    showToast("Impostazioni Floppy salvate.");
+
+    if (verifyAfter) {
+      const status = await api("/api/integrations/floppy/status");
+      if (status.authenticated && status.boardgame_api) {
+        const version = status.info?.version ? ` · versione ${escapeHtml(status.info.version)}` : "";
+        settingsResult.innerHTML =
+          `<strong>Connessione riuscita.</strong> API board game disponibile${version}.`;
+      } else if (!status.configured) {
+        settingsResult.textContent = "Configurazione incompleta: URL e token sono entrambi necessari.";
+      } else {
+        settingsResult.textContent =
+          status.error?.message || "Floppy risponde, ma la verifica API non è riuscita.";
+      }
+    }
+
+    if (document.querySelector("#floppyPanel")) {
+      await loadFloppyStatus();
+    }
+  } catch (error) {
+    settingsResult.hidden = false;
+    settingsResult.textContent = error.message;
+    showToast(error.message, true);
+  } finally {
+    setSettingsBusy(false);
+  }
 }
 
 function gameCard(game) {
@@ -262,7 +398,7 @@ async function loadFloppyStatus() {
     if (!status.configured) {
       setFloppyStatus("Non configurato", "neutral");
       body.innerHTML =
-        'Imposta <code>BGC_FLOPPY_URL</code> e <code>BGC_FLOPPY_API_KEY</code> nel container BoardGameCompanion, quindi riavvialo.';
+        'Apri <strong>Impostazioni</strong> e inserisci URL e API Token di Floppy.';
       return;
     }
 
@@ -563,6 +699,40 @@ document.addEventListener("click", (event) => {
 });
 
 window.addEventListener("popstate", route);
+
+settingsButton.addEventListener("click", () => {
+  void openSettingsDialog();
+});
+
+closeSettings.addEventListener("click", closeSettingsDialog);
+cancelSettings.addEventListener("click", closeSettingsDialog);
+
+settingsDialog.addEventListener("cancel", (event) => {
+  if (settingsBusy) {
+    event.preventDefault();
+  }
+});
+
+settingsDialog.addEventListener("close", () => {
+  settingsForm.reset();
+  settingsResult.hidden = true;
+  settingsResult.textContent = "";
+  currentFloppySettings = null;
+});
+
+settingsForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void persistFloppySettings({verifyAfter: false});
+});
+
+saveTestSettings.addEventListener("click", () => {
+  void persistFloppySettings({verifyAfter: true});
+});
+
+floppyClearToken.addEventListener("change", () => {
+  floppyApiKey.disabled = floppyClearToken.checked || Boolean(currentFloppySettings?.overrides?.api_key);
+  if (floppyClearToken.checked) floppyApiKey.value = "";
+});
 
 importButton.addEventListener("click", () => {
   resetImportDialog();

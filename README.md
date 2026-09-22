@@ -69,21 +69,17 @@ Missing rows are **not deleted automatically**. This is intentional because an `
 
 ## Floppy integration
 
-Configure these environment variables on the BoardGameCompanion container:
+Configure Floppy from the BoardGameCompanion web UI:
 
-```text
-BGC_FLOPPY_URL=http://<floppy-host>:8000
-BGC_FLOPPY_API_KEY=<API Token from Floppy Settings → Integrations>
-```
+1. open **Impostazioni**;
+2. enter the Floppy base URL;
+3. enter the API Token from Floppy **Settings → Integrations**;
+4. optionally adjust timeout/TLS verification;
+5. choose **Salva** or **Salva e verifica**.
 
-Optional:
+Settings are persisted in the SQLite database under `/config`. The API token is never returned to the browser or exposed by the settings API after it has been saved.
 
-```text
-BGC_FLOPPY_TIMEOUT_SECONDS=8
-BGC_FLOPPY_VERIFY_TLS=true
-```
-
-The home page then verifies the public Floppy info endpoint, authenticated board-game access and the live OpenAPI schema. **Confronta cataloghi** compares owned local games with Floppy using:
+The home page can then verify Floppy connectivity and compare the owned local catalog with Floppy using:
 
 1. explicit BGG ID when Floppy exposes one;
 2. exact normalized title + publication year as a lower-confidence fallback.
@@ -93,11 +89,26 @@ A `manual` Floppy `media_id` is never assumed to be a BGG ID.
 API endpoints:
 
 ```text
+GET /api/settings/floppy
+PUT /api/settings/floppy
 GET /api/integrations/floppy/status
 GET /api/integrations/floppy/preview
 ```
 
 The preview performs no writes or deletes in Floppy.
+
+### Advanced environment overrides
+
+For automated deployments, these optional environment variables override values saved in the app:
+
+```text
+BGC_FLOPPY_URL
+BGC_FLOPPY_API_KEY
+BGC_FLOPPY_TIMEOUT_SECONDS
+BGC_FLOPPY_VERIFY_TLS
+```
+
+They are intentionally not present in the default Unraid template.
 
 ## Catalog API
 

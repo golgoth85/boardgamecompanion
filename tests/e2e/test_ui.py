@@ -331,8 +331,50 @@ def test_floppy_panel_reports_unconfigured_without_blocking_catalog(browser, liv
     try:
         page.goto(live_server)
         expect(page.locator("#floppyStatus")).to_have_text("Non configurato")
-        expect(page.locator("#floppyBody")).to_contain_text("BGC_FLOPPY_URL")
+        expect(page.locator("#floppyBody")).to_contain_text("Apri Impostazioni")
         expect(page.locator("#floppyPreview")).to_be_disabled()
         expect(page.locator("#catalogGrid")).to_be_visible()
+    finally:
+        context.close()
+
+
+def test_floppy_settings_are_saved_from_ui_without_revealing_token(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        page.route(
+            "**/api/integrations/floppy/status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"configured":false,"reachable":false,"authenticated":false,"boardgame_api":false,"schema":{"available":false,"media_write":false,"collection_write":false,"write_contract_ready":false}}',
+            ),
+        )
+
+        page.goto(live_server)
+        page.get_by_role("button", name="Impostazioni").click()
+        expect(page.locator("#settingsDialog")).to_be_visible()
+
+        page.locator("#floppyUrl").fill("http://floppy:8000")
+        page.locator("#floppyApiKey").fill("browser-secret-token")
+        page.locator("#floppyTimeout").fill("11")
+        page.locator("#floppyVerifyTls").uncheck()
+        page.get_by_role("button", name="Salva", exact=True).click()
+
+        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni salvate")
+        response = page.request.get(f"{live_server}/api/settings/floppy")
+        assert response.ok
+        body = response.json()
+        assert body["url"] == "http://floppy:8000"
+        assert body["api_key_configured"] is True
+        assert body["timeout_seconds"] == 11
+        assert body["verify_tls"] is False
+        assert "browser-secret-token" not in response.text()
+
+        page.get_by_role("button", name="Chiudi impostazioni").click()
+        page.get_by_role("button", name="Impostazioni").click()
+
+        expect(page.locator("#floppyApiKey")).to_have_value("")
+        expect(page.locator("#floppyTokenHint")).to_contain_text("Token configurato")
+        expect(page.locator("#clearTokenRow")).to_be_visible()
     finally:
         context.close()

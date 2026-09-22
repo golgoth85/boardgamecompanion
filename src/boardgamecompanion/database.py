@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS import_runs (
     unchanged_count INTEGER NOT NULL,
     imported_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    sensitive INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 """
 
 
