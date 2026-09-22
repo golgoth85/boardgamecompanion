@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     ollama_url: str | None = None
     qdrant_url: str | None = None
 
+    @property
+    def database_path(self) -> Path:
+        return self.config_dir / "boardgamecompanion.sqlite3"
+
     def ensure_directories(self) -> None:
         for path in (self.config_dir, self.import_dir, self.manuals_dir):
             path.mkdir(parents=True, exist_ok=True)
