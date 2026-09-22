@@ -299,8 +299,9 @@ def build_sync_preview(
             )
             continue
 
-        key = (_normalize_title(local_item["title"]), local_item.get("year_published"))
-        fallback = by_title_year.get(key, [])
+        local_year = local_item.get("year_published")
+        key = (_normalize_title(local_item["title"]), local_year)
+        fallback = by_title_year.get(key, []) if local_year is not None else []
         if len(fallback) == 1:
             matches.append(
                 {
