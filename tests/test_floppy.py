@@ -285,6 +285,59 @@ def test_preview_distinguishes_owned_collection_media_and_missing() -> None:
     assert len(preview["plan_hash"]) == 64
 
 
+def test_preview_recognizes_held_media_visible_only_in_collection() -> None:
+    local = [local_game(701, "Held Game", 2020)]
+    collection = [
+        collection_row(
+            entry_id=2701,
+            media_id="701",
+            source="bgg",
+            title="Held Game",
+        )
+    ]
+    links = {
+        701: {
+            "bgg_id": 701,
+            "source": "bgg",
+            "media_id": "701",
+            "item_db_id": 1701,
+            "collection_entry_id": 2701,
+            "link_method": "bgg",
+        }
+    }
+
+    preview = build_sync_preview(local, [], collection, links)
+
+    assert preview["remote_boardgames"] == 0
+    assert preview["remote_collection_entries"] == 1
+    assert preview["matched_by_saved_link"] == 1
+    assert preview["already_owned"] == 1
+    assert preview["needs_collection"] == 0
+    assert preview["needs_media"] == 0
+    assert preview["actionable"] == 0
+    assert preview["matches"][0]["remote"]["item_db_id"] == 1701
+
+
+def test_preview_recognizes_preexisting_collection_without_saved_link() -> None:
+    local = [local_game(702, "Existing Floppy Game", 2021)]
+    collection = [
+        collection_row(
+            entry_id=2702,
+            media_id="702",
+            source="bgg",
+            title="Existing Floppy Game",
+        )
+    ]
+
+    preview = build_sync_preview(local, [], collection)
+
+    assert preview["matched_by_bgg_id"] == 1
+    assert preview["already_owned"] == 1
+    assert preview["needs_collection"] == 0
+    assert preview["needs_media"] == 0
+    assert preview["actionable"] == 0
+
+
 def test_preview_uses_title_year_fallback_but_marks_duplicates_ambiguous() -> None:
     local = [
         local_game(501, "Café International", 1989),
