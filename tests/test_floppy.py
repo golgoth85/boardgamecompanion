@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
+from fastapi.testclient import TestClient
 
 from boardgamecompanion.floppy import (
     FloppyClient,
     FloppyConfig,
     build_sync_preview,
 )
+from boardgamecompanion.main import app
+from boardgamecompanion.settings import settings
 
 
 def test_floppy_client_auth_pagination_and_schema() -> None:
@@ -143,7 +148,7 @@ def test_matching_marks_duplicate_candidates_ambiguous() -> None:
     ]
     remote = [
         {"title": "Duplicate A", "source": "bgg", "media_id": "101"},
-        {"title": "Duplicate B", "source": "manual", "media_id": "101"},
+        {"title": "Duplicate B", "source": "boardgamegeek", "media_id": "101"},
     ]
 
     preview = build_sync_preview(local, remote)
@@ -151,3 +156,24 @@ def test_matching_marks_duplicate_candidates_ambiguous() -> None:
     assert preview["matched"] == 0
     assert preview["ambiguous"] == 1
     assert preview["ambiguous_items"][0]["reason"] == "duplicate_bgg_id"
+
+
+def test_floppy_api_reports_unconfigured_without_network(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "import_dir", tmp_path / "import")
+    monkeypatch.setattr(settings, "manuals_dir", tmp_path / "manuals")
+    monkeypatch.setattr(settings, "floppy_url", None)
+    monkeypatch.setattr(settings, "floppy_api_key", None)
+
+    with TestClient(app) as client:
+        status = client.get("/api/integrations/floppy/status")
+        preview = client.get("/api/integrations/floppy/preview")
+
+    assert status.status_code == 200
+    assert status.json()["configured"] is False
+    assert status.json()["authenticated"] is False
+    assert preview.status_code == 409
+    assert "BGC_FLOPPY_URL" in preview.json()["detail"]
