@@ -484,6 +484,28 @@ def test_direct_detail_flat_response_exposes_item_database_id() -> None:
     assert identity["media_id"] == "184151"
 
 
+def test_direct_detail_provider_preview_is_not_existing_media() -> None:
+    provider_preview = {
+        "id": None,
+        "media_id": "224899",
+        "source": "bgg",
+        "title": "Too Many Bones: Ghillie",
+        "tracked": False,
+        "item_id": "boardgame/bgg/224899",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/media/boardgame/bgg/224899/"
+        return httpx.Response(200, json=provider_preview)
+
+    client = FloppyClient(
+        FloppyConfig("http://floppy", "secret"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert client.boardgame_bgg_detail(224899) is None
+
+
 def test_apply_sync_reuses_hidden_existing_bgg_media(tmp_path: Path) -> None:
     database = Database(tmp_path / "catalog.sqlite3")
     database.initialize()
