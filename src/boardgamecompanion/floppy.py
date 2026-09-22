@@ -193,6 +193,11 @@ class FloppyClient:
                 "Unexpected response while reading BGG board game detail",
                 kind="invalid_response",
             )
+        # Floppy also uses this endpoint as a live BGG provider lookup.
+        # Provider-only results have id=null / tracked=false and are not yet
+        # persisted media, so they must not be treated as existing items.
+        if _remote_item_db_id(body) is None:
+            return None
         return body
 
     def track_boardgame_bgg(self, bgg_id: int) -> dict[str, Any]:
