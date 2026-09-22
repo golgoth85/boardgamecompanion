@@ -27,14 +27,14 @@
 
   <main id="app" class="shell" aria-live="polite"></main>
 
-  <dialog id="importDialog" class="dialog">
-    <form id="importForm" method="dialog">
+  <dialog id="importDialog" class="dialog" aria-labelledby="importDialogTitle">
+    <form id="importForm">
       <div class="dialog-head">
         <div>
           <p class="eyebrow">BoardGameGeek</p>
-          <h2>Importa o aggiorna la collezione</h2>
+          <h2 id="importDialogTitle">Importa o aggiorna la collezione</h2>
         </div>
-        <button class="icon-button" value="cancel" aria-label="Chiudi">×</button>
+        <button class="icon-button" id="closeImport" type="button" aria-label="Chiudi">×</button>
       </div>
       <p class="muted">
         Seleziona il CSV esportato da BGG. Il reimport è idempotente: i giochi esistenti
