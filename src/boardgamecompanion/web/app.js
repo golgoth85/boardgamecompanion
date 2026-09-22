@@ -180,12 +180,13 @@ function applyFloppySettingsToForm(data) {
 async function openSettingsDialog() {
   settingsResult.hidden = true;
   settingsResult.textContent = "";
-  settingsDialog.showModal();
   setSettingsBusy(true);
   try {
     const data = await api("/api/settings/floppy");
     applyFloppySettingsToForm(data);
+    settingsDialog.showModal();
   } catch (error) {
+    settingsDialog.showModal();
     settingsResult.hidden = false;
     settingsResult.textContent = error.message;
   } finally {
