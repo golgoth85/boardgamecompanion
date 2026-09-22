@@ -206,6 +206,8 @@ class FloppyClient:
                 "title": title,
                 # Blank means a held/untracked row rather than Planning.
                 "status": "",
+                # Floppy board-game tracking requires an explicit progress value.
+                "progress": 0,
             },
         )
         if not isinstance(body, dict):
