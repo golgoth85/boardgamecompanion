@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,7 +35,7 @@ class FloppyPlanChanged(RuntimeError):
 class FloppyConfig:
     base_url: str
     api_key: str
-    timeout_seconds: float = 8.0
+    timeout_seconds: float = 45.0
     verify_tls: bool = True
 
     @property
@@ -176,6 +177,23 @@ class FloppyClient:
                 )
 
         return results
+
+    def boardgame_bgg_detail(self, bgg_id: int) -> dict[str, Any] | None:
+        try:
+            body = self._request(
+                "GET",
+                f"/api/v1/media/boardgame/bgg/{int(bgg_id)}/",
+            )
+        except FloppyError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        if not isinstance(body, dict):
+            raise FloppyError(
+                "Unexpected response while reading BGG board game detail",
+                kind="invalid_response",
+            )
+        return body
 
     def track_boardgame_bgg(self, bgg_id: int) -> dict[str, Any]:
         body = self._request(
@@ -764,7 +782,7 @@ def apply_floppy_sync(
                 )
                 continue
 
-            tracked, source_mode = _create_missing_media(client, local_item)
+            tracked, source_mode, created_now = _create_missing_media(client, local_item)
             remote = _remote_identity(tracked)
             item_db_id = _as_int(remote.get("item_db_id"))
             if item_db_id is None:
@@ -773,7 +791,8 @@ def apply_floppy_sync(
                     kind="invalid_response",
                 )
 
-            media_created += 1
+            if created_now:
+                media_created += 1
             save_floppy_link(
                 database,
                 bgg_id=bgg_id,
@@ -803,7 +822,11 @@ def apply_floppy_sync(
                 {
                     "bgg_id": bgg_id,
                     "title": item["title"],
-                    "status": "media_and_collection_added",
+                    "status": (
+                        "media_and_collection_added"
+                        if created_now
+                        else "existing_media_collection_added"
+                    ),
                     "source": remote.get("source"),
                     "media_id": remote.get("media_id"),
                     "collection_entry_id": collection_id,
@@ -843,17 +866,41 @@ def apply_floppy_sync(
 def _create_missing_media(
     client: FloppyClient,
     local_item: dict[str, Any],
-) -> tuple[dict[str, Any], str]:
+) -> tuple[dict[str, Any], str, bool]:
     bgg_id = int(local_item["bgg_id"])
+
+    # Held board games with blank status are omitted from Floppy's media-list
+    # endpoint, but the detail endpoint still exposes them. Check it before
+    # creating anything so retries can safely reconcile prior partial writes.
+    existing = client.boardgame_bgg_detail(bgg_id)
+    if existing is not None:
+        return existing, "bgg_existing", False
+
     try:
-        return client.track_boardgame_bgg(bgg_id), "bgg"
+        return client.track_boardgame_bgg(bgg_id), "bgg", True
     except FloppyError as exc:
-        # Authentication, network and timeout errors are infrastructure errors:
-        # do not hide them by creating a manual duplicate.
-        if exc.kind in {"authentication", "timeout", "unreachable"}:
+        if exc.kind == "timeout":
+            # Floppy may finish the BGG provider request after our HTTP client
+            # times out. Re-check the authoritative detail endpoint before
+            # reporting failure or allowing a later retry to create a duplicate.
+            for attempt in range(4):
+                if attempt:
+                    time.sleep(1)
+                recovered = client.boardgame_bgg_detail(bgg_id)
+                if recovered is not None:
+                    return recovered, "bgg_recovered_after_timeout", False
             raise
 
-    return client.track_boardgame_manual(str(local_item["title"])), "manual_fallback"
+        # Authentication and network errors are infrastructure errors:
+        # do not hide them by creating a manual duplicate.
+        if exc.kind in {"authentication", "unreachable"}:
+            raise
+
+    return (
+        client.track_boardgame_manual(str(local_item["title"])),
+        "manual_fallback",
+        True,
+    )
 
 
 def _collection_fields(local_item: dict[str, Any]) -> dict[str, Any]:
