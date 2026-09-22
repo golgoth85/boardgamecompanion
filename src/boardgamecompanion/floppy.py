@@ -251,6 +251,7 @@ def build_sync_preview(
     local_games: Iterable[dict[str, Any]],
     remote_games: Iterable[dict[str, Any]],
 ) -> dict[str, Any]:
+    local = list(local_games)
     remote = list(remote_games)
     by_bgg: dict[int, list[dict[str, Any]]] = {}
     by_title_year: dict[tuple[str, int | None], list[dict[str, Any]]] = {}
@@ -268,14 +269,14 @@ def build_sync_preview(
     missing: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
 
-    for local in local_games:
-        bgg_id = int(local["bgg_id"])
+    for local_item in local:
+        bgg_id = int(local_item["bgg_id"])
         exact = by_bgg.get(bgg_id, [])
         base = {
             "bgg_id": bgg_id,
-            "title": local["title"],
-            "year_published": local.get("year_published"),
-            "item_type": local.get("item_type"),
+            "title": local_item["title"],
+            "year_published": local_item.get("year_published"),
+            "item_type": local_item.get("item_type"),
         }
 
         if len(exact) == 1:
@@ -298,7 +299,7 @@ def build_sync_preview(
             )
             continue
 
-        key = (_normalize_title(local["title"]), local.get("year_published"))
+        key = (_normalize_title(local_item["title"]), local_item.get("year_published"))
         fallback = by_title_year.get(key, [])
         if len(fallback) == 1:
             matches.append(
@@ -323,7 +324,7 @@ def build_sync_preview(
     fallback_count = sum(item["match_method"] == "title_year" for item in matches)
 
     return {
-        "local_owned": len(list(local_games)) if not isinstance(local_games, list) else len(local_games),
+        "local_owned": len(local),
         "remote_boardgames": len(remote),
         "matched": len(matches),
         "matched_by_bgg_id": exact_count,
