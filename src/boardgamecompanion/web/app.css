@@ -420,7 +420,12 @@ a { color: inherit; text-decoration: none; }
   .toolbar { grid-template-columns: 1fr 1fr; }
   .toolbar .search-field { grid-column: 1 / -1; }
   .detail { grid-template-columns: 1fr; }
-  .detail-cover { min-height: 260px; aspect-ratio: 16 / 8; }
+  .detail-cover {
+    width: 100%;
+    min-height: 0;
+    height: clamp(220px, 55vw, 300px);
+    aspect-ratio: auto;
+  }
 }
 @media (max-width: 580px) {
   .topbar { align-items: center; padding: .8rem; gap: .55rem; }
