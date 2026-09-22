@@ -9,6 +9,13 @@ from boardgamecompanion import __version__
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.catalog import Catalog, SORT_SQL
 from boardgamecompanion.database import Database
+from boardgamecompanion.floppy import (
+    FloppyClient,
+    FloppyConfig,
+    FloppyError,
+    build_sync_preview,
+    local_owned_games,
+)
 from boardgamecompanion.settings import settings
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -16,6 +23,27 @@ WEB_DIR = Path(__file__).parent / "web"
 
 def get_database() -> Database:
     return Database(settings.database_path)
+
+
+def get_floppy_client() -> FloppyClient | None:
+    if not settings.floppy_url or not settings.floppy_api_key:
+        return None
+    return FloppyClient(
+        FloppyConfig(
+            base_url=settings.floppy_url,
+            api_key=settings.floppy_api_key,
+            timeout_seconds=settings.floppy_timeout_seconds,
+            verify_tls=settings.floppy_verify_tls,
+        )
+    )
+
+
+def floppy_http_error(exc: FloppyError) -> HTTPException:
+    if exc.kind == "authentication":
+        return HTTPException(status_code=502, detail="Floppy authentication failed")
+    if exc.kind in {"timeout", "unreachable"}:
+        return HTTPException(status_code=503, detail=str(exc))
+    return HTTPException(status_code=502, detail=str(exc))
 
 
 @asynccontextmanager
@@ -120,3 +148,91 @@ def catalog_stats() -> dict[str, int]:
     database = get_database()
     database.initialize()
     return Catalog(database).stats()
+
+
+@app.get("/api/integrations/floppy/status", tags=["integrations"])
+def floppy_status() -> dict[str, object]:
+    client = get_floppy_client()
+    if client is None:
+        return {
+            "configured": False,
+            "reachable": False,
+            "authenticated": False,
+            "boardgame_api": False,
+            "schema": {
+                "available": False,
+                "media_write": False,
+                "collection_write": False,
+                "write_contract_ready": False,
+            },
+        }
+
+    status: dict[str, object] = {
+        "configured": True,
+        "base_url": client.config.normalized_url,
+        "reachable": False,
+        "authenticated": False,
+        "boardgame_api": False,
+    }
+
+    try:
+        info = client.info()
+        status["reachable"] = True
+        status["info"] = {
+            key: info[key]
+            for key in ("name", "version", "app", "commit")
+            if key in info
+        }
+    except FloppyError as exc:
+        status["error"] = {"kind": exc.kind, "message": str(exc)}
+        status["schema"] = {
+            "available": False,
+            "media_write": False,
+            "collection_write": False,
+            "write_contract_ready": False,
+        }
+        return status
+
+    try:
+        client.boardgames_page(limit=1, offset=0)
+        status["authenticated"] = True
+        status["boardgame_api"] = True
+    except FloppyError as exc:
+        status["error"] = {"kind": exc.kind, "message": str(exc)}
+        status["schema"] = {
+            "available": False,
+            "media_write": False,
+            "collection_write": False,
+            "write_contract_ready": False,
+        }
+        return status
+
+    status["schema"] = client.schema_capabilities()
+    return status
+
+
+@app.get("/api/integrations/floppy/preview", tags=["integrations"])
+def floppy_preview() -> dict[str, object]:
+    client = get_floppy_client()
+    if client is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Floppy is not configured. Set BGC_FLOPPY_URL and BGC_FLOPPY_API_KEY.",
+        )
+
+    database = get_database()
+    database.initialize()
+
+    try:
+        remote_games = client.boardgames()
+    except FloppyError as exc:
+        raise floppy_http_error(exc) from exc
+
+    preview = build_sync_preview(local_owned_games(database), remote_games)
+    preview["mode"] = "read_only"
+    preview["apply_supported"] = False
+    preview["note"] = (
+        "Write sync stays disabled until the live Floppy OpenAPI contract "
+        "for media tracking and collection creation has been validated."
+    )
+    return preview
