@@ -90,6 +90,23 @@ CREATE TABLE IF NOT EXISTS import_runs (
     unchanged_count INTEGER NOT NULL,
     imported_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS external_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_game_id INTEGER NOT NULL REFERENCES board_games(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    external_source TEXT NOT NULL,
+    external_media_id TEXT NOT NULL,
+    external_item_id TEXT,
+    external_collection_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(board_game_id, provider),
+    UNIQUE(provider, external_source, external_media_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_links_provider
+ON external_links(provider);
 """
 
 
