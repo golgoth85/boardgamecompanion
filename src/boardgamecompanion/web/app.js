@@ -147,7 +147,7 @@ function applyFloppySettingsToForm(data) {
   currentFloppySettings = data;
   floppyUrl.value = data.url || "";
   floppyApiKey.value = "";
-  floppyTimeout.value = String(data.timeout_seconds ?? 8);
+  floppyTimeout.value = String(data.timeout_seconds ?? 45);
   floppyVerifyTls.checked = data.verify_tls !== false;
   floppyClearToken.checked = false;
 
@@ -204,7 +204,7 @@ async function persistFloppySettings({verifyAfter = false} = {}) {
       ? null
       : floppyApiKey.value.trim(),
     clear_api_key: !floppyClearToken.disabled && floppyClearToken.checked,
-    timeout_seconds: Number(floppyTimeout.value || 8),
+    timeout_seconds: Number(floppyTimeout.value || 45),
     verify_tls: floppyVerifyTls.checked,
   };
 
