@@ -110,7 +110,7 @@ def resolve_floppy_settings(database: Database) -> ResolvedFloppySettings:
     timeout = (
         float(settings.floppy_timeout_seconds)
         if has_env_timeout
-        else stored_timeout if stored_timeout is not None else 8.0
+        else stored_timeout if stored_timeout is not None else 45.0
     )
 
     stored_tls = _to_bool(stored["floppy_verify_tls"])
