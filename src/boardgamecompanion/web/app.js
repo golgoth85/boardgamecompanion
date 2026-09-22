@@ -7,6 +7,7 @@ const fileName = document.querySelector("#fileName");
 const importResult = document.querySelector("#importResult");
 const submitImport = document.querySelector("#submitImport");
 const cancelImport = document.querySelector("#cancelImport");
+const closeImport = document.querySelector("#closeImport");
 const toast = document.querySelector("#toast");
 
 const state = {
@@ -20,6 +21,8 @@ const state = {
 };
 
 let searchTimer;
+let catalogRequestController;
+let importInProgress = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -63,6 +66,32 @@ function showToast(message, isError = false) {
   toast.classList.toggle("error", isError);
   toast.classList.add("show");
   window.setTimeout(() => toast.classList.remove("show"), 3200);
+}
+
+function resetImportDialog() {
+  importForm.reset();
+  fileName.textContent = "Nessun file selezionato";
+  importResult.hidden = true;
+  importResult.textContent = "";
+  submitImport.disabled = false;
+  submitImport.textContent = "Importa";
+  cancelImport.disabled = false;
+  closeImport.disabled = false;
+  importInProgress = false;
+}
+
+function setImportBusy(busy) {
+  importInProgress = busy;
+  submitImport.disabled = busy;
+  submitImport.textContent = busy ? "Importazione…" : "Importa";
+  cancelImport.disabled = busy;
+  closeImport.disabled = busy;
+}
+
+function closeImportDialog() {
+  if (!importInProgress && importDialog.open) {
+    importDialog.close();
+  }
 }
 
 async function api(url, options) {
@@ -125,7 +154,7 @@ async function renderCatalog() {
 
     <section class="toolbar" aria-label="Filtri catalogo">
       <label class="field search-field">
-        <input id="searchInput" type="search" placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
+        <input id="searchInput" type="search" aria-label="Cerca per titolo" placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
       </label>
       <label class="field">
         <select id="typeFilter" aria-label="Tipo">
@@ -162,12 +191,14 @@ async function renderCatalog() {
   `;
 
   bindCatalogControls();
+  const requestedPath = window.location.pathname;
 
   try {
     const [stats, catalog] = await Promise.all([
       api("/api/catalog/stats"),
       loadCatalogData(),
     ]);
+    if (window.location.pathname !== requestedPath) return;
     renderStats(stats);
     renderCatalogData(catalog);
   } catch (error) {
@@ -206,7 +237,7 @@ function bindCatalogControls() {
   });
 }
 
-async function loadCatalogData() {
+async function loadCatalogData(signal) {
   const params = new URLSearchParams({
     limit: String(state.limit),
     offset: String(state.offset),
@@ -215,20 +246,34 @@ async function loadCatalogData() {
   if (state.q) params.set("q", state.q);
   if (state.itemType) params.set("item_type", state.itemType);
   if (state.owned) params.set("owned", state.owned);
-  return api(`/api/games?${params}`);
+  return api(`/api/games?${params}`, signal ? {signal} : undefined);
 }
 
 async function refreshCatalog() {
   const grid = document.querySelector("#catalogGrid");
   const count = document.querySelector("#resultCount");
+  if (!grid || !count) return;
+
+  catalogRequestController?.abort();
+  const controller = new AbortController();
+  catalogRequestController = controller;
+
   grid.innerHTML = skeletons();
   count.textContent = "Caricamento…";
   try {
-    const catalog = await loadCatalogData();
+    const catalog = await loadCatalogData(controller.signal);
+    if (controller.signal.aborted || !document.querySelector("#catalogGrid")) return;
     renderCatalogData(catalog);
   } catch (error) {
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1">${escapeHtml(error.message)}</div>`;
+    if (error.name === "AbortError") return;
+    if (document.querySelector("#catalogGrid")) {
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1">${escapeHtml(error.message)}</div>`;
+    }
     showToast(error.message, true);
+  } finally {
+    if (catalogRequestController === controller) {
+      catalogRequestController = undefined;
+    }
   }
 }
 
@@ -291,8 +336,10 @@ async function renderDetail(bggId) {
       <div class="panel detail-main"><div class="skeleton"></div></div>
     </section>
   `;
+  const requestedPath = window.location.pathname;
   try {
     const game = await api(`/api/games/${bggId}`);
+    if (window.location.pathname !== requestedPath) return;
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
@@ -384,12 +431,20 @@ document.addEventListener("click", (event) => {
 window.addEventListener("popstate", route);
 
 importButton.addEventListener("click", () => {
-  importResult.hidden = true;
-  importResult.textContent = "";
+  resetImportDialog();
   importDialog.showModal();
 });
 
-cancelImport.addEventListener("click", () => importDialog.close());
+cancelImport.addEventListener("click", closeImportDialog);
+closeImport.addEventListener("click", closeImportDialog);
+
+importDialog.addEventListener("cancel", (event) => {
+  if (importInProgress) {
+    event.preventDefault();
+  }
+});
+
+importDialog.addEventListener("close", resetImportDialog);
 
 csvFile.addEventListener("change", () => {
   fileName.textContent = csvFile.files?.[0]?.name || "Nessun file selezionato";
@@ -398,10 +453,9 @@ csvFile.addEventListener("change", () => {
 importForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = csvFile.files?.[0];
-  if (!file) return;
+  if (!file || importInProgress) return;
 
-  submitImport.disabled = true;
-  submitImport.textContent = "Importazione…";
+  setImportBusy(true);
   importResult.hidden = true;
 
   try {
@@ -415,19 +469,21 @@ importForm.addEventListener("submit", async (event) => {
       ${result.updated_count} aggiornati · ${result.unchanged_count} invariati
     `;
     showToast("Collezione BGG aggiornata.");
+
     if (window.location.pathname === "/") {
       const stats = await api("/api/catalog/stats");
       renderStats(stats);
       state.offset = 0;
       await refreshCatalog();
+    } else if (/^\/games\/\d+\/?$/.test(window.location.pathname)) {
+      await route();
     }
   } catch (error) {
     importResult.hidden = false;
     importResult.textContent = error.message;
     showToast(error.message, true);
   } finally {
-    submitImport.disabled = false;
-    submitImport.textContent = "Importa";
+    setImportBusy(false);
   }
 });
 
