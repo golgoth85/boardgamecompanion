@@ -483,7 +483,30 @@ def build_sync_preview(
     by_title_year: dict[tuple[str, int | None], list[dict[str, Any]]] = {}
     by_coordinate: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
+    # Floppy omits held board games (blank status) from the media-list
+    # endpoint even though they remain visible in the collection endpoint.
+    # Build one de-duplicated matching surface from both sources, preferring
+    # the richer media row when both expose the same source/media_id pair.
+    candidates_by_coordinate: dict[tuple[str, str], dict[str, Any]] = {}
+    uncoordinated_candidates: list[dict[str, Any]] = []
+
     for item in remote:
+        coordinate = _remote_coordinate(item)
+        if all(coordinate):
+            candidates_by_coordinate[coordinate] = item
+        else:
+            uncoordinated_candidates.append(item)
+
+    for entry in collection:
+        coordinate = _remote_coordinate(entry)
+        if all(coordinate):
+            candidates_by_coordinate.setdefault(coordinate, entry)
+        else:
+            uncoordinated_candidates.append(entry)
+
+    candidates = list(candidates_by_coordinate.values()) + uncoordinated_candidates
+
+    for item in candidates:
         coordinate = _remote_coordinate(item)
         if all(coordinate):
             by_coordinate.setdefault(coordinate, []).append(item)
@@ -576,6 +599,11 @@ def build_sync_preview(
             continue
 
         remote_identity = _remote_identity(match)
+        if method == "saved_link" and saved:
+            # Collection rows do not expose the underlying Item database id;
+            # retain the authoritative id persisted when BoardGameCompanion
+            # created or linked the media.
+            remote_identity["item_db_id"] = saved.get("item_db_id")
         matched = {
             **base,
             "match_method": method,
