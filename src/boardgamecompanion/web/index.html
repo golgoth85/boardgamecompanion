@@ -19,6 +19,9 @@
       </span>
     </a>
     <div class="topbar-actions">
+      <button class="button button-ghost" id="settingsButton" type="button">
+        Impostazioni
+      </button>
       <button class="button button-primary" id="importButton" type="button">
         Importa BGG CSV
       </button>
@@ -49,6 +52,60 @@
       <div class="dialog-actions">
         <button class="button button-ghost" value="cancel" type="button" id="cancelImport">Annulla</button>
         <button class="button button-primary" type="submit" id="submitImport">Importa</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog" aria-labelledby="settingsDialogTitle">
+    <form id="settingsForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Configurazione</p>
+          <h2 id="settingsDialogTitle">Impostazioni Floppy</h2>
+        </div>
+        <button class="icon-button" id="closeSettings" type="button" aria-label="Chiudi impostazioni">×</button>
+      </div>
+
+      <p class="muted">
+        Le impostazioni vengono salvate in /config. Il token non viene mai restituito in chiaro dalla API.
+      </p>
+
+      <div class="settings-grid">
+        <label class="settings-field">
+          <span>URL Floppy</span>
+          <input id="floppyUrl" type="url" inputmode="url" placeholder="http://192.168.1.10:8000">
+          <small id="floppyUrlHint" class="muted"></small>
+        </label>
+
+        <label class="settings-field">
+          <span>API Token</span>
+          <input id="floppyApiKey" type="password" autocomplete="new-password" placeholder="Inserisci o sostituisci il token">
+          <small id="floppyTokenHint" class="muted"></small>
+        </label>
+
+        <label class="settings-field">
+          <span>Timeout HTTP (secondi)</span>
+          <input id="floppyTimeout" type="number" min="1" max="60" step="1" value="8">
+          <small id="floppyTimeoutHint" class="muted"></small>
+        </label>
+
+        <label class="settings-check">
+          <input id="floppyVerifyTls" type="checkbox" checked>
+          <span>Verifica certificati TLS</span>
+        </label>
+
+        <label class="settings-check" id="clearTokenRow" hidden>
+          <input id="floppyClearToken" type="checkbox">
+          <span>Rimuovi il token salvato</span>
+        </label>
+      </div>
+
+      <div id="settingsResult" class="import-result" hidden></div>
+
+      <div class="dialog-actions">
+        <button class="button button-ghost" type="button" id="cancelSettings">Annulla</button>
+        <button class="button button-ghost" type="submit" id="saveSettings">Salva</button>
+        <button class="button button-primary" type="button" id="saveTestSettings">Salva e verifica</button>
       </div>
     </form>
   </dialog>
