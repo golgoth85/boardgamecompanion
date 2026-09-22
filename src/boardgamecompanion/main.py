@@ -3,9 +3,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 from fastapi.staticfiles import StaticFiles
 
 from boardgamecompanion import __version__
+from boardgamecompanion.app_settings import (
+    resolve_floppy_settings,
+    save_floppy_settings,
+)
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.catalog import Catalog, SORT_SQL
 from boardgamecompanion.database import Database
@@ -26,14 +31,17 @@ def get_database() -> Database:
 
 
 def get_floppy_client() -> FloppyClient | None:
-    if not settings.floppy_url or not settings.floppy_api_key:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_floppy_settings(database)
+    if not resolved.configured:
         return None
     return FloppyClient(
         FloppyConfig(
-            base_url=settings.floppy_url,
-            api_key=settings.floppy_api_key,
-            timeout_seconds=settings.floppy_timeout_seconds,
-            verify_tls=settings.floppy_verify_tls,
+            base_url=resolved.url or "",
+            api_key=resolved.api_key or "",
+            timeout_seconds=resolved.timeout_seconds,
+            verify_tls=resolved.verify_tls,
         )
     )
 
@@ -44,6 +52,22 @@ def floppy_http_error(exc: FloppyError) -> HTTPException:
     if exc.kind in {"timeout", "unreachable"}:
         return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=502, detail=str(exc))
+
+
+class FloppySettingsUpdate(BaseModel):
+    url: str = ""
+    api_key: str | None = None
+    clear_api_key: bool = False
+    timeout_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+    verify_tls: bool = True
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        value = value.strip()
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError("Floppy URL must start with http:// or https://")
+        return value
 
 
 @asynccontextmanager
@@ -148,6 +172,28 @@ def catalog_stats() -> dict[str, int]:
     database = get_database()
     database.initialize()
     return Catalog(database).stats()
+
+
+@app.get("/api/settings/floppy", tags=["settings"])
+def get_floppy_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return resolve_floppy_settings(database).public_dict()
+
+
+@app.put("/api/settings/floppy", tags=["settings"])
+def update_floppy_settings(payload: FloppySettingsUpdate) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = save_floppy_settings(
+        database,
+        url=payload.url,
+        api_key=payload.api_key,
+        clear_api_key=payload.clear_api_key,
+        timeout_seconds=payload.timeout_seconds,
+        verify_tls=payload.verify_tls,
+    )
+    return resolved.public_dict()
 
 
 @app.get("/api/integrations/floppy/status", tags=["integrations"])
