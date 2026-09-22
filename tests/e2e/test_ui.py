@@ -378,3 +378,122 @@ def test_floppy_settings_are_saved_from_ui_without_revealing_token(browser, live
         expect(page.locator("#clearTokenRow")).to_be_visible()
     finally:
         context.close()
+
+
+def test_floppy_sync_requires_preview_confirmation_and_refreshes(browser, live_server):
+    context, page = new_page(browser)
+    sync_requests = []
+    preview_calls = {"count": 0}
+
+    def status_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=(
+                '{"configured":true,"reachable":true,"authenticated":true,'
+                '"boardgame_api":true,"info":{"version":"26.9"},'
+                '"schema":{"available":true,"media_write":true,'
+                '"collection_write":true,"write_contract_ready":true}}'
+            ),
+        )
+
+    def preview_route(route):
+        preview_calls["count"] += 1
+        if preview_calls["count"] == 1:
+            body = {
+                "local_owned": 2,
+                "remote_boardgames": 1,
+                "remote_collection_entries": 1,
+                "matched": 1,
+                "matched_by_saved_link": 0,
+                "matched_by_bgg_id": 1,
+                "matched_by_title_year": 0,
+                "already_owned": 1,
+                "needs_collection": 0,
+                "needs_media": 1,
+                "missing_in_floppy": 1,
+                "ambiguous": 0,
+                "actionable": 1,
+                "already_owned_items": [],
+                "needs_collection_items": [],
+                "needs_media_items": [
+                    {
+                        "bgg_id": 900002,
+                        "title": "Synthetic Beta Expansion",
+                        "year_published": 2021,
+                        "item_type": "expansion",
+                    }
+                ],
+                "missing": [],
+                "ambiguous_items": [],
+                "plan_hash": "a" * 64,
+                "mode": "dry_run",
+                "apply_supported": True,
+            }
+        else:
+            body = {
+                "local_owned": 2,
+                "remote_boardgames": 2,
+                "remote_collection_entries": 2,
+                "matched": 2,
+                "matched_by_saved_link": 1,
+                "matched_by_bgg_id": 1,
+                "matched_by_title_year": 0,
+                "already_owned": 2,
+                "needs_collection": 0,
+                "needs_media": 0,
+                "missing_in_floppy": 0,
+                "ambiguous": 0,
+                "actionable": 0,
+                "already_owned_items": [],
+                "needs_collection_items": [],
+                "needs_media_items": [],
+                "missing": [],
+                "ambiguous_items": [],
+                "plan_hash": "b" * 64,
+                "mode": "dry_run",
+                "apply_supported": True,
+            }
+        route.fulfill(status=200, content_type="application/json", body=__import__("json").dumps(body))
+
+    def sync_route(route):
+        request = route.request
+        sync_requests.append(request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "plan_hash": "a" * 64,
+                    "attempted": 1,
+                    "media_created": 1,
+                    "collection_created": 1,
+                    "skipped": 0,
+                    "failed": 0,
+                    "remaining_from_preview": 0,
+                    "batch_size": 1,
+                    "results": [],
+                }
+            ),
+        )
+
+    try:
+        page.route("**/api/integrations/floppy/status", status_route)
+        page.route("**/api/integrations/floppy/preview", preview_route)
+        page.route("**/api/integrations/floppy/sync", sync_route)
+        page.on("dialog", lambda dialog: dialog.accept())
+
+        page.goto(live_server)
+        expect(page.locator("#floppyStatus")).to_have_text("Connesso")
+        page.get_by_role("button", name="Confronta cataloghi").click()
+
+        expect(page.locator("#floppyPreviewResult")).to_contain_text("Media mancanti")
+        expect(page.get_by_role("button", name="Sincronizza 1")).to_be_visible()
+        page.get_by_role("button", name="Sincronizza 1").click()
+
+        expect(page.locator("#floppyPreviewResult")).to_contain_text("Ultimo batch")
+        expect(page.locator("#floppyPreviewResult")).to_contain_text("Collection allineata")
+        assert sync_requests == [{"plan_hash": "a" * 64, "batch_size": 1}]
+        assert preview_calls["count"] == 2
+    finally:
+        context.close()

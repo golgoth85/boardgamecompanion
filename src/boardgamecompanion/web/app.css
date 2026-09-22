@@ -224,6 +224,30 @@ a { color: inherit; text-decoration: none; }
   color: #d7deeb;
 }
 .integration-note { margin: .8rem 0 0; font-size: .78rem; }
+.sync-actions {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin-top: 1rem;
+}
+.sync-ok {
+  color: #bff5df;
+  font-weight: 800;
+}
+.sync-report {
+  margin-bottom: .8rem;
+  padding: .72rem .8rem;
+  border: 1px solid rgba(52,211,153,.3);
+  border-radius: 11px;
+  background: rgba(52,211,153,.08);
+  color: #c8f7e7;
+  line-height: 1.45;
+}
+.sync-report.has-errors {
+  border-color: rgba(251,113,133,.36);
+  background: rgba(251,113,133,.08);
+  color: #ffd1d9;
+}
 .integration-error { color: #ffd1d9; }
 
 .toolbar {

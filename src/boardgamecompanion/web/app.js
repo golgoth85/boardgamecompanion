@@ -121,7 +121,9 @@ async function api(url, options) {
       const body = await response.json();
       message = body.detail || message;
     } catch (_) {}
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -419,8 +421,8 @@ async function loadFloppyStatus() {
     previewButton.disabled = false;
     const version = status.info?.version ? ` · versione ${escapeHtml(status.info.version)}` : "";
     const schema = status.schema?.write_contract_ready
-      ? "Contratto write rilevato; per ora il confronto resta deliberatamente read-only."
-      : "Contratto write non ancora validato: nessuna modifica verrà inviata a Floppy.";
+      ? "Contratto write validato: dopo il dry-run puoi aggiungere in sicurezza i giochi mancanti alla collection."
+      : "Contratto write non disponibile: il confronto resta in sola lettura.";
     body.innerHTML = `API board game raggiungibile${version}. ${escapeHtml(schema)}`;
   } catch (error) {
     setFloppyStatus("Errore", "error");
@@ -428,7 +430,7 @@ async function loadFloppyStatus() {
   }
 }
 
-async function loadFloppyPreview() {
+async function loadFloppyPreview(syncReport = null) {
   const button = document.querySelector("#floppyPreview");
   const result = document.querySelector("#floppyPreviewResult");
   if (!button || !result) return;
@@ -436,37 +438,90 @@ async function loadFloppyPreview() {
   button.disabled = true;
   button.textContent = "Confronto…";
   result.hidden = false;
-  result.innerHTML = '<span class="muted">Lettura catalogo Floppy…</span>';
+  result.innerHTML = '<span class="muted">Lettura catalogo e collection Floppy…</span>';
 
   try {
     const preview = await api("/api/integrations/floppy/preview");
     if (!document.querySelector("#floppyPanel")) return;
 
-    const missing = (preview.missing || []).slice(0, 8);
-    const missingHtml = missing.length
-      ? `<div class="integration-missing">
-          <strong>Primi elementi assenti in Floppy</strong>
-          <ul>${missing.map((item) =>
+    const needsMedia = (preview.needs_media_items || []).slice(0, 6);
+    const needsCollection = (preview.needs_collection_items || []).slice(0, 6);
+    const ambiguous = (preview.ambiguous_items || []).slice(0, 4);
+
+    const listBlock = (title, items, total) => {
+      if (!items.length) return "";
+      return `
+        <div class="integration-missing">
+          <strong>${escapeHtml(title)}</strong>
+          <ul>${items.map((item) =>
             `<li>${escapeHtml(item.title)} <span class="muted">BGG #${escapeHtml(item.bgg_id)}</span></li>`
           ).join("")}</ul>
-          ${preview.missing_in_floppy > missing.length
-            ? `<span class="muted">…e altri ${preview.missing_in_floppy - missing.length}</span>`
+          ${total > items.length
+            ? `<span class="muted">…e altri ${total - items.length}</span>`
             : ""}
-        </div>`
+        </div>
+      `;
+    };
+
+    const reportHtml = syncReport
+      ? `
+        <div class="sync-report ${syncReport.failed ? "has-errors" : ""}">
+          <strong>Ultimo batch:</strong>
+          ${formatNumber(syncReport.attempted, 0)} tentati ·
+          ${formatNumber(syncReport.media_created, 0)} media creati ·
+          ${formatNumber(syncReport.collection_created, 0)} copie aggiunte ·
+          ${formatNumber(syncReport.failed, 0)} errori
+          ${syncReport.remaining_from_preview
+            ? ` · ${formatNumber(syncReport.remaining_from_preview, 0)} ancora da elaborare`
+            : ""}
+        </div>
+      `
       : "";
 
+    const canApply = Boolean(preview.apply_supported) &&
+      Number(preview.actionable || 0) > 0 &&
+      Number(preview.ambiguous || 0) === 0;
+    const batchCount = Math.min(Number(preview.actionable || 0), 20);
+    const applyLabel = batchCount === Number(preview.actionable || 0)
+      ? `Sincronizza ${batchCount}`
+      : `Sincronizza prossimi ${batchCount}`;
+
     result.innerHTML = `
+      ${reportHtml}
       <div class="integration-summary">
         <div><strong>${formatNumber(preview.local_owned, 0)}</strong><span>Locali posseduti</span></div>
-        <div><strong>${formatNumber(preview.remote_boardgames, 0)}</strong><span>In Floppy</span></div>
-        <div><strong>${formatNumber(preview.matched_by_bgg_id, 0)}</strong><span>Match BGG ID</span></div>
-        <div><strong>${formatNumber(preview.matched_by_title_year, 0)}</strong><span>Match titolo+anno</span></div>
-        <div><strong>${formatNumber(preview.missing_in_floppy, 0)}</strong><span>Assenti</span></div>
+        <div><strong>${formatNumber(preview.remote_collection_entries, 0)}</strong><span>Copie in Floppy</span></div>
+        <div><strong>${formatNumber(preview.already_owned, 0)}</strong><span>Già allineati</span></div>
+        <div><strong>${formatNumber(preview.needs_collection, 0)}</strong><span>Da aggiungere alla collection</span></div>
+        <div><strong>${formatNumber(preview.needs_media, 0)}</strong><span>Media mancanti</span></div>
         <div><strong>${formatNumber(preview.ambiguous, 0)}</strong><span>Ambigui</span></div>
       </div>
-      ${missingHtml}
-      <p class="muted integration-note">Confronto read-only: nessun dato è stato scritto o cancellato in Floppy.</p>
+
+      ${listBlock("Media da creare in Floppy", needsMedia, preview.needs_media)}
+      ${listBlock("Media già presenti, copia da aggiungere", needsCollection, preview.needs_collection)}
+      ${listBlock("Corrispondenze ambigue — nessuna scrittura", ambiguous, preview.ambiguous)}
+
+      <div class="sync-actions">
+        ${preview.actionable === 0
+          ? '<span class="sync-ok">✓ Collection allineata</span>'
+          : canApply
+            ? `<button class="button button-primary" id="floppyApply" type="button">${applyLabel}</button>`
+            : ""}
+      </div>
+
+      <p class="muted integration-note">
+        Dry-run add-only: BoardGameCompanion non elimina media, copie o cronologia da Floppy.
+        ${preview.ambiguous
+          ? " Risolvi prima le corrispondenze ambigue."
+          : preview.apply_supported
+            ? " La scrittura richiede conferma esplicita."
+            : " L'istanza Floppy non espone il contratto write richiesto."}
+      </p>
     `;
+
+    document.querySelector("#floppyApply")?.addEventListener("click", () => {
+      void applyFloppySync(preview);
+    });
   } catch (error) {
     result.innerHTML = `<span class="integration-error">${escapeHtml(error.message)}</span>`;
     showToast(error.message, true);
@@ -474,6 +529,52 @@ async function loadFloppyPreview() {
     if (button.isConnected) {
       button.disabled = false;
       button.textContent = "Confronta cataloghi";
+    }
+  }
+}
+
+async function applyFloppySync(preview) {
+  const applyButton = document.querySelector("#floppyApply");
+  const actionable = Number(preview.actionable || 0);
+  const batchSize = Math.min(actionable, 20);
+  if (!applyButton || !batchSize) return;
+
+  const confirmed = window.confirm(
+    `Aggiungerò fino a ${batchSize} giochi alla collection di Floppy. Non verrà cancellato nulla. Procedere?`
+  );
+  if (!confirmed) return;
+
+  applyButton.disabled = true;
+  applyButton.textContent = "Sincronizzazione…";
+
+  try {
+    const report = await api("/api/integrations/floppy/sync", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        plan_hash: preview.plan_hash,
+        batch_size: batchSize,
+      }),
+    });
+
+    if (report.failed) {
+      showToast(
+        `Sync completato con ${report.failed} errori. Controlla il riepilogo.`,
+        true,
+      );
+    } else {
+      showToast(
+        `Sync completato: ${report.collection_created} copie aggiunte a Floppy.`,
+      );
+    }
+    await loadFloppyPreview(report);
+  } catch (error) {
+    showToast(error.message, true);
+    if (error.status === 409) {
+      await loadFloppyPreview();
+    } else if (applyButton.isConnected) {
+      applyButton.disabled = false;
+      applyButton.textContent = "Riprova sincronizzazione";
     }
   }
 }

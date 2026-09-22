@@ -97,6 +97,32 @@ CREATE TABLE IF NOT EXISTS app_settings (
     sensitive INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS floppy_links (
+    bgg_id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    media_id TEXT NOT NULL,
+    item_db_id INTEGER,
+    collection_entry_id INTEGER,
+    link_method TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_floppy_links_remote
+ON floppy_links(source, media_id);
+
+CREATE TABLE IF NOT EXISTS floppy_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_hash TEXT NOT NULL,
+    attempted INTEGER NOT NULL,
+    media_created INTEGER NOT NULL,
+    collection_created INTEGER NOT NULL,
+    skipped INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 

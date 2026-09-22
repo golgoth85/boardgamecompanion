@@ -15,13 +15,13 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Floppy connection health/capability checks.
-- Read-only Floppy board-game catalog comparison with BGG-ID-first matching.
+- Floppy board-game comparison and guarded add-only collection synchronization.
 
 Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
-The Floppy integration is deliberately read-only at this stage. BoardGameCompanion reads the live Floppy OpenAPI schema and will not enable write synchronization until the actual media/collection contracts exposed by the configured Floppy instance are validated.
+Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
-Planned next: validated Floppy write synchronization, barcode workflow, rulebook discovery/archive and page-cited RAG.
+Planned next: barcode workflow, rulebook discovery/archive and page-cited RAG.
 
 ## Container
 
@@ -79,23 +79,47 @@ Configure Floppy from the BoardGameCompanion web UI:
 
 Settings are persisted in the SQLite database under `/config`. The API token is never returned to the browser or exposed by the settings API after it has been saved.
 
-The home page can then verify Floppy connectivity and compare the owned local catalog with Floppy using:
+The home page can verify Floppy connectivity and compare the owned local catalog with both tracked board games and the Floppy collection. Matching uses, in order:
 
-1. explicit BGG ID when Floppy exposes one;
-2. exact normalized title + publication year as a lower-confidence fallback.
+1. a previously persisted BoardGameCompanion ↔ Floppy link;
+2. explicit BGG ID when Floppy exposes one;
+3. exact normalized title + publication year as a lower-confidence fallback.
 
 A `manual` Floppy `media_id` is never assumed to be a BGG ID.
+
+### Add-only synchronization
+
+**Confronta cataloghi** always performs a dry-run first. The preview separates games into:
+
+- already owned in Floppy;
+- tracked in Floppy but missing from its collection;
+- media missing entirely from Floppy;
+- ambiguous matches, which block automatic write sync.
+
+When the live Floppy OpenAPI schema exposes the validated media and collection write contracts, the UI offers a sync button. Each apply request:
+
+- requires the exact `plan_hash` returned by the preceding preview;
+- re-reads Floppy before writing and rejects a stale plan;
+- processes at most 20 items from the UI (API maximum: 50);
+- only adds missing records;
+- never deletes Floppy media, collection entries or history;
+- persists BGG ↔ Floppy links locally for idempotence and recovery.
+
+For a missing game, BoardGameCompanion first tries Floppy's BGG provider. If provider resolution is unavailable, it can create a manual Floppy board-game item and retains the canonical BGG ID in its local link. Infrastructure/authentication failures do not trigger this fallback.
+
+At present one owned BGG row maps to one Floppy collection copy; quantity-aware multi-copy synchronization is intentionally deferred.
 
 API endpoints:
 
 ```text
-GET /api/settings/floppy
-PUT /api/settings/floppy
-GET /api/integrations/floppy/status
-GET /api/integrations/floppy/preview
+GET  /api/settings/floppy
+PUT  /api/settings/floppy
+GET  /api/integrations/floppy/status
+GET  /api/integrations/floppy/preview
+POST /api/integrations/floppy/sync
 ```
 
-The preview performs no writes or deletes in Floppy.
+The sync endpoint accepts the dry-run `plan_hash` and an optional `batch_size`.
 
 ### Advanced environment overrides
 
