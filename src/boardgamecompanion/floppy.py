@@ -202,7 +202,7 @@ def _remote_bgg_id(item: dict[str, Any]) -> int | None:
 
     source = str(item.get("source") or "").lower()
     media_id = _as_int(item.get("media_id"))
-    if source in {"bgg", "boardgamegeek", "manual"} and media_id is not None:
+    if source in {"bgg", "boardgamegeek"} and media_id is not None:
         return media_id
 
     for key in ("bgg_id", "bggid", "boardgamegeek_id"):
