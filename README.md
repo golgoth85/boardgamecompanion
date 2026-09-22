@@ -4,12 +4,18 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 
 ## Current capabilities
 
-- Import a BoardGameGeek collection CSV without a BGG API token.
+- Responsive web catalog at `/`.
+- Import or update a BoardGameGeek collection CSV directly from the web UI.
+- Search and filter by title, base game/expansion and ownership state.
+- Sort by title, year, BGG rating, BGG rank or complexity.
+- Dedicated game detail pages at `/games/{bgg_id}`.
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
-- Search and filter the catalog through a REST API.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
+- REST API and OpenAPI/Swagger remain available.
+
+Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
 Planned next: Floppy synchronization, barcode workflow, rulebook discovery/archive and page-cited RAG.
 
@@ -35,11 +41,15 @@ docker run -d \
   ghcr.io/golgoth85/boardgamecompanion:latest
 ```
 
+Web UI: `http://<server>:8787/`
+
 OpenAPI/Swagger UI: `http://<server>:8787/docs`
 
 ## BGG CSV import
 
-Export your collection from BoardGameGeek and upload it through:
+From the web UI, choose **Importa BGG CSV** and select the collection export.
+
+API equivalent:
 
 ```text
 POST /api/imports/bgg-csv
@@ -65,6 +75,7 @@ GET /api/games/{bgg_id}
 - `q`
 - `item_type`
 - `owned`
+- `sort` — `title`, `year_desc`, `rating_desc`, `rank_asc`, `weight_desc`
 - `limit`
 - `offset`
 
