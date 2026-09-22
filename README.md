@@ -14,10 +14,14 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
+- Floppy connection health/capability checks.
+- Read-only Floppy board-game catalog comparison with BGG-ID-first matching.
 
 Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
-Planned next: Floppy synchronization, barcode workflow, rulebook discovery/archive and page-cited RAG.
+The Floppy integration is deliberately read-only at this stage. BoardGameCompanion reads the live Floppy OpenAPI schema and will not enable write synchronization until the actual media/collection contracts exposed by the configured Floppy instance are validated.
+
+Planned next: validated Floppy write synchronization, barcode workflow, rulebook discovery/archive and page-cited RAG.
 
 ## Container
 
@@ -61,6 +65,39 @@ The importer requires `objectid` and `objectname`. It retains the original row a
 Re-importing the exact same CSV re-validates the rows and leaves existing records unchanged. A later changed export updates matching records by BGG `objectid` / BGG collection `collid` without creating duplicates.
 
 Missing rows are **not deleted automatically**. This is intentional because an `owned` export is only a partial view of a BGG account and must not erase wishlist or other states imported from a broader export.
+
+
+## Floppy integration
+
+Configure these environment variables on the BoardGameCompanion container:
+
+```text
+BGC_FLOPPY_URL=http://<floppy-host>:8000
+BGC_FLOPPY_API_KEY=<API Token from Floppy Settings → Integrations>
+```
+
+Optional:
+
+```text
+BGC_FLOPPY_TIMEOUT_SECONDS=8
+BGC_FLOPPY_VERIFY_TLS=true
+```
+
+The home page then verifies the public Floppy info endpoint, authenticated board-game access and the live OpenAPI schema. **Confronta cataloghi** compares owned local games with Floppy using:
+
+1. explicit BGG ID when Floppy exposes one;
+2. exact normalized title + publication year as a lower-confidence fallback.
+
+A `manual` Floppy `media_id` is never assumed to be a BGG ID.
+
+API endpoints:
+
+```text
+GET /api/integrations/floppy/status
+GET /api/integrations/floppy/preview
+```
+
+The preview performs no writes or deletes in Floppy.
 
 ## Catalog API
 

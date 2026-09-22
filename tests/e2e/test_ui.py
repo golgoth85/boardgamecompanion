@@ -324,3 +324,15 @@ def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
         assert page.locator(".card-title img").count() == 0
     finally:
         context.close()
+
+
+def test_floppy_panel_reports_unconfigured_without_blocking_catalog(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        page.goto(live_server)
+        expect(page.locator("#floppyStatus")).to_have_text("Non configurato")
+        expect(page.locator("#floppyBody")).to_contain_text("BGC_FLOPPY_URL")
+        expect(page.locator("#floppyPreview")).to_be_disabled()
+        expect(page.locator("#catalogGrid")).to_be_visible()
+    finally:
+        context.close()
