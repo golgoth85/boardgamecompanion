@@ -153,6 +153,7 @@ def test_floppy_client_auth_pagination_schema_and_write_payloads() -> None:
             payload = request.read()
             body = __import__("json").loads(payload)
             assert body["status"] == ""
+            assert body["progress"] == 0
             if body["source"] == "bgg":
                 assert body["media_id"] == "777"
                 return httpx.Response(
@@ -341,7 +342,12 @@ def test_apply_sync_provider_success_and_collection_metadata(tmp_path: Path) -> 
             return _page(state["collection"])
         if request.url.path == "/api/v1/media/boardgame/" and request.method == "POST":
             body = __import__("json").loads(request.read())
-            assert body == {"source": "bgg", "media_id": "701", "status": ""}
+            assert body == {
+                "source": "bgg",
+                "media_id": "701",
+                "status": "",
+                "progress": 0,
+            }
             row = media_row(
                 item_db_id=1701,
                 media_id="701",
