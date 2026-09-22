@@ -389,6 +389,8 @@ def test_apply_sync_provider_success_and_collection_metadata(tmp_path: Path) -> 
     state = {"media": [], "collection": []}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/media/boardgame/bgg/701/" and request.method == "GET":
+            return httpx.Response(404, json={"detail": "Not found"})
         if request.url.path == "/api/v1/media/boardgame/" and request.method == "GET":
             return _page(state["media"])
         if request.url.path == "/api/v1/collection/" and request.method == "GET":
@@ -465,6 +467,137 @@ def test_apply_sync_provider_success_and_collection_metadata(tmp_path: Path) -> 
     assert second["already_owned"] == 1
 
 
+def test_apply_sync_reuses_hidden_existing_bgg_media(tmp_path: Path) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    _insert_local_owned(database, local_game(711, "Hidden Existing", 2020))
+
+    hidden = media_row(
+        item_db_id=1711,
+        media_id="711",
+        source="bgg",
+        title="Hidden Existing",
+        year=2020,
+        bgg_id=711,
+    )
+    state = {"collection": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/media/boardgame/" and request.method == "GET":
+            return _page([])
+        if request.url.path == "/api/v1/collection/" and request.method == "GET":
+            return _page(state["collection"])
+        if request.url.path == "/api/v1/media/boardgame/bgg/711/" and request.method == "GET":
+            return httpx.Response(200, json=hidden)
+        if request.url.path == "/api/v1/media/boardgame/" and request.method == "POST":
+            raise AssertionError("existing hidden media must not be created again")
+        if request.url.path == "/api/v1/collection/" and request.method == "POST":
+            body = __import__("json").loads(request.read())
+            assert body["item_id"] == 1711
+            row = collection_row(
+                entry_id=2711,
+                media_id="711",
+                source="bgg",
+                title="Hidden Existing",
+            )
+            state["collection"].append(row)
+            return httpx.Response(201, json=row)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = FloppyClient(
+        FloppyConfig("http://floppy", "secret"),
+        transport=httpx.MockTransport(handler),
+    )
+    preview = build_sync_preview(
+        [local_game(711, "Hidden Existing", 2020)],
+        [],
+        [],
+    )
+
+    result = apply_floppy_sync(
+        database,
+        client,
+        expected_plan_hash=preview["plan_hash"],
+    )
+
+    assert result["attempted"] == 1
+    assert result["media_created"] == 0
+    assert result["collection_created"] == 1
+    assert result["failed"] == 0
+    assert result["results"][0]["status"] == "existing_media_collection_added"
+    assert result["results"][0]["source_mode"] == "bgg_existing"
+    link = load_floppy_links(database)[711]
+    assert link["item_db_id"] == 1711
+    assert link["collection_entry_id"] == 2711
+
+
+def test_apply_sync_recovers_bgg_media_created_after_timeout(tmp_path: Path) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    _insert_local_owned(database, local_game(712, "Timeout Recovery", 2021))
+
+    recovered = media_row(
+        item_db_id=1712,
+        media_id="712",
+        source="bgg",
+        title="Timeout Recovery",
+        year=2021,
+        bgg_id=712,
+    )
+    state = {"timed_out": False, "collection": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/media/boardgame/" and request.method == "GET":
+            return _page([])
+        if request.url.path == "/api/v1/collection/" and request.method == "GET":
+            return _page(state["collection"])
+        if request.url.path == "/api/v1/media/boardgame/bgg/712/" and request.method == "GET":
+            if state["timed_out"]:
+                return httpx.Response(200, json=recovered)
+            return httpx.Response(404, json={"detail": "Not found"})
+        if request.url.path == "/api/v1/media/boardgame/" and request.method == "POST":
+            state["timed_out"] = True
+            raise httpx.ReadTimeout("provider request exceeded client timeout", request=request)
+        if request.url.path == "/api/v1/collection/" and request.method == "POST":
+            body = __import__("json").loads(request.read())
+            assert body["item_id"] == 1712
+            row = collection_row(
+                entry_id=2712,
+                media_id="712",
+                source="bgg",
+                title="Timeout Recovery",
+            )
+            state["collection"].append(row)
+            return httpx.Response(201, json=row)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = FloppyClient(
+        FloppyConfig("http://floppy", "secret"),
+        transport=httpx.MockTransport(handler),
+    )
+    preview = build_sync_preview(
+        [local_game(712, "Timeout Recovery", 2021)],
+        [],
+        [],
+    )
+
+    result = apply_floppy_sync(
+        database,
+        client,
+        expected_plan_hash=preview["plan_hash"],
+    )
+
+    assert result["attempted"] == 1
+    assert result["media_created"] == 0
+    assert result["collection_created"] == 1
+    assert result["failed"] == 0
+    assert result["results"][0]["status"] == "existing_media_collection_added"
+    assert result["results"][0]["source_mode"] == "bgg_recovered_after_timeout"
+    link = load_floppy_links(database)[712]
+    assert link["item_db_id"] == 1712
+    assert link["collection_entry_id"] == 2712
+
+
 def test_apply_sync_falls_back_to_manual_and_persists_partial_link(tmp_path: Path) -> None:
     database = Database(tmp_path / "catalog.sqlite3")
     database.initialize()
@@ -473,6 +606,8 @@ def test_apply_sync_falls_back_to_manual_and_persists_partial_link(tmp_path: Pat
     state = {"media": [], "collection": []}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/media/boardgame/bgg/801/" and request.method == "GET":
+            return httpx.Response(404, json={"detail": "Not found"})
         if request.url.path == "/api/v1/media/boardgame/" and request.method == "GET":
             return _page(state["media"])
         if request.url.path == "/api/v1/collection/" and request.method == "GET":

@@ -33,6 +33,7 @@ def test_floppy_settings_persist_without_returning_secret(tmp_path: Path) -> Non
         initial = client.get("/api/settings/floppy")
         assert initial.status_code == 200
         assert initial.json()["api_key_configured"] is False
+        assert initial.json()["timeout_seconds"] == 45
 
         saved = client.put(
             "/api/settings/floppy",

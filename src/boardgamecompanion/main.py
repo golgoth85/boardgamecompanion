@@ -66,7 +66,7 @@ class FloppySettingsUpdate(BaseModel):
     url: str = ""
     api_key: str | None = None
     clear_api_key: bool = False
-    timeout_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
+    timeout_seconds: float = Field(default=45.0, ge=1.0, le=60.0)
     verify_tls: bool = True
 
     @field_validator("url")
