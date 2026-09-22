@@ -467,6 +467,23 @@ def test_apply_sync_provider_success_and_collection_metadata(tmp_path: Path) -> 
     assert second["already_owned"] == 1
 
 
+def test_direct_detail_flat_response_exposes_item_database_id() -> None:
+    flat = {
+        "id": 38,
+        "source": "bgg",
+        "media_id": "184151",
+        "title": "Legend of the Five Rings: The Card Game",
+    }
+
+    from boardgamecompanion.floppy import _remote_identity
+
+    identity = _remote_identity(flat)
+
+    assert identity["item_db_id"] == 38
+    assert identity["source"] == "bgg"
+    assert identity["media_id"] == "184151"
+
+
 def test_apply_sync_reuses_hidden_existing_bgg_media(tmp_path: Path) -> None:
     database = Database(tmp_path / "catalog.sqlite3")
     database.initialize()
