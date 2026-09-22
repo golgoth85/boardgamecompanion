@@ -9,7 +9,7 @@
   <Project>https://github.com/golgoth85/boardgamecompanion</Project>
   <Overview>Self-hosted board-game collection, rulebook and RAG companion.</Overview>
   <Category>Tools:</Category>
-  <WebUI>http://[IP]:[PORT:8787]/docs</WebUI>
+  <WebUI>http://[IP]:[PORT:8787]/</WebUI>
   <Shell>bash</Shell>
   <Config Name="WebUI" Target="8787" Default="8787" Mode="tcp" Description="BoardGameCompanion HTTP port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/boardgamecompanion" Mode="rw" Description="Configuration and database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/boardgamecompanion</Config>
