@@ -110,6 +110,8 @@ def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.get_by_role("button", name="Importa", exact=True).click()
     expect(page.locator("#importResult")).to_contain_text("Import completato.")
     expect(page.locator("#importResult")).to_contain_text("2 righe")
+    page.get_by_role("button", name="Chiudi").click()
+    expect(page.locator("#importDialog")).not_to_be_visible()
 
 
 def make_many_games_csv(path: Path, count: int = 30) -> Path:
