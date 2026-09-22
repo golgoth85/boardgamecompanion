@@ -2,12 +2,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from boardgamecompanion import __version__
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
-from boardgamecompanion.catalog import Catalog
+from boardgamecompanion.catalog import Catalog, SORT_SQL
 from boardgamecompanion.database import Database
 from boardgamecompanion.settings import settings
+
+WEB_DIR = Path(__file__).parent / "web"
 
 
 def get_database() -> Database:
@@ -26,6 +30,17 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def web_home() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/games/{bgg_id}", include_in_schema=False)
+def web_game(bgg_id: int) -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.get("/health", tags=["system"])
@@ -74,6 +89,7 @@ def list_games(
     q: str | None = Query(default=None, min_length=1),
     item_type: str | None = Query(default=None),
     owned: bool | None = Query(default=None),
+    sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
@@ -83,6 +99,7 @@ def list_games(
         query=q,
         item_type=item_type,
         owned=owned,
+        sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
     )

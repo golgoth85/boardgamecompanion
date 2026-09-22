@@ -5,6 +5,15 @@ from typing import Any
 from boardgamecompanion.database import Database
 
 
+SORT_SQL = {
+    "title": "g.title COLLATE NOCASE ASC, g.bgg_id ASC",
+    "year_desc": "g.year_published IS NULL, g.year_published DESC, g.title COLLATE NOCASE ASC",
+    "rating_desc": "g.bgg_average IS NULL, g.bgg_average DESC, g.title COLLATE NOCASE ASC",
+    "rank_asc": "g.bgg_rank IS NULL OR g.bgg_rank = 0, g.bgg_rank ASC, g.title COLLATE NOCASE ASC",
+    "weight_desc": "g.bgg_average_weight IS NULL, g.bgg_average_weight DESC, g.title COLLATE NOCASE ASC",
+}
+
+
 def _game_dict(row) -> dict[str, Any]:
     return {
         "bgg_id": row["bgg_id"],
@@ -63,6 +72,7 @@ class Catalog:
         query: str | None = None,
         item_type: str | None = None,
         owned: bool | None = None,
+        sort: str = "title",
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -80,6 +90,7 @@ class Catalog:
             params.append(1 if owned else 0)
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
         from_sql = """
             FROM board_games g
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
@@ -99,7 +110,7 @@ class Catalog:
                        c.version_nickname, c.inventory_location, c.quantity
                 {from_sql}
                 {where_sql}
-                ORDER BY g.title COLLATE NOCASE, g.bgg_id
+                ORDER BY {order_sql}
                 LIMIT ? OFFSET ?
                 """,
                 [*params, limit, offset],
@@ -110,6 +121,7 @@ class Catalog:
             "total": total,
             "limit": limit,
             "offset": offset,
+            "sort": sort if sort in SORT_SQL else "title",
         }
 
     def get_game(self, bgg_id: int) -> dict[str, Any] | None:
