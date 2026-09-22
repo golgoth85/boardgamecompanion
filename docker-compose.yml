@@ -1,0 +1,20 @@
+services:
+  boardgamecompanion:
+    build: .
+    image: ghcr.io/golgoth85/boardgamecompanion:latest
+    container_name: boardgamecompanion
+    ports:
+      - "8787:8787"
+    environment:
+      BGC_CONFIG_DIR: /config
+      BGC_IMPORT_DIR: /data/import
+      BGC_MANUALS_DIR: /data/manuals
+      # BGC_FLOPPY_URL: http://floppy:8000
+      # BGC_FLOPPY_API_KEY: ""
+      # BGC_OLLAMA_URL: http://ollama:11434
+      # BGC_QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./runtime/config:/config
+      - ./runtime/import:/data/import
+      - ./runtime/manuals:/data/manuals
+    restart: unless-stopped

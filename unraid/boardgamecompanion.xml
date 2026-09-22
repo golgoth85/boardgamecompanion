@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>BoardGameCompanion</Name>
+  <Repository>ghcr.io/golgoth85/boardgamecompanion:latest</Repository>
+  <Registry>https://ghcr.io/golgoth85/boardgamecompanion</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/golgoth85/boardgamecompanion/issues</Support>
+  <Project>https://github.com/golgoth85/boardgamecompanion</Project>
+  <Overview>Self-hosted board-game collection, rulebook and RAG companion.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8787]/docs</WebUI>
+  <Shell>bash</Shell>
+  <Config Name="WebUI" Target="8787" Default="8787" Mode="tcp" Description="BoardGameCompanion HTTP port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/boardgamecompanion" Mode="rw" Description="Configuration and database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/boardgamecompanion</Config>
+  <Config Name="Import" Target="/data/import" Default="/mnt/user/boardgames/import" Mode="rw" Description="BGG CSV import folder" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/boardgames/import</Config>
+  <Config Name="Manuals" Target="/data/manuals" Default="/mnt/user/boardgames/manuals" Mode="rw" Description="Rulebook archive" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/boardgames/manuals</Config>
+  <Config Name="Floppy URL" Target="BGC_FLOPPY_URL" Default="" Mode="" Description="Optional Floppy base URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Floppy API Key" Target="BGC_FLOPPY_API_KEY" Default="" Mode="" Description="Optional Floppy API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Ollama URL" Target="BGC_OLLAMA_URL" Default="" Mode="" Description="Optional Ollama URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Qdrant URL" Target="BGC_QDRANT_URL" Default="" Mode="" Description="Optional Qdrant URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>
