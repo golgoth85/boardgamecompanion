@@ -350,10 +350,13 @@ def _remote_media_id(value: dict[str, Any]) -> str:
 
 
 def _remote_item_db_id(value: dict[str, Any]) -> int | None:
-    # MediaSerializer exposes the database Item.id as the top-level id.
+    # List/media rows expose the database Item.id as the top-level id while
+    # collection rows also have a nested item but their top-level id belongs
+    # to the collection entry. Direct media detail responses are flat and
+    # expose Item.id as top-level id without a nested item.
     if isinstance(value.get("item"), dict):
         return _as_int(value.get("id"))
-    return _as_int(value.get("item_db_id"))
+    return _as_int(value.get("item_db_id")) or _as_int(value.get("id"))
 
 
 def _remote_bgg_id(value: dict[str, Any]) -> int | None:
