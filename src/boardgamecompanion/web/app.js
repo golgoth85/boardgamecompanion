@@ -152,6 +152,24 @@ async function renderCatalog() {
       </section>
     </section>
 
+    <section class="panel integration-panel" id="floppyPanel" aria-label="Integrazione Floppy">
+      <div class="integration-head">
+        <div>
+          <p class="eyebrow">Integrazione</p>
+          <h2>Floppy</h2>
+        </div>
+        <span class="integration-status" id="floppyStatus">Verifica…</span>
+      </div>
+      <div id="floppyBody" class="integration-body">
+        Controllo configurazione e connettività…
+      </div>
+      <div class="integration-actions">
+        <button class="button button-ghost" id="floppyCheck" type="button">Verifica connessione</button>
+        <button class="button button-primary" id="floppyPreview" type="button" disabled>Confronta cataloghi</button>
+      </div>
+      <div id="floppyPreviewResult" class="integration-result" hidden></div>
+    </section>
+
     <section class="toolbar" aria-label="Filtri catalogo">
       <label class="field search-field">
         <input id="searchInput" type="search" aria-label="Cerca per titolo" placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
@@ -191,6 +209,8 @@ async function renderCatalog() {
   `;
 
   bindCatalogControls();
+  bindFloppyControls();
+  void loadFloppyStatus();
   const requestedPath = window.location.pathname;
 
   try {
@@ -205,6 +225,120 @@ async function renderCatalog() {
     document.querySelector("#catalogGrid").innerHTML =
       `<div class="empty" style="grid-column:1/-1">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
+  }
+}
+
+function bindFloppyControls() {
+  document.querySelector("#floppyCheck")?.addEventListener("click", () => {
+    void loadFloppyStatus();
+  });
+  document.querySelector("#floppyPreview")?.addEventListener("click", () => {
+    void loadFloppyPreview();
+  });
+}
+
+function setFloppyStatus(label, kind = "") {
+  const badge = document.querySelector("#floppyStatus");
+  if (!badge) return;
+  badge.textContent = label;
+  badge.className = `integration-status ${kind}`.trim();
+}
+
+async function loadFloppyStatus() {
+  const body = document.querySelector("#floppyBody");
+  const previewButton = document.querySelector("#floppyPreview");
+  const previewResult = document.querySelector("#floppyPreviewResult");
+  if (!body || !previewButton) return;
+
+  previewButton.disabled = true;
+  if (previewResult) previewResult.hidden = true;
+  setFloppyStatus("Verifica…");
+  body.textContent = "Controllo configurazione e connettività…";
+
+  try {
+    const status = await api("/api/integrations/floppy/status");
+    if (!document.querySelector("#floppyPanel")) return;
+
+    if (!status.configured) {
+      setFloppyStatus("Non configurato", "neutral");
+      body.innerHTML =
+        'Imposta <code>BGC_FLOPPY_URL</code> e <code>BGC_FLOPPY_API_KEY</code> nel container BoardGameCompanion, quindi riavvialo.';
+      return;
+    }
+
+    if (!status.reachable) {
+      setFloppyStatus("Non raggiungibile", "error");
+      body.textContent = status.error?.message || "Impossibile raggiungere Floppy.";
+      return;
+    }
+
+    if (!status.authenticated) {
+      setFloppyStatus("Autenticazione fallita", "error");
+      body.textContent =
+        "Floppy risponde, ma il token non consente l’accesso all’API board game. Verifica l’API Token in Settings → Integrations.";
+      return;
+    }
+
+    setFloppyStatus("Connesso", "success");
+    previewButton.disabled = false;
+    const version = status.info?.version ? ` · versione ${escapeHtml(status.info.version)}` : "";
+    const schema = status.schema?.write_contract_ready
+      ? "Contratto write rilevato; per ora il confronto resta deliberatamente read-only."
+      : "Contratto write non ancora validato: nessuna modifica verrà inviata a Floppy.";
+    body.innerHTML = `API board game raggiungibile${version}. ${escapeHtml(schema)}`;
+  } catch (error) {
+    setFloppyStatus("Errore", "error");
+    body.textContent = error.message;
+  }
+}
+
+async function loadFloppyPreview() {
+  const button = document.querySelector("#floppyPreview");
+  const result = document.querySelector("#floppyPreviewResult");
+  if (!button || !result) return;
+
+  button.disabled = true;
+  button.textContent = "Confronto…";
+  result.hidden = false;
+  result.innerHTML = '<span class="muted">Lettura catalogo Floppy…</span>';
+
+  try {
+    const preview = await api("/api/integrations/floppy/preview");
+    if (!document.querySelector("#floppyPanel")) return;
+
+    const missing = (preview.missing || []).slice(0, 8);
+    const missingHtml = missing.length
+      ? `<div class="integration-missing">
+          <strong>Primi elementi assenti in Floppy</strong>
+          <ul>${missing.map((item) =>
+            `<li>${escapeHtml(item.title)} <span class="muted">BGG #${escapeHtml(item.bgg_id)}</span></li>`
+          ).join("")}</ul>
+          ${preview.missing_in_floppy > missing.length
+            ? `<span class="muted">…e altri ${preview.missing_in_floppy - missing.length}</span>`
+            : ""}
+        </div>`
+      : "";
+
+    result.innerHTML = `
+      <div class="integration-summary">
+        <div><strong>${formatNumber(preview.local_owned, 0)}</strong><span>Locali posseduti</span></div>
+        <div><strong>${formatNumber(preview.remote_boardgames, 0)}</strong><span>In Floppy</span></div>
+        <div><strong>${formatNumber(preview.matched_by_bgg_id, 0)}</strong><span>Match BGG ID</span></div>
+        <div><strong>${formatNumber(preview.matched_by_title_year, 0)}</strong><span>Match titolo+anno</span></div>
+        <div><strong>${formatNumber(preview.missing_in_floppy, 0)}</strong><span>Assenti</span></div>
+        <div><strong>${formatNumber(preview.ambiguous, 0)}</strong><span>Ambigui</span></div>
+      </div>
+      ${missingHtml}
+      <p class="muted integration-note">Confronto read-only: nessun dato è stato scritto o cancellato in Floppy.</p>
+    `;
+  } catch (error) {
+    result.innerHTML = `<span class="integration-error">${escapeHtml(error.message)}</span>`;
+    showToast(error.message, true);
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = "Confronta cataloghi";
+    }
   }
 }
 
