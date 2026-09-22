@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     manuals_dir: Path = Path("/data/manuals")
     floppy_url: str | None = None
     floppy_api_key: str | None = None
-    floppy_timeout_seconds: float = 8.0
+    floppy_timeout_seconds: float = 45.0
     floppy_verify_tls: bool = True
     ollama_url: str | None = None
     qdrant_url: str | None = None
