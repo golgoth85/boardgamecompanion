@@ -450,32 +450,32 @@ async function loadFloppyPreview(syncReport = null) {
 
     const listBlock = (title, items, total) => {
       if (!items.length) return "";
-      return \`
+      return `
         <div class="integration-missing">
-          <strong>\${escapeHtml(title)}</strong>
-          <ul>\${items.map((item) =>
-            \`<li>\${escapeHtml(item.title)} <span class="muted">BGG #\${escapeHtml(item.bgg_id)}</span></li>\`
+          <strong>${escapeHtml(title)}</strong>
+          <ul>${items.map((item) =>
+            `<li>${escapeHtml(item.title)} <span class="muted">BGG #${escapeHtml(item.bgg_id)}</span></li>`
           ).join("")}</ul>
-          \${total > items.length
-            ? \`<span class="muted">…e altri \${total - items.length}</span>\`
+          ${total > items.length
+            ? `<span class="muted">…e altri ${total - items.length}</span>`
             : ""}
         </div>
-      \`;
+      `;
     };
 
     const reportHtml = syncReport
-      ? \`
-        <div class="sync-report \${syncReport.failed ? "has-errors" : ""}">
+      ? `
+        <div class="sync-report ${syncReport.failed ? "has-errors" : ""}">
           <strong>Ultimo batch:</strong>
-          \${formatNumber(syncReport.attempted, 0)} tentati ·
-          \${formatNumber(syncReport.media_created, 0)} media creati ·
-          \${formatNumber(syncReport.collection_created, 0)} copie aggiunte ·
-          \${formatNumber(syncReport.failed, 0)} errori
-          \${syncReport.remaining_from_preview
-            ? \` · \${formatNumber(syncReport.remaining_from_preview, 0)} ancora da elaborare\`
+          ${formatNumber(syncReport.attempted, 0)} tentati ·
+          ${formatNumber(syncReport.media_created, 0)} media creati ·
+          ${formatNumber(syncReport.collection_created, 0)} copie aggiunte ·
+          ${formatNumber(syncReport.failed, 0)} errori
+          ${syncReport.remaining_from_preview
+            ? ` · ${formatNumber(syncReport.remaining_from_preview, 0)} ancora da elaborare`
             : ""}
         </div>
-      \`
+      `
       : "";
 
     const canApply = Boolean(preview.apply_supported) &&
@@ -483,47 +483,47 @@ async function loadFloppyPreview(syncReport = null) {
       Number(preview.ambiguous || 0) === 0;
     const batchCount = Math.min(Number(preview.actionable || 0), 20);
     const applyLabel = batchCount === Number(preview.actionable || 0)
-      ? \`Sincronizza \${batchCount}\`
-      : \`Sincronizza prossimi \${batchCount}\`;
+      ? `Sincronizza ${batchCount}`
+      : `Sincronizza prossimi ${batchCount}`;
 
-    result.innerHTML = \`
-      \${reportHtml}
+    result.innerHTML = `
+      ${reportHtml}
       <div class="integration-summary">
-        <div><strong>\${formatNumber(preview.local_owned, 0)}</strong><span>Locali posseduti</span></div>
-        <div><strong>\${formatNumber(preview.remote_collection_entries, 0)}</strong><span>Copie in Floppy</span></div>
-        <div><strong>\${formatNumber(preview.already_owned, 0)}</strong><span>Già allineati</span></div>
-        <div><strong>\${formatNumber(preview.needs_collection, 0)}</strong><span>Da aggiungere alla collection</span></div>
-        <div><strong>\${formatNumber(preview.needs_media, 0)}</strong><span>Media mancanti</span></div>
-        <div><strong>\${formatNumber(preview.ambiguous, 0)}</strong><span>Ambigui</span></div>
+        <div><strong>${formatNumber(preview.local_owned, 0)}</strong><span>Locali posseduti</span></div>
+        <div><strong>${formatNumber(preview.remote_collection_entries, 0)}</strong><span>Copie in Floppy</span></div>
+        <div><strong>${formatNumber(preview.already_owned, 0)}</strong><span>Già allineati</span></div>
+        <div><strong>${formatNumber(preview.needs_collection, 0)}</strong><span>Da aggiungere alla collection</span></div>
+        <div><strong>${formatNumber(preview.needs_media, 0)}</strong><span>Media mancanti</span></div>
+        <div><strong>${formatNumber(preview.ambiguous, 0)}</strong><span>Ambigui</span></div>
       </div>
 
-      \${listBlock("Media da creare in Floppy", needsMedia, preview.needs_media)}
-      \${listBlock("Media già presenti, copia da aggiungere", needsCollection, preview.needs_collection)}
-      \${listBlock("Corrispondenze ambigue — nessuna scrittura", ambiguous, preview.ambiguous)}
+      ${listBlock("Media da creare in Floppy", needsMedia, preview.needs_media)}
+      ${listBlock("Media già presenti, copia da aggiungere", needsCollection, preview.needs_collection)}
+      ${listBlock("Corrispondenze ambigue — nessuna scrittura", ambiguous, preview.ambiguous)}
 
       <div class="sync-actions">
-        \${preview.actionable === 0
+        ${preview.actionable === 0
           ? '<span class="sync-ok">✓ Collection allineata</span>'
           : canApply
-            ? \`<button class="button button-primary" id="floppyApply" type="button">\${applyLabel}</button>\`
+            ? `<button class="button button-primary" id="floppyApply" type="button">${applyLabel}</button>`
             : ""}
       </div>
 
       <p class="muted integration-note">
         Dry-run add-only: BoardGameCompanion non elimina media, copie o cronologia da Floppy.
-        \${preview.ambiguous
+        ${preview.ambiguous
           ? " Risolvi prima le corrispondenze ambigue."
           : preview.apply_supported
             ? " La scrittura richiede conferma esplicita."
             : " L'istanza Floppy non espone il contratto write richiesto."}
       </p>
-    \`;
+    `;
 
     document.querySelector("#floppyApply")?.addEventListener("click", () => {
       void applyFloppySync(preview);
     });
   } catch (error) {
-    result.innerHTML = \`<span class="integration-error">\${escapeHtml(error.message)}</span>\`;
+    result.innerHTML = `<span class="integration-error">${escapeHtml(error.message)}</span>`;
     showToast(error.message, true);
   } finally {
     if (button.isConnected) {
@@ -540,7 +540,7 @@ async function applyFloppySync(preview) {
   if (!applyButton || !batchSize) return;
 
   const confirmed = window.confirm(
-    \`Aggiungerò fino a \${batchSize} giochi alla collection di Floppy. Non verrà cancellato nulla. Procedere?\`
+    `Aggiungerò fino a ${batchSize} giochi alla collection di Floppy. Non verrà cancellato nulla. Procedere?`
   );
   if (!confirmed) return;
 
@@ -559,12 +559,12 @@ async function applyFloppySync(preview) {
 
     if (report.failed) {
       showToast(
-        \`Sync completato con \${report.failed} errori. Controlla il riepilogo.\`,
+        `Sync completato con ${report.failed} errori. Controlla il riepilogo.`,
         true,
       );
     } else {
       showToast(
-        \`Sync completato: \${report.collection_created} copie aggiunte a Floppy.\`,
+        `Sync completato: ${report.collection_created} copie aggiunte a Floppy.`,
       );
     }
     await loadFloppyPreview(report);
