@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121826">
+  <title>BoardGameCompanion</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" data-nav>
+      <span class="brand-mark" aria-hidden="true">BGC</span>
+      <span>
+        <strong>BoardGameCompanion</strong>
+        <small>La tua ludoteca, in locale.</small>
+      </span>
+    </a>
+    <div class="topbar-actions">
+      <button class="button button-primary" id="importButton" type="button">
+        Importa BGG CSV
+      </button>
+    </div>
+  </header>
+
+  <main id="app" class="shell" aria-live="polite"></main>
+
+  <dialog id="importDialog" class="dialog">
+    <form id="importForm" method="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">BoardGameGeek</p>
+          <h2>Importa o aggiorna la collezione</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="Chiudi">×</button>
+      </div>
+      <p class="muted">
+        Seleziona il CSV esportato da BGG. Il reimport è idempotente: i giochi esistenti
+        vengono aggiornati senza creare duplicati.
+      </p>
+      <label class="file-drop" for="csvFile">
+        <span class="file-drop-title">Scegli collection.csv</span>
+        <span id="fileName" class="muted">Nessun file selezionato</span>
+        <input id="csvFile" name="file" type="file" accept=".csv,text/csv" required>
+      </label>
+      <div id="importResult" class="import-result" hidden></div>
+      <div class="dialog-actions">
+        <button class="button button-ghost" value="cancel" type="button" id="cancelImport">Annulla</button>
+        <button class="button button-primary" type="submit" id="submitImport">Importa</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

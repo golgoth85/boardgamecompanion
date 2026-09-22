@@ -30,3 +30,8 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         assert games.status_code == 200
         assert games.json()["total"] == 1
         assert games.json()["items"][0]["bgg_id"] == 900001
+
+        sorted_games = client.get("/api/games", params={"sort": "rating_desc"})
+        assert sorted_games.status_code == 200
+        assert sorted_games.json()["sort"] == "rating_desc"
+        assert sorted_games.json()["items"][0]["bgg_id"] == 900001
