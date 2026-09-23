@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from boardgamecompanion.database import Database
 from boardgamecompanion.main import app
 from boardgamecompanion.rulebook_review import (
+    MAX_CANDIDATE_SNAPSHOT_BYTES,
+    MAX_POLICY_REASONS_BYTES,
     RulebookReviewCandidateMismatch,
     RulebookReviewConflict,
     RulebookReviewError,
@@ -465,6 +467,82 @@ def test_corrupt_review_rows_are_quarantined_and_not_decidable(
                 (item["id"],),
             ).fetchone()
         assert row["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    ("column", "payload"),
+    [
+        (
+            "candidate_json",
+            "[" * 1200 + "0" + "]" * 1200,
+        ),
+        (
+            "policy_reasons_json",
+            "[" * 1200 + "0" + "]" * 1200,
+        ),
+        (
+            "candidate_json",
+            '{"oversized":"' + "x" * MAX_CANDIDATE_SNAPSHOT_BYTES + '"}',
+        ),
+        (
+            "policy_reasons_json",
+            '["' + "x" * MAX_POLICY_REASONS_BYTES + '"]',
+        ),
+    ],
+)
+def test_pathological_persisted_json_is_quarantined_without_mutation(
+    tmp_path: Path,
+    column: str,
+    payload: str,
+) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(
+            community_payload(
+                url=f"https://community.example/corrupt-{column}.pdf",
+            )
+        )
+        database = Database(settings.database_path)
+        with database.connect() as connection:
+            connection.execute(
+                f"UPDATE rulebook_review_items SET {column} = ? WHERE id = ?",
+                (payload, item["id"]),
+            )
+            before = connection.execute(
+                f"SELECT {column}, status FROM rulebook_review_items WHERE id = ?",
+                (item["id"],),
+            ).fetchone()
+
+        listing = client.get(
+            "/api/rulebook-reviews?status=pending&limit=50&offset=0"
+        )
+        assert listing.status_code == 200
+        assert listing.json()["items"] == []
+        assert listing.json()["corrupt_count"] == 1
+        assert listing.json()["corrupt_items"] == [
+            {
+                "id": item["id"],
+                "error": "corrupt persisted review record",
+            }
+        ]
+        assert client.get(
+            f"/api/rulebook-reviews/{item['id']}"
+        ).status_code == 500
+        assert client.post(
+            f"/api/rulebook-reviews/{item['id']}/decision",
+            json={"decision": "approved"},
+        ).status_code == 500
+
+        with database.connect() as connection:
+            after = connection.execute(
+                f"SELECT {column}, status FROM rulebook_review_items WHERE id = ?",
+                (item["id"],),
+            ).fetchone()
+
+    assert before[column] == payload
+    assert after[column] == payload
+    assert before["status"] == after["status"] == "pending"
 
 
 def test_semantically_unsafe_snapshot_is_quarantined(tmp_path: Path) -> None:

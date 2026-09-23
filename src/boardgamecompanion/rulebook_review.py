@@ -19,6 +19,7 @@ from boardgamecompanion.rulebooks import (
 UNATTENDED_MIN_CONFIDENCE = 95
 DEFAULT_UNATTENDED_LANGUAGES = ("it", "en")
 MAX_CANDIDATE_SNAPSHOT_BYTES = 256 * 1024
+MAX_POLICY_REASONS_BYTES = 16 * 1024
 
 
 class RulebookReviewError(ValueError):
@@ -174,9 +175,33 @@ def evaluate_candidate(
     )
 
 
+def _load_persisted_json(
+    value: Any,
+    *,
+    field_name: str,
+    max_bytes: int,
+) -> Any:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be stored as text")
+    try:
+        encoded_size = len(value.encode("utf-8"))
+    except UnicodeError as exc:
+        raise ValueError(f"{field_name} contains invalid Unicode") from exc
+    if encoded_size > max_bytes:
+        raise ValueError(f"{field_name} exceeds {max_bytes} bytes")
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError(f"{field_name} is not safely decodable JSON") from exc
+
+
 def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
     try:
-        raw_candidate = json.loads(row["candidate_json"])
+        raw_candidate = _load_persisted_json(
+            row["candidate_json"],
+            field_name="candidate_json",
+            max_bytes=MAX_CANDIDATE_SNAPSHOT_BYTES,
+        )
         if not isinstance(raw_candidate, Mapping):
             raise TypeError("candidate snapshot must be a JSON object")
         candidate = candidate_from_snapshot(raw_candidate)
@@ -184,7 +209,11 @@ def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
         if serialized != row["candidate_json"] or candidate_key != row["candidate_key"]:
             raise ValueError("candidate snapshot canonical form or digest does not match")
 
-        reasons = json.loads(row["policy_reasons_json"])
+        reasons = _load_persisted_json(
+            row["policy_reasons_json"],
+            field_name="policy_reasons_json",
+            max_bytes=MAX_POLICY_REASONS_BYTES,
+        )
         if not isinstance(reasons, list) or any(
             not isinstance(reason, str) for reason in reasons
         ):
