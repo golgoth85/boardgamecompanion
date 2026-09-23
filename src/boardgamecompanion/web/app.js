@@ -56,6 +56,22 @@ const floppyUrlHint = document.querySelector("#floppyUrlHint");
 const floppyTokenHint = document.querySelector("#floppyTokenHint");
 const floppyTimeoutHint = document.querySelector("#floppyTimeoutHint");
 const settingsResult = document.querySelector("#settingsResult");
+const documentDialog = document.querySelector("#documentDialog");
+const documentForm = document.querySelector("#documentForm");
+const documentDialogSubtitle = document.querySelector("#documentDialogSubtitle");
+const closeDocumentDialogButton = document.querySelector("#closeDocumentDialog");
+const cancelDocumentDialog = document.querySelector("#cancelDocumentDialog");
+const saveDocument = document.querySelector("#saveDocument");
+const documentFile = document.querySelector("#documentFile");
+const documentFileName = document.querySelector("#documentFileName");
+const documentType = document.querySelector("#documentType");
+const documentLanguage = document.querySelector("#documentLanguage");
+const documentTitle = document.querySelector("#documentTitle");
+const documentVersion = document.querySelector("#documentVersion");
+const documentEdition = document.querySelector("#documentEdition");
+const documentSourceUrl = document.querySelector("#documentSourceUrl");
+const documentOfficial = document.querySelector("#documentOfficial");
+const documentResult = document.querySelector("#documentResult");
 const toast = document.querySelector("#toast");
 
 const state = {
@@ -81,6 +97,8 @@ let scannerStream = null;
 let scannerFrameHandle = null;
 let scannerDetector = null;
 let scannerLastCode = null;
+let documentBusy = false;
+let documentBggId = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -378,6 +396,76 @@ async function saveCopyEditor(event) {
     showToast(error.message, true);
   } finally {
     setCopyBusy(false);
+  }
+}
+
+function setDocumentBusy(busy) {
+  documentBusy = busy;
+  for (const control of documentForm.querySelectorAll("input, select, button")) {
+    control.disabled = busy;
+  }
+  saveDocument.textContent = busy ? "Caricamento…" : "Carica PDF";
+}
+
+function resetDocumentDialog() {
+  documentForm.reset();
+  documentLanguage.value = "it";
+  documentFileName.textContent = "Nessun file selezionato";
+  documentResult.hidden = true;
+  documentResult.textContent = "";
+  documentBggId = null;
+  setDocumentBusy(false);
+}
+
+function openDocumentDialog(bggId, title) {
+  resetDocumentDialog();
+  documentBggId = bggId;
+  documentDialogSubtitle.textContent = title || `BGG #${bggId}`;
+  documentDialog.showModal();
+}
+
+function closeDocumentDialog() {
+  if (!documentBusy && documentDialog.open) {
+    documentDialog.close();
+  }
+}
+
+async function saveDocumentUpload(event) {
+  event.preventDefault();
+  const file = documentFile.files?.[0];
+  const bggId = documentBggId;
+  if (!file || !bggId || documentBusy) return;
+
+  setDocumentBusy(true);
+  documentResult.hidden = true;
+  documentResult.textContent = "";
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("document_type", documentType.value);
+  formData.append("language", documentLanguage.value.trim() || "und");
+  if (documentTitle.value.trim()) formData.append("title", documentTitle.value.trim());
+  if (documentVersion.value.trim()) formData.append("version_label", documentVersion.value.trim());
+  if (documentEdition.value.trim()) formData.append("edition", documentEdition.value.trim());
+  if (documentSourceUrl.value.trim()) formData.append("source_url", documentSourceUrl.value.trim());
+  formData.append("is_official", String(documentOfficial.checked));
+
+  try {
+    const result = await api(`/api/games/${encodeURIComponent(bggId)}/documents`, {
+      method: "POST",
+      body: formData,
+    });
+    const created = result.created === true;
+    documentDialog.close();
+    showToast(created ? "Documento caricato." : "Documento già presente: nessun duplicato creato.");
+    if (window.location.pathname === `/games/${bggId}`) {
+      await renderDetail(bggId);
+    }
+  } catch (error) {
+    documentResult.hidden = false;
+    documentResult.textContent = error.message;
+  } finally {
+    setDocumentBusy(false);
   }
 }
 
@@ -1153,6 +1241,58 @@ function fact(label, value) {
   return `<div class="fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value ?? "—")}</strong></div>`;
 }
 
+const documentTypeLabels = {
+  rulebook: "Regolamento",
+  reference: "Riferimento",
+  faq: "FAQ",
+  errata: "Errata",
+  scenario_book: "Libro scenari",
+  campaign_book: "Libro campagna",
+  player_aid: "Player aid",
+  other: "Altro",
+};
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, 1)} KB`;
+  return `${formatNumber(bytes / (1024 * 1024), 1)} MB`;
+}
+
+function documentCard(document) {
+  const typeLabel = documentTypeLabels[document.document_type] || document.document_type || "Documento";
+  const source = document.source || {};
+  const details = [
+    document.version_label ? `Versione ${document.version_label}` : null,
+    document.edition ? `Edizione ${document.edition}` : null,
+    document.original_filename || null,
+    formatBytes(document.size_bytes),
+  ].filter(Boolean).join(" · ");
+  const provenance = source.kind === "manual_upload" ? "Upload manuale" : (source.provider || source.kind || "Fonte registrata");
+  const official = source.official === true;
+
+  return `
+    <article class="game-document-card">
+      <div class="game-document-head">
+        <div>
+          <div class="document-badges">
+            <span class="badge">${escapeHtml(typeLabel)}</span>
+            <span class="badge">${escapeHtml((document.language || "und").toUpperCase())}</span>
+            ${official ? '<span class="badge document-official">Ufficiale</span>' : ""}
+          </div>
+          <strong class="game-document-title">${escapeHtml(document.title || document.original_filename || typeLabel)}</strong>
+        </div>
+        <a class="button button-ghost document-download"
+           href="/api/documents/${encodeURIComponent(document.id)}/file"
+           target="_blank" rel="noopener noreferrer">Apri PDF</a>
+      </div>
+      <p class="game-document-meta">${escapeHtml(details)}</p>
+      <p class="game-document-source">${escapeHtml(provenance)}${source.url ? ` · ${escapeHtml(source.url)}` : ""}</p>
+    </article>
+  `;
+}
+
 function physicalCopyCard(copy, index) {
   const sourceLabel = copy.source?.kind === "bgg_csv" ? "Import BGG" : "Manuale";
   const purchase = [
@@ -1198,15 +1338,17 @@ async function renderDetail(bggId) {
   `;
   const requestedPath = window.location.pathname;
   try {
-    const [game, copies] = await Promise.all([
+    const [game, copies, documents] = await Promise.all([
       api(`/api/games/${bggId}`),
       api(`/api/games/${bggId}/copies`),
+      api(`/api/games/${bggId}/documents`),
     ]);
     if (window.location.pathname !== requestedPath) return;
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
     const copyItems = copies.items || [];
+    const documentItems = documents.items || [];
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -1247,6 +1389,19 @@ async function renderDetail(bggId) {
               : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
           </div>
 
+          <div class="section-heading-row document-heading">
+            <div>
+              <h2 class="section-title">Manuali e documenti</h2>
+              <p class="section-subtitle">${documentItems.length} ${documentItems.length === 1 ? "documento" : "documenti"} archiviati</p>
+            </div>
+            <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
+          </div>
+          <div class="game-document-list" id="gameDocumentList">
+            ${documentItems.length
+              ? documentItems.map(documentCard).join("")
+              : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
+          </div>
+
           <h2 class="section-title">Dati BGG</h2>
           <div class="fact-grid">
             ${fact("Best players", bgg.best_players || "—")}
@@ -1272,6 +1427,9 @@ async function renderDetail(bggId) {
         const copy = copyItems.find((item) => item.id === button.dataset.copyId);
         if (copy) openCopyEditor(game.bgg_id, game.title, copy);
       });
+    });
+    document.querySelector("#addDocument")?.addEventListener("click", () => {
+      openDocumentDialog(game.bgg_id, game.title);
     });
 
     document.title = `${game.title} · BoardGameCompanion`;
@@ -1342,6 +1500,21 @@ copyDialog.addEventListener("close", () => {
   editingCopyId = null;
   editingCopyBggId = null;
   setCopyBusy(false);
+});
+
+documentForm.addEventListener("submit", (event) => {
+  void saveDocumentUpload(event);
+});
+closeDocumentDialogButton.addEventListener("click", closeDocumentDialog);
+cancelDocumentDialog.addEventListener("click", closeDocumentDialog);
+documentDialog.addEventListener("cancel", (event) => {
+  if (documentBusy) {
+    event.preventDefault();
+  }
+});
+documentDialog.addEventListener("close", resetDocumentDialog);
+documentFile.addEventListener("change", () => {
+  documentFileName.textContent = documentFile.files?.[0]?.name || "Nessun file selezionato";
 });
 
 settingsButton.addEventListener("click", () => {
