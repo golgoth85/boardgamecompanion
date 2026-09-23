@@ -311,9 +311,9 @@ def test_provider_failure_isolated_and_partial_results_are_retained():
         ]
     ).resolve(query())
 
-    assert {item.candidate for item in result.candidates} == {
-        partial_item,
-        healthy_item,
+    assert {item.candidate.url for item in result.candidates} == {
+        partial_item.url,
+        healthy_item.url,
     }
     assert [(failure.provider, failure.error_type) for failure in result.failures] == [
         ("broken", "RuntimeError"),
