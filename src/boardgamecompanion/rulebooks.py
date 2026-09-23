@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 import re
 import unicodedata
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
 from enum import StrEnum
 from numbers import Integral
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -62,6 +65,11 @@ def _clean_optional(value: str | None, *, max_length: int = 500) -> str | None:
 
 
 _HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_LEGACY_IPV4_TOKEN_RE = re.compile(r"(?:0[xX][0-9A-Fa-f]+|[0-9]+)")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+_UNRESERVED = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
 
 
 def _normalize_positive_identifier(value: Any, *, field_name: str) -> int:
@@ -81,6 +89,30 @@ def _normalize_positive_identifier(value: Any, *, field_name: str) -> int:
     return normalized
 
 
+def _is_disallowed_public_ip(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> bool:
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return True
+    return (
+        not address.is_global
+        or address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    )
+
+
+def _looks_like_legacy_ipv4(host: str) -> bool:
+    parts = host.split(".")
+    return 1 <= len(parts) <= 4 and all(
+        part and _LEGACY_IPV4_TOKEN_RE.fullmatch(part)
+        for part in parts
+    )
+
+
 def _normalize_http_hostname(hostname: str) -> str:
     host = hostname
     if host.endswith(".."):
@@ -90,30 +122,55 @@ def _normalize_http_hostname(hostname: str) -> str:
     if not host or "%" in host:
         raise ValueError("Rulebook candidate URL contains an invalid hostname")
 
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        if ":" in host:
-            raise ValueError("Rulebook candidate URL contains an invalid hostname")
+    if ":" in host:
         try:
-            ascii_host = idna.encode(
-                host,
-                uts46=True,
-                std3_rules=True,
-            ).decode("ascii").lower()
-        except idna.IDNAError as exc:
+            address = ipaddress.ip_address(host)
+        except ValueError as exc:
             raise ValueError(
                 "Rulebook candidate URL contains an invalid hostname"
             ) from exc
-        if len(ascii_host) > 253:
-            raise ValueError("Rulebook candidate URL contains an invalid hostname")
-        labels = ascii_host.split(".")
-        if any(not _HOST_LABEL_RE.fullmatch(label) for label in labels):
-            raise ValueError("Rulebook candidate URL contains an invalid hostname")
+        if _is_disallowed_public_ip(address):
+            raise ValueError(
+                "Rulebook candidate URL must not use a non-public IP address"
+            )
+        return f"[{address.compressed.lower()}]"
+
+    try:
+        ascii_host = idna.encode(
+            host,
+            uts46=True,
+            std3_rules=True,
+        ).decode("ascii").lower()
+    except idna.IDNAError as exc:
+        raise ValueError(
+            "Rulebook candidate URL contains an invalid hostname"
+        ) from exc
+
+    if len(ascii_host) > 253:
+        raise ValueError("Rulebook candidate URL contains an invalid hostname")
+    labels = ascii_host.split(".")
+    if any(not _HOST_LABEL_RE.fullmatch(label) for label in labels):
+        raise ValueError("Rulebook candidate URL contains an invalid hostname")
+
+    if ascii_host == "localhost" or ascii_host.endswith(".localhost"):
+        raise ValueError(
+            "Rulebook candidate URL must not use localhost"
+        )
+
+    try:
+        address = ipaddress.ip_address(ascii_host)
+    except ValueError:
+        if _looks_like_legacy_ipv4(ascii_host):
+            raise ValueError(
+                "Rulebook candidate URL contains an ambiguous IPv4 hostname"
+            )
         return ascii_host
-    else:
-        normalized = address.compressed.lower()
-        return f"[{normalized}]" if address.version == 6 else normalized
+
+    if _is_disallowed_public_ip(address):
+        raise ValueError(
+            "Rulebook candidate URL must not use a non-public IP address"
+        )
+    return address.compressed.lower()
 
 
 def _canonical_http_url(value: str) -> str:
@@ -137,20 +194,170 @@ def _canonical_http_url(value: str) -> str:
         parts.scheme.lower() == "https" and port == 443
     )
     netloc = host if port is None or default_port else f"{host}:{port}"
+    path = parts.path or "/"
+    _normalize_percent_encoding(path)
     normalized = SplitResult(
         scheme=parts.scheme.lower(),
         netloc=netloc,
-        path=parts.path or "/",
+        path=path,
         query=parts.query,
         fragment="",
     )
     return urlunsplit(normalized)
 
 
+def _normalize_percent_encoding(value: str) -> str:
+    normalized: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char != "%":
+            normalized.append(char)
+            index += 1
+            continue
+        if (
+            index + 2 >= len(value)
+            or value[index + 1] not in _HEX_DIGITS
+            or value[index + 2] not in _HEX_DIGITS
+        ):
+            raise ValueError("Rulebook candidate URL contains invalid percent-encoding")
+        hex_value = value[index + 1:index + 3]
+        decoded = chr(int(hex_value, 16))
+        normalized.append(
+            decoded if decoded in _UNRESERVED else f"%{hex_value.upper()}"
+        )
+        index += 3
+    return "".join(normalized)
+
+
+def _remove_dot_segments(path: str) -> str:
+    input_buffer = path
+    output = ""
+    while input_buffer:
+        if input_buffer.startswith("../"):
+            input_buffer = input_buffer[3:]
+        elif input_buffer.startswith("./"):
+            input_buffer = input_buffer[2:]
+        elif input_buffer.startswith("/./"):
+            input_buffer = "/" + input_buffer[3:]
+        elif input_buffer == "/.":
+            input_buffer = "/"
+        elif input_buffer.startswith("/../"):
+            input_buffer = "/" + input_buffer[4:]
+            output = output.rsplit("/", 1)[0]
+        elif input_buffer == "/..":
+            input_buffer = "/"
+            output = output.rsplit("/", 1)[0]
+        elif input_buffer in {".", ".."}:
+            input_buffer = ""
+        else:
+            next_slash = input_buffer.find("/", 1 if input_buffer.startswith("/") else 0)
+            if next_slash == -1:
+                output += input_buffer
+                input_buffer = ""
+            else:
+                output += input_buffer[:next_slash]
+                input_buffer = input_buffer[next_slash:]
+    return output or "/"
+
+
+def _url_dedup_key(url: str) -> str:
+    parts = urlsplit(url)
+    normalized_path = _remove_dot_segments(
+        _normalize_percent_encoding(parts.path or "/")
+    )
+    return urlunsplit(
+        SplitResult(
+            scheme=parts.scheme,
+            netloc=parts.netloc,
+            path=normalized_path,
+            query=parts.query,
+            fragment="",
+        )
+    )
+
+
 def _normalize_match_text(value: str | None) -> str:
     text = unicodedata.normalize("NFKD", value or "").casefold()
     text = "".join(char for char in text if not unicodedata.combining(char))
     return " ".join(re.findall(r"[a-z0-9]+", text))
+
+
+def _normalize_metadata_value(
+    value: Any,
+    *,
+    path: str,
+    active_container_ids: set[int],
+) -> tuple[Any, Any]:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value, value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain only finite floats")
+        return value, value
+    if isinstance(value, MappingABC):
+        container_id = id(value)
+        if container_id in active_container_ids:
+            raise ValueError(f"{path} must not contain recursive containers")
+        active_container_ids.add(container_id)
+        try:
+            items = list(value.items())
+            if any(not isinstance(key, str) for key, _ in items):
+                raise ValueError(f"{path} mapping keys must be strings")
+            frozen: dict[str, Any] = {}
+            canonical: dict[str, Any] = {}
+            for key, item in sorted(items, key=lambda pair: pair[0]):
+                frozen_value, canonical_value = _normalize_metadata_value(
+                    item,
+                    path=f"{path}.{key}",
+                    active_container_ids=active_container_ids,
+                )
+                frozen[key] = frozen_value
+                canonical[key] = canonical_value
+            return MappingProxyType(frozen), canonical
+        finally:
+            active_container_ids.remove(container_id)
+    if isinstance(value, (list, tuple)):
+        container_id = id(value)
+        if container_id in active_container_ids:
+            raise ValueError(f"{path} must not contain recursive containers")
+        active_container_ids.add(container_id)
+        try:
+            normalized = [
+                _normalize_metadata_value(
+                    item,
+                    path=f"{path}[{index}]",
+                    active_container_ids=active_container_ids,
+                )
+                for index, item in enumerate(value)
+            ]
+            return (
+                tuple(item[0] for item in normalized),
+                [item[1] for item in normalized],
+            )
+        finally:
+            active_container_ids.remove(container_id)
+    raise ValueError(
+        f"{path} contains unsupported metadata type: {type(value).__name__}"
+    )
+
+
+def _normalize_metadata(metadata: Mapping[str, Any]) -> tuple[Mapping[str, Any], str]:
+    if not isinstance(metadata, MappingABC):
+        raise ValueError("metadata must be a mapping")
+    frozen, canonical = _normalize_metadata_value(
+        metadata,
+        path="metadata",
+        active_container_ids=set(),
+    )
+    tie_key = json.dumps(
+        canonical,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return frozen, tie_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +408,7 @@ class RulebookCandidate:
     year: int | None = None
     publisher: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    _metadata_sort_key: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         provider = str(self.provider or "").strip()
@@ -211,7 +419,9 @@ class RulebookCandidate:
         except ValueError as exc:
             raise ValueError(f"Unsupported rulebook source kind: {self.source_kind}") from exc
 
-        official = bool(self.official)
+        if type(self.official) is not bool:
+            raise ValueError("official must be a Python bool")
+        official = self.official
         if (source_kind in OFFICIAL_SOURCES) != official:
             expected = "official" if source_kind in OFFICIAL_SOURCES else "unofficial"
             raise ValueError(
@@ -257,7 +467,9 @@ class RulebookCandidate:
             )
         if self.year is not None:
             object.__setattr__(self, "year", int(self.year))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        metadata, metadata_sort_key = _normalize_metadata(self.metadata)
+        object.__setattr__(self, "metadata", metadata)
+        object.__setattr__(self, "_metadata_sort_key", metadata_sort_key)
 
 
 @runtime_checkable
@@ -384,21 +596,6 @@ class RulebookResolver:
 
         return score, tuple(reasons)
 
-    @staticmethod
-    def _metadata_tie_key(metadata: Mapping[str, Any]) -> str:
-        def fallback(value: Any) -> str:
-            return (
-                f"<{type(value).__module__}.{type(value).__qualname__}:"
-                f"{repr(value)}>"
-            )
-
-        return json.dumps(
-            dict(metadata),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=fallback,
-        )
 
     @staticmethod
     def _deterministic_tie_key(candidate: RulebookCandidate) -> tuple[Any, ...]:
@@ -415,7 +612,20 @@ class RulebookResolver:
             candidate.publisher or "",
             candidate.bgg_id or 0,
             candidate.year or 0,
-            RulebookResolver._metadata_tie_key(candidate.metadata),
+            candidate._metadata_sort_key,
+        )
+
+    @staticmethod
+    def _with_reason(
+        item: ResolvedRulebookCandidate,
+        reason: str,
+    ) -> ResolvedRulebookCandidate:
+        if reason in item.reasons:
+            return item
+        return ResolvedRulebookCandidate(
+            candidate=item.candidate,
+            score=item.score,
+            reasons=item.reasons + (reason,),
         )
 
     def resolve(
@@ -472,18 +682,18 @@ class RulebookResolver:
 
         best_by_url: dict[str, ResolvedRulebookCandidate] = {}
         for item in ranked:
-            current = best_by_url.get(item.candidate.url)
+            dedup_key = _url_dedup_key(item.candidate.url)
+            current = best_by_url.get(dedup_key)
             if current is None or item.score > current.score:
-                best_by_url[item.candidate.url] = item
+                best_by_url[dedup_key] = item
             elif item.score == current.score:
                 chosen = min(
                     (current, item),
                     key=lambda value: self._deterministic_tie_key(value.candidate),
                 )
-                best_by_url[item.candidate.url] = ResolvedRulebookCandidate(
-                    candidate=chosen.candidate,
-                    score=chosen.score,
-                    reasons=chosen.reasons + ("dedup_tie:deterministic",),
+                best_by_url[dedup_key] = self._with_reason(
+                    chosen,
+                    "dedup_tie:deterministic",
                 )
 
         deduplicated = tuple(best_by_url.values())
@@ -501,10 +711,9 @@ class RulebookResolver:
         ordered = tuple(
             item
             if score_counts[item.score] == 1
-            else ResolvedRulebookCandidate(
-                candidate=item.candidate,
-                score=item.score,
-                reasons=item.reasons + ("tie_break:canonical_url-provider",),
+            else self._with_reason(
+                item,
+                "tie_break:canonical_url-provider",
             )
             for item in ordered_items
         )
