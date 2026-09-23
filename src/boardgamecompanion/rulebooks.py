@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from enum import StrEnum
+from numbers import Integral
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -56,8 +58,60 @@ def _clean_optional(value: str | None, *, max_length: int = 500) -> str | None:
     return text
 
 
+_HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _normalize_positive_identifier(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if isinstance(value, Integral):
+        normalized = int(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(r"[0-9]+", text):
+            raise ValueError(f"{field_name} must be a positive integer")
+        normalized = int(text)
+    else:
+        raise ValueError(f"{field_name} must be a positive integer")
+    if normalized <= 0:
+        raise ValueError(f"{field_name} must be positive")
+    return normalized
+
+
+def _normalize_http_hostname(hostname: str) -> str:
+    host = hostname.rstrip(".")
+    if not host or "%" in host:
+        raise ValueError("Rulebook candidate URL contains an invalid hostname")
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if ":" in host:
+            raise ValueError("Rulebook candidate URL contains an invalid hostname")
+        try:
+            ascii_host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError as exc:
+            raise ValueError(
+                "Rulebook candidate URL contains an invalid hostname"
+            ) from exc
+        if len(ascii_host) > 253:
+            raise ValueError("Rulebook candidate URL contains an invalid hostname")
+        labels = ascii_host.split(".")
+        if any(not _HOST_LABEL_RE.fullmatch(label) for label in labels):
+            raise ValueError("Rulebook candidate URL contains an invalid hostname")
+        return ascii_host
+    else:
+        normalized = address.compressed.lower()
+        return f"[{normalized}]" if address.version == 6 else normalized
+
+
 def _canonical_http_url(value: str) -> str:
     text = str(value or "").strip()
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+        raise ValueError("Rulebook candidate URL must not contain whitespace or controls")
+    if "\\" in text:
+        raise ValueError("Rulebook candidate URL must not contain backslashes")
+
     parts = urlsplit(text)
     if parts.scheme.lower() not in {"http", "https"}:
         raise ValueError("Rulebook candidate URL must use http or https")
@@ -66,9 +120,7 @@ def _canonical_http_url(value: str) -> str:
     if parts.username is not None or parts.password is not None:
         raise ValueError("Rulebook candidate URL must not contain credentials")
 
-    host = parts.hostname.lower()
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
+    host = _normalize_http_hostname(parts.hostname)
     port = parts.port
     default_port = (parts.scheme.lower() == "http" and port == 80) or (
         parts.scheme.lower() == "https" and port == 443
@@ -100,12 +152,11 @@ class RulebookQuery:
     publishers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if int(self.bgg_id) <= 0:
-            raise ValueError("bgg_id must be positive")
+        bgg_id = _normalize_positive_identifier(self.bgg_id, field_name="bgg_id")
         title = str(self.title or "").strip()
         if not title:
             raise ValueError("title is required")
-        object.__setattr__(self, "bgg_id", int(self.bgg_id))
+        object.__setattr__(self, "bgg_id", bgg_id)
         object.__setattr__(self, "title", title)
         object.__setattr__(self, "original_title", _clean_optional(self.original_title))
         if self.year is not None:
@@ -185,10 +236,14 @@ class RulebookCandidate:
         object.__setattr__(self, "game_title", _clean_optional(self.game_title))
         object.__setattr__(self, "publisher", _clean_optional(self.publisher))
         if self.bgg_id is not None:
-            bgg_id = int(self.bgg_id)
-            if bgg_id <= 0:
-                raise ValueError("candidate bgg_id must be positive")
-            object.__setattr__(self, "bgg_id", bgg_id)
+            object.__setattr__(
+                self,
+                "bgg_id",
+                _normalize_positive_identifier(
+                    self.bgg_id,
+                    field_name="candidate bgg_id",
+                ),
+            )
         if self.year is not None:
             object.__setattr__(self, "year", int(self.year))
         object.__setattr__(self, "metadata", dict(self.metadata))
@@ -267,21 +322,24 @@ class RulebookResolver:
             f"confidence:{candidate.confidence}",
             f"source:{candidate.source_kind.value}",
         ]
-        score = int(candidate.confidence) * 100_000
 
-        if candidate.bgg_id == query.bgg_id:
-            score += 10_000
+        bgg_exact = candidate.bgg_id == query.bgg_id
+        if bgg_exact:
             reasons.append("bgg_id:exact")
 
         language_rank = RulebookResolver._language_rank(
             candidate.language,
             preferred_languages,
         )
-        score += language_rank * 1_000
         if language_rank:
             reasons.append(f"language:{candidate.language}")
-
-        score += SOURCE_PRIORITY[candidate.source_kind] * 100
+        max_language_rank = max(
+            (
+                RulebookResolver._language_rank(language, preferred_languages)
+                for language in preferred_languages
+            ),
+            default=0,
+        )
 
         query_titles = {
             value
@@ -292,15 +350,45 @@ class RulebookResolver:
             if value
         }
         candidate_title = _normalize_match_text(candidate.game_title)
-        if candidate_title and candidate_title in query_titles:
-            score += 20
+        title_exact = bool(candidate_title and candidate_title in query_titles)
+        if title_exact:
             reasons.append("title:exact")
 
-        if query.year is not None and candidate.year == query.year:
-            score += 1
+        year_exact = query.year is not None and candidate.year == query.year
+        if year_exact:
             reasons.append("year:exact")
 
+        # Mixed-radix encoding preserves the documented lexicographic precedence:
+        # confidence > exact BGG identity > language > source > title > year.
+        # The language radix is derived from this resolution request, so lower-order
+        # fields cannot overtake exact identity even with many preferred languages.
+        score = int(candidate.confidence)
+        score = score * 2 + int(bgg_exact)
+        score = score * (max_language_rank + 1) + language_rank
+        score = score * (max(SOURCE_PRIORITY.values()) + 1) + SOURCE_PRIORITY[
+            candidate.source_kind
+        ]
+        score = score * 2 + int(title_exact)
+        score = score * 2 + int(year_exact)
+
         return score, tuple(reasons)
+
+    @staticmethod
+    def _deterministic_tie_key(candidate: RulebookCandidate) -> tuple[Any, ...]:
+        return (
+            candidate.url,
+            candidate.provider.casefold(),
+            candidate.provider,
+            candidate.language,
+            candidate.document_type,
+            candidate.title or "",
+            candidate.version_label or "",
+            candidate.edition or "",
+            candidate.game_title or "",
+            candidate.publisher or "",
+            candidate.bgg_id or 0,
+            candidate.year or 0,
+        )
 
     def resolve(
         self,
@@ -359,13 +447,38 @@ class RulebookResolver:
             current = best_by_url.get(item.candidate.url)
             if current is None or item.score > current.score:
                 best_by_url[item.candidate.url] = item
+            elif item.score == current.score:
+                chosen = min(
+                    (current, item),
+                    key=lambda value: self._deterministic_tie_key(value.candidate),
+                )
+                best_by_url[item.candidate.url] = ResolvedRulebookCandidate(
+                    candidate=chosen.candidate,
+                    score=chosen.score,
+                    reasons=chosen.reasons + ("dedup_tie:deterministic",),
+                )
 
+        deduplicated = tuple(best_by_url.values())
+        score_counts = {
+            score: sum(1 for item in deduplicated if item.score == score)
+            for score in {item.score for item in deduplicated}
+        }
+        ordered_items = sorted(
+            deduplicated,
+            key=lambda item: (
+                -item.score,
+                self._deterministic_tie_key(item.candidate),
+            ),
+        )
         ordered = tuple(
-            sorted(
-                best_by_url.values(),
-                key=lambda item: item.score,
-                reverse=True,
+            item
+            if score_counts[item.score] == 1
+            else ResolvedRulebookCandidate(
+                candidate=item.candidate,
+                score=item.score,
+                reasons=item.reasons + ("tie_break:canonical_url-provider",),
             )
+            for item in ordered_items
         )
         return RulebookResolution(
             query=query,

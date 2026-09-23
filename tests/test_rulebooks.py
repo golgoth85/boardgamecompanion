@@ -414,3 +414,138 @@ def test_resolution_exposes_explainable_score_reasons():
     assert "title:exact" in result.best.reasons
     assert "year:exact" in result.best.reasons
     assert result.best.score > 0
+
+
+@pytest.mark.parametrize("bad_id", [42.9, True, False, "42.9"])
+def test_bgg_identity_rejects_non_integral_values(bad_id):
+    with pytest.raises(ValueError):
+        RulebookQuery(bgg_id=bad_id, title="Example Game")
+
+    with pytest.raises(ValueError):
+        candidate(
+            provider="publisher",
+            source=RulebookSource.OFFICIAL_PUBLISHER,
+            url="https://publisher.example/rules.pdf",
+            bgg_id=bad_id,
+        )
+
+
+def test_bgg_identity_accepts_numeric_strings_without_truncation():
+    normalized_query = RulebookQuery(bgg_id="42", title="Example Game")
+    normalized_candidate = candidate(
+        provider="publisher",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules.pdf",
+        bgg_id="42",
+    )
+
+    assert normalized_query.bgg_id == 42
+    assert normalized_candidate.bgg_id == 42
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://exa mple.com/rules.pdf",
+        "https://-example.com/rules.pdf",
+        "https://example-.com/rules.pdf",
+        "https://example..com/rules.pdf",
+        "https://example_.com/rules.pdf",
+    ],
+)
+def test_candidate_rejects_malformed_hostnames(url):
+    with pytest.raises(ValueError):
+        candidate(
+            provider="unsafe-host",
+            source=RulebookSource.COMMUNITY,
+            url=url,
+            official=False,
+        )
+
+
+def test_candidate_normalizes_unicode_hostname_to_idna():
+    item = candidate(
+        provider="publisher",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://MÜNICH.example/rules.pdf",
+    )
+
+    assert item.url == "https://xn--mnich-kva.example/rules.pdf"
+
+
+def test_exact_bgg_identity_outranks_any_requested_language_position():
+    exact_identity = candidate(
+        provider="publisher-exact",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules-fr.pdf",
+        language="fr",
+        bgg_id=42,
+    )
+    preferred_language_without_identity = candidate(
+        provider="publisher-it",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules-it.pdf",
+        language="it",
+        bgg_id=None,
+    )
+
+    result = RulebookResolver(
+        [StaticProvider("publisher", [preferred_language_without_identity, exact_identity])]
+    ).resolve(
+        query(),
+        preferred_languages=("it", "en", "de"),
+    )
+
+    assert result.best is not None
+    assert result.best.candidate is exact_identity
+    assert result.candidates[0].score > result.candidates[1].score
+
+
+def test_equal_score_order_is_independent_of_provider_yield_order():
+    alpha = candidate(
+        provider="z-provider",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://alpha.example/rules.pdf",
+        bgg_id=None,
+    )
+    beta = candidate(
+        provider="a-provider",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://beta.example/rules.pdf",
+        bgg_id=None,
+    )
+
+    forward = RulebookResolver([StaticProvider("provider", [beta, alpha])]).resolve(query())
+    reverse = RulebookResolver([StaticProvider("provider", [alpha, beta])]).resolve(query())
+
+    assert [item.candidate.url for item in forward.candidates] == [
+        item.candidate.url for item in reverse.candidates
+    ] == [alpha.url, beta.url]
+    assert "tie_break:canonical_url-provider" in forward.candidates[0].reasons
+
+
+def test_equal_score_dedup_is_independent_of_provider_order():
+    first = candidate(
+        provider="z-provider",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://example.com/rules.pdf",
+        bgg_id=None,
+    )
+    second = candidate(
+        provider="a-provider",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://EXAMPLE.com:443/rules.pdf#fragment",
+        bgg_id=None,
+    )
+
+    forward = RulebookResolver(
+        [StaticProvider("one", [first]), StaticProvider("two", [second])]
+    ).resolve(query())
+    reverse = RulebookResolver(
+        [StaticProvider("two", [second]), StaticProvider("one", [first])]
+    ).resolve(query())
+
+    assert forward.best is not None
+    assert reverse.best is not None
+    assert forward.best.candidate.provider == reverse.best.candidate.provider == "a-provider"
+    assert "dedup_tie:deterministic" in forward.best.reasons
