@@ -694,6 +694,7 @@ def test_document_metadata_is_escaped(browser, live_server):
         page.locator("#saveDocument").click()
 
         expect(page.locator(".game-document-title")).to_contain_text("<img src=x")
+        expect(page.locator(".game-document-card")).to_contain_text("Non ufficiale")
         assert page.evaluate("window.__bgc_doc_xss") is None
         assert page.locator(".game-document-title img").count() == 0
     finally:
