@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +20,14 @@ from boardgamecompanion.copies import (
     PhysicalCopyStore,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.documents import (
+    BoardGameDocumentNotFound,
+    DocumentError,
+    DocumentNotFound,
+    DocumentStore,
+    DocumentTooLarge,
+    InvalidPdf,
+)
 from boardgamecompanion.floppy import (
     FloppyClient,
     FloppyConfig,
@@ -253,6 +261,81 @@ def lookup_barcode(payload: BarcodeLookupRequest) -> dict[str, object]:
         return PhysicalCopyStore(database).lookup_barcode(payload.barcode)
     except PhysicalCopyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/games/{bgg_id}/documents", tags=["documents"])
+def list_game_documents(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    documents = DocumentStore(database, settings.manuals_dir).list_for_game(bgg_id)
+    return {"bgg_id": bgg_id, "count": len(documents), "items": documents}
+
+
+@app.post("/api/games/{bgg_id}/documents", tags=["documents"])
+def upload_game_document(
+    bgg_id: int,
+    file: UploadFile = File(...),
+    document_type: str = Form("rulebook"),
+    language: str = Form("und"),
+    title: str | None = Form(None),
+    version_label: str | None = Form(None),
+    edition: str | None = Form(None),
+    published_at: str | None = Form(None),
+    source_url: str | None = Form(None),
+    is_official: bool = Form(False),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    store = DocumentStore(database, settings.manuals_dir)
+
+    try:
+        file.file.seek(0)
+        document, created = store.import_pdf(
+            bgg_id=bgg_id,
+            original_filename=file.filename or "document.pdf",
+            stream=file.file,
+            document_type=document_type,
+            language=language,
+            title=title,
+            version_label=version_label,
+            edition=edition,
+            published_at=published_at,
+            source_url=source_url,
+            is_official=is_official,
+            max_bytes=settings.max_document_bytes,
+        )
+    except BoardGameDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DocumentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except (InvalidPdf, DocumentError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"created": created, "document": document}
+
+
+@app.get("/api/documents/{document_id}", tags=["documents"])
+def get_document(document_id: str) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    document = DocumentStore(database, settings.manuals_dir).get(document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return document
+
+
+@app.get("/api/documents/{document_id}/file", tags=["documents"])
+def get_document_file(document_id: str) -> FileResponse:
+    database = get_database()
+    database.initialize()
+    store = DocumentStore(database, settings.manuals_dir)
+    try:
+        path = store.resolve_path(document_id)
+    except DocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DocumentError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return FileResponse(path, media_type="application/pdf")
 
 
 @app.get("/api/catalog/stats", tags=["catalog"])
