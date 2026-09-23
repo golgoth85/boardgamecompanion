@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import socket
 import ssl
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+from boardgamecompanion.network_security import is_disallowed_public_ip
 from boardgamecompanion.rulebook_fetch import (
     PinnedHTTPTransport,
     RulebookFetcher,
     RulebookFetchFailureCode,
     RulebookFetchPolicy,
+    SocketAddressResolver,
+    ValidatedHTTPSTarget,
     _atomic_noreplace_rename,
     _open_numeric_socket,
     _wrap_tls_socket,
@@ -79,6 +85,7 @@ class FakeTransport:
         *,
         connect_timeout,
         read_timeout,
+        deadline=None,
     ):
         self.requests.append(
             {
@@ -87,6 +94,7 @@ class FakeTransport:
                 "headers": dict(headers),
                 "connect_timeout": connect_timeout,
                 "read_timeout": read_timeout,
+                "deadline": deadline,
             }
         )
         queue = self.routes.get(target.url)
@@ -103,7 +111,7 @@ class FakeResolver:
         self.answers = answers
         self.calls = []
 
-    def resolve(self, hostname, port):
+    def resolve(self, hostname, port, *, timeout):
         self.calls.append((hostname, port))
         answer = self.answers[hostname]
         if callable(answer):
@@ -157,6 +165,7 @@ def fetcher(
     max_bytes=1024,
     max_redirects=5,
     chunk_size=8,
+    fetch_timeout=30.0,
 ):
     return RulebookFetcher(
         manuals_dir=tmp_path,
@@ -168,6 +177,7 @@ def fetcher(
             chunk_size=chunk_size,
             connect_timeout_seconds=1.25,
             read_timeout_seconds=2.5,
+            fetch_timeout_seconds=fetch_timeout,
         ),
     )
 
@@ -206,6 +216,10 @@ def test_public_hostname_is_resolved_and_pinned(tmp_path):
         "192.0.0.8",
         "64:ff9b:1::1",
         "2002::1",
+        "2001:db8::1",
+        "3fff::1",
+        "5f00::1",
+        "fec0::1",
     ],
 )
 def test_runtime_dns_rejects_non_public_addresses(tmp_path, unsafe):
@@ -915,3 +929,603 @@ def test_partial_file_creation_error_is_reported_as_storage_failure(
     assert failure_code(result) == RulebookFetchFailureCode.STORAGE_ERROR
     assert list(Path(tmp_path).glob("*.part")) == []
     assert list(Path(tmp_path).glob("*.pdf")) == []
+
+
+def _start_local_http_server(handler):
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def run():
+        try:
+            connection, _ = listener.accept()
+            with connection:
+                request = bytearray()
+                while b"\r\n\r\n" not in request:
+                    data = connection.recv(4096)
+                    if not data:
+                        break
+                    request.extend(data)
+                handler(connection, bytes(request))
+        finally:
+            listener.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread
+
+
+def test_runtime_dns_rejects_documentation_prefix_added_after_python_3124(tmp_path):
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": ("3fff::1",)}),
+        transport=FakeTransport({}),
+    ).fetch(candidate())
+
+    assert failure_code(result) == RulebookFetchFailureCode.SSRF_BLOCKED
+
+
+@pytest.mark.parametrize(
+    ("url", "request_target"),
+    [
+        (
+            "https://rules.example/régole.pdf",
+            "/r%C3%A9gole.pdf",
+        ),
+        (
+            "https://rules.example/path?q=è&keep=%7e",
+            "/path?q=%C3%A8&keep=%7e",
+        ),
+    ],
+)
+def test_unicode_candidate_url_is_ascii_encoded_for_http_request(
+    tmp_path,
+    url,
+    request_target,
+):
+    transport = FakeTransport({url: [pdf_response()]})
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=transport,
+    ).fetch(candidate(url))
+
+    assert result.ok
+    assert result.requested_url == url
+    assert transport.requests[0]["request_target"] == request_target
+
+
+def test_unicode_redirect_is_ascii_encoded_only_at_request_boundary(tmp_path):
+    start = "https://rules.example/manual.pdf"
+    final = "https://cdn.example/régole.pdf?q=è"
+    transport = FakeTransport(
+        {
+            start: [redirect(final)],
+            final: [pdf_response()],
+        }
+    )
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver(
+            {
+                "rules.example": (PUBLIC_V4,),
+                "cdn.example": (PUBLIC_V4_ALT,),
+            }
+        ),
+        transport=transport,
+    ).fetch(candidate(start))
+
+    assert result.ok
+    assert result.final_url == final
+    assert transport.requests[1]["request_target"] == "/r%C3%A9gole.pdf?q=%C3%A8"
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "\thttps://cdn.example/manual.pdf",
+        "https://cdn.example/\nmanual.pdf",
+        "https://cdn.example/\rmanual.pdf",
+        "https://cdn.example/ manual.pdf",
+    ],
+)
+def test_redirect_rejects_raw_whitespace_and_controls(tmp_path, location):
+    start = "https://rules.example/manual.pdf"
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=FakeTransport({start: [redirect(location)]}),
+    ).fetch(candidate(start))
+
+    assert failure_code(result) == RulebookFetchFailureCode.INVALID_REDIRECT
+    assert result.status_code == 302
+
+
+def test_private_literal_redirect_failure_retains_status_and_target(tmp_path):
+    start = "https://rules.example/manual.pdf"
+    blocked = "https://127.0.0.1/manual.pdf"
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=FakeTransport({start: [redirect(blocked)]}),
+    ).fetch(candidate(start))
+
+    assert failure_code(result) == RulebookFetchFailureCode.SSRF_BLOCKED
+    assert result.status_code == 302
+    assert result.failure is not None
+    assert result.failure.attempted_redirect_url == blocked
+
+
+def test_private_dns_redirect_failure_retains_status_target_and_chain(tmp_path):
+    start = "https://rules.example/manual.pdf"
+    blocked = "https://private.example/manual.pdf"
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver(
+            {
+                "rules.example": (PUBLIC_V4,),
+                "private.example": ("10.0.0.9",),
+            }
+        ),
+        transport=FakeTransport({start: [redirect(blocked)]}),
+    ).fetch(candidate(start))
+
+    assert failure_code(result) == RulebookFetchFailureCode.SSRF_BLOCKED
+    assert result.status_code == 302
+    assert result.failure is not None
+    assert result.failure.attempted_redirect_url == blocked
+    assert result.redirect_chain[0].to_url == blocked
+
+
+def test_credential_redirect_does_not_copy_credentials_into_failure(tmp_path):
+    start = "https://rules.example/manual.pdf"
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=FakeTransport(
+            {start: [redirect("https://user:secret@cdn.example/manual.pdf")]}
+        ),
+    ).fetch(candidate(start))
+
+    assert failure_code(result) == RulebookFetchFailureCode.INVALID_REDIRECT
+    assert result.status_code == 302
+    assert result.failure is not None
+    assert result.failure.attempted_redirect_url is None
+    assert "secret" not in result.failure.url
+
+
+def test_pdf_magic_failure_retains_observed_provenance(tmp_path):
+    body = b"this is not a pdf"
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=FakeTransport(
+            {
+                "https://rules.example/manual.pdf": [
+                    pdf_response(
+                        body,
+                        extra_headers={"ETag": '"bad-pdf"'},
+                    )
+                ]
+            }
+        ),
+    ).fetch(candidate())
+
+    assert failure_code(result) == RulebookFetchFailureCode.PDF_MAGIC_MISMATCH
+    assert result.status_code == 200
+    assert result.content_type == "application/pdf"
+    assert result.byte_size == len(body)
+    assert result.sha256 == hashlib.sha256(body).hexdigest()
+    assert result.http_metadata["etag"] == '"bad-pdf"'
+
+
+def test_real_pinned_transport_connects_to_numeric_ip_not_hostname():
+    def handler(connection, request):
+        assert b"Host: does-not-resolve.invalid:" in request
+        connection.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + f"Content-Length: {len(PDF)}\r\n".encode()
+            + b"Content-Type: application/pdf\r\n"
+            + b"Connection: close\r\n\r\n"
+            + PDF
+        )
+
+    port, thread = _start_local_http_server(handler)
+    transport = PinnedHTTPTransport()
+    target = ValidatedHTTPSTarget(
+        url=f"http://does-not-resolve.invalid:{port}/manual.pdf",
+        scheme="http",
+        hostname="does-not-resolve.invalid",
+        port=port,
+        host_header=f"does-not-resolve.invalid:{port}",
+        addresses=("127.0.0.1",),
+    )
+
+    response = transport.request(
+        target,
+        "/manual.pdf",
+        {"Host": target.host_header, "Connection": "close"},
+        connect_timeout=1.0,
+        read_timeout=1.0,
+        deadline=time.monotonic() + 2.0,
+    )
+    try:
+        chunks = []
+        while chunk := response.read(1024):
+            chunks.append(chunk)
+        assert b"".join(chunks) == PDF
+    finally:
+        response.close()
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+
+
+def test_real_transport_absolute_deadline_stops_slow_drip():
+    body = PDF + b"x" * 200
+
+    def handler(connection, request):
+        del request
+        connection.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode()
+            + b"Content-Type: application/pdf\r\n"
+            + b"Connection: close\r\n\r\n"
+        )
+        for byte in body:
+            try:
+                connection.sendall(bytes((byte,)))
+            except OSError:
+                break
+            time.sleep(0.05)
+
+    port, thread = _start_local_http_server(handler)
+    transport = PinnedHTTPTransport()
+    target = ValidatedHTTPSTarget(
+        url=f"http://slow.invalid:{port}/manual.pdf",
+        scheme="http",
+        hostname="slow.invalid",
+        port=port,
+        host_header=f"slow.invalid:{port}",
+        addresses=("127.0.0.1",),
+    )
+    deadline = time.monotonic() + 0.30
+    started = time.monotonic()
+    response = transport.request(
+        target,
+        "/manual.pdf",
+        {"Host": target.host_header, "Connection": "close"},
+        connect_timeout=1.0,
+        read_timeout=0.20,
+        deadline=deadline,
+    )
+    try:
+        with pytest.raises(TimeoutError, match="deadline"):
+            while response.read(16):
+                pass
+    finally:
+        response.close()
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.8
+    thread.join(timeout=1.0)
+
+
+def test_fetcher_deadline_is_shared_across_redirect_chain(tmp_path):
+    start = "https://rules.example/manual.pdf"
+    final = "https://cdn.example/manual.pdf"
+
+    class SlowResponse(FakeResponse):
+        def read(self, amount):
+            time.sleep(0.04)
+            return super().read(amount)
+
+    transport = FakeTransport(
+        {
+            start: [redirect(final)],
+            final: [
+                SlowResponse(
+                    status=200,
+                    body=PDF,
+                    headers={"Content-Type": "application/pdf"},
+                )
+            ],
+        }
+    )
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver(
+            {
+                "rules.example": (PUBLIC_V4,),
+                "cdn.example": (PUBLIC_V4_ALT,),
+            }
+        ),
+        transport=transport,
+        chunk_size=1,
+        fetch_timeout=0.12,
+    ).fetch(candidate(start))
+
+    assert failure_code(result) == RulebookFetchFailureCode.NETWORK_TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ("address", "disallowed"),
+    [
+        ("192.0.0.8", True),
+        ("192.0.0.9", False),
+        ("192.0.0.10", False),
+        ("8.8.8.8", False),
+        ("2001:db8::1", True),
+        ("3fff::1", True),
+        ("5f00::1", True),
+        ("fec0::1", True),
+        ("2001:3::1", False),
+        ("2606:4700:4700::1111", False),
+    ],
+)
+def test_project_public_address_policy_is_explicit_and_stable(address, disallowed):
+    assert is_disallowed_public_ip(ipaddress.ip_address(address)) is disallowed
+
+
+def test_real_transport_retries_share_one_absolute_deadline(monkeypatch):
+    attempts = []
+
+    def slow_timeout(address, port, timeout):
+        attempts.append((address, port, timeout))
+        time.sleep(timeout)
+        raise TimeoutError("simulated connect timeout")
+
+    monkeypatch.setattr(
+        "boardgamecompanion.rulebook_fetch._open_numeric_socket",
+        slow_timeout,
+    )
+    target = ValidatedHTTPSTarget(
+        url="http://multi.invalid/manual.pdf",
+        scheme="http",
+        hostname="multi.invalid",
+        port=80,
+        host_header="multi.invalid",
+        addresses=(PUBLIC_V4, PUBLIC_V4_ALT, "9.9.9.9"),
+    )
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError):
+        PinnedHTTPTransport().request(
+            target,
+            "/manual.pdf",
+            {"Host": target.host_header, "Connection": "close"},
+            connect_timeout=0.10,
+            read_timeout=1.0,
+            deadline=started + 0.15,
+        )
+
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.30
+    assert len(attempts) == 2
+    assert attempts[1][2] < attempts[0][2]
+
+
+def test_production_dns_resolution_obeys_absolute_fetch_deadline(
+    tmp_path,
+    monkeypatch,
+):
+    original_getaddrinfo = socket.getaddrinfo
+
+    def slow_getaddrinfo(*args, **kwargs):
+        time.sleep(0.20)
+        return original_getaddrinfo(
+            "localhost",
+            args[1],
+            family=socket.AF_INET,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+        )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.rulebook_fetch.socket.getaddrinfo",
+        slow_getaddrinfo,
+    )
+    started = time.monotonic()
+    result = RulebookFetcher(
+        manuals_dir=tmp_path,
+        resolver=SocketAddressResolver(),
+        transport=FakeTransport({}),
+        policy=RulebookFetchPolicy(
+            connect_timeout_seconds=1.0,
+            read_timeout_seconds=1.0,
+            fetch_timeout_seconds=0.05,
+            max_bytes=1024,
+        ),
+    ).fetch(candidate())
+
+    elapsed = time.monotonic() - started
+    assert failure_code(result) == RulebookFetchFailureCode.NETWORK_TIMEOUT
+    assert elapsed < 0.15
+    time.sleep(0.20)
+
+
+
+def _start_local_tls_server(handler, sni_names):
+    fixture_dir = Path(__file__).parent / "fixtures" / "tls"
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(
+        certfile=fixture_dir / "rules-test-cert.pem",
+        keyfile=fixture_dir / "rules-test-key.pem",
+    )
+    context.set_servername_callback(
+        lambda ssl_socket, server_name, ssl_context: sni_names.append(server_name)
+    )
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def run():
+        try:
+            connection, _ = listener.accept()
+            try:
+                with context.wrap_socket(connection, server_side=True) as tls_connection:
+                    request = bytearray()
+                    while b"\r\n\r\n" not in request:
+                        data = tls_connection.recv(4096)
+                        if not data:
+                            break
+                        request.extend(data)
+                    handler(tls_connection, bytes(request))
+            except ssl.SSLError:
+                connection.close()
+        finally:
+            listener.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return port, thread
+
+
+def _trusted_rules_test_context():
+    cert_path = Path(__file__).parent / "fixtures" / "tls" / "rules-test-cert.pem"
+    return ssl.create_default_context(cafile=str(cert_path))
+
+
+def test_real_tls_preserves_original_hostname_for_sni_and_validation():
+    sni_names = []
+
+    def handler(connection, request):
+        assert b"Host: rules.test:" in request
+        connection.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + f"Content-Length: {len(PDF)}\r\n".encode()
+            + b"Content-Type: application/pdf\r\n"
+            + b"Connection: close\r\n\r\n"
+            + PDF
+        )
+
+    port, thread = _start_local_tls_server(handler, sni_names)
+    target = ValidatedHTTPSTarget(
+        url=f"https://rules.test:{port}/manual.pdf",
+        scheme="https",
+        hostname="rules.test",
+        port=port,
+        host_header=f"rules.test:{port}",
+        addresses=("127.0.0.1",),
+    )
+    response = PinnedHTTPTransport(
+        ssl_context=_trusted_rules_test_context()
+    ).request(
+        target,
+        "/manual.pdf",
+        {"Host": target.host_header, "Connection": "close"},
+        connect_timeout=1.0,
+        read_timeout=1.0,
+        deadline=time.monotonic() + 2.0,
+    )
+    try:
+        chunks = []
+        while chunk := response.read(1024):
+            chunks.append(chunk)
+        assert b"".join(chunks) == PDF
+    finally:
+        response.close()
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert sni_names == ["rules.test"]
+
+
+def test_real_tls_rejects_certificate_valid_only_for_original_dns_name():
+    sni_names = []
+    port, thread = _start_local_tls_server(
+        lambda connection, request: None,
+        sni_names,
+    )
+    target = ValidatedHTTPSTarget(
+        url=f"https://127.0.0.1:{port}/manual.pdf",
+        scheme="https",
+        hostname="127.0.0.1",
+        port=port,
+        host_header=f"127.0.0.1:{port}",
+        addresses=("127.0.0.1",),
+    )
+
+    with pytest.raises(ssl.SSLCertVerificationError):
+        PinnedHTTPTransport(
+            ssl_context=_trusted_rules_test_context()
+        ).request(
+            target,
+            "/manual.pdf",
+            {"Host": target.host_header, "Connection": "close"},
+            connect_timeout=1.0,
+            read_timeout=1.0,
+            deadline=time.monotonic() + 2.0,
+        )
+
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+    assert sni_names == [None]
+
+
+
+def test_unicode_request_target_works_with_real_http_client(tmp_path):
+    received_requests = []
+
+    def handler(connection, request):
+        received_requests.append(request)
+        connection.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + f"Content-Length: {len(PDF)}\r\n".encode()
+            + b"Content-Type: application/pdf\r\n"
+            + b"Connection: close\r\n\r\n"
+            + PDF
+        )
+
+    port, thread = _start_local_http_server(handler)
+    real_transport = PinnedHTTPTransport()
+
+    class LocalPinnedTransport:
+        def request(
+            self,
+            target,
+            request_target,
+            headers,
+            *,
+            connect_timeout,
+            read_timeout,
+            deadline=None,
+        ):
+            local_target = ValidatedHTTPSTarget(
+                url=target.url,
+                scheme=target.scheme,
+                hostname=target.hostname,
+                port=target.port,
+                host_header=target.host_header,
+                addresses=("127.0.0.1",),
+            )
+            return real_transport.request(
+                local_target,
+                request_target,
+                headers,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                deadline=deadline,
+            )
+
+    url = f"http://rules.example:{port}/régole.pdf?q=è&keep=%7e"
+    result = RulebookFetcher(
+        manuals_dir=tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=LocalPinnedTransport(),
+        policy=RulebookFetchPolicy(
+            connect_timeout_seconds=1.0,
+            read_timeout_seconds=1.0,
+            fetch_timeout_seconds=2.0,
+            max_bytes=1024,
+        ),
+    ).fetch(candidate(url))
+
+    thread.join(timeout=1.0)
+    assert result.ok
+    assert not thread.is_alive()
+    assert received_requests
+    assert b"GET /r%C3%A9gole.pdf?q=%C3%A8&keep=%7e HTTP/1.1" in received_requests[0]
