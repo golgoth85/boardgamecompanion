@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-
 MigrationFn = Callable[[sqlite3.Connection], None]
 
 
@@ -309,10 +308,84 @@ def _game_documents(connection: sqlite3.Connection) -> None:
     )
 
 
+def _rulebook_reviews(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rulebook_review_items (
+            id TEXT PRIMARY KEY,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            candidate_key TEXT NOT NULL,
+            candidate_json TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            url TEXT NOT NULL,
+            language TEXT NOT NULL,
+            document_type TEXT NOT NULL,
+            official INTEGER NOT NULL DEFAULT 0,
+            confidence INTEGER NOT NULL,
+            policy_action TEXT NOT NULL
+                CHECK(policy_action IN ('review', 'unattended')),
+            policy_reasons_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL
+                CHECK(status IN ('pending', 'approved', 'rejected')),
+            decision_source TEXT
+                CHECK(decision_source IS NULL OR decision_source IN ('policy', 'user')),
+            decision_note TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            decided_at TEXT,
+            CHECK(
+                (
+                    status = 'pending'
+                    AND policy_action = 'review'
+                    AND decision_source IS NULL
+                    AND decision_note IS NULL
+                    AND decided_at IS NULL
+                )
+                OR (
+                    status = 'approved'
+                    AND policy_action = 'unattended'
+                    AND decision_source = 'policy'
+                    AND decision_note IS NULL
+                    AND decided_at IS NOT NULL
+                )
+                OR (
+                    status = 'approved'
+                    AND policy_action = 'review'
+                    AND decision_source = 'user'
+                    AND decided_at IS NOT NULL
+                )
+                OR (
+                    status = 'rejected'
+                    AND policy_action = 'review'
+                    AND decision_source = 'user'
+                    AND decided_at IS NOT NULL
+                )
+            ),
+            UNIQUE(board_game_id, candidate_key)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_review_status
+        ON rulebook_review_items(status, created_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_review_game
+        ON rulebook_review_items(board_game_id, created_at)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
     Migration(3, "game-documents", _game_documents),
+    Migration(4, "rulebook-review-queue", _rulebook_reviews),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

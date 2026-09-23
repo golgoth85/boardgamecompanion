@@ -1442,7 +1442,188 @@ async function renderDetail(bggId) {
   }
 }
 
+const REVIEW_PAGE_SIZE = 50;
+let reviewPendingOffset = 0;
+let reviewDecidedOffset = 0;
+
+
+function reviewPager(data, section) {
+  if (data.total <= data.limit) return "";
+  const start = data.total ? data.offset + 1 : 0;
+  const end = Math.min(data.offset + data.limit, data.total);
+  const previousOffset = Math.max(0, data.offset - data.limit);
+  const nextOffset = data.offset + data.limit;
+
+  return `
+    <div class="review-pagination">
+      <span>${start}–${end} di ${data.total}</span>
+      <div>
+        <button class="button button-ghost review-page-button"
+          data-review-section="${section}"
+          data-review-offset="${previousOffset}"
+          type="button" ${data.offset === 0 ? "disabled" : ""}>Precedente</button>
+        <button class="button button-ghost review-page-button"
+          data-review-section="${section}"
+          data-review-offset="${nextOffset}"
+          type="button" ${nextOffset >= data.total ? "disabled" : ""}>Successiva</button>
+      </div>
+    </div>
+  `;
+}
+
+
+function reviewCard(item) {
+  const candidate = item.candidate || {};
+  const pending = item.status === "pending";
+  const statusLabel = item.status === "approved"
+    ? (item.decision_source === "policy" ? "Auto-approvato" : "Approvato")
+    : item.status === "rejected" ? "Rifiutato" : "Da revisionare";
+  const source = String(candidate.source_kind || "unknown").replaceAll("_", " ");
+  const reasons = (item.policy_reasons || [])
+    .map((reason) => `<span class="review-reason">${escapeHtml(reason)}</span>`)
+    .join("");
+
+  return `
+    <article class="review-card">
+      <div class="review-card-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(source)} · confidenza ${escapeHtml(candidate.confidence ?? "—")}</p>
+          <h3><a href="/games/${item.bgg_id}" data-nav>${escapeHtml(item.game_title)}</a></h3>
+        </div>
+        <span class="review-status review-status-${escapeHtml(item.status)}">${statusLabel}</span>
+      </div>
+      <div class="review-meta">
+        <span>${escapeHtml(candidate.language || "und")}</span>
+        <span>${escapeHtml(candidate.document_type || "rulebook")}</span>
+        <span>${candidate.official ? "ufficiale" : "non ufficiale"}</span>
+      </div>
+      <a class="review-url" href="${escapeHtml(candidate.url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${escapeHtml(candidate.url || "URL non disponibile")}
+      </a>
+      <div class="review-reasons">${reasons}</div>
+      ${item.decision_note ? `<p class="review-note">${escapeHtml(item.decision_note)}</p>` : ""}
+      ${pending ? `
+        <div class="review-actions">
+          <button class="button button-ghost review-decision" data-review-id="${item.id}" data-decision="rejected" type="button">Rifiuta</button>
+          <button class="button button-primary review-decision" data-review-id="${item.id}" data-decision="approved" type="button">Approva</button>
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+
+async function decideReviewItem(reviewId, decision) {
+  const buttons = document.querySelectorAll(`.review-decision[data-review-id="${reviewId}"]`);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await api(`/api/rulebook-reviews/${reviewId}/decision`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({decision}),
+    });
+    showToast(decision === "approved" ? "Candidato approvato." : "Candidato rifiutato.");
+    await renderReviews();
+  } catch (error) {
+    showToast(error.message, true);
+    if (error.status === 409) {
+      await renderReviews();
+      return;
+    }
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+
+async function renderReviews({reset = false} = {}) {
+  if (reset) {
+    reviewPendingOffset = 0;
+    reviewDecidedOffset = 0;
+  }
+  app.innerHTML = '<div class="empty">Caricamento coda di revisione…</div>';
+  try {
+    const [pendingData, decidedData] = await Promise.all([
+      api(`/api/rulebook-reviews?status=pending&limit=${REVIEW_PAGE_SIZE}&offset=${reviewPendingOffset}`),
+      api(`/api/rulebook-reviews?status=decided&limit=${REVIEW_PAGE_SIZE}&offset=${reviewDecidedOffset}`),
+    ]);
+
+    if (pendingData.total === 0) {
+      reviewPendingOffset = 0;
+    } else if (reviewPendingOffset >= pendingData.total) {
+      reviewPendingOffset = Math.floor((pendingData.total - 1) / REVIEW_PAGE_SIZE) * REVIEW_PAGE_SIZE;
+      return renderReviews();
+    }
+    if (decidedData.total === 0) {
+      reviewDecidedOffset = 0;
+    } else if (reviewDecidedOffset >= decidedData.total) {
+      reviewDecidedOffset = Math.floor((decidedData.total - 1) / REVIEW_PAGE_SIZE) * REVIEW_PAGE_SIZE;
+      return renderReviews();
+    }
+
+    const corruptCount = (pendingData.corrupt_count || 0) + (decidedData.corrupt_count || 0);
+    const corruptWarning = corruptCount
+      ? `<div class="review-warning">${corruptCount} record corrotti sono stati esclusi da questa pagina.</div>`
+      : "";
+
+    app.innerHTML = `
+      <section class="review-page">
+        <div class="review-page-head">
+          <div>
+            <p class="eyebrow">P6 · Rulebook review</p>
+            <h1>Coda di revisione</h1>
+            <p class="muted">
+              I candidati non idonei al download unattended richiedono una decisione esplicita.
+            </p>
+          </div>
+          <span class="review-counter">${pendingData.total} pending</span>
+        </div>
+
+        ${corruptWarning}
+
+        <h2 class="section-title">Da revisionare</h2>
+        <div class="review-list">
+          ${pendingData.items.length ? pendingData.items.map(reviewCard).join("") : '<div class="empty">Nessun candidato in attesa.</div>'}
+        </div>
+        ${reviewPager(pendingData, "pending")}
+
+        <h2 class="section-title review-decided-title">Decisioni recenti</h2>
+        <div class="review-list">
+          ${decidedData.items.length ? decidedData.items.map(reviewCard).join("") : '<div class="empty">Nessuna decisione registrata.</div>'}
+        </div>
+        ${reviewPager(decidedData, "decided")}
+      </section>
+    `;
+
+    document.querySelectorAll(".review-decision").forEach((button) => {
+      button.addEventListener("click", () => {
+        void decideReviewItem(button.dataset.reviewId, button.dataset.decision);
+      });
+    });
+    document.querySelectorAll(".review-page-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const offset = Number(button.dataset.reviewOffset || 0);
+        if (button.dataset.reviewSection === "pending") {
+          reviewPendingOffset = offset;
+        } else {
+          reviewDecidedOffset = offset;
+        }
+        void renderReviews();
+      });
+    });
+    document.title = "Revisioni · BoardGameCompanion";
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare la coda: ${escapeHtml(error.message)}</div>`;
+    showToast(error.message, true);
+  }
+}
+
+
 async function route() {
+  if (/^\/reviews\/?$/.test(window.location.pathname)) {
+    await renderReviews({reset: true});
+    return;
+  }
+
   const match = window.location.pathname.match(/^\/games\/(\d+)\/?$/);
   if (match) {
     await renderDetail(Number(match[1]));

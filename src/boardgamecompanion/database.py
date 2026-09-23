@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from boardgamecompanion.migrations import migrate
 
@@ -33,10 +33,14 @@ class Database:
         return int(row["version"])
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(
+        self,
+        *,
+        immediate: bool = False,
+    ) -> Iterator[sqlite3.Connection]:
         connection = self.connect()
         try:
-            connection.execute("BEGIN")
+            connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             yield connection
             connection.commit()
         except Exception:

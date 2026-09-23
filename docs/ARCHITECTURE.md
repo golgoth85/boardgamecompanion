@@ -115,6 +115,16 @@ Validated bytes are hashed with SHA-256 while streaming to a temporary file unde
 
 P6 remains responsible for review queues, unattended-download policy, approval state and scheduled document update checks. P7 remains responsible for PDF parsing, ingestion, embeddings and page-cited RAG.
 
+## Rulebook review queue (P6A)
+
+P6A introduces a persistent, provider-independent review queue without exposing a public trust-escalation endpoint. Normalized `RulebookCandidate` values are submitted internally by trusted resolver/provider orchestration; HTTP clients may list queued items and record explicit approve/reject decisions, but they cannot manufacture an `official_publisher` or high-confidence candidate through the API.
+
+The initial unattended policy is deliberately conservative. A candidate is policy-approved only when all of the following are true: it comes from an official publisher/localizer/mirror source, confidence is at least 95, its BGG ID exactly matches the target game, and its primary language is Italian or English. Any missing condition routes the candidate to `pending` review. Policy-approved candidates are persisted as `approved` with `decision_source=policy`; human decisions use `decision_source=user`. This keeps automated eligibility auditable without conflating it with manual approval.
+
+Each normalized candidate is snapshotted as canonical JSON and keyed by SHA-256 together with its target game, making rediscovery idempotent while preserving provider, URL, language, document type, confidence, edition/version clues and metadata. Queue insertion resolves the target game before the write transaction and uses an immediate SQLite write transaction plus `INSERT ... ON CONFLICT(board_game_id, candidate_key) DO NOTHING`; concurrent rediscovery therefore converges on one row, while unrelated integrity failures remain visible. Database CHECK constraints encode the allowed relationships between policy action, status, decision source and decision timestamp rather than relying only on application code.
+
+Persisted snapshots are revalidated against the P5A `RulebookCandidate` contract, canonical digest, denormalized columns and policy reasons before being returned or decided. Both persisted JSON fields are byte-bounded before decoding, and malformed, pathologically nested or otherwise unsafe JSON is converted into a quarantined corrupt-record result instead of escaping as a decoder/runtime failure. Corrupt rows are excluded from list output with an explicit corruption marker and cannot be approved through the decision API. Review transitions are atomic: `pending` may become `approved` or `rejected`; repeating the same decision is idempotent, while conflicting later decisions return a conflict instead of silently rewriting history. The web UI at `/reviews` consumes only the list/decision API, paginates pending and decided queues independently, and refreshes server state after a concurrent-decision conflict. P6A does not schedule discovery, fetch approved items, or create/update `game_documents`; those execution concerns remain P6B.
+
 ## RAG
 
 Documents are indexed per game while retaining language, document type, version and page identity.

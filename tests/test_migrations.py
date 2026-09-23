@@ -15,8 +15,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 3
-    assert second_version == 3
+    assert first_version == LATEST_SCHEMA_VERSION == 4
+    assert second_version == 4
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -33,6 +33,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (1, "baseline-existing-schema"),
         (2, "physical-copies"),
         (3, "game-documents"),
+        (4, "rulebook-review-queue"),
     ]
     assert {
         "board_games",
@@ -43,6 +44,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "floppy_sync_runs",
         "physical_copies",
         "game_documents",
+        "rulebook_review_items",
         "schema_migrations",
     } <= tables
 
@@ -118,7 +120,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3]
+    assert [row["version"] for row in migrations] == [1, 2, 3, 4]
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",

@@ -16,12 +16,14 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - REST API and OpenAPI/Swagger remain available.
 - Floppy connection health/capability checks.
 - Floppy board-game comparison and guarded add-only collection synchronization.
+- Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
+- Persistent rulebook review queue with auditable unattended/manual approval state.
 
 Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
-Planned next: barcode workflow, rulebook discovery/archive and page-cited RAG.
+Planned next: scheduled rulebook update checks, approved-candidate execution, and page-cited RAG.
 
 ## Container
 

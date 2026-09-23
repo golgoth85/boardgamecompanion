@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, field_validator
 
 from boardgamecompanion import __version__
 from boardgamecompanion.app_settings import (
@@ -12,7 +13,7 @@ from boardgamecompanion.app_settings import (
     save_floppy_settings,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
-from boardgamecompanion.catalog import Catalog, SORT_SQL
+from boardgamecompanion.catalog import SORT_SQL, Catalog
 from boardgamecompanion.copies import (
     BoardGameNotFound,
     PhysicalCopyError,
@@ -38,6 +39,13 @@ from boardgamecompanion.floppy import (
     load_floppy_links,
     local_owned_games,
     reconcile_floppy_links,
+)
+from boardgamecompanion.rulebook_review import (
+    RulebookReviewConflict,
+    RulebookReviewCorruptRecord,
+    RulebookReviewError,
+    RulebookReviewNotFound,
+    RulebookReviewQueue,
 )
 from boardgamecompanion.settings import settings
 
@@ -112,6 +120,11 @@ class FloppySettingsUpdate(BaseModel):
         return value
 
 
+class RulebookReviewDecisionPayload(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -134,6 +147,11 @@ def web_home() -> FileResponse:
 
 @app.get("/games/{bgg_id}", include_in_schema=False)
 def web_game(bgg_id: int) -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/reviews", include_in_schema=False)
+def web_reviews() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -336,6 +354,68 @@ def get_document_file(document_id: str) -> FileResponse:
     except DocumentError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return FileResponse(path, media_type="application/pdf")
+
+
+@app.get("/api/rulebook-reviews", tags=["rulebooks"])
+def list_rulebook_reviews(
+    status: str | None = Query(default=None),
+    bgg_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=100, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return RulebookReviewQueue(database).list(
+            status=status,
+            bgg_id=bgg_id,
+            limit=limit,
+            offset=offset,
+        )
+    except RulebookReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/rulebook-reviews/{review_id}", tags=["rulebooks"])
+def get_rulebook_review(review_id: str) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        item = RulebookReviewQueue(database).get(review_id)
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="Rulebook review not found")
+    return item
+
+
+@app.post("/api/rulebook-reviews/{review_id}/decision", tags=["rulebooks"])
+def decide_rulebook_review(
+    review_id: str,
+    payload: RulebookReviewDecisionPayload,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return RulebookReviewQueue(database).decide(
+            review_id,
+            decision=payload.decision,
+            note=payload.note,
+        )
+    except RulebookReviewNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RulebookReviewConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
+    except RulebookReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/catalog/stats", tags=["catalog"])
