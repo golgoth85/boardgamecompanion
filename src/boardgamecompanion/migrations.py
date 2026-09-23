@@ -4,6 +4,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from uuid import uuid4
 
 
 MigrationFn = Callable[[sqlite3.Connection], None]
@@ -143,8 +144,125 @@ def _baseline(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
+def _normalize_barcode(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = "".join(char for char in value.upper() if char.isalnum())
+    return normalized or None
+
+
+def _physical_copies(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS physical_copies (
+            id TEXT PRIMARY KEY,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            source_collection_entry_id INTEGER
+                REFERENCES collection_entries(id) ON DELETE SET NULL,
+            source_copy_index INTEGER,
+            source_kind TEXT NOT NULL DEFAULT 'manual',
+            barcode TEXT,
+            barcode_normalized TEXT,
+            language TEXT,
+            edition TEXT,
+            publishers TEXT,
+            version_year_published INTEGER,
+            acquisition_date TEXT,
+            acquired_from TEXT,
+            price_paid REAL,
+            price_currency TEXT,
+            condition_text TEXT,
+            inventory_location TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_collection_entry_id, source_copy_index)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_physical_copies_board_game_id
+        ON physical_copies(board_game_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_physical_copies_barcode
+        ON physical_copies(barcode_normalized)
+        """
+    )
+
+    now = datetime.now(UTC).isoformat()
+    rows = connection.execute(
+        """
+        SELECT id, board_game_id, barcode, version_languages,
+               version_nickname, version_publishers,
+               version_year_published, acquisition_date, acquired_from,
+               price_paid, price_currency, condition_text,
+               inventory_location, private_comment, quantity
+        FROM collection_entries
+        WHERE own = 1
+        ORDER BY id
+        """
+    ).fetchall()
+
+    for row in rows:
+        quantity = row["quantity"]
+        expected = int(quantity) if quantity is not None and int(quantity) > 0 else 1
+        for copy_index in range(1, expected + 1):
+            existing = connection.execute(
+                """
+                SELECT 1
+                FROM physical_copies
+                WHERE source_collection_entry_id = ?
+                  AND source_copy_index = ?
+                """,
+                (row["id"], copy_index),
+            ).fetchone()
+            if existing:
+                continue
+
+            connection.execute(
+                """
+                INSERT INTO physical_copies (
+                    id, board_game_id, source_collection_entry_id,
+                    source_copy_index, source_kind, barcode,
+                    barcode_normalized, language, edition, publishers,
+                    version_year_published, acquisition_date, acquired_from,
+                    price_paid, price_currency, condition_text,
+                    inventory_location, notes, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid4()),
+                    row["board_game_id"],
+                    row["id"],
+                    copy_index,
+                    "bgg_csv",
+                    row["barcode"],
+                    _normalize_barcode(row["barcode"]),
+                    row["version_languages"],
+                    row["version_nickname"],
+                    row["version_publishers"],
+                    row["version_year_published"],
+                    row["acquisition_date"],
+                    row["acquired_from"],
+                    row["price_paid"],
+                    row["price_currency"],
+                    row["condition_text"],
+                    row["inventory_location"],
+                    row["private_comment"],
+                    now,
+                    now,
+                ),
+            )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
+    Migration(2, "physical-copies", _physical_copies),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

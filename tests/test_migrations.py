@@ -15,8 +15,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 1
-    assert second_version == 1
+    assert first_version == LATEST_SCHEMA_VERSION == 2
+    assert second_version == 2
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -30,7 +30,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         }
 
     assert [(row["version"], row["name"]) for row in rows] == [
-        (1, "baseline-existing-schema")
+        (1, "baseline-existing-schema"),
+        (2, "physical-copies"),
     ]
     assert {
         "board_games",
@@ -39,6 +40,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "app_settings",
         "floppy_links",
         "floppy_sync_runs",
+        "physical_copies",
         "schema_migrations",
     } <= tables
 
@@ -98,6 +100,14 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
         migrations = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
+        copies = connection.execute(
+            """
+            SELECT pc.source_kind, pc.source_copy_index, g.bgg_id
+            FROM physical_copies pc
+            JOIN board_games g ON g.id = pc.board_game_id
+            WHERE g.bgg_id = 12345
+            """
+        ).fetchall()
 
     assert dict(game) == {
         "bgg_id": 12345,
@@ -106,4 +116,11 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1]
+    assert [row["version"] for row in migrations] == [1, 2]
+    assert [dict(row) for row in copies] == [
+        {
+            "source_kind": "bgg_csv",
+            "source_copy_index": 1,
+            "bgg_id": 12345,
+        }
+    ]

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from boardgamecompanion.copies import ensure_physical_copies_for_collection_entry
 from boardgamecompanion.database import Database
 
 REQUIRED_COLUMNS = {"objectid", "objectname"}
@@ -256,9 +257,14 @@ class BggCsvImporter:
         if existing_entry is None:
             columns = ", ".join(collection_values)
             placeholders = ", ".join("?" for _ in collection_values)
-            connection.execute(
+            cursor = connection.execute(
                 f"INSERT INTO collection_entries ({columns}, created_at, updated_at) VALUES ({placeholders}, ?, ?)",
                 (*collection_values.values(), now, now),
+            )
+            ensure_physical_copies_for_collection_entry(
+                connection,
+                int(cursor.lastrowid),
+                now,
             )
             return "created"
 
@@ -268,6 +274,16 @@ class BggCsvImporter:
                 f"UPDATE collection_entries SET {assignments}, updated_at = ? WHERE id = ?",
                 (*collection_values.values(), now, existing_entry["id"]),
             )
+            ensure_physical_copies_for_collection_entry(
+                connection,
+                int(existing_entry["id"]),
+                now,
+            )
             return "updated"
 
+        ensure_physical_copies_for_collection_entry(
+            connection,
+            int(existing_entry["id"]),
+            now,
+        )
         return "unchanged"

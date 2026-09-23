@@ -13,6 +13,12 @@ from boardgamecompanion.app_settings import (
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.catalog import Catalog, SORT_SQL
+from boardgamecompanion.copies import (
+    BoardGameNotFound,
+    PhysicalCopyError,
+    PhysicalCopyNotFound,
+    PhysicalCopyStore,
+)
 from boardgamecompanion.database import Database
 from boardgamecompanion.floppy import (
     FloppyClient,
@@ -56,6 +62,25 @@ def floppy_http_error(exc: FloppyError) -> HTTPException:
     if exc.kind in {"timeout", "unreachable"}:
         return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=502, detail=str(exc))
+
+
+class PhysicalCopyPayload(BaseModel):
+    barcode: str | None = Field(default=None, max_length=128)
+    language: str | None = Field(default=None, max_length=500)
+    edition: str | None = Field(default=None, max_length=500)
+    publishers: str | None = Field(default=None, max_length=1000)
+    version_year_published: int | None = Field(default=None, ge=1000, le=3000)
+    acquisition_date: str | None = Field(default=None, max_length=64)
+    acquired_from: str | None = Field(default=None, max_length=500)
+    price_paid: float | None = Field(default=None, ge=0)
+    price_currency: str | None = Field(default=None, max_length=16)
+    condition_text: str | None = Field(default=None, max_length=500)
+    inventory_location: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class BarcodeLookupRequest(BaseModel):
+    barcode: str = Field(min_length=1, max_length=128)
 
 
 class FloppySyncRequest(BaseModel):
@@ -174,6 +199,60 @@ def get_game(bgg_id: int) -> dict[str, object]:
     if game is None:
         raise HTTPException(status_code=404, detail="Board game not found")
     return game
+
+
+@app.get("/api/games/{bgg_id}/copies", tags=["copies"])
+def list_physical_copies(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    copies = PhysicalCopyStore(database).list_for_game(bgg_id)
+    return {"bgg_id": bgg_id, "count": len(copies), "items": copies}
+
+
+@app.post("/api/games/{bgg_id}/copies", tags=["copies"], status_code=201)
+def create_physical_copy(
+    bgg_id: int,
+    payload: PhysicalCopyPayload,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return PhysicalCopyStore(database).create(
+            bgg_id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except BoardGameNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PhysicalCopyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/copies/{copy_id}", tags=["copies"])
+def update_physical_copy(
+    copy_id: str,
+    payload: PhysicalCopyPayload,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return PhysicalCopyStore(database).update(
+            copy_id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except PhysicalCopyNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PhysicalCopyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/barcodes/lookup", tags=["copies"])
+def lookup_barcode(payload: BarcodeLookupRequest) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return PhysicalCopyStore(database).lookup_barcode(payload.barcode)
+    except PhysicalCopyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/catalog/stats", tags=["catalog"])
