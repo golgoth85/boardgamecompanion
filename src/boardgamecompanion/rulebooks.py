@@ -173,6 +173,36 @@ def _normalize_http_hostname(hostname: str) -> str:
     return address.compressed.lower()
 
 
+def _query_component_present(value: str) -> bool:
+    return "?" in value.partition("#")[0]
+
+
+def _unsplit_preserving_empty_query(
+    parts: SplitResult,
+    *,
+    query_present: bool,
+) -> str:
+    value = urlunsplit(parts)
+    if query_present and not parts.query:
+        return f"{value}?"
+    return value
+
+
+def _validate_percent_encoding(value: str) -> None:
+    index = 0
+    while index < len(value):
+        if value[index] != "%":
+            index += 1
+            continue
+        if (
+            index + 2 >= len(value)
+            or value[index + 1] not in _HEX_DIGITS
+            or value[index + 2] not in _HEX_DIGITS
+        ):
+            raise ValueError("Rulebook candidate URL contains invalid percent-encoding")
+        index += 3
+
+
 def _canonical_http_url(value: str) -> str:
     text = str(value or "").strip()
     if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in text):
@@ -180,6 +210,7 @@ def _canonical_http_url(value: str) -> str:
     if "\\" in text:
         raise ValueError("Rulebook candidate URL must not contain backslashes")
 
+    query_present = _query_component_present(text)
     parts = urlsplit(text)
     if parts.scheme.lower() not in {"http", "https"}:
         raise ValueError("Rulebook candidate URL must use http or https")
@@ -195,7 +226,8 @@ def _canonical_http_url(value: str) -> str:
     )
     netloc = host if port is None or default_port else f"{host}:{port}"
     path = parts.path or "/"
-    _normalize_percent_encoding(path)
+    _validate_percent_encoding(path)
+    _validate_percent_encoding(parts.query)
     normalized = SplitResult(
         scheme=parts.scheme.lower(),
         netloc=netloc,
@@ -203,10 +235,14 @@ def _canonical_http_url(value: str) -> str:
         query=parts.query,
         fragment="",
     )
-    return urlunsplit(normalized)
+    return _unsplit_preserving_empty_query(
+        normalized,
+        query_present=query_present,
+    )
 
 
 def _normalize_percent_encoding(value: str) -> str:
+    _validate_percent_encoding(value)
     normalized: list[str] = []
     index = 0
     while index < len(value):
@@ -215,12 +251,6 @@ def _normalize_percent_encoding(value: str) -> str:
             normalized.append(char)
             index += 1
             continue
-        if (
-            index + 2 >= len(value)
-            or value[index + 1] not in _HEX_DIGITS
-            or value[index + 2] not in _HEX_DIGITS
-        ):
-            raise ValueError("Rulebook candidate URL contains invalid percent-encoding")
         hex_value = value[index + 1:index + 3]
         decoded = chr(int(hex_value, 16))
         normalized.append(
@@ -262,18 +292,21 @@ def _remove_dot_segments(path: str) -> str:
 
 
 def _url_dedup_key(url: str) -> str:
+    query_present = _query_component_present(url)
     parts = urlsplit(url)
     normalized_path = _remove_dot_segments(
         _normalize_percent_encoding(parts.path or "/")
     )
-    return urlunsplit(
-        SplitResult(
-            scheme=parts.scheme,
-            netloc=parts.netloc,
-            path=normalized_path,
-            query=parts.query,
-            fragment="",
-        )
+    normalized = SplitResult(
+        scheme=parts.scheme,
+        netloc=parts.netloc,
+        path=normalized_path,
+        query=parts.query,
+        fragment="",
+    )
+    return _unsplit_preserving_empty_query(
+        normalized,
+        query_present=query_present,
     )
 
 
