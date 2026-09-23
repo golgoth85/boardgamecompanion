@@ -147,6 +147,17 @@ def test_candidate_requires_source_and_official_flag_to_agree(source, official):
         )
 
 
+def test_candidate_cannot_raise_confidence_above_source_trust_ceiling():
+    with pytest.raises(ValueError, match="community.*between 0 and 70"):
+        candidate(
+            provider="community",
+            source=RulebookSource.COMMUNITY,
+            url="https://community.example/rules.pdf",
+            official=False,
+            confidence=100,
+        )
+
+
 def test_resolver_prefers_language_then_source_with_equal_confidence():
     publisher_en = candidate(
         provider="publisher",
@@ -183,6 +194,70 @@ def test_resolver_prefers_language_then_source_with_equal_confidence():
         localizer_it,
         publisher_en,
     ]
+
+
+def test_resolver_honors_exact_regional_language_preferences():
+    gb = candidate(
+        provider="publisher-gb",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules-gb.pdf",
+        language="en-GB",
+        bgg_id=None,
+    )
+    us = candidate(
+        provider="publisher-us",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules-us.pdf",
+        language="en-US",
+        bgg_id=None,
+    )
+    generic_en = candidate(
+        provider="publisher-en",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://publisher.example/rules-en.pdf",
+        language="en",
+        bgg_id=None,
+    )
+
+    result = RulebookResolver(
+        [StaticProvider("publisher", [us, generic_en, gb])]
+    ).resolve(
+        query(),
+        preferred_languages=("en-gb", "en-us"),
+    )
+
+    assert [item.candidate.language for item in result.candidates] == [
+        "en-gb",
+        "en-us",
+        "en",
+    ]
+
+
+def test_primary_language_order_still_beats_later_exact_language():
+    italian_variant = candidate(
+        provider="localizer-it",
+        source=RulebookSource.OFFICIAL_LOCALIZER,
+        url="https://localizer.example/rules-it.pdf",
+        language="it-CH",
+        bgg_id=None,
+    )
+    english = candidate(
+        provider="publisher-en",
+        source=RulebookSource.OFFICIAL_LOCALIZER,
+        url="https://localizer.example/rules-en.pdf",
+        language="en",
+        bgg_id=None,
+    )
+
+    result = RulebookResolver(
+        [StaticProvider("localizer", [english, italian_variant])]
+    ).resolve(
+        query(),
+        preferred_languages=("it-it", "en"),
+    )
+
+    assert result.best is not None
+    assert result.best.candidate.language == "it-ch"
 
 
 def test_resolver_source_confidence_dominates_lower_tier_exact_match():
