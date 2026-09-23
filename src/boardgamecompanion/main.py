@@ -23,6 +23,7 @@ from boardgamecompanion.floppy import (
     build_sync_preview,
     load_floppy_links,
     local_owned_games,
+    reconcile_floppy_links,
 )
 from boardgamecompanion.settings import settings
 
@@ -298,6 +299,26 @@ def floppy_preview() -> dict[str, object]:
         "history, or local BoardGameCompanion records."
     )
     return preview
+
+
+@app.post("/api/integrations/floppy/reconcile-links", tags=["integrations"])
+def floppy_reconcile_links() -> dict[str, object]:
+    client = get_floppy_client()
+    if client is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
+        )
+
+    database = get_database()
+    database.initialize()
+
+    try:
+        collection_entries = client.collection_entries()
+    except FloppyError as exc:
+        raise floppy_http_error(exc) from exc
+
+    return reconcile_floppy_links(database, collection_entries)
 
 
 @app.post("/api/integrations/floppy/sync", tags=["integrations"])
