@@ -260,9 +260,59 @@ def _physical_copies(connection: sqlite3.Connection) -> None:
             )
 
 
+def _game_documents(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_documents (
+            id TEXT PRIMARY KEY,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            document_type TEXT NOT NULL,
+            language TEXT NOT NULL DEFAULT 'und',
+            title TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            storage_path TEXT NOT NULL UNIQUE,
+            sha256 TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+            source_kind TEXT NOT NULL,
+            source_provider TEXT,
+            source_url TEXT,
+            is_official INTEGER NOT NULL DEFAULT 0,
+            version_label TEXT,
+            edition TEXT,
+            published_at TEXT,
+            provenance_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(board_game_id, sha256)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_documents_board_game
+        ON game_documents(board_game_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_documents_type_language
+        ON game_documents(document_type, language)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_documents_sha256
+        ON game_documents(sha256)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
+    Migration(3, "game-documents", _game_documents),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
