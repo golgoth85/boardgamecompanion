@@ -214,11 +214,13 @@ def test_public_hostname_is_resolved_and_pinned(tmp_path):
         "0.0.0.0",
         "240.0.0.1",
         "192.0.0.8",
+        "192.88.99.2",
         "64:ff9b:1::1",
         "2002::1",
         "2001:db8::1",
         "3fff::1",
         "5f00::1",
+        "fe80::1",
         "fec0::1",
     ],
 )
@@ -238,7 +240,7 @@ def test_runtime_dns_rejects_non_public_addresses(tmp_path, unsafe):
 
 def test_runtime_dns_rejects_mixed_public_and_private_answers(tmp_path):
     resolver = FakeResolver(
-        {"rules.example": (PUBLIC_V4, PUBLIC_V6, "10.0.0.1")}
+        {"rules.example": (PUBLIC_V4, PUBLIC_V6, "fe80::1")}
     )
     transport = FakeTransport({})
 
@@ -1254,11 +1256,14 @@ def test_fetcher_deadline_is_shared_across_redirect_chain(tmp_path):
         ("192.0.0.8", True),
         ("192.0.0.9", False),
         ("192.0.0.10", False),
+        ("192.88.99.2", True),
         ("8.8.8.8", False),
         ("2001:db8::1", True),
         ("3fff::1", True),
         ("5f00::1", True),
+        ("fe80::1", True),
         ("fec0::1", True),
+        ("2001:1::3", False),
         ("2001:3::1", False),
         ("2606:4700:4700::1111", False),
     ],
