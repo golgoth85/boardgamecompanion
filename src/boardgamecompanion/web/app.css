@@ -607,6 +607,58 @@ a { color: inherit; text-decoration: none; }
   border-radius: 6px;
   background: rgba(11,15,23,.52);
 }
+.document-heading { margin-top: 1.5rem; }
+.document-heading > div { min-width: 0; }
+.section-subtitle {
+  margin: .25rem 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+}
+.game-document-list {
+  display: grid;
+  gap: .7rem;
+  margin-bottom: 1.45rem;
+}
+.game-document-card {
+  padding: .9rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(11,15,23,.34);
+}
+.game-document-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: .85rem;
+}
+.game-document-head > div { min-width: 0; }
+.document-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-bottom: .45rem;
+}
+.document-official {
+  color: #bff5df;
+  border-color: rgba(52,211,153,.34);
+  background: rgba(52,211,153,.08);
+}
+.game-document-title {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.game-document-meta,
+.game-document-source {
+  margin: .55rem 0 0;
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.game-document-source { margin-top: .28rem; }
+.document-empty { padding: 1.4rem 1rem; }
+.document-download { flex: 0 0 auto; }
+
 .external-link { color: var(--accent-2); font-weight: 700; }
 
 .dialog {
@@ -655,7 +707,8 @@ a { color: inherit; text-decoration: none; }
   gap: .38rem;
   font-weight: 700;
 }
-.settings-field input {
+.settings-field input,
+.settings-field select {
   width: 100%;
   min-height: 2.8rem;
   padding: .68rem .78rem;
@@ -665,6 +718,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--text);
   background: rgba(11,15,23,.45);
 }
+.settings-field select { color-scheme: dark; }
 .settings-field input:disabled {
   color: var(--muted);
   opacity: .75;
@@ -739,6 +793,9 @@ a { color: inherit; text-decoration: none; }
   .section-heading-row { align-items: center; }
   .scanner-match { align-items: stretch; flex-direction: column; }
   .scanner-match .button { align-self: flex-start; }
+  .game-document-head { align-items: stretch; flex-direction: column; }
+  .document-download { align-self: flex-start; }
+  .document-heading { align-items: flex-start; }
   .inline-input-action { grid-template-columns: 1fr; }
   .shell { width: min(100% - 1rem, 1460px); padding-top: 1rem; }
   .hero-card { padding: 1.25rem; }
