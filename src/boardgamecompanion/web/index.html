@@ -211,6 +211,71 @@
     </div>
   </dialog>
 
+  <dialog id="documentDialog" class="dialog" aria-labelledby="documentDialogTitle">
+    <form id="documentForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Manuali e documenti</p>
+          <h2 id="documentDialogTitle">Aggiungi PDF</h2>
+        </div>
+        <button class="icon-button" id="closeDocumentDialog" type="button" aria-label="Chiudi documento">×</button>
+      </div>
+      <p id="documentDialogSubtitle" class="muted"></p>
+
+      <label class="file-drop" for="documentFile">
+        <span class="file-drop-title">Scegli un PDF</span>
+        <span id="documentFileName" class="muted">Nessun file selezionato</span>
+        <input id="documentFile" name="file" type="file" accept=".pdf,application/pdf" required>
+      </label>
+
+      <div class="copy-form-grid">
+        <label class="settings-field">
+          <span>Tipo documento</span>
+          <select id="documentType">
+            <option value="rulebook">Regolamento</option>
+            <option value="reference">Riferimento</option>
+            <option value="faq">FAQ</option>
+            <option value="errata">Errata</option>
+            <option value="scenario_book">Libro scenari</option>
+            <option value="campaign_book">Libro campagna</option>
+            <option value="player_aid">Player aid</option>
+            <option value="other">Altro</option>
+          </select>
+        </label>
+        <label class="settings-field">
+          <span>Lingua</span>
+          <input id="documentLanguage" type="text" value="it" placeholder="it, en, de…">
+        </label>
+        <label class="settings-field copy-span-2">
+          <span>Titolo</span>
+          <input id="documentTitle" type="text" placeholder="Es. Regolamento italiano">
+        </label>
+        <label class="settings-field">
+          <span>Versione</span>
+          <input id="documentVersion" type="text" placeholder="v1.2">
+        </label>
+        <label class="settings-field">
+          <span>Edizione</span>
+          <input id="documentEdition" type="text" placeholder="Retail IT">
+        </label>
+        <label class="settings-field copy-span-2">
+          <span>URL origine (opzionale)</span>
+          <input id="documentSourceUrl" type="url" placeholder="https://editore.example/manuale.pdf">
+        </label>
+        <label class="settings-check copy-span-2">
+          <input id="documentOfficial" type="checkbox">
+          <span>Documento ufficiale</span>
+        </label>
+      </div>
+
+      <div id="documentResult" class="import-result" hidden></div>
+      <div class="dialog-actions">
+        <button class="button button-ghost" id="cancelDocumentDialog" type="button">Annulla</button>
+        <button class="button button-primary" id="saveDocument" type="submit">Carica PDF</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="/static/app.js" defer></script>
 </body>
 </html>
