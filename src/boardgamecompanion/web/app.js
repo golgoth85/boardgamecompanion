@@ -1279,7 +1279,7 @@ function documentCard(document) {
           <div class="document-badges">
             <span class="badge">${escapeHtml(typeLabel)}</span>
             <span class="badge">${escapeHtml((document.language || "und").toUpperCase())}</span>
-            ${official ? '<span class="badge document-official">Ufficiale</span>' : ""}
+            ${official ? '<span class="badge document-official">Ufficiale</span>' : '<span class="badge document-unofficial">Non ufficiale</span>'}
           </div>
           <strong class="game-document-title">${escapeHtml(document.title || document.original_filename || typeLabel)}</strong>
         </div>
