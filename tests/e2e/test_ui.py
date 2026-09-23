@@ -599,3 +599,123 @@ def test_mobile_topbar_and_scanner_dialog_do_not_overflow(browser, live_server):
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
     finally:
         context.close()
+
+
+
+def test_document_upload_list_download_and_dedup(browser, live_server):
+    context, page = new_page(browser)
+    pdf_bytes = b"%PDF-1.4\nBoardGameCompanion test manual\n%%EOF\n"
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.get_by_text("Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.locator(".game-document-card")).to_have_count(0)
+        expect(page.locator(".document-empty")).to_contain_text(
+            "Nessun manuale o documento registrato"
+        )
+
+        page.locator("#addDocument").click()
+        expect(page.locator("#documentDialog")).to_be_visible()
+        page.locator("#documentFile").set_input_files(
+            {
+                "name": "manuale-italiano.pdf",
+                "mimeType": "application/pdf",
+                "buffer": pdf_bytes,
+            }
+        )
+        expect(page.locator("#documentFileName")).to_have_text("manuale-italiano.pdf")
+        page.locator("#documentTitle").fill("Regolamento italiano")
+        page.locator("#documentVersion").fill("v1.2")
+        page.locator("#documentEdition").fill("Retail IT")
+        page.locator("#documentSourceUrl").fill("https://publisher.example/manuale.pdf")
+        page.locator("#documentOfficial").check()
+        page.locator("#saveDocument").click()
+
+        expect(page.locator("#documentDialog")).not_to_be_visible()
+        expect(page.locator(".game-document-card")).to_have_count(1)
+        card = page.locator(".game-document-card")
+        expect(card).to_contain_text("Regolamento italiano")
+        expect(card).to_contain_text("Regolamento")
+        expect(card).to_contain_text("IT")
+        expect(card).to_contain_text("Ufficiale")
+        expect(card).to_contain_text("Versione v1.2")
+        expect(card).to_contain_text("Edizione Retail IT")
+        expect(card).to_contain_text("manuale-italiano.pdf")
+        expect(card).to_contain_text("Upload manuale")
+        expect(card).to_contain_text("https://publisher.example/manuale.pdf")
+
+        href = page.locator(".document-download").get_attribute("href")
+        assert href is not None
+        response = page.request.get(f"{live_server}{href}")
+        assert response.ok
+        assert response.body() == pdf_bytes
+
+        api_response = page.request.get(f"{live_server}/api/games/900001/documents")
+        assert api_response.ok
+        assert api_response.json()["count"] == 1
+
+        page.locator("#addDocument").click()
+        page.locator("#documentFile").set_input_files(
+            {
+                "name": "stesso-file-altro-nome.pdf",
+                "mimeType": "application/pdf",
+                "buffer": pdf_bytes,
+            }
+        )
+        page.locator("#documentTitle").fill("Titolo che non deve duplicare il file")
+        page.locator("#saveDocument").click()
+
+        expect(page.locator("#documentDialog")).not_to_be_visible()
+        expect(page.locator(".game-document-card")).to_have_count(1)
+        expect(page.locator("#toast")).to_contain_text("già presente")
+        api_response = page.request.get(f"{live_server}/api/games/900001/documents")
+        assert api_response.json()["count"] == 1
+    finally:
+        context.close()
+
+
+def test_document_metadata_is_escaped(browser, live_server):
+    context, page = new_page(browser)
+    pdf_bytes = b"%PDF-1.4\nXSS metadata test\n%%EOF\n"
+    malicious = '<img src=x onerror="window.__bgc_doc_xss=1">'
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        page.locator("#addDocument").click()
+        page.locator("#documentFile").set_input_files(
+            {
+                "name": "safe.pdf",
+                "mimeType": "application/pdf",
+                "buffer": pdf_bytes,
+            }
+        )
+        page.locator("#documentTitle").fill(malicious)
+        page.locator("#saveDocument").click()
+
+        expect(page.locator(".game-document-title")).to_contain_text("<img src=x")
+        assert page.evaluate("window.__bgc_doc_xss") is None
+        assert page.locator(".game-document-title img").count() == 0
+    finally:
+        context.close()
+
+
+def test_mobile_document_dialog_and_cards_do_not_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        page.locator("#addDocument").click()
+
+        expect(page.locator("#documentDialog")).to_be_visible()
+        box = page.locator("#documentDialog").bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= 391
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+
+        page.locator("#cancelDocumentDialog").click()
+        expect(page.locator("#documentDialog")).not_to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+    finally:
+        context.close()
