@@ -31,6 +31,15 @@ def test_web_game_route_is_spa_entrypoint(tmp_path: Path) -> None:
     assert "Importa BGG CSV" in response.text
 
 
+def test_web_reviews_route_is_spa_entrypoint(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/reviews")
+
+    assert response.status_code == 200
+    assert "Revisioni" in response.text
+
+
 def test_static_assets_are_served(tmp_path: Path) -> None:
     _configure(tmp_path)
     with TestClient(app) as client:
@@ -41,3 +50,4 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "--accent:" in css.text
     assert js.status_code == 200
     assert "renderCatalog" in js.text
+    assert "renderReviews" in js.text

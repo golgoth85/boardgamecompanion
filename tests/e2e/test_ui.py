@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -718,5 +719,80 @@ def test_mobile_document_dialog_and_cards_do_not_overflow(browser, live_server):
         page.locator("#cancelDocumentDialog").click()
         expect(page.locator("#documentDialog")).not_to_be_visible()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+    finally:
+        context.close()
+
+
+def test_review_queue_ui_allows_explicit_approval(browser, live_server):
+    context, page = new_page(browser)
+    state = {"status": "pending", "decision_source": None}
+    decisions = []
+
+    def item():
+        return {
+            "id": "review-1",
+            "bgg_id": 900001,
+            "game_title": "Synthetic Alpha",
+            "candidate_key": "a" * 64,
+            "candidate": {
+                "provider": "community-example",
+                "source_kind": "community",
+                "url": "https://community.example/rules.pdf",
+                "language": "it",
+                "document_type": "rulebook",
+                "official": False,
+                "confidence": 70,
+            },
+            "policy_action": "review",
+            "policy_reasons": [
+                "review:unofficial-source",
+                "review:confidence:70",
+                "bgg_id:exact",
+                "language:it",
+            ],
+            "status": state["status"],
+            "decision_source": state["decision_source"],
+            "decision_note": None,
+            "created_at": "2026-09-23T18:00:00+00:00",
+            "updated_at": "2026-09-23T18:00:00+00:00",
+            "decided_at": None,
+        }
+
+    def list_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {"total": 1, "limit": 100, "offset": 0, "items": [item()]}
+            ),
+        )
+
+    def decision_route(route):
+        decisions.append(route.request.post_data_json)
+        state["status"] = "approved"
+        state["decision_source"] = "user"
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(item()),
+        )
+
+    try:
+        page.route(re.compile(r".*/api/rulebook-reviews\\?limit=100$"), list_route)
+        page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
+
+        page.goto(live_server)
+        page.get_by_role("link", name="Revisioni").click()
+        expect(page).to_have_url(f"{live_server}/reviews")
+        expect(page.get_by_role("heading", name="Coda di revisione")).to_be_visible()
+        expect(page.locator(".review-card")).to_have_count(1)
+        expect(page.locator(".review-card")).to_contain_text("Synthetic Alpha")
+        expect(page.locator(".review-card")).to_contain_text("community")
+        expect(page.get_by_role("button", name="Approva")).to_be_visible()
+
+        page.get_by_role("button", name="Approva").click()
+        expect(page.locator("#toast")).to_contain_text("Candidato approvato")
+        expect(page.locator(".review-status-approved")).to_have_text("Approvato")
+        assert decisions == [{"decision": "approved"}]
     finally:
         context.close()

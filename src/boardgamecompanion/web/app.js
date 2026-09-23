@@ -1442,7 +1442,116 @@ async function renderDetail(bggId) {
   }
 }
 
+function reviewCard(item) {
+  const candidate = item.candidate || {};
+  const pending = item.status === "pending";
+  const statusLabel = item.status === "approved"
+    ? (item.decision_source === "policy" ? "Auto-approvato" : "Approvato")
+    : item.status === "rejected" ? "Rifiutato" : "Da revisionare";
+  const source = String(candidate.source_kind || "unknown").replaceAll("_", " ");
+  const reasons = (item.policy_reasons || [])
+    .map((reason) => `<span class="review-reason">${escapeHtml(reason)}</span>`)
+    .join("");
+
+  return `
+    <article class="review-card">
+      <div class="review-card-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(source)} · confidenza ${escapeHtml(candidate.confidence ?? "—")}</p>
+          <h3><a href="/games/${item.bgg_id}" data-nav>${escapeHtml(item.game_title)}</a></h3>
+        </div>
+        <span class="review-status review-status-${escapeHtml(item.status)}">${statusLabel}</span>
+      </div>
+      <div class="review-meta">
+        <span>${escapeHtml(candidate.language || "und")}</span>
+        <span>${escapeHtml(candidate.document_type || "rulebook")}</span>
+        <span>${candidate.official ? "ufficiale" : "non ufficiale"}</span>
+      </div>
+      <a class="review-url" href="${escapeHtml(candidate.url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${escapeHtml(candidate.url || "URL non disponibile")}
+      </a>
+      <div class="review-reasons">${reasons}</div>
+      ${item.decision_note ? `<p class="review-note">${escapeHtml(item.decision_note)}</p>` : ""}
+      ${pending ? `
+        <div class="review-actions">
+          <button class="button button-ghost review-decision" data-review-id="${item.id}" data-decision="rejected" type="button">Rifiuta</button>
+          <button class="button button-primary review-decision" data-review-id="${item.id}" data-decision="approved" type="button">Approva</button>
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+
+async function decideReviewItem(reviewId, decision) {
+  const buttons = document.querySelectorAll(`.review-decision[data-review-id="${reviewId}"]`);
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await api(`/api/rulebook-reviews/${reviewId}/decision`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({decision}),
+    });
+    showToast(decision === "approved" ? "Candidato approvato." : "Candidato rifiutato.");
+    await renderReviews();
+  } catch (error) {
+    showToast(error.message, true);
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+
+async function renderReviews() {
+  app.innerHTML = '<div class="empty">Caricamento coda di revisione…</div>';
+  try {
+    const data = await api("/api/rulebook-reviews?limit=100");
+    const pending = data.items.filter((item) => item.status === "pending");
+    const decided = data.items.filter((item) => item.status !== "pending");
+
+    app.innerHTML = `
+      <section class="review-page">
+        <div class="review-page-head">
+          <div>
+            <p class="eyebrow">P6 · Rulebook review</p>
+            <h1>Coda di revisione</h1>
+            <p class="muted">
+              I candidati non idonei al download unattended richiedono una decisione esplicita.
+            </p>
+          </div>
+          <span class="review-counter">${pending.length} pending</span>
+        </div>
+
+        <h2 class="section-title">Da revisionare</h2>
+        <div class="review-list">
+          ${pending.length ? pending.map(reviewCard).join("") : '<div class="empty">Nessun candidato in attesa.</div>'}
+        </div>
+
+        <h2 class="section-title review-decided-title">Decisioni recenti</h2>
+        <div class="review-list">
+          ${decided.length ? decided.map(reviewCard).join("") : '<div class="empty">Nessuna decisione registrata.</div>'}
+        </div>
+      </section>
+    `;
+
+    document.querySelectorAll(".review-decision").forEach((button) => {
+      button.addEventListener("click", () => {
+        void decideReviewItem(button.dataset.reviewId, button.dataset.decision);
+      });
+    });
+    document.title = "Revisioni · BoardGameCompanion";
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare la coda: ${escapeHtml(error.message)}</div>`;
+    showToast(error.message, true);
+  }
+}
+
+
 async function route() {
+  if (/^\/reviews\/?$/.test(window.location.pathname)) {
+    await renderReviews();
+    return;
+  }
+
   const match = window.location.pathname.match(/^\/games\/(\d+)\/?$/);
   if (match) {
     await renderDetail(Number(match[1]));
