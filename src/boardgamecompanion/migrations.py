@@ -335,6 +335,34 @@ def _rulebook_reviews(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             decided_at TEXT,
+            CHECK(
+                (
+                    status = 'pending'
+                    AND policy_action = 'review'
+                    AND decision_source IS NULL
+                    AND decision_note IS NULL
+                    AND decided_at IS NULL
+                )
+                OR (
+                    status = 'approved'
+                    AND policy_action = 'unattended'
+                    AND decision_source = 'policy'
+                    AND decision_note IS NULL
+                    AND decided_at IS NOT NULL
+                )
+                OR (
+                    status = 'approved'
+                    AND policy_action = 'review'
+                    AND decision_source = 'user'
+                    AND decided_at IS NOT NULL
+                )
+                OR (
+                    status = 'rejected'
+                    AND policy_action = 'review'
+                    AND decision_source = 'user'
+                    AND decided_at IS NOT NULL
+                )
+            ),
             UNIQUE(board_game_id, candidate_key)
         )
         """

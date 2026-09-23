@@ -37,6 +37,10 @@ class RulebookReviewCandidateMismatch(RulebookReviewError):
     pass
 
 
+class RulebookReviewCorruptRecord(RulebookReviewError):
+    pass
+
+
 class RulebookReviewStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -171,14 +175,51 @@ def evaluate_candidate(
 
 
 def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
-    candidate = json.loads(row["candidate_json"])
-    reasons = json.loads(row["policy_reasons_json"])
+    try:
+        raw_candidate = json.loads(row["candidate_json"])
+        if not isinstance(raw_candidate, Mapping):
+            raise TypeError("candidate snapshot must be a JSON object")
+        candidate = candidate_from_snapshot(raw_candidate)
+        serialized, candidate_key = _canonical_snapshot(candidate)
+        if serialized != row["candidate_json"] or candidate_key != row["candidate_key"]:
+            raise ValueError("candidate snapshot canonical form or digest does not match")
+
+        reasons = json.loads(row["policy_reasons_json"])
+        if not isinstance(reasons, list) or any(
+            not isinstance(reason, str) for reason in reasons
+        ):
+            raise ValueError("policy reasons must be a JSON string array")
+
+        evaluation = evaluate_candidate(candidate, bgg_id=int(row["bgg_id"]))
+        if row["policy_action"] != evaluation.action:
+            raise ValueError("stored policy action does not match candidate")
+        if reasons != list(evaluation.reasons):
+            raise ValueError("stored policy reasons do not match candidate")
+
+        scalar_checks = {
+            "provider": candidate.provider,
+            "source_kind": candidate.source_kind.value,
+            "url": candidate.url,
+            "language": candidate.language,
+            "document_type": candidate.document_type,
+            "official": 1 if candidate.official else 0,
+            "confidence": int(candidate.confidence),
+        }
+        if any(row[key] != value for key, value in scalar_checks.items()):
+            raise ValueError("stored candidate columns do not match candidate snapshot")
+    except RulebookReviewCorruptRecord:
+        raise
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RulebookReviewCorruptRecord(
+            f"Rulebook review {row['id']} contains corrupt persisted data"
+        ) from exc
+
     return {
         "id": row["id"],
         "bgg_id": row["bgg_id"],
         "game_title": row["game_title"],
         "candidate_key": row["candidate_key"],
-        "candidate": candidate,
+        "candidate": candidate_snapshot(candidate),
         "policy_action": row["policy_action"],
         "policy_reasons": reasons,
         "status": row["status"],
@@ -220,66 +261,61 @@ class RulebookReviewQueue:
         decision_source = "policy" if evaluation.unattended else None
         decided_at = now if evaluation.unattended else None
 
-        with self.database.transaction() as connection:
+        with self.database.connect() as connection:
             game = connection.execute(
                 "SELECT id FROM board_games WHERE bgg_id = ?",
                 (bgg_id,),
             ).fetchone()
-            if game is None:
-                raise RulebookReviewNotFound(
-                    f"Board game BGG #{bgg_id} not found"
-                )
+        if game is None:
+            raise RulebookReviewNotFound(
+                f"Board game BGG #{bgg_id} not found"
+            )
+        board_game_id = int(game["id"])
+        item_id = str(uuid4())
 
-            item_id = str(uuid4())
-            try:
-                connection.execute(
-                    """
-                    INSERT INTO rulebook_review_items (
-                        id, board_game_id, candidate_key, candidate_json,
-                        provider, source_kind, url, language, document_type,
-                        official, confidence, policy_action, policy_reasons_json,
-                        status, decision_source, decision_note,
-                        created_at, updated_at, decided_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-                    """,
-                    (
-                        item_id,
-                        game["id"],
-                        candidate_key,
-                        serialized,
-                        candidate.provider,
-                        candidate.source_kind.value,
-                        candidate.url,
-                        candidate.language,
-                        candidate.document_type,
-                        1 if candidate.official else 0,
-                        int(candidate.confidence),
-                        evaluation.action,
-                        json.dumps(list(evaluation.reasons), separators=(",", ":")),
-                        status.value,
-                        decision_source,
-                        now,
-                        now,
-                        decided_at,
-                    ),
-                )
-                created = True
-            except sqlite3.IntegrityError:
-                existing = connection.execute(
-                    self._select_sql(
-                        "r.board_game_id = ? AND r.candidate_key = ?"
-                    ),
-                    (game["id"], candidate_key),
-                ).fetchone()
-                if existing is None:
-                    raise
-                return _row_to_item(existing), False
-
+        with self.database.transaction(immediate=True) as connection:
+            inserted = connection.execute(
+                """
+                INSERT INTO rulebook_review_items (
+                    id, board_game_id, candidate_key, candidate_json,
+                    provider, source_kind, url, language, document_type,
+                    official, confidence, policy_action, policy_reasons_json,
+                    status, decision_source, decision_note,
+                    created_at, updated_at, decided_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT(board_game_id, candidate_key) DO NOTHING
+                """,
+                (
+                    item_id,
+                    board_game_id,
+                    candidate_key,
+                    serialized,
+                    candidate.provider,
+                    candidate.source_kind.value,
+                    candidate.url,
+                    candidate.language,
+                    candidate.document_type,
+                    1 if candidate.official else 0,
+                    int(candidate.confidence),
+                    evaluation.action,
+                    json.dumps(list(evaluation.reasons), separators=(",", ":")),
+                    status.value,
+                    decision_source,
+                    now,
+                    now,
+                    decided_at,
+                ),
+            )
+            created = inserted.rowcount == 1
             row = connection.execute(
-                self._select_sql("r.id = ?"),
-                (item_id,),
+                self._select_sql(
+                    "r.id = ?" if created
+                    else "r.board_game_id = ? AND r.candidate_key = ?"
+                ),
+                (item_id,) if created else (board_game_id, candidate_key),
             ).fetchone()
-            assert row is not None
+            if row is None:
+                raise RuntimeError("Rulebook review insert completed without a readable row")
             return _row_to_item(row), created
 
     def get(self, review_id: str) -> dict[str, Any] | None:
@@ -306,14 +342,17 @@ class RulebookReviewQueue:
         clauses: list[str] = []
         params: list[Any] = []
         if status is not None:
-            try:
-                normalized_status = RulebookReviewStatus(status).value
-            except ValueError as exc:
-                raise RulebookReviewError(
-                    f"Unsupported review status: {status}"
-                ) from exc
-            clauses.append("r.status = ?")
-            params.append(normalized_status)
+            if status == "decided":
+                clauses.append("r.status <> 'pending'")
+            else:
+                try:
+                    normalized_status = RulebookReviewStatus(status).value
+                except ValueError as exc:
+                    raise RulebookReviewError(
+                        f"Unsupported review status: {status}"
+                    ) from exc
+                clauses.append("r.status = ?")
+                params.append(normalized_status)
         if bgg_id is not None:
             clauses.append("g.bgg_id = ?")
             params.append(int(bgg_id))
@@ -334,18 +373,33 @@ class RulebookReviewQueue:
                 + """
                 ORDER BY
                     CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,
-                    r.created_at DESC,
+                    COALESCE(r.decided_at, r.created_at) DESC,
                     r.id
                 LIMIT ? OFFSET ?
                 """,
                 (*params, int(limit), int(offset)),
             ).fetchall()
 
+        items: list[dict[str, Any]] = []
+        corrupt_items: list[dict[str, str]] = []
+        for row in rows:
+            try:
+                items.append(_row_to_item(row))
+            except RulebookReviewCorruptRecord:
+                corrupt_items.append(
+                    {
+                        "id": row["id"],
+                        "error": "corrupt persisted review record",
+                    }
+                )
+
         return {
             "total": int(total),
             "limit": int(limit),
             "offset": int(offset),
-            "items": [_row_to_item(row) for row in rows],
+            "items": items,
+            "corrupt_count": len(corrupt_items),
+            "corrupt_items": corrupt_items,
         }
 
     def decide(
@@ -369,7 +423,24 @@ class RulebookReviewQueue:
             raise RulebookReviewError("Decision note exceeds 2000 characters")
         now = datetime.now(UTC).isoformat()
 
-        with self.database.transaction() as connection:
+        with self.database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                self._select_sql("r.id = ?"),
+                (review_id,),
+            ).fetchone()
+            if row is None:
+                raise RulebookReviewNotFound(
+                    f"Rulebook review {review_id} not found"
+                )
+
+            current = _row_to_item(row)
+            if row["status"] != RulebookReviewStatus.PENDING.value:
+                if row["status"] == target.value:
+                    return current
+                raise RulebookReviewConflict(
+                    f"Rulebook review {review_id} is already {row['status']}"
+                )
+
             updated = connection.execute(
                 """
                 UPDATE rulebook_review_items
@@ -379,18 +450,13 @@ class RulebookReviewQueue:
                 """,
                 (target.value, clean_note, now, now, review_id),
             )
+            if updated.rowcount != 1:
+                raise RulebookReviewConflict(
+                    f"Rulebook review {review_id} changed concurrently"
+                )
             row = connection.execute(
                 self._select_sql("r.id = ?"),
                 (review_id,),
             ).fetchone()
-            if row is None:
-                raise RulebookReviewNotFound(
-                    f"Rulebook review {review_id} not found"
-                )
-            if updated.rowcount == 1:
-                return _row_to_item(row)
-            if row["status"] == target.value:
-                return _row_to_item(row)
-            raise RulebookReviewConflict(
-                f"Rulebook review {review_id} is already {row['status']}"
-            )
+            assert row is not None
+            return _row_to_item(row)

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +14,7 @@ from boardgamecompanion.database import Database
 from boardgamecompanion.main import app
 from boardgamecompanion.rulebook_review import (
     RulebookReviewCandidateMismatch,
+    RulebookReviewConflict,
     RulebookReviewError,
     RulebookReviewNotFound,
     RulebookReviewQueue,
@@ -313,3 +319,294 @@ def test_raw_http_cannot_self_assert_candidate_trust(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 404
+
+
+def test_concurrent_duplicate_submissions_are_idempotent(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+
+    database = Database(settings.database_path)
+    candidate = RulebookCandidate(**community_payload())
+    for index in range(20):
+        round_candidate = RulebookCandidate(
+            **{
+                **community_payload(),
+                "url": f"https://community.example/rules-{index}.pdf",
+            }
+        )
+        barrier = Barrier(2)
+
+        def worker(
+            barrier: Barrier = barrier,
+            round_candidate: RulebookCandidate = round_candidate,
+        ):
+            barrier.wait()
+            return RulebookReviewQueue(database).submit(
+                bgg_id=900001,
+                candidate=round_candidate,
+            )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [
+                future.result()
+                for future in [pool.submit(worker), pool.submit(worker)]
+            ]
+
+        created = sorted(result[1] for result in results)
+        ids = {result[0]["id"] for result in results}
+        assert created == [False, True]
+        assert len(ids) == 1
+
+    assert candidate.provider == "community-example"
+
+
+def test_unrelated_integrity_error_is_not_treated_as_duplicate(
+    tmp_path: Path,
+) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        submit_candidate(community_payload())
+
+    database = Database(settings.database_path)
+    with database.connect() as connection:
+        connection.execute(
+            """
+            CREATE TRIGGER force_review_integrity
+            BEFORE INSERT ON rulebook_review_items
+            WHEN NEW.provider = 'community-example'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced unrelated integrity failure');
+            END
+            """
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="forced unrelated"):
+        submit_candidate(community_payload())
+
+
+def test_database_rejects_impossible_review_states(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(community_payload())
+
+    invalid_updates = [
+        (
+            "status='pending', policy_action='review', "
+            "decision_source='user', decided_at='x'"
+        ),
+        (
+            "status='approved', policy_action='review', "
+            "decision_source='user', decided_at=NULL"
+        ),
+        (
+            "status='rejected', policy_action='review', "
+            "decision_source='policy', decided_at=NULL"
+        ),
+        (
+            "status='pending', policy_action='review', "
+            "decision_source=NULL, decided_at='x'"
+        ),
+        (
+            "status='pending', policy_action='review', "
+            "decision_source=NULL, decision_note='spurious', decided_at=NULL"
+        ),
+    ]
+    database = Database(settings.database_path)
+    for update in invalid_updates:
+        with (
+            database.connect() as connection,
+            pytest.raises(sqlite3.IntegrityError),
+        ):
+            connection.execute(
+                f"UPDATE rulebook_review_items SET {update} WHERE id = ?",
+                (item["id"],),
+            )
+
+
+def test_corrupt_review_rows_are_quarantined_and_not_decidable(
+    tmp_path: Path,
+) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(community_payload())
+
+        database = Database(settings.database_path)
+        with database.connect() as connection:
+            connection.execute(
+                "UPDATE rulebook_review_items SET candidate_json = '{' WHERE id = ?",
+                (item["id"],),
+            )
+
+        listing = client.get(
+            "/api/rulebook-reviews?status=pending&limit=50&offset=0"
+        )
+        assert listing.status_code == 200
+        assert listing.json()["items"] == []
+        assert listing.json()["corrupt_count"] == 1
+        assert listing.json()["corrupt_items"] == [
+            {
+                "id": item["id"],
+                "error": "corrupt persisted review record",
+            }
+        ]
+        assert client.get(
+            f"/api/rulebook-reviews/{item['id']}"
+        ).status_code == 500
+        assert client.post(
+            f"/api/rulebook-reviews/{item['id']}/decision",
+            json={"decision": "approved"},
+        ).status_code == 500
+        with database.connect() as connection:
+            row = connection.execute(
+                "SELECT status FROM rulebook_review_items WHERE id = ?",
+                (item["id"],),
+            ).fetchone()
+        assert row["status"] == "pending"
+
+
+def test_semantically_unsafe_snapshot_is_quarantined(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(community_payload())
+
+        snapshot = item["candidate"]
+        snapshot["url"] = "javascript:alert(1)"
+        serialized = json.dumps(
+            snapshot,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        database = Database(settings.database_path)
+        with database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE rulebook_review_items
+                SET candidate_json = ?, candidate_key = ?, url = ?
+                WHERE id = ?
+                """,
+                (serialized, digest, "javascript:alert(1)", item["id"]),
+            )
+
+        listing = client.get(
+            "/api/rulebook-reviews?status=pending&limit=50&offset=0"
+        ).json()
+        assert listing["items"] == []
+        assert listing["corrupt_count"] == 1
+
+
+def test_decided_filter_and_backend_pagination(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        for index in range(101):
+            submit_candidate(
+                community_payload(
+                    url=f"https://community.example/paged-{index}.pdf",
+                )
+            )
+
+        first = client.get(
+            "/api/rulebook-reviews?status=pending&limit=50&offset=0"
+        ).json()
+        last = client.get(
+            "/api/rulebook-reviews?status=pending&limit=50&offset=100"
+        ).json()
+        assert first["total"] == 101
+        assert len(first["items"]) == 50
+        assert len(last["items"]) == 1
+
+        review_id = first["items"][0]["id"]
+        response = client.post(
+            f"/api/rulebook-reviews/{review_id}/decision",
+            json={"decision": "approved"},
+        )
+        assert response.status_code == 200
+        decided = client.get(
+            "/api/rulebook-reviews?status=decided&limit=50&offset=0"
+        ).json()
+        assert decided["total"] == 1
+        assert decided["items"][0]["id"] == review_id
+
+
+def test_concurrent_opposite_decisions_converge_without_lost_update(
+    tmp_path: Path,
+) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(community_payload())
+
+    database = Database(settings.database_path)
+    barrier = Barrier(2)
+
+    def decide(value: str):
+        barrier.wait()
+        try:
+            return RulebookReviewQueue(database).decide(
+                item["id"],
+                decision=value,
+            )
+        except RulebookReviewConflict as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            future.result()
+            for future in [
+                pool.submit(decide, "approved"),
+                pool.submit(decide, "rejected"),
+            ]
+        ]
+    successes = [result for result in results if isinstance(result, dict)]
+    conflicts = [
+        result for result in results
+        if isinstance(result, RulebookReviewConflict)
+    ]
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+    assert successes[0]["status"] in {"approved", "rejected"}
+
+
+def test_concurrent_identical_decisions_preserve_first_audit_data(
+    tmp_path: Path,
+) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        item, _ = submit_candidate(
+            community_payload(url="https://community.example/same-decision.pdf")
+        )
+
+    database = Database(settings.database_path)
+    barrier = Barrier(2)
+
+    def decide(note: str):
+        barrier.wait()
+        return RulebookReviewQueue(database).decide(
+            item["id"],
+            decision="approved",
+            note=note,
+        )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [
+            future.result()
+            for future in [
+                pool.submit(decide, "first contender"),
+                pool.submit(decide, "second contender"),
+            ]
+        ]
+
+    assert {result["status"] for result in results} == {"approved"}
+    assert len({result["decided_at"] for result in results}) == 1
+    assert len({result["decision_note"] for result in results}) == 1
+    assert results[0]["decision_note"] in {
+        "first contender",
+        "second contender",
+    }

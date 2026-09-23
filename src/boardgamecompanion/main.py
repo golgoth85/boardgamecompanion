@@ -42,6 +42,7 @@ from boardgamecompanion.floppy import (
 )
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
+    RulebookReviewCorruptRecord,
     RulebookReviewError,
     RulebookReviewNotFound,
     RulebookReviewQueue,
@@ -379,7 +380,13 @@ def list_rulebook_reviews(
 def get_rulebook_review(review_id: str) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    item = RulebookReviewQueue(database).get(review_id)
+    try:
+        item = RulebookReviewQueue(database).get(review_id)
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="Rulebook review not found")
     return item
@@ -402,6 +409,11 @@ def decide_rulebook_review(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RulebookReviewConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
     except RulebookReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

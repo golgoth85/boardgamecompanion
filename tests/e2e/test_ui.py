@@ -758,12 +758,37 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
             "decided_at": None,
         }
 
-    def list_route(route):
+    def pending_route(route):
+        items = [item()] if state["status"] == "pending" else []
         route.fulfill(
             status=200,
             content_type="application/json",
             body=__import__("json").dumps(
-                {"total": 1, "limit": 100, "offset": 0, "items": [item()]}
+                {
+                    "total": len(items),
+                    "limit": 50,
+                    "offset": 0,
+                    "items": items,
+                    "corrupt_count": 0,
+                    "corrupt_items": [],
+                }
+            ),
+        )
+
+    def decided_route(route):
+        items = [item()] if state["status"] != "pending" else []
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "total": len(items),
+                    "limit": 50,
+                    "offset": 0,
+                    "items": items,
+                    "corrupt_count": 0,
+                    "corrupt_items": [],
+                }
             ),
         )
 
@@ -778,7 +803,14 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         )
 
     try:
-        page.route(re.compile(r".*/api/rulebook-reviews\?limit=100$"), list_route)
+        page.route(
+            re.compile(r".*/api/rulebook-reviews\?status=pending&limit=50&offset=0$"),
+            pending_route,
+        )
+        page.route(
+            re.compile(r".*/api/rulebook-reviews\?status=decided&limit=50&offset=0$"),
+            decided_route,
+        )
         page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
 
         page.goto(live_server)
@@ -794,5 +826,186 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         expect(page.locator("#toast")).to_contain_text("Candidato approvato")
         expect(page.locator(".review-status-approved")).to_have_text("Approvato")
         assert decisions == [{"decision": "approved"}]
+    finally:
+        context.close()
+
+
+def test_review_queue_ui_paginates_all_pending_items(browser, live_server):
+    context, page = new_page(browser)
+
+    def make_item(index):
+        return {
+            "id": f"review-{index}",
+            "bgg_id": 900001,
+            "game_title": f"Review Game {index:03d}",
+            "candidate_key": f"{index:064x}",
+            "candidate": {
+                "provider": "community-example",
+                "source_kind": "community",
+                "url": f"https://community.example/{index}.pdf",
+                "language": "it",
+                "document_type": "rulebook",
+                "official": False,
+                "confidence": 70,
+            },
+            "policy_action": "review",
+            "policy_reasons": ["review:unofficial-source"],
+            "status": "pending",
+            "decision_source": None,
+            "decision_note": None,
+            "created_at": "2026-09-23T18:00:00+00:00",
+            "updated_at": "2026-09-23T18:00:00+00:00",
+            "decided_at": None,
+        }
+    items = [make_item(index) for index in range(101)]
+
+    def pending_route(route):
+        match = re.search(r"offset=(\d+)$", route.request.url)
+        assert match is not None
+        offset = int(match.group(1))
+        page_items = items[offset:offset + 50]
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "total": len(items),
+                    "limit": 50,
+                    "offset": offset,
+                    "items": page_items,
+                    "corrupt_count": 0,
+                    "corrupt_items": [],
+                }
+            ),
+        )
+
+    def decided_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "total": 0,
+                    "limit": 50,
+                    "offset": 0,
+                    "items": [],
+                    "corrupt_count": 0,
+                    "corrupt_items": [],
+                }
+            ),
+        )
+    try:
+        page.route(
+            re.compile(
+                r".*/api/rulebook-reviews\?status=pending&limit=50&offset=\d+$"
+            ),
+            pending_route,
+        )
+        page.route(
+            re.compile(r".*/api/rulebook-reviews\?status=decided&limit=50&offset=0$"),
+            decided_route,
+        )
+
+        page.goto(f"{live_server}/reviews")
+        expect(page.locator(".review-counter")).to_have_text("101 pending")
+        expect(page.locator(".review-card")).to_have_count(50)
+        expect(page.locator(".review-pagination")).to_contain_text("1–50 di 101")
+
+        page.get_by_role("button", name="Successiva").click()
+        expect(page.locator(".review-card")).to_have_count(50)
+        expect(page.locator(".review-pagination")).to_contain_text("51–100 di 101")
+
+        page.get_by_role("button", name="Successiva").click()
+        expect(page.locator(".review-card")).to_have_count(1)
+        expect(page.locator(".review-card")).to_contain_text("Review Game 100")
+        expect(page.locator(".review-pagination")).to_contain_text("101–101 di 101")
+    finally:
+        context.close()
+
+
+def test_review_queue_ui_refreshes_after_conflicting_decision(browser, live_server):
+    context, page = new_page(browser)
+    state = {"status": "pending", "decision_source": None}
+
+    def item():
+        return {
+            "id": "review-conflict",
+            "bgg_id": 900001,
+            "game_title": "Concurrent Game",
+            "candidate_key": "b" * 64,
+            "candidate": {
+                "provider": "community-example",
+                "source_kind": "community",
+                "url": "https://community.example/conflict.pdf",
+                "language": "it",
+                "document_type": "rulebook",
+                "official": False,
+                "confidence": 70,
+            },
+            "policy_action": "review",
+            "policy_reasons": ["review:unofficial-source"],
+            "status": state["status"],
+            "decision_source": state["decision_source"],
+            "decision_note": None,
+            "created_at": "2026-09-23T18:00:00+00:00",
+            "updated_at": "2026-09-23T18:00:00+00:00",
+            "decided_at": None,
+        }
+    def list_payload(pending):
+        items = [item()] if (state["status"] == "pending") is pending else []
+        return __import__("json").dumps(
+            {
+                "total": len(items),
+                "limit": 50,
+                "offset": 0,
+                "items": items,
+                "corrupt_count": 0,
+                "corrupt_items": [],
+            }
+        )
+
+    def pending_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=list_payload(True),
+        )
+
+    def decided_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=list_payload(False),
+        )
+
+    def conflict_route(route):
+        state["status"] = "rejected"
+        state["decision_source"] = "user"
+        route.fulfill(
+            status=409,
+            content_type="application/json",
+            body='{"detail":"Rulebook review is already rejected"}',
+        )
+    try:
+        page.route(
+            re.compile(r".*/api/rulebook-reviews\?status=pending&limit=50&offset=0$"),
+            pending_route,
+        )
+        page.route(
+            re.compile(r".*/api/rulebook-reviews\?status=decided&limit=50&offset=0$"),
+            decided_route,
+        )
+        page.route(
+            "**/api/rulebook-reviews/review-conflict/decision",
+            conflict_route,
+        )
+
+        page.goto(f"{live_server}/reviews")
+        expect(page.get_by_role("button", name="Approva")).to_be_visible()
+        page.get_by_role("button", name="Approva").click()
+
+        expect(page.locator("#toast")).to_contain_text("already rejected")
+        expect(page.locator(".review-status-rejected")).to_have_text("Rifiutato")
+        expect(page.get_by_role("button", name="Approva")).to_have_count(0)
     finally:
         context.close()

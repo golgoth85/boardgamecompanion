@@ -838,6 +838,26 @@ a { color: inherit; text-decoration: none; }
 .review-decided-title {
   margin-top: .8rem;
 }
+.review-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  color: var(--muted);
+  font-size: .8rem;
+}
+.review-pagination > div {
+  display: flex;
+  gap: .45rem;
+}
+.review-warning {
+  padding: .75rem .85rem;
+  border: 1px solid rgba(251,113,133,.35);
+  border-radius: 12px;
+  background: rgba(251,113,133,.08);
+  color: #fecdd3;
+  font-size: .82rem;
+}
 
 .toast {
   position: fixed;
