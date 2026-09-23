@@ -14,6 +14,8 @@ from boardgamecompanion.floppy import (
     apply_floppy_sync,
     build_sync_preview,
     load_floppy_links,
+    reconcile_floppy_links,
+    save_floppy_link,
 )
 from boardgamecompanion.main import app
 from boardgamecompanion.settings import settings
@@ -737,6 +739,108 @@ def test_apply_sync_rejects_stale_plan(tmp_path: Path) -> None:
             client,
             expected_plan_hash="0" * 64,
         )
+
+
+def test_reconcile_floppy_links_repairs_exact_bgg_collection_rows(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    _insert_local_owned(database, local_game(1001, "Linked", 2020))
+    _insert_local_owned(database, local_game(1002, "Needs Repair", 2021))
+
+    save_floppy_link(
+        database,
+        bgg_id=1001,
+        source="bgg",
+        media_id="1001",
+        item_db_id=51,
+        collection_entry_id=61,
+        link_method="bgg",
+    )
+
+    collection = [
+        collection_row(
+            entry_id=61,
+            media_id="1001",
+            source="bgg",
+            title="Linked",
+        ),
+        collection_row(
+            entry_id=62,
+            media_id="1002",
+            source="bgg",
+            title="Needs Repair",
+        ),
+        collection_row(
+            entry_id=63,
+            media_id="1002",
+            source="manual",
+            title="Manual lookalike",
+        ),
+        collection_row(
+            entry_id=64,
+            media_id="9999",
+            source="bgg",
+            title="Not local",
+        ),
+    ]
+
+    first = reconcile_floppy_links(database, collection)
+    links = load_floppy_links(database)
+
+    assert first["local_owned"] == 2
+    assert first["existing_links"] == 1
+    assert first["already_linked"] == 1
+    assert first["repaired"] == 1
+    assert first["repaired_bgg_ids"] == [1002]
+    assert first["ambiguous"] == 0
+    assert first["remote_writes"] == 0
+    assert links[1002]["source"] == "bgg"
+    assert links[1002]["media_id"] == "1002"
+    assert links[1002]["collection_entry_id"] == 62
+    assert links[1002]["link_method"] == "reconciled_bgg_collection"
+
+    second = reconcile_floppy_links(database, collection)
+    assert second["repaired"] == 0
+    assert second["already_linked"] == 2
+    assert len(load_floppy_links(database)) == 2
+
+
+def test_reconcile_floppy_links_refuses_duplicate_collection_entries(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    _insert_local_owned(database, local_game(2001, "Duplicate Remote", 2024))
+
+    collection = [
+        collection_row(
+            entry_id=71,
+            media_id="2001",
+            source="bgg",
+            title="Duplicate Remote",
+        ),
+        collection_row(
+            entry_id=72,
+            media_id="2001",
+            source="bgg",
+            title="Duplicate Remote",
+        ),
+    ]
+
+    result = reconcile_floppy_links(database, collection)
+
+    assert result["repaired"] == 0
+    assert result["ambiguous"] == 1
+    assert result["ambiguous_items"] == [
+        {
+            "bgg_id": 2001,
+            "reason": "duplicate_collection_entries",
+            "count": 2,
+        }
+    ]
+    assert load_floppy_links(database) == {}
 
 
 def test_floppy_api_reports_unconfigured_without_network(
