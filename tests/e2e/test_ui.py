@@ -778,7 +778,7 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         )
 
     try:
-        page.route(re.compile(r".*/api/rulebook-reviews\\?limit=100$"), list_route)
+        page.route(re.compile(r".*/api/rulebook-reviews\?limit=100$"), list_route)
         page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
 
         page.goto(live_server)
