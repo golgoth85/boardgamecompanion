@@ -494,6 +494,127 @@ def save_floppy_link(
         )
 
 
+def reconcile_floppy_links(
+    database: Database,
+    collection_entries: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Backfill missing local links from exact BGG-backed collection rows.
+
+    This is deliberately local-only: callers may read Floppy's collection, but
+    this function never creates, updates or deletes remote Floppy state.
+    """
+
+    local_ids = {int(item["bgg_id"]) for item in local_owned_games(database)}
+    existing = load_floppy_links(database)
+    entries = list(collection_entries)
+
+    by_bgg: dict[int, list[dict[str, Any]]] = {}
+    ignored = 0
+    for entry in entries:
+        source, media_id = _remote_coordinate(entry)
+        bgg_id = _remote_bgg_id(entry)
+        if (
+            source not in {"bgg", "boardgamegeek"}
+            or bgg_id is None
+            or str(bgg_id) != media_id
+            or bgg_id not in local_ids
+        ):
+            ignored += 1
+            continue
+        by_bgg.setdefault(bgg_id, []).append(entry)
+
+    remote_owners = {
+        (
+            str(link.get("source") or "").lower(),
+            str(link.get("media_id") or ""),
+        ): bgg_id
+        for bgg_id, link in existing.items()
+    }
+
+    repaired_ids: list[int] = []
+    ambiguous_items: list[dict[str, Any]] = []
+    already_linked = 0
+    not_found = 0
+
+    now = datetime.now(UTC).isoformat()
+    with database.transaction() as connection:
+        for bgg_id in sorted(local_ids):
+            if bgg_id in existing:
+                already_linked += 1
+                continue
+
+            candidates = by_bgg.get(bgg_id, [])
+            if not candidates:
+                not_found += 1
+                continue
+            if len(candidates) != 1:
+                ambiguous_items.append(
+                    {
+                        "bgg_id": bgg_id,
+                        "reason": "duplicate_collection_entries",
+                        "count": len(candidates),
+                    }
+                )
+                continue
+
+            entry = candidates[0]
+            source, media_id = _remote_coordinate(entry)
+            coordinate = (source, media_id)
+            other_owner = remote_owners.get(coordinate)
+            if other_owner is not None and other_owner != bgg_id:
+                ambiguous_items.append(
+                    {
+                        "bgg_id": bgg_id,
+                        "reason": "remote_coordinate_already_linked",
+                        "linked_bgg_id": other_owner,
+                    }
+                )
+                continue
+
+            nested = entry.get("item")
+            item_db_id = (
+                _as_int(nested.get("id"))
+                if isinstance(nested, dict)
+                else None
+            )
+            collection_entry_id = _as_int(entry.get("id"))
+
+            connection.execute(
+                """
+                INSERT INTO floppy_links (
+                    bgg_id, source, media_id, item_db_id,
+                    collection_entry_id, link_method, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    bgg_id,
+                    source,
+                    media_id,
+                    item_db_id,
+                    collection_entry_id,
+                    "reconciled_bgg_collection",
+                    now,
+                    now,
+                ),
+            )
+            remote_owners[coordinate] = bgg_id
+            repaired_ids.append(bgg_id)
+
+    return {
+        "local_owned": len(local_ids),
+        "remote_collection_entries": len(entries),
+        "existing_links": len(existing),
+        "already_linked": already_linked,
+        "repaired": len(repaired_ids),
+        "repaired_bgg_ids": repaired_ids,
+        "not_found": not_found,
+        "ambiguous": len(ambiguous_items),
+        "ambiguous_items": ambiguous_items,
+        "ignored_remote_entries": ignored,
+        "remote_writes": 0,
+    }
+
+
 def build_sync_preview(
     local_games: Iterable[dict[str, Any]],
     remote_games: Iterable[dict[str, Any]],
