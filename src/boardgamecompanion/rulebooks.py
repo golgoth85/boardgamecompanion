@@ -16,6 +16,9 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 import idna
 
 from boardgamecompanion.documents import normalize_document_type, normalize_language
+from boardgamecompanion.network_security import (
+    is_disallowed_public_ip as _project_ip_disallowed,
+)
 
 
 class RulebookSource(StrEnum):
@@ -92,17 +95,7 @@ def _normalize_positive_identifier(value: Any, *, field_name: str) -> int:
 def _is_disallowed_public_ip(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> bool:
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        return True
-    return (
-        not address.is_global
-        or address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_unspecified
-        or address.is_reserved
-    )
+    return _project_ip_disallowed(address)
 
 
 def _looks_like_legacy_ipv4(host: str) -> bool:
@@ -203,7 +196,7 @@ def _validate_percent_encoding(value: str) -> None:
         index += 3
 
 
-def _canonical_http_url(value: str) -> str:
+def canonical_http_url(value: str) -> str:
     text = str(value or "").strip()
     if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in text):
         raise ValueError("Rulebook candidate URL must not contain whitespace or controls")
@@ -239,6 +232,11 @@ def _canonical_http_url(value: str) -> str:
         normalized,
         query_present=query_present,
     )
+
+
+# Backward-compatible internal alias. The validator is now an explicit shared
+# P5A/P5B security boundary, but older internal callers may still import it.
+_canonical_http_url = canonical_http_url
 
 
 def _normalize_percent_encoding(value: str) -> str:
@@ -475,7 +473,7 @@ class RulebookCandidate:
 
         object.__setattr__(self, "provider", provider)
         object.__setattr__(self, "source_kind", source_kind)
-        object.__setattr__(self, "url", _canonical_http_url(self.url))
+        object.__setattr__(self, "url", canonical_http_url(self.url))
         object.__setattr__(self, "language", normalize_language(self.language))
         object.__setattr__(
             self,
