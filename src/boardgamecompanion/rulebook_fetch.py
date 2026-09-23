@@ -6,23 +6,23 @@ import hashlib
 import http.client
 import ipaddress
 import os
+import queue
 import socket
 import ssl
 import tempfile
-from collections.abc import Mapping, Sequence
+import threading
+import time
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
-from boardgamecompanion.rulebooks import (
-    RulebookCandidate,
-    _canonical_http_url,
-    _is_disallowed_public_ip,
-)
+from boardgamecompanion.network_security import is_disallowed_public_ip
+from boardgamecompanion.rulebooks import RulebookCandidate, canonical_http_url
 
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _SAFE_HTTP_METADATA = (
@@ -70,6 +70,7 @@ class RulebookFetchFailureCode(StrEnum):
 class RulebookFetchPolicy:
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 15.0
+    fetch_timeout_seconds: float = 300.0
     max_bytes: int = 32 * 1024 * 1024
     max_redirects: int = 5
     chunk_size: int = 64 * 1024
@@ -81,6 +82,8 @@ class RulebookFetchPolicy:
             raise ValueError("connect_timeout_seconds must be positive")
         if self.read_timeout_seconds <= 0:
             raise ValueError("read_timeout_seconds must be positive")
+        if self.fetch_timeout_seconds <= 0:
+            raise ValueError("fetch_timeout_seconds must be positive")
         if self.max_bytes <= 0:
             raise ValueError("max_bytes must be positive")
         if self.max_redirects < 0:
@@ -122,6 +125,7 @@ class RulebookFetchFailure:
     message: str
     url: str
     status_code: int | None = None
+    attempted_redirect_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,20 +164,73 @@ class RulebookFetchResult:
 
 @runtime_checkable
 class AddressResolver(Protocol):
-    def resolve(self, hostname: str, port: int) -> Sequence[str]:
+    def resolve(
+        self,
+        hostname: str,
+        port: int,
+        *,
+        timeout: float,
+    ) -> Sequence[str]:
         ...
 
 
 class SocketAddressResolver:
-    def resolve(self, hostname: str, port: int) -> Sequence[str]:
-        records = socket.getaddrinfo(
-            hostname,
-            port,
-            family=socket.AF_UNSPEC,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
-        )
-        return tuple(record[4][0] for record in records)
+    # Bound unresolved libc/OS resolver calls globally. A timed-out getaddrinfo()
+    # may continue in its daemon worker, but cannot create unbounded worker growth.
+    _resolution_slots = threading.BoundedSemaphore(8)
+
+    def resolve(
+        self,
+        hostname: str,
+        port: int,
+        *,
+        timeout: float,
+    ) -> Sequence[str]:
+        if timeout <= 0:
+            raise TimeoutError("DNS resolution deadline exceeded")
+        started = time.monotonic()
+        if not self._resolution_slots.acquire(timeout=timeout):
+            raise TimeoutError("DNS resolution deadline exceeded")
+
+        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+        def run_resolution() -> None:
+            try:
+                records = socket.getaddrinfo(
+                    hostname,
+                    port,
+                    family=socket.AF_UNSPEC,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                )
+                result: tuple[bool, object] = (
+                    True,
+                    tuple(record[4][0] for record in records),
+                )
+            except OSError as exc:
+                result = (False, exc)
+            finally:
+                self._resolution_slots.release()
+            result_queue.put(result)
+
+        worker = threading.Thread(target=run_resolution, daemon=True)
+        try:
+            worker.start()
+        except RuntimeError:
+            self._resolution_slots.release()
+            raise
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("DNS resolution deadline exceeded")
+        try:
+            succeeded, value = result_queue.get(timeout=remaining)
+        except queue.Empty as exc:
+            raise TimeoutError("DNS resolution deadline exceeded") from exc
+        if not succeeded:
+            assert isinstance(value, Exception)
+            raise value
+        assert isinstance(value, tuple)
+        return value
 
 
 @runtime_checkable
@@ -199,8 +256,37 @@ class HTTPTransport(Protocol):
         *,
         connect_timeout: float,
         read_timeout: float,
+        deadline: float | None = None,
     ) -> HTTPResponseStream:
         ...
+
+
+def _remaining_timeout(deadline: float | None, phase_limit: float) -> float:
+    if deadline is None:
+        return phase_limit
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Rulebook fetch deadline exceeded")
+    return min(phase_limit, remaining)
+
+
+def _deadline_expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def _start_deadline_timer(
+    close_callback: Callable[[], None],
+    deadline: float | None,
+) -> threading.Timer | None:
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Rulebook fetch deadline exceeded")
+    timer = threading.Timer(remaining, close_callback)
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def _open_numeric_socket(address: str, port: int, timeout: float):
@@ -279,18 +365,23 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         address: str,
         connect_timeout: float,
         read_timeout: float,
+        deadline: float | None,
     ):
         super().__init__(hostname, port=port, timeout=connect_timeout)
         self._validated_address = address
         self._read_timeout = read_timeout
+        self._deadline = deadline
 
     def connect(self) -> None:
+        self.timeout = _remaining_timeout(self._deadline, self.timeout)
         self.sock = _open_numeric_socket(
             self._validated_address,
             self.port,
             self.timeout,
         )
-        self.sock.settimeout(self._read_timeout)
+        self.sock.settimeout(
+            _remaining_timeout(self._deadline, self._read_timeout)
+        )
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -302,6 +393,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         address: str,
         connect_timeout: float,
         read_timeout: float,
+        deadline: float | None,
         context: ssl.SSLContext,
     ):
         super().__init__(
@@ -312,22 +404,30 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         )
         self._validated_address = address
         self._read_timeout = read_timeout
+        self._deadline = deadline
 
     def connect(self) -> None:
-        raw_socket = _open_numeric_socket(
+        self.timeout = _remaining_timeout(self._deadline, self.timeout)
+        self.sock = _open_numeric_socket(
             self._validated_address,
             self.port,
             self.timeout,
         )
         try:
+            self.sock.settimeout(
+                _remaining_timeout(self._deadline, self.timeout)
+            )
             self.sock = _wrap_tls_socket(
-                raw_socket,
+                self.sock,
                 self._context,
                 self.host,
             )
-            self.sock.settimeout(self._read_timeout)
-        except BaseException:
-            raw_socket.close()
+            self.sock.settimeout(
+                _remaining_timeout(self._deadline, self._read_timeout)
+            )
+        except Exception:
+            if self.sock is not None:
+                self.sock.close()
             raise
 
 
@@ -336,9 +436,16 @@ class _LiveHTTPResponse:
         self,
         connection: http.client.HTTPConnection,
         response: http.client.HTTPResponse,
+        *,
+        read_timeout: float,
+        deadline: float | None,
+        deadline_timer: threading.Timer | None,
     ):
         self._connection = connection
         self._response = response
+        self._read_timeout = read_timeout
+        self._deadline = deadline
+        self._deadline_timer = deadline_timer
         self.status = response.status
         self.reason = response.reason
         normalized: dict[str, str] = {}
@@ -351,9 +458,23 @@ class _LiveHTTPResponse:
         self.headers = MappingProxyType(normalized)
 
     def read(self, amount: int) -> bytes:
-        return self._response.read(amount)
+        if self._connection.sock is not None:
+            self._connection.sock.settimeout(
+                _remaining_timeout(self._deadline, self._read_timeout)
+            )
+        try:
+            data = self._response.read1(amount)
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            if _deadline_expired(self._deadline):
+                raise TimeoutError("Rulebook fetch deadline exceeded") from exc
+            raise
+        if _deadline_expired(self._deadline):
+            raise TimeoutError("Rulebook fetch deadline exceeded")
+        return data
 
     def close(self) -> None:
+        if self._deadline_timer is not None:
+            self._deadline_timer.cancel()
         try:
             self._response.close()
         finally:
@@ -377,17 +498,23 @@ class PinnedHTTPTransport:
         *,
         connect_timeout: float,
         read_timeout: float,
+        deadline: float | None = None,
     ) -> HTTPResponseStream:
         last_error: BaseException | None = None
         for address in target.addresses:
+            effective_connect_timeout = _remaining_timeout(
+                deadline,
+                connect_timeout,
+            )
             connection: http.client.HTTPConnection
             if target.scheme == "https":
                 connection = _PinnedHTTPSConnection(
                     target.hostname,
                     target.port,
                     address=address,
-                    connect_timeout=connect_timeout,
+                    connect_timeout=effective_connect_timeout,
                     read_timeout=read_timeout,
+                    deadline=deadline,
                     context=self.ssl_context,
                 )
             else:
@@ -395,21 +522,41 @@ class PinnedHTTPTransport:
                     target.hostname,
                     target.port,
                     address=address,
-                    connect_timeout=connect_timeout,
+                    connect_timeout=effective_connect_timeout,
                     read_timeout=read_timeout,
+                    deadline=deadline,
                 )
+            deadline_timer = _start_deadline_timer(connection.close, deadline)
             try:
                 connection.request(
                     "GET",
                     request_target,
                     headers=dict(headers),
                 )
+                if connection.sock is not None:
+                    connection.sock.settimeout(
+                        _remaining_timeout(deadline, read_timeout)
+                    )
+                response = connection.getresponse()
+                if deadline_timer is not None:
+                    deadline_timer.cancel()
+                if _deadline_expired(deadline):
+                    response.close()
+                    raise TimeoutError("Rulebook fetch deadline exceeded")
+                deadline_timer = _start_deadline_timer(response.close, deadline)
                 return _LiveHTTPResponse(
                     connection,
-                    connection.getresponse(),
+                    response,
+                    read_timeout=read_timeout,
+                    deadline=deadline,
+                    deadline_timer=deadline_timer,
                 )
-            except (OSError, http.client.HTTPException) as exc:
+            except (OSError, ValueError, http.client.HTTPException) as exc:
+                if deadline_timer is not None:
+                    deadline_timer.cancel()
                 connection.close()
+                if _deadline_expired(deadline):
+                    raise TimeoutError("Rulebook fetch deadline exceeded") from exc
                 last_error = exc
         if last_error is None:
             raise OSError("No validated address available for connection")
@@ -424,11 +571,21 @@ class _FetchAbort(RuntimeError):
         *,
         url: str,
         status_code: int | None = None,
+        attempted_redirect_url: str | None = None,
+        content_type: str | None = None,
+        byte_size: int = 0,
+        sha256: str | None = None,
+        http_metadata: Mapping[str, str] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.url = url
         self.status_code = status_code
+        self.attempted_redirect_url = attempted_redirect_url
+        self.content_type = content_type
+        self.byte_size = byte_size
+        self.sha256 = sha256
+        self.http_metadata = dict(http_metadata or {})
 
 
 class RulebookFetcher:
@@ -453,16 +610,19 @@ class RulebookFetcher:
         current_url = requested_url
         redirects: list[RedirectHop] = []
         visited = {current_url}
+        deadline = time.monotonic() + self.policy.fetch_timeout_seconds
 
         try:
             while True:
-                target = self._validated_target(current_url)
+                self._ensure_deadline(deadline, current_url)
+                target = self._validated_target(current_url, deadline=deadline)
                 response = self.transport.request(
                     target,
                     self._request_target(current_url),
                     self._request_headers(target),
                     connect_timeout=self.policy.connect_timeout_seconds,
                     read_timeout=self.policy.read_timeout_seconds,
+                    deadline=deadline,
                 )
                 try:
                     if response.status in _REDIRECT_STATUSES:
@@ -476,6 +636,7 @@ class RulebookFetcher:
                         next_url = self._redirect_target(
                             current_url,
                             response.headers.get("location"),
+                            status_code=response.status,
                         )
                         hop = RedirectHop(
                             status_code=response.status,
@@ -500,6 +661,10 @@ class RulebookFetcher:
                             f"Unexpected HTTP status {response.status}",
                             url=current_url,
                             status_code=response.status,
+                            content_type=self._normalized_content_type(
+                                response.headers.get("content-type")
+                            ),
+                            http_metadata=self._http_metadata(response.headers),
                         )
 
                     return self._consume_pdf_response(
@@ -508,10 +673,19 @@ class RulebookFetcher:
                         final_url=current_url,
                         redirects=tuple(redirects),
                         response=response,
+                        deadline=deadline,
                     )
                 finally:
                     response.close()
         except _FetchAbort as exc:
+            if (
+                exc.status_code is None
+                and redirects
+                and current_url == redirects[-1].to_url
+            ):
+                exc.status_code = redirects[-1].status_code
+                if exc.attempted_redirect_url is None:
+                    exc.attempted_redirect_url = current_url
             return self._failure_result(
                 candidate,
                 requested_url,
@@ -556,9 +730,24 @@ class RulebookFetcher:
                 ),
             )
 
-    def _validated_target(self, url: str) -> ValidatedHTTPSTarget:
+    @staticmethod
+    def _ensure_deadline(deadline: float, url: str) -> None:
+        if time.monotonic() >= deadline:
+            raise _FetchAbort(
+                RulebookFetchFailureCode.NETWORK_TIMEOUT,
+                "Rulebook fetch deadline exceeded",
+                url=url,
+            )
+
+    def _validated_target(
+        self,
+        url: str,
+        *,
+        deadline: float,
+    ) -> ValidatedHTTPSTarget:
+        self._ensure_deadline(deadline, url)
         try:
-            canonical = _canonical_http_url(url)
+            canonical = canonical_http_url(url)
         except ValueError as exc:
             raise _FetchAbort(
                 RulebookFetchFailureCode.INVALID_REDIRECT,
@@ -585,8 +774,21 @@ class RulebookFetcher:
             raw_addresses: Sequence[str] = (literal.compressed,)
         else:
             try:
-                raw_addresses = self.resolver.resolve(hostname, port)
-            except (OSError, socket.gaierror) as exc:
+                raw_addresses = self.resolver.resolve(
+                    hostname,
+                    port,
+                    timeout=_remaining_timeout(
+                        deadline,
+                        self.policy.fetch_timeout_seconds,
+                    ),
+                )
+            except TimeoutError as exc:
+                raise _FetchAbort(
+                    RulebookFetchFailureCode.NETWORK_TIMEOUT,
+                    str(exc) or "DNS resolution deadline exceeded",
+                    url=canonical,
+                ) from exc
+            except OSError as exc:
                 raise _FetchAbort(
                     RulebookFetchFailureCode.DNS_FAILURE,
                     str(exc) or "DNS resolution failed",
@@ -598,6 +800,8 @@ class RulebookFetcher:
                     str(exc) or exc.__class__.__name__,
                     url=canonical,
                 ) from exc
+
+        self._ensure_deadline(deadline, canonical)
 
         if not raw_addresses:
             raise _FetchAbort(
@@ -616,7 +820,7 @@ class RulebookFetcher:
                     "DNS resolution returned a non-IP address",
                     url=canonical,
                 ) from exc
-            if _is_disallowed_public_ip(address):
+            if is_disallowed_public_ip(address):
                 raise _FetchAbort(
                     RulebookFetchFailureCode.SSRF_BLOCKED,
                     f"Resolved address is not public: {address.compressed}",
@@ -637,22 +841,54 @@ class RulebookFetcher:
             addresses=ordered_addresses,
         )
 
-    def _redirect_target(self, current_url: str, location: str | None) -> str:
-        if location is None or not location.strip():
+    def _redirect_target(
+        self,
+        current_url: str,
+        location: str | None,
+        *,
+        status_code: int,
+    ) -> str:
+        if location is None or not location:
             raise _FetchAbort(
                 RulebookFetchFailureCode.INVALID_REDIRECT,
                 "Redirect response is missing a Location header",
                 url=current_url,
+                status_code=status_code,
             )
         if len(location) > 8192:
             raise _FetchAbort(
                 RulebookFetchFailureCode.INVALID_REDIRECT,
                 "Redirect Location is too long",
                 url=current_url,
+                status_code=status_code,
+            )
+        if (
+            "\\" in location
+            or any(
+                char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F
+                for char in location
+            )
+        ):
+            raise _FetchAbort(
+                RulebookFetchFailureCode.INVALID_REDIRECT,
+                "Redirect Location contains whitespace, controls, or backslashes",
+                url=current_url,
+                status_code=status_code,
             )
 
         try:
-            next_url = _canonical_http_url(urljoin(current_url, location))
+            joined = urljoin(current_url, location)
+        except (ValueError, TypeError) as exc:
+            raise _FetchAbort(
+                RulebookFetchFailureCode.INVALID_REDIRECT,
+                str(exc) or "Invalid redirect target",
+                url=current_url,
+                status_code=status_code,
+            ) from exc
+
+        attempted_redirect_url = self._safe_attempted_redirect_url(joined)
+        try:
+            next_url = canonical_http_url(joined)
         except (ValueError, TypeError) as exc:
             message = str(exc)
             code = (
@@ -663,7 +899,9 @@ class RulebookFetcher:
             raise _FetchAbort(
                 code,
                 message or "Invalid redirect target",
-                url=current_url,
+                url=attempted_redirect_url or current_url,
+                status_code=status_code,
+                attempted_redirect_url=attempted_redirect_url,
             ) from exc
 
         current_scheme = urlsplit(current_url).scheme
@@ -677,15 +915,39 @@ class RulebookFetcher:
                 RulebookFetchFailureCode.DOWNGRADE_REDIRECT,
                 "HTTPS to HTTP redirect is not allowed",
                 url=next_url,
+                status_code=status_code,
+                attempted_redirect_url=next_url,
             )
         return next_url
 
     @staticmethod
+    def _safe_attempted_redirect_url(value: str) -> str | None:
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            return None
+        if parts.username is not None or parts.password is not None:
+            return None
+        return value
+
+    @staticmethod
     def _request_target(url: str) -> str:
         parts = urlsplit(url)
-        target = parts.path or "/"
+        path = quote(
+            parts.path or "/",
+            safe="/:@!$&'()*+,;=-._~%",
+            encoding="utf-8",
+            errors="strict",
+        )
+        target = path
         if "?" in url.partition("#")[0]:
-            target += f"?{parts.query}"
+            query = quote(
+                parts.query,
+                safe="/?:@!$&'()*+,;=-._~%",
+                encoding="utf-8",
+                errors="strict",
+            )
+            target += f"?{query}"
         return target
 
     @staticmethod
@@ -706,8 +968,11 @@ class RulebookFetcher:
         final_url: str,
         redirects: tuple[RedirectHop, ...],
         response: HTTPResponseStream,
+        deadline: float,
     ) -> RulebookFetchResult:
         headers = response.headers
+        content_type = self._normalized_content_type(headers.get("content-type"))
+        http_metadata = self._http_metadata(headers)
         content_encoding = headers.get("content-encoding", "").strip().lower()
         if content_encoding not in {"", "identity"}:
             raise _FetchAbort(
@@ -715,9 +980,9 @@ class RulebookFetcher:
                 f"Unsupported Content-Encoding: {content_encoding}",
                 url=final_url,
                 status_code=response.status,
+                content_type=content_type,
+                http_metadata=http_metadata,
             )
-
-        content_type = self._normalized_content_type(headers.get("content-type"))
         if (
             content_type is not None
             and content_type not in self.policy.allowed_content_types
@@ -727,6 +992,8 @@ class RulebookFetcher:
                 f"Content-Type is not allowed for a PDF rulebook: {content_type}",
                 url=final_url,
                 status_code=response.status,
+                content_type=content_type,
+                http_metadata=http_metadata,
             )
 
         declared_length = self._content_length(headers.get("content-length"), final_url)
@@ -736,6 +1003,8 @@ class RulebookFetcher:
                 "Content-Length exceeds the configured download limit",
                 url=final_url,
                 status_code=response.status,
+                content_type=content_type,
+                http_metadata=http_metadata,
             )
 
         try:
@@ -746,6 +1015,8 @@ class RulebookFetcher:
                 str(exc) or "Unable to create the manuals directory",
                 url=final_url,
                 status_code=response.status,
+                content_type=content_type,
+                http_metadata=http_metadata,
             ) from exc
 
         temp_path: Path | None = None
@@ -771,11 +1042,15 @@ class RulebookFetcher:
                         str(exc) or "Unable to create a partial manual file",
                         url=final_url,
                         status_code=response.status,
+                        content_type=content_type,
+                        http_metadata=http_metadata,
                     ) from exc
 
                 temp_path = Path(handle.name)
                 while True:
+                    self._ensure_deadline(deadline, final_url)
                     chunk = response.read(self.policy.chunk_size)
+                    self._ensure_deadline(deadline, final_url)
                     if not chunk:
                         break
                     byte_size += len(chunk)
@@ -785,6 +1060,9 @@ class RulebookFetcher:
                             "Response body exceeded the configured download limit",
                             url=final_url,
                             status_code=response.status,
+                            content_type=content_type,
+                            byte_size=byte_size,
+                            http_metadata=http_metadata,
                         )
                     if len(prefix) < 8:
                         prefix.extend(chunk[: 8 - len(prefix)])
@@ -797,6 +1075,9 @@ class RulebookFetcher:
                             str(exc) or "Unable to write the partial manual file",
                             url=final_url,
                             status_code=response.status,
+                            content_type=content_type,
+                            byte_size=byte_size,
+                            http_metadata=http_metadata,
                         ) from exc
                 try:
                     handle.flush()
@@ -807,6 +1088,10 @@ class RulebookFetcher:
                         str(exc) or "Unable to flush the partial manual file",
                         url=final_url,
                         status_code=response.status,
+                        content_type=content_type,
+                        byte_size=byte_size,
+                        sha256=digest.hexdigest() if byte_size else None,
+                        http_metadata=http_metadata,
                     ) from exc
 
             if byte_size == 0:
@@ -815,6 +1100,9 @@ class RulebookFetcher:
                     "Response body is empty",
                     url=final_url,
                     status_code=response.status,
+                    content_type=content_type,
+                    byte_size=byte_size,
+                    http_metadata=http_metadata,
                 )
             if declared_length is not None and byte_size != declared_length:
                 raise _FetchAbort(
@@ -822,6 +1110,10 @@ class RulebookFetcher:
                     "Response byte count does not match Content-Length",
                     url=final_url,
                     status_code=response.status,
+                    content_type=content_type,
+                    byte_size=byte_size,
+                    sha256=digest.hexdigest(),
+                    http_metadata=http_metadata,
                 )
             if not bytes(prefix).startswith(b"%PDF-"):
                 raise _FetchAbort(
@@ -829,6 +1121,10 @@ class RulebookFetcher:
                     "Response body does not start with a PDF signature",
                     url=final_url,
                     status_code=response.status,
+                    content_type=content_type,
+                    byte_size=byte_size,
+                    sha256=digest.hexdigest(),
+                    http_metadata=http_metadata,
                 )
 
             sha256 = digest.hexdigest()
@@ -972,10 +1268,15 @@ class RulebookFetcher:
             final_url=final_url,
             redirect_chain=redirects,
             status_code=abort.status_code,
+            content_type=abort.content_type,
+            byte_size=abort.byte_size,
+            sha256=abort.sha256,
+            http_metadata=abort.http_metadata,
             failure=RulebookFetchFailure(
                 code=abort.code,
                 message=str(abort),
                 url=abort.url,
                 status_code=abort.status_code,
+                attempted_redirect_url=abort.attempted_redirect_url,
             ),
         )
