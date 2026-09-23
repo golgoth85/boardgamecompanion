@@ -1153,6 +1153,41 @@ function fact(label, value) {
   return `<div class="fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value ?? "—")}</strong></div>`;
 }
 
+function physicalCopyCard(copy, index) {
+  const sourceLabel = copy.source?.kind === "bgg_csv" ? "Import BGG" : "Manuale";
+  const purchase = [
+    copy.acquisition_date,
+    copy.acquired_from,
+    copy.price_paid !== null && copy.price_paid !== undefined
+      ? `${formatNumber(copy.price_paid, 2)} ${copy.price_currency || ""}`.trim()
+      : null,
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <article class="physical-copy-card" data-copy-id="${escapeHtml(copy.id)}">
+      <div class="physical-copy-head">
+        <div>
+          <p class="eyebrow">Copia ${index + 1}</p>
+          <strong>${escapeHtml(copy.edition || copy.language || "Copia fisica")}</strong>
+        </div>
+        <button class="button button-ghost edit-copy" type="button"
+                data-copy-id="${escapeHtml(copy.id)}">Modifica</button>
+      </div>
+      <div class="copy-facts">
+        ${fact("Barcode", copy.barcode || "—")}
+        ${fact("Lingua", copy.language || "—")}
+        ${fact("Editore", copy.publishers || "—")}
+        ${fact("Anno edizione", copy.version_year_published || "—")}
+        ${fact("Posizione", copy.inventory_location || "—")}
+        ${fact("Condizioni", copy.condition || "—")}
+      </div>
+      ${purchase ? `<p class="copy-note"><strong>Acquisto:</strong> ${escapeHtml(purchase)}</p>` : ""}
+      ${copy.notes ? `<p class="copy-note"><strong>Note:</strong> ${escapeHtml(copy.notes)}</p>` : ""}
+      <span class="copy-source">${escapeHtml(sourceLabel)}</span>
+    </article>
+  `;
+}
+
 async function renderDetail(bggId) {
   app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -1163,11 +1198,15 @@ async function renderDetail(bggId) {
   `;
   const requestedPath = window.location.pathname;
   try {
-    const game = await api(`/api/games/${bggId}`);
+    const [game, copies] = await Promise.all([
+      api(`/api/games/${bggId}`),
+      api(`/api/games/${bggId}/copies`),
+    ]);
     if (window.location.pathname !== requestedPath) return;
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
+    const copyItems = copies.items || [];
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -1186,6 +1225,7 @@ async function renderDetail(bggId) {
             <span class="badge">${type}</span>
             ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
             ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
+            <span class="badge">${copyItems.length} ${copyItems.length === 1 ? "copia" : "copie"}</span>
           </div>
 
           <div class="fact-grid">
@@ -1194,21 +1234,22 @@ async function renderDetail(bggId) {
             ${fact("Rating BGG", bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—")}
             ${fact("Complessità", bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—")}
             ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
-            ${fact("Best players", bgg.best_players || "—")}
+            ${fact("Partite registrate", collection.num_plays ?? "—")}
           </div>
 
-          <h2 class="section-title">La mia copia</h2>
-          <div class="fact-grid">
-            ${fact("Lingua", collection.language || "—")}
-            ${fact("Editore", collection.publishers || "—")}
-            ${fact("Edizione", collection.version_nickname || collection.version_year || "—")}
-            ${fact("Barcode", collection.barcode || "—")}
-            ${fact("Posizione", collection.inventory_location || "—")}
-            ${fact("Partite", collection.num_plays ?? "—")}
+          <div class="section-heading-row">
+            <h2 class="section-title">Copie fisiche</h2>
+            <button class="button button-ghost" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
+          </div>
+          <div class="physical-copy-list" id="physicalCopyList">
+            ${copyItems.length
+              ? copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")
+              : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
           </div>
 
           <h2 class="section-title">Dati BGG</h2>
           <div class="fact-grid">
+            ${fact("Best players", bgg.best_players || "—")}
             ${fact("Età consigliata", bgg.recommended_age || "—")}
             ${fact("Recommended players", bgg.recommended_players || "—")}
             ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
@@ -1222,6 +1263,17 @@ async function renderDetail(bggId) {
         </article>
       </section>
     `;
+
+    document.querySelector("#addPhysicalCopy")?.addEventListener("click", () => {
+      openCopyEditor(game.bgg_id, game.title);
+    });
+    document.querySelectorAll(".edit-copy").forEach((button) => {
+      button.addEventListener("click", () => {
+        const copy = copyItems.find((item) => item.id === button.dataset.copyId);
+        if (copy) openCopyEditor(game.bgg_id, game.title, copy);
+      });
+    });
+
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
     app.innerHTML = `
