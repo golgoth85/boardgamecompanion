@@ -549,3 +549,71 @@ def test_equal_score_dedup_is_independent_of_provider_order():
     assert reverse.best is not None
     assert forward.best.candidate.provider == reverse.best.candidate.provider == "a-provider"
     assert "dedup_tie:deterministic" in forward.best.reasons
+
+
+def test_candidate_accepts_single_trailing_root_dot_but_rejects_empty_dns_labels():
+    valid = candidate(
+        provider="publisher",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://Example.COM./rules.pdf",
+    )
+    assert valid.url == "https://example.com/rules.pdf"
+
+    for url in (
+        "https://example.com../rules.pdf",
+        "https://example.com.../rules.pdf",
+    ):
+        with pytest.raises(ValueError):
+            candidate(
+                provider="publisher",
+                source=RulebookSource.OFFICIAL_PUBLISHER,
+                url=url,
+            )
+
+
+def test_candidate_uses_modern_idna_without_changing_sharp_s_domain_identity():
+    item = candidate(
+        provider="publisher",
+        source=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://faß.de/rules.pdf",
+    )
+
+    assert item.url == "https://xn--fa-hia.de/rules.pdf"
+
+
+def test_equal_score_dedup_uses_metadata_as_final_deterministic_discriminant():
+    one = RulebookCandidate(
+        provider="same-provider",
+        source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://example.com/rules.pdf",
+        language="it",
+        official=True,
+        bgg_id=None,
+        game_title="Example Game",
+        year=2024,
+        metadata={"origin": "one"},
+    )
+    two = RulebookCandidate(
+        provider="same-provider",
+        source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+        url="https://EXAMPLE.com:443/rules.pdf#page=1",
+        language="it",
+        official=True,
+        bgg_id=None,
+        game_title="Example Game",
+        year=2024,
+        metadata={"origin": "two"},
+    )
+
+    forward = RulebookResolver(
+        [StaticProvider("one", [one]), StaticProvider("two", [two])]
+    ).resolve(query())
+    reverse = RulebookResolver(
+        [StaticProvider("two", [two]), StaticProvider("one", [one])]
+    ).resolve(query())
+
+    assert forward.best is not None
+    assert reverse.best is not None
+    assert forward.best.candidate.metadata == reverse.best.candidate.metadata
+    assert forward.best.candidate.metadata == {"origin": "one"}
+    assert "dedup_tie:deterministic" in forward.best.reasons

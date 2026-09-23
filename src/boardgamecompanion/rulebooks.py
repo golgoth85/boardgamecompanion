@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -8,6 +9,8 @@ from enum import StrEnum
 from numbers import Integral
 from typing import Any, Iterable, Mapping, Protocol, runtime_checkable
 from urllib.parse import SplitResult, urlsplit, urlunsplit
+
+import idna
 
 from boardgamecompanion.documents import normalize_document_type, normalize_language
 
@@ -79,7 +82,11 @@ def _normalize_positive_identifier(value: Any, *, field_name: str) -> int:
 
 
 def _normalize_http_hostname(hostname: str) -> str:
-    host = hostname.rstrip(".")
+    host = hostname
+    if host.endswith(".."):
+        raise ValueError("Rulebook candidate URL contains an invalid hostname")
+    if host.endswith("."):
+        host = host[:-1]
     if not host or "%" in host:
         raise ValueError("Rulebook candidate URL contains an invalid hostname")
 
@@ -89,8 +96,12 @@ def _normalize_http_hostname(hostname: str) -> str:
         if ":" in host:
             raise ValueError("Rulebook candidate URL contains an invalid hostname")
         try:
-            ascii_host = host.encode("idna").decode("ascii").lower()
-        except UnicodeError as exc:
+            ascii_host = idna.encode(
+                host,
+                uts46=True,
+                std3_rules=True,
+            ).decode("ascii").lower()
+        except idna.IDNAError as exc:
             raise ValueError(
                 "Rulebook candidate URL contains an invalid hostname"
             ) from exc
@@ -374,6 +385,22 @@ class RulebookResolver:
         return score, tuple(reasons)
 
     @staticmethod
+    def _metadata_tie_key(metadata: Mapping[str, Any]) -> str:
+        def fallback(value: Any) -> str:
+            return (
+                f"<{type(value).__module__}.{type(value).__qualname__}:"
+                f"{repr(value)}>"
+            )
+
+        return json.dumps(
+            dict(metadata),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=fallback,
+        )
+
+    @staticmethod
     def _deterministic_tie_key(candidate: RulebookCandidate) -> tuple[Any, ...]:
         return (
             candidate.url,
@@ -388,6 +415,7 @@ class RulebookResolver:
             candidate.publisher or "",
             candidate.bgg_id or 0,
             candidate.year or 0,
+            RulebookResolver._metadata_tie_key(candidate.metadata),
         )
 
     def resolve(
