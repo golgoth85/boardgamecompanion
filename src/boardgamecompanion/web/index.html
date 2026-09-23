@@ -19,6 +19,9 @@
       </span>
     </a>
     <div class="topbar-actions">
+      <button class="button button-ghost" id="scannerButton" type="button">
+        Scansiona
+      </button>
       <button class="button button-ghost" id="settingsButton" type="button">
         Impostazioni
       </button>
@@ -108,6 +111,104 @@
         <button class="button button-primary" type="button" id="saveTestSettings">Salva e verifica</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="copyDialog" class="dialog" aria-labelledby="copyDialogTitle">
+    <form id="copyForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Inventario</p>
+          <h2 id="copyDialogTitle">Copia fisica</h2>
+        </div>
+        <button class="icon-button" id="closeCopyDialog" type="button" aria-label="Chiudi copia">×</button>
+      </div>
+      <p class="muted" id="copyDialogSubtitle"></p>
+      <div class="copy-form-grid">
+        <label class="settings-field copy-span-2">
+          <span>Barcode / EAN / UPC</span>
+          <input id="copyBarcode" type="text" inputmode="numeric" autocomplete="off">
+        </label>
+        <label class="settings-field">
+          <span>Lingua</span>
+          <input id="copyLanguage" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field">
+          <span>Edizione</span>
+          <input id="copyEdition" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field copy-span-2">
+          <span>Editore / localizzatore</span>
+          <input id="copyPublishers" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field">
+          <span>Anno edizione</span>
+          <input id="copyVersionYear" type="number" min="1000" max="3000">
+        </label>
+        <label class="settings-field">
+          <span>Posizione</span>
+          <input id="copyLocation" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field">
+          <span>Data acquisto</span>
+          <input id="copyAcquisitionDate" type="date">
+        </label>
+        <label class="settings-field">
+          <span>Acquistato da</span>
+          <input id="copyAcquiredFrom" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field">
+          <span>Prezzo</span>
+          <input id="copyPrice" type="number" min="0" step="0.01">
+        </label>
+        <label class="settings-field">
+          <span>Valuta</span>
+          <input id="copyCurrency" type="text" maxlength="16" placeholder="EUR">
+        </label>
+        <label class="settings-field copy-span-2">
+          <span>Condizioni</span>
+          <input id="copyCondition" type="text" autocomplete="off">
+        </label>
+        <label class="settings-field copy-span-2">
+          <span>Note</span>
+          <textarea id="copyNotes" rows="3"></textarea>
+        </label>
+      </div>
+      <div id="copyResult" class="import-result" hidden></div>
+      <div class="dialog-actions">
+        <button class="button button-ghost" type="button" id="cancelCopyDialog">Annulla</button>
+        <button class="button button-primary" type="submit" id="saveCopy">Salva copia</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="scannerDialog" class="dialog scanner-dialog" aria-labelledby="scannerDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">Inventario rapido</p>
+        <h2 id="scannerDialogTitle">Scansiona barcode</h2>
+      </div>
+      <button class="icon-button" id="closeScanner" type="button" aria-label="Chiudi scanner">×</button>
+    </div>
+
+    <form id="scannerForm" class="scanner-manual">
+      <label class="settings-field">
+        <span>Barcode / EAN / UPC</span>
+        <div class="inline-input-action">
+          <input id="scannerBarcode" type="text" inputmode="numeric" autocomplete="off" placeholder="Scansiona o digita il codice">
+          <button class="button button-primary" type="submit" id="lookupBarcode">Cerca</button>
+        </div>
+      </label>
+    </form>
+
+    <div id="cameraSection" class="scanner-camera" hidden>
+      <video id="scannerVideo" playsinline muted></video>
+      <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
+      <p id="cameraHint" class="muted"></p>
+    </div>
+
+    <div id="scannerResult" class="scanner-result">
+      <p class="muted">Inserisci un codice oppure usa la fotocamera, se disponibile.</p>
+    </div>
   </dialog>
 
   <script src="/static/app.js" defer></script>
