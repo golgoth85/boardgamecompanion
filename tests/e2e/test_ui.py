@@ -497,3 +497,105 @@ def test_floppy_sync_requires_preview_confirmation_and_refreshes(browser, live_s
         assert preview_calls["count"] == 2
     finally:
         context.close()
+
+
+def test_physical_copy_detail_and_edit_flow(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.get_by_text("Copie fisiche", exact=True)).to_be_visible()
+        expect(page.locator(".physical-copy-card")).to_have_count(1)
+        expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
+        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")
+        expect(page.locator(".physical-copy-card")).to_contain_text("Italian")
+
+        page.get_by_role("button", name="Modifica").click()
+        expect(page.locator("#copyDialog")).to_be_visible()
+        expect(page.locator("#copyBarcode")).to_have_value("1234567890123")
+        expect(page.locator("#copyLocation")).to_have_value("Kallax A1")
+
+        page.locator("#copyBarcode").fill("555-000-111")
+        page.locator("#copyLocation").fill("Kallax Z9")
+        page.locator("#copyNotes").fill("Copia aggiornata da UI")
+        page.get_by_role("button", name="Salva copia").click()
+
+        expect(page.locator("#copyDialog")).not_to_be_visible()
+        expect(page.locator(".physical-copy-card")).to_contain_text("555-000-111")
+        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax Z9")
+        expect(page.locator(".physical-copy-card")).to_contain_text("Copia aggiornata da UI")
+
+        response = page.request.get(f"{live_server}/api/games/900001/copies")
+        assert response.ok
+        items = response.json()["items"]
+        assert len(items) == 1
+        assert items[0]["barcode_normalized"] == "555000111"
+        assert items[0]["inventory_location"] == "Kallax Z9"
+    finally:
+        context.close()
+
+
+def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+
+        page.get_by_role("button", name="Scansiona").click()
+        expect(page.locator("#scannerDialog")).to_be_visible()
+        page.locator("#scannerBarcode").fill("1234-5678-90123")
+        page.get_by_role("button", name="Cerca", exact=True).click()
+
+        expect(page.locator("#scannerResult")).to_contain_text("Copia trovata")
+        expect(page.locator("#scannerResult")).to_contain_text("Synthetic Alpha")
+        expect(page.locator("#scannerResult")).to_contain_text("1234567890123")
+        expect(page.get_by_role("link", name="Apri gioco")).to_be_visible()
+    finally:
+        context.close()
+
+
+def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+
+        page.get_by_role("button", name="Scansiona").click()
+        page.locator("#scannerBarcode").fill("222-222-222")
+        page.get_by_role("button", name="Cerca", exact=True).click()
+
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        page.locator("#scannerGameSearch").fill("Beta")
+        page.locator("#scannerSearchGames").click()
+        expect(page.locator(".scanner-game-choice")).to_have_count(1)
+        expect(page.locator(".scanner-game-choice")).to_contain_text("Synthetic Beta Expansion")
+        page.locator(".scanner-game-choice").click()
+
+        expect(page.locator("#scannerResult")).to_contain_text("Copia trovata")
+        expect(page.locator("#scannerResult")).to_contain_text("Synthetic Beta Expansion")
+
+        response = page.request.get(f"{live_server}/api/games/900002/copies")
+        assert response.ok
+        items = response.json()["items"]
+        assert len(items) == 1
+        assert items[0]["barcode"] == "222-222-222"
+        assert items[0]["barcode_normalized"] == "222222222"
+    finally:
+        context.close()
+
+
+def test_mobile_topbar_and_scanner_dialog_do_not_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        page.goto(live_server)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+        expect(page.get_by_role("button", name="Scansiona")).to_be_visible()
+
+        page.get_by_role("button", name="Scansiona").click()
+        expect(page.locator("#scannerDialog")).to_be_visible()
+        box = page.locator("#scannerDialog").bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= 391
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+    finally:
+        context.close()
