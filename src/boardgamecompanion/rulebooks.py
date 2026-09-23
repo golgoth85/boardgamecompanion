@@ -156,13 +156,17 @@ class RulebookCandidate:
                 f"{source_kind.value} candidates must be marked {expected}"
             )
 
+        source_confidence_ceiling = SOURCE_CONFIDENCE[source_kind]
         confidence = (
-            SOURCE_CONFIDENCE[source_kind]
+            source_confidence_ceiling
             if self.confidence is None
             else int(self.confidence)
         )
-        if not 0 <= confidence <= 100:
-            raise ValueError("confidence must be between 0 and 100")
+        if not 0 <= confidence <= source_confidence_ceiling:
+            raise ValueError(
+                f"confidence for {source_kind.value} must be between 0 "
+                f"and {source_confidence_ceiling}"
+            )
 
         object.__setattr__(self, "provider", provider)
         object.__setattr__(self, "source_kind", source_kind)
@@ -230,11 +234,28 @@ class RulebookResolver:
     @staticmethod
     def _language_rank(language: str, preferred_languages: tuple[str, ...]) -> int:
         primary = language.split("-", 1)[0]
-        for index, preferred in enumerate(preferred_languages):
-            pref_primary = preferred.split("-", 1)[0]
-            if language == preferred or primary == pref_primary:
-                return len(preferred_languages) - index
-        return 0
+        primary_order = tuple(
+            dict.fromkeys(
+                preferred.split("-", 1)[0]
+                for preferred in preferred_languages
+            )
+        )
+        if primary not in primary_order:
+            return 0
+
+        group_index = primary_order.index(primary)
+        same_primary = tuple(
+            preferred
+            for preferred in preferred_languages
+            if preferred.split("-", 1)[0] == primary
+        )
+        group_stride = len(preferred_languages) + 1
+        group_rank = (len(primary_order) - group_index) * group_stride
+        if language in same_primary:
+            exact_rank = len(same_primary) - same_primary.index(language)
+        else:
+            exact_rank = 0
+        return group_rank + exact_rank
 
     @staticmethod
     def _candidate_score(
