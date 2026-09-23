@@ -1072,3 +1072,71 @@ def test_resolution_is_fully_order_independent_for_three_equal_score_duplicates(
         item.reasons.count("tie_break:canonical_url-provider") == 1
         for item in baseline.candidates
     )
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://192.0.0.8/rules.pdf",
+        "https://[64:ff9b:1::1]/rules.pdf",
+        "https://[2002::1]/rules.pdf",
+    ],
+)
+def test_candidate_rejects_special_use_literals_on_minimum_supported_python(url):
+    with pytest.raises(ValueError, match="non-public IP address"):
+        candidate(
+            provider="special-use",
+            source=RulebookSource.COMMUNITY,
+            url=url,
+            official=False,
+        )
+
+
+def test_candidate_preserves_explicit_empty_query_and_dedup_distinction():
+    with_empty_query = candidate(
+        provider="with-empty-query",
+        source=RulebookSource.COMMUNITY,
+        url="https://example.com/rules.pdf?",
+        official=False,
+        bgg_id=None,
+    )
+    without_query = candidate(
+        provider="without-query",
+        source=RulebookSource.COMMUNITY,
+        url="https://example.com/rules.pdf",
+        official=False,
+        bgg_id=None,
+    )
+
+    assert with_empty_query.url == "https://example.com/rules.pdf?"
+    assert without_query.url == "https://example.com/rules.pdf"
+
+    result = RulebookResolver(
+        [StaticProvider("query-boundary", [with_empty_query, without_query])]
+    ).resolve(query())
+
+    assert len(result.candidates) == 2
+    assert {item.candidate.url for item in result.candidates} == {
+        "https://example.com/rules.pdf?",
+        "https://example.com/rules.pdf",
+    }
+
+
+def test_candidate_rejects_invalid_query_percent_encoding():
+    with pytest.raises(ValueError, match="invalid percent-encoding"):
+        candidate(
+            provider="bad-query-percent",
+            source=RulebookSource.COMMUNITY,
+            url="https://example.com/rules.pdf?token=%ZZ",
+            official=False,
+        )
+
+
+def test_candidate_validates_but_does_not_normalize_query_percent_encoding():
+    item = candidate(
+        provider="signed-query",
+        source=RulebookSource.COMMUNITY,
+        url="https://example.com/rules.pdf?token=%7e&slash=%2f",
+        official=False,
+    )
+
+    assert item.url == "https://example.com/rules.pdf?token=%7e&slash=%2f"
