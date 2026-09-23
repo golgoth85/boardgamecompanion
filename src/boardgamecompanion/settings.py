@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,30 @@ class Settings(BaseSettings):
     import_dir: Path = Path("/data/import")
     manuals_dir: Path = Path("/data/manuals")
     max_document_bytes: int = 100 * 1024 * 1024
+    rulebook_fetch_max_bytes: int = Field(
+        default=32 * 1024 * 1024,
+        ge=1024,
+        le=100 * 1024 * 1024,
+    )
+    rulebook_update_worker_enabled: bool = True
+    rulebook_update_poll_seconds: float = Field(default=60.0, ge=5.0, le=86400.0)
+    rulebook_update_default_interval_seconds: int = Field(
+        default=30 * 24 * 60 * 60,
+        ge=3600,
+        le=365 * 24 * 60 * 60,
+    )
+    rulebook_update_retry_base_seconds: int = Field(
+        default=6 * 60 * 60,
+        ge=60,
+        le=30 * 24 * 60 * 60,
+    )
+    rulebook_update_retry_max_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        ge=60,
+        le=365 * 24 * 60 * 60,
+    )
+    rulebook_update_lease_seconds: int = Field(default=15 * 60, ge=60, le=3600)
+    rulebook_update_batch_size: int = Field(default=5, ge=1, le=100)
     floppy_url: str | None = None
     floppy_api_key: str | None = None
     floppy_timeout_seconds: float = 45.0

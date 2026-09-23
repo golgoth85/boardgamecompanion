@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Literal
 
@@ -47,13 +49,39 @@ from boardgamecompanion.rulebook_review import (
     RulebookReviewNotFound,
     RulebookReviewQueue,
 )
+from boardgamecompanion.rulebook_updates import (
+    MAX_INTERVAL_SECONDS,
+    MIN_INTERVAL_SECONDS,
+    RulebookUpdateBusy,
+    RulebookUpdateConflict,
+    RulebookUpdateError,
+    RulebookUpdateNotApproved,
+    RulebookUpdateNotFound,
+    RulebookUpdateService,
+)
 from boardgamecompanion.settings import settings
 
 WEB_DIR = Path(__file__).parent / "web"
+LOGGER = logging.getLogger(__name__)
 
 
 def get_database() -> Database:
     return Database(settings.database_path)
+
+
+def get_rulebook_update_service() -> RulebookUpdateService:
+    database = get_database()
+    database.initialize()
+    return RulebookUpdateService(
+        database,
+        settings.manuals_dir,
+        default_interval_seconds=settings.rulebook_update_default_interval_seconds,
+        retry_base_seconds=settings.rulebook_update_retry_base_seconds,
+        retry_max_seconds=settings.rulebook_update_retry_max_seconds,
+        lease_seconds=settings.rulebook_update_lease_seconds,
+        max_archive_bytes=settings.max_document_bytes,
+        fetch_max_bytes=settings.rulebook_fetch_max_bytes,
+    )
 
 
 def get_floppy_client() -> FloppyClient | None:
@@ -78,6 +106,17 @@ def floppy_http_error(exc: FloppyError) -> HTTPException:
     if exc.kind in {"timeout", "unreachable"}:
         return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=502, detail=str(exc))
+
+
+def rulebook_update_http_error(exc: RulebookUpdateError) -> HTTPException:
+    if isinstance(exc, RulebookUpdateNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(
+        exc,
+        (RulebookUpdateBusy, RulebookUpdateConflict, RulebookUpdateNotApproved),
+    ):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 class PhysicalCopyPayload(BaseModel):
@@ -125,11 +164,54 @@ class RulebookReviewDecisionPayload(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
+class RulebookUpdateSchedulePayload(BaseModel):
+    enabled: bool | None = None
+    interval_seconds: int | None = Field(
+        default=None,
+        ge=MIN_INTERVAL_SECONDS,
+        le=MAX_INTERVAL_SECONDS,
+    )
+
+
+async def _rulebook_update_worker() -> None:
+    while True:
+        await asyncio.sleep(settings.rulebook_update_poll_seconds)
+        try:
+            service = get_rulebook_update_service()
+            await asyncio.to_thread(
+                service.run_due,
+                limit=settings.rulebook_update_batch_size,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("Scheduled rulebook update worker failed")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
     get_database().initialize()
-    yield
+
+    worker_task: asyncio.Task[None] | None = None
+    if settings.rulebook_update_worker_enabled:
+        try:
+            await asyncio.to_thread(
+                get_rulebook_update_service().synchronize_approved_targets
+            )
+        except Exception:
+            LOGGER.exception(
+                "Initial rulebook update target synchronization failed"
+            )
+        worker_task = asyncio.create_task(_rulebook_update_worker())
+
+    try:
+        yield
+    finally:
+        if worker_task is not None:
+            worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker_task
 
 
 app = FastAPI(
@@ -152,6 +234,11 @@ def web_game(bgg_id: int) -> FileResponse:
 
 @app.get("/reviews", include_in_schema=False)
 def web_reviews() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/updates", include_in_schema=False)
+def web_updates() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -400,11 +487,14 @@ def decide_rulebook_review(
     database = get_database()
     database.initialize()
     try:
-        return RulebookReviewQueue(database).decide(
+        item = RulebookReviewQueue(database).decide(
             review_id,
             decision=payload.decision,
             note=payload.note,
         )
+        if item["status"] == "approved":
+            get_rulebook_update_service().ensure_target(review_id)
+        return item
     except RulebookReviewNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RulebookReviewConflict as exc:
@@ -416,6 +506,98 @@ def decide_rulebook_review(
         ) from exc
     except RulebookReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RulebookUpdateError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Review approved but update scheduling failed: {exc}",
+        ) from exc
+
+
+@app.get("/api/rulebook-updates", tags=["rulebooks"])
+def list_rulebook_updates(
+    enabled: bool | None = Query(default=None),
+    bgg_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=100, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    service = get_rulebook_update_service()
+    service.synchronize_approved_targets(limit=500)
+    payload = service.list_targets(
+        enabled=enabled,
+        bgg_id=bgg_id,
+        limit=limit,
+        offset=offset,
+    )
+    payload["worker"] = {
+        "enabled": settings.rulebook_update_worker_enabled,
+        "poll_seconds": settings.rulebook_update_poll_seconds,
+        "batch_size": settings.rulebook_update_batch_size,
+    }
+    return payload
+
+
+@app.get("/api/rulebook-updates/{review_id}", tags=["rulebooks"])
+def get_rulebook_update(review_id: str) -> dict[str, object]:
+    service = get_rulebook_update_service()
+    try:
+        target = service.get_target(review_id)
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook update target references corrupt review data",
+        ) from exc
+    if target is None:
+        raise HTTPException(status_code=404, detail="Rulebook update target not found")
+    return target
+
+
+@app.patch("/api/rulebook-updates/{review_id}", tags=["rulebooks"])
+def configure_rulebook_update(
+    review_id: str,
+    payload: RulebookUpdateSchedulePayload,
+) -> dict[str, object]:
+    try:
+        return get_rulebook_update_service().configure_target(
+            review_id,
+            enabled=payload.enabled,
+            interval_seconds=payload.interval_seconds,
+        )
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
+    except RulebookUpdateError as exc:
+        raise rulebook_update_http_error(exc) from exc
+
+
+@app.post("/api/rulebook-updates/{review_id}/run", tags=["rulebooks"])
+def run_rulebook_update_now(review_id: str) -> dict[str, object]:
+    try:
+        return get_rulebook_update_service().run_review_now(review_id)
+    except RulebookReviewCorruptRecord as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Rulebook review contains corrupt persisted data",
+        ) from exc
+    except RulebookUpdateError as exc:
+        raise rulebook_update_http_error(exc) from exc
+
+
+@app.get("/api/rulebook-updates/{review_id}/runs", tags=["rulebooks"])
+def list_rulebook_update_runs(
+    review_id: str,
+    limit: int = Query(default=50, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    try:
+        return get_rulebook_update_service().list_runs(
+            review_id,
+            limit=limit,
+            offset=offset,
+        )
+    except RulebookUpdateError as exc:
+        raise rulebook_update_http_error(exc) from exc
 
 
 @app.get("/api/catalog/stats", tags=["catalog"])

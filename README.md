@@ -18,12 +18,13 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Floppy board-game comparison and guarded add-only collection synchronization.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
 - Persistent rulebook review queue with auditable unattended/manual approval state.
+- Scheduled guarded re-checks for approved rulebook candidates with version-by-hash archival and run audit.
 
 Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
-Planned next: scheduled rulebook update checks, approved-candidate execution, and page-cited RAG.
+Planned next: PDF ingestion, embeddings and page-cited RAG.
 
 ## Container
 
@@ -135,6 +136,37 @@ BGC_FLOPPY_VERIFY_TLS
 ```
 
 They are intentionally not present in the default Unraid template.
+
+## Rulebook updates
+
+Approved rulebook candidates are monitored independently from the review queue at `/updates`. New targets are due immediately; subsequent successful checks use the configured interval (30 days by default). Failed checks use bounded exponential backoff and remain auditable without changing the approval decision.
+
+The scheduler reuses the guarded P5B fetch path and archives a new `game_documents` version only when the fetched SHA-256 is new for that game. Existing document metadata is not overwritten.
+
+API endpoints:
+
+```text
+GET   /api/rulebook-updates
+GET   /api/rulebook-updates/{review_id}
+PATCH /api/rulebook-updates/{review_id}
+POST  /api/rulebook-updates/{review_id}/run
+GET   /api/rulebook-updates/{review_id}/runs
+```
+
+Optional environment overrides:
+
+```text
+BGC_RULEBOOK_FETCH_MAX_BYTES
+BGC_RULEBOOK_UPDATE_WORKER_ENABLED
+BGC_RULEBOOK_UPDATE_POLL_SECONDS
+BGC_RULEBOOK_UPDATE_DEFAULT_INTERVAL_SECONDS
+BGC_RULEBOOK_UPDATE_RETRY_BASE_SECONDS
+BGC_RULEBOOK_UPDATE_RETRY_MAX_SECONDS
+BGC_RULEBOOK_UPDATE_LEASE_SECONDS
+BGC_RULEBOOK_UPDATE_BATCH_SIZE
+```
+
+Provider-specific discovery and replacement-URL search are intentionally not part of scheduled updates. A new candidate must still pass through the resolver and P6A approval policy.
 
 ## Catalog API
 

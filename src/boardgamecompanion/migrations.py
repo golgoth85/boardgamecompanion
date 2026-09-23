@@ -381,11 +381,135 @@ def _rulebook_reviews(connection: sqlite3.Connection) -> None:
     )
 
 
+def _rulebook_updates(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rulebook_update_targets (
+            id TEXT PRIMARY KEY,
+            review_item_id TEXT NOT NULL UNIQUE
+                REFERENCES rulebook_review_items(id) ON DELETE CASCADE,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 1
+                CHECK(enabled IN (0, 1)),
+            interval_seconds INTEGER NOT NULL
+                CHECK(interval_seconds BETWEEN 3600 AND 31536000),
+            next_check_at TEXT NOT NULL,
+            last_checked_at TEXT,
+            last_success_at TEXT,
+            last_document_id TEXT
+                REFERENCES game_documents(id) ON DELETE RESTRICT,
+            last_sha256 TEXT,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0
+                CHECK(consecutive_failures >= 0),
+            last_outcome TEXT
+                CHECK(last_outcome IS NULL OR last_outcome IN ('created', 'unchanged', 'failed')),
+            last_failure_code TEXT,
+            last_failure_message TEXT,
+            lease_owner TEXT,
+            lease_until TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK(
+                (lease_owner IS NULL AND lease_until IS NULL)
+                OR (lease_owner IS NOT NULL AND lease_until IS NOT NULL)
+            ),
+            CHECK(
+                (
+                    last_outcome IS NULL
+                    AND last_checked_at IS NULL
+                    AND last_success_at IS NULL
+                    AND last_document_id IS NULL
+                    AND last_sha256 IS NULL
+                    AND consecutive_failures = 0
+                    AND last_failure_code IS NULL
+                    AND last_failure_message IS NULL
+                )
+                OR (
+                    last_outcome = 'failed'
+                    AND last_checked_at IS NOT NULL
+                    AND consecutive_failures > 0
+                    AND last_failure_code IS NOT NULL
+                )
+                OR (
+                    last_outcome IN ('created', 'unchanged')
+                    AND last_checked_at IS NOT NULL
+                    AND last_success_at IS NOT NULL
+                    AND last_document_id IS NOT NULL
+                    AND last_sha256 IS NOT NULL
+                    AND consecutive_failures = 0
+                    AND last_failure_code IS NULL
+                    AND last_failure_message IS NULL
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_update_due
+        ON rulebook_update_targets(enabled, next_check_at, lease_until)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_update_game
+        ON rulebook_update_targets(board_game_id, next_check_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rulebook_update_runs (
+            id TEXT PRIMARY KEY,
+            target_id TEXT NOT NULL
+                REFERENCES rulebook_update_targets(id) ON DELETE CASCADE,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL,
+            outcome TEXT NOT NULL
+                CHECK(outcome IN ('created', 'unchanged', 'failed')),
+            document_id TEXT
+                REFERENCES game_documents(id) ON DELETE RESTRICT,
+            sha256 TEXT,
+            requested_url TEXT NOT NULL,
+            final_url TEXT,
+            status_code INTEGER,
+            byte_size INTEGER NOT NULL DEFAULT 0
+                CHECK(byte_size >= 0),
+            failure_code TEXT,
+            failure_message TEXT,
+            http_metadata_json TEXT NOT NULL DEFAULT '{}',
+            redirect_chain_json TEXT NOT NULL DEFAULT '[]',
+            CHECK(
+                (
+                    outcome = 'failed'
+                    AND failure_code IS NOT NULL
+                )
+                OR (
+                    outcome IN ('created', 'unchanged')
+                    AND document_id IS NOT NULL
+                    AND sha256 IS NOT NULL
+                    AND failure_code IS NULL
+                    AND failure_message IS NULL
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_update_runs_target
+        ON rulebook_update_runs(target_id, started_at DESC)
+        """
+    )
+
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
     Migration(3, "game-documents", _game_documents),
     Migration(4, "rulebook-review-queue", _rulebook_reviews),
+    Migration(5, "rulebook-scheduled-updates", _rulebook_updates),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

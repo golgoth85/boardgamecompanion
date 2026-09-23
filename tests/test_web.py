@@ -40,6 +40,15 @@ def test_web_reviews_route_is_spa_entrypoint(tmp_path: Path) -> None:
     assert "Revisioni" in response.text
 
 
+def test_web_updates_route_is_spa_entrypoint(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/updates")
+
+    assert response.status_code == 200
+    assert "Aggiornamenti" in response.text
+
+
 def test_static_assets_are_served(tmp_path: Path) -> None:
     _configure(tmp_path)
     with TestClient(app) as client:
@@ -51,3 +60,4 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert js.status_code == 200
     assert "renderCatalog" in js.text
     assert "renderReviews" in js.text
+    assert "renderUpdates" in js.text

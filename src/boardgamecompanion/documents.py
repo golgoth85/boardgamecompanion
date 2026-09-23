@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from boardgamecompanion.database import Database
 
-
 DOCUMENT_TYPES = {
     "rulebook",
     "reference",
@@ -311,6 +310,202 @@ class DocumentStore:
                 if duplicate is not None:
                     return _row_to_document(duplicate), False
                 raise
+            except Exception:
+                final_path.unlink(missing_ok=True)
+                raise
+
+            created = self.get(document_id)
+            assert created is not None
+            return created, True
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+
+    def archive_fetched_pdf(
+        self,
+        *,
+        bgg_id: int,
+        source_path: Path,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        original_filename: str,
+        document_type: str,
+        language: str,
+        title: str | None,
+        version_label: str | None,
+        edition: str | None,
+        source_kind: str,
+        source_provider: str,
+        source_url: str,
+        is_official: bool,
+        provenance: dict[str, Any],
+        max_bytes: int,
+    ) -> tuple[dict[str, Any], bool]:
+        doc_type = normalize_document_type(document_type)
+        lang = normalize_language(language)
+        clean_filename = Path(original_filename or "rulebook.pdf").name
+        if not clean_filename.lower().endswith(".pdf"):
+            clean_filename = f"{clean_filename or 'rulebook'}.pdf"
+
+        expected_sha256 = str(expected_sha256).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise DocumentError("Fetched PDF SHA-256 is invalid")
+        if expected_size_bytes <= 5 or expected_size_bytes > max_bytes:
+            raise DocumentTooLarge(
+                f"Fetched PDF size is outside the {max_bytes} byte archive limit"
+            )
+
+        root = self.manuals_dir.resolve()
+        resolved_source = Path(source_path).resolve()
+        if root not in resolved_source.parents or not resolved_source.is_file():
+            raise DocumentError("Fetched PDF path is outside the manuals directory")
+        if resolved_source.stat().st_size != expected_size_bytes:
+            raise InvalidPdf("Fetched PDF size no longer matches fetch provenance")
+
+        source_digest = hashlib.sha256()
+        source_prefix = b""
+        with resolved_source.open("rb") as source:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                if len(source_prefix) < 8:
+                    source_prefix += chunk[: 8 - len(source_prefix)]
+                source_digest.update(chunk)
+        if not source_prefix.startswith(b"%PDF-"):
+            raise InvalidPdf("Fetched file is not a PDF")
+        if source_digest.hexdigest() != expected_sha256:
+            raise InvalidPdf("Fetched PDF digest no longer matches fetch provenance")
+
+        with self.database.connect() as connection:
+            game = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id = ?",
+                (bgg_id,),
+            ).fetchone()
+            if game is None:
+                raise BoardGameDocumentNotFound(
+                    f"Board game BGG #{bgg_id} not found"
+                )
+            duplicate = connection.execute(
+                self._select_sql("d.board_game_id = ? AND d.sha256 = ?"),
+                (game["id"], expected_sha256),
+            ).fetchone()
+            if duplicate is not None:
+                return _row_to_document(duplicate), False
+
+        document_id = str(uuid4())
+        game_dir = self.manuals_dir / str(int(bgg_id))
+        game_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = game_dir / f".{document_id}.part"
+        final_path = game_dir / f"{document_id}.pdf"
+        digest = hashlib.sha256()
+        size = 0
+        first_bytes = b""
+
+        try:
+            with resolved_source.open("rb") as source, temp_path.open("wb") as destination:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    if len(first_bytes) < 8:
+                        first_bytes += chunk[: 8 - len(first_bytes)]
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise DocumentTooLarge(
+                            f"Fetched PDF exceeds the {max_bytes} byte archive limit"
+                        )
+                    digest.update(chunk)
+                    destination.write(chunk)
+                destination.flush()
+                os.fsync(destination.fileno())
+
+            if not first_bytes.startswith(b"%PDF-"):
+                raise InvalidPdf("Fetched file is not a PDF")
+            if size != expected_size_bytes:
+                raise InvalidPdf("Fetched PDF size changed during archive")
+            if digest.hexdigest() != expected_sha256:
+                raise InvalidPdf("Fetched PDF digest changed during archive")
+
+            os.replace(temp_path, final_path)
+            relative_path = final_path.relative_to(self.manuals_dir).as_posix()
+            now = datetime.now(UTC).isoformat()
+            doc_title = (
+                _clean_text(title, max_length=500)
+                or Path(clean_filename).stem
+                or f"Rulebook {bgg_id}"
+            )
+            clean_provenance = json.loads(
+                json.dumps(
+                    provenance,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+
+            try:
+                with self.database.transaction(immediate=True) as connection:
+                    game = connection.execute(
+                        "SELECT id FROM board_games WHERE bgg_id = ?",
+                        (bgg_id,),
+                    ).fetchone()
+                    if game is None:
+                        raise BoardGameDocumentNotFound(
+                            f"Board game BGG #{bgg_id} not found"
+                        )
+                    inserted = connection.execute(
+                        """
+                        INSERT INTO game_documents (
+                            id, board_game_id, document_type, language, title,
+                            original_filename, storage_path, sha256, size_bytes,
+                            mime_type, source_kind, source_provider, source_url,
+                            is_official, version_label, edition, published_at,
+                            provenance_json, created_at, updated_at
+                        ) VALUES (
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, 'application/pdf',
+                            ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?
+                        )
+                        ON CONFLICT(board_game_id, sha256) DO NOTHING
+                        """,
+                        (
+                            document_id,
+                            game["id"],
+                            doc_type,
+                            lang,
+                            doc_title,
+                            clean_filename,
+                            relative_path,
+                            expected_sha256,
+                            size,
+                            _clean_text(source_kind, max_length=64) or "rulebook_fetch",
+                            _clean_text(source_provider, max_length=200),
+                            _clean_text(source_url, max_length=2000),
+                            1 if is_official else 0,
+                            _clean_text(version_label, max_length=500),
+                            _clean_text(edition, max_length=500),
+                            json.dumps(
+                                clean_provenance,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                            ),
+                            now,
+                            now,
+                        ),
+                    )
+                    if inserted.rowcount == 0:
+                        duplicate = connection.execute(
+                            self._select_sql(
+                                "d.board_game_id = ? AND d.sha256 = ?"
+                            ),
+                            (game["id"], expected_sha256),
+                        ).fetchone()
+                        if duplicate is None:
+                            raise RuntimeError(
+                                "Fetched PDF conflict completed without a readable row"
+                            )
+                        final_path.unlink(missing_ok=True)
+                        return _row_to_document(duplicate), False
             except Exception:
                 final_path.unlink(missing_ok=True)
                 raise
