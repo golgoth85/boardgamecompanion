@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     config_dir: Path = Path("/config")
     import_dir: Path = Path("/data/import")
     manuals_dir: Path = Path("/data/manuals")
+    max_document_bytes: int = 100 * 1024 * 1024
     floppy_url: str | None = None
     floppy_api_key: str | None = None
     floppy_timeout_seconds: float = 45.0
