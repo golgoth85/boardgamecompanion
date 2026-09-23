@@ -609,7 +609,7 @@ def test_document_upload_list_download_and_dedup(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
         expect(page.locator(".game-document-card")).to_have_count(0)
         expect(page.locator(".document-empty")).to_contain_text(
             "Nessun manuale o documento registrato"
