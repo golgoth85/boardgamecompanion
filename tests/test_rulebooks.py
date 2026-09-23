@@ -1077,8 +1077,13 @@ def test_resolution_is_fully_order_independent_for_three_equal_score_duplicates(
     "url",
     [
         "https://192.0.0.8/rules.pdf",
+        "https://192.88.99.2/rules.pdf",
         "https://[64:ff9b:1::1]/rules.pdf",
         "https://[2002::1]/rules.pdf",
+        "https://[3fff::1]/rules.pdf",
+        "https://[5f00::1]/rules.pdf",
+        "https://[fe80::1]/rules.pdf",
+        "https://[fec0::1]/rules.pdf",
     ],
 )
 def test_candidate_rejects_special_use_literals_on_minimum_supported_python(url):
@@ -1089,6 +1094,17 @@ def test_candidate_rejects_special_use_literals_on_minimum_supported_python(url)
             url=url,
             official=False,
         )
+
+
+def test_candidate_accepts_current_iana_global_ipv6_exception():
+    result = candidate(
+        provider="iana-global",
+        source=RulebookSource.COMMUNITY,
+        url="https://[2001:1::3]/rules.pdf",
+        official=False,
+    )
+
+    assert result.url == "https://[2001:1::3]/rules.pdf"
 
 
 def test_candidate_preserves_explicit_empty_query_and_dedup_distinction():
