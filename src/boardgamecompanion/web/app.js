@@ -1307,6 +1307,43 @@ document.addEventListener("click", (event) => {
 
 window.addEventListener("popstate", route);
 
+scannerButton.addEventListener("click", openScannerDialog);
+closeScanner.addEventListener("click", closeScannerDialog);
+scannerDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeScannerDialog();
+});
+scannerDialog.addEventListener("close", resetScanner);
+scannerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void lookupScannerBarcode();
+});
+toggleCamera.addEventListener("click", () => {
+  void startScannerCamera();
+});
+
+copyForm.addEventListener("submit", (event) => {
+  void saveCopyEditor(event);
+});
+closeCopyDialogButton.addEventListener("click", closeCopyEditor);
+cancelCopyDialog.addEventListener("click", closeCopyEditor);
+copyDialog.addEventListener("cancel", (event) => {
+  if (copyBusy) {
+    event.preventDefault();
+    return;
+  }
+  editingCopyId = null;
+  editingCopyBggId = null;
+});
+copyDialog.addEventListener("close", () => {
+  copyForm.reset();
+  copyResult.hidden = true;
+  copyResult.textContent = "";
+  editingCopyId = null;
+  editingCopyBggId = null;
+  setCopyBusy(false);
+});
+
 settingsButton.addEventListener("click", () => {
   void openSettingsDialog();
 });
