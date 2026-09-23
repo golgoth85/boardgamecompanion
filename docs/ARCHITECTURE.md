@@ -69,6 +69,12 @@ BGG CSV must be accepted without BGG API access. Imports are idempotent and keye
 
 The original row should be retained as source metadata so future versions can make use of fields not yet modeled.
 
+## Database migrations
+
+Schema changes are applied through ordered, versioned migrations recorded in `schema_migrations`.
+A pre-migration database is adopted by the baseline migration without rewriting existing rows.
+New phases must add an additive migration instead of extending an unversioned startup schema.
+
 ## Rulebook resolver
 
 The resolver orchestrates provider adapters and ranks normalized candidates. Provider-specific HTML/API parsing remains inside adapters.
