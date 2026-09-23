@@ -89,6 +89,12 @@ Resolution order should prefer:
 
 A title match alone is insufficient for unattended download. Matching may also use year, BGG ID, publisher, expansion/base-game identity, language and edition clues.
 
+Provider results are normalized before ranking. Every candidate carries the provider identity, source class, HTTP(S) URL, language, document type, official/unofficial status, confidence and optional BGG/title/year/version/edition clues. Source classes use the initial confidence policy from `AGENTS.md`: publisher/localizer 100, official mirror 95, known community 70 and generic discovery 40.
+
+The resolver is failure-isolated: one provider cannot abort results from another provider, and candidates with an explicit conflicting BGG ID are rejected. Exact URL duplicates collapse to the highest-ranked candidate. Within equal source confidence, exact BGG identity is preferred first, then the requested language order (Italian before English by default), then publisher/localizer/mirror/community/generic source priority, followed by exact title/year clues. The score and matching reasons remain inspectable so later review-queue decisions are explainable.
+
+P5A deliberately defines this contract without unattended network downloading. Provider-specific HTTP discovery and guarded download/review behavior are separate subphases.
+
 ## RAG
 
 Documents are indexed per game while retaining language, document type, version and page identity.
