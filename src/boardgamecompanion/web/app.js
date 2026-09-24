@@ -2128,6 +2128,9 @@ scannerDialog.addEventListener("cancel", (event) => {
 scannerDialog.addEventListener("close", resetScanner);
 scannerForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!scannerBarcode.value.trim()) return;
+  scannerDetectionLocked = true;
+  stopScannerCamera();
   void lookupScannerBarcode();
 });
 toggleCamera.addEventListener("click", () => {

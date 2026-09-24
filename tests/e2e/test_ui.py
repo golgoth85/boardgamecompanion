@@ -1308,3 +1308,42 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
         assert page.evaluate("window.__bgcZxingStopped") is True
     finally:
         context.close()
+
+
+def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    _install_camera_stub(page)
+    page.add_init_script(
+        """
+        window.BarcodeDetector = class {
+          static async getSupportedFormats() {
+            return ["ean_13", "ean_8", "upc_a", "upc_e"];
+          }
+          async detect() {
+            window.__bgcDetectCalls = (window.__bgcDetectCalls || 0) + 1;
+            return await new Promise((resolve) => {
+              window.__bgcResolveDetection = resolve;
+            });
+          }
+        };
+        """
+    )
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+        page.wait_for_function("window.__bgcResolveDetection !== undefined")
+
+        page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
+        page.locator("#scannerBarcode").fill("1234567890123")
+        page.get_by_role("button", name="Cerca").click()
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
+
+        page.evaluate(
+            "window.__bgcResolveDetection([{rawValue: '9999999999999'}])"
+        )
+        page.wait_for_timeout(100)
+        expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
+        expect(page.locator("#scannerResult")).to_contain_text("1234567890123")
+    finally:
+        context.close()
