@@ -31,6 +31,13 @@ from boardgamecompanion.documents import (
     DocumentTooLarge,
     InvalidPdf,
 )
+from boardgamecompanion.pdf_ingest import (
+    PdfIngestDocumentNotFound,
+    PdfIngestError,
+    PdfIngestIntegrityError,
+    PdfIngestParseError,
+    PdfIngestService,
+)
 from boardgamecompanion.floppy import (
     FloppyClient,
     FloppyConfig,
@@ -450,6 +457,75 @@ def get_document_file(document_id: str) -> FileResponse:
     except DocumentError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return FileResponse(path, media_type="application/pdf")
+
+
+
+def get_pdf_ingest_service() -> PdfIngestService:
+    database = get_database()
+    database.initialize()
+    return PdfIngestService(
+        database,
+        settings.manuals_dir,
+        timeout_seconds=settings.pdf_parse_timeout_seconds,
+        max_pages=settings.pdf_parse_max_pages,
+        max_chars_per_page=settings.pdf_parse_max_chars_per_page,
+        max_total_chars=settings.pdf_parse_max_total_chars,
+        memory_mb=settings.pdf_parse_memory_mb,
+    )
+
+
+@app.post("/api/documents/{document_id}/ingest", tags=["documents"])
+def ingest_document_pdf(
+    document_id: str,
+    force: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_pdf_ingest_service().ingest(document_id, force=force)
+    except PdfIngestDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PdfIngestParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PdfIngestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/documents/{document_id}/ingest", tags=["documents"])
+def get_document_ingest(document_id: str) -> dict[str, object]:
+    try:
+        return get_pdf_ingest_service().status(document_id)
+    except PdfIngestDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/documents/{document_id}/pages", tags=["documents"])
+def list_document_pages(
+    document_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    try:
+        return get_pdf_ingest_service().list_pages(
+            document_id,
+            limit=limit,
+            offset=offset,
+        )
+    except PdfIngestDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/documents/{document_id}/pages/{page_number}", tags=["documents"])
+def get_document_page(document_id: str, page_number: int) -> dict[str, object]:
+    if page_number < 1:
+        raise HTTPException(status_code=400, detail="Page number must be >= 1")
+    try:
+        page = get_pdf_ingest_service().get_page(document_id, page_number)
+    except PdfIngestDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Document page not found")
+    return page
 
 
 @app.get("/api/rulebook-reviews", tags=["rulebooks"])

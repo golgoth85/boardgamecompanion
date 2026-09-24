@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import pytest
 from pathlib import Path
 
 from boardgamecompanion.database import Database
@@ -19,8 +20,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 5
-    assert second_version == 5
+    assert first_version == LATEST_SCHEMA_VERSION == 6
+    assert second_version == 6
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -39,6 +40,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (3, "game-documents"),
         (4, "rulebook-review-queue"),
         (5, "rulebook-scheduled-updates"),
+        (6, "pdf-page-ingestion"),
     ]
     assert {
         "board_games",
@@ -52,6 +54,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "rulebook_review_items",
         "rulebook_update_targets",
         "rulebook_update_runs",
+        "document_parse_runs",
+        "document_pages",
         "schema_migrations",
     } <= tables
 
@@ -127,7 +131,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5]
+    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5, 6]
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",
@@ -226,7 +230,7 @@ def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
             "SELECT COUNT(*) AS count FROM rulebook_update_runs"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 5
+    assert database.schema_version() == 6
     assert dict(review) == {
         "id": "review-existing",
         "status": "approved",
@@ -234,3 +238,164 @@ def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
     }
     assert targets == 0
     assert runs == 0
+
+
+def test_v5_database_with_archived_document_upgrades_to_v6_without_loss(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "v5.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    for migration in MIGRATIONS[:5]:
+        migration.apply(connection)
+        connection.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, 'before')
+            """,
+            (migration.version, migration.name),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO board_games (
+            bgg_id, title, source_metadata_json, created_at, updated_at
+        ) VALUES (67890, 'Archived Game', '{}', 'before', 'before')
+        """
+    )
+    game_id = connection.execute(
+        "SELECT id FROM board_games WHERE bgg_id = 67890"
+    ).fetchone()["id"]
+    connection.execute(
+        """
+        INSERT INTO game_documents (
+            id, board_game_id, document_type, language, title,
+            original_filename, storage_path, sha256, size_bytes,
+            mime_type, source_kind, source_provider, source_url,
+            is_official, version_label, edition, published_at,
+            provenance_json, created_at, updated_at
+        ) VALUES (
+            'doc-existing', ?, 'rulebook', 'it', 'Regolamento',
+            'rules.pdf', '67890/doc-existing.pdf', ?, 123,
+            'application/pdf', 'rulebook_fetch', 'publisher-test',
+            'https://publisher.example/rules.pdf',
+            1, 'v1', 'Retail IT', NULL,
+            '{"ingest":"rulebook_fetch"}', 'before', 'before'
+        )
+        """,
+        (game_id, "a" * 64),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connect() as connection:
+        document = connection.execute(
+            """
+            SELECT id, document_type, language, version_label, edition, is_official
+            FROM game_documents
+            WHERE id = 'doc-existing'
+            """
+        ).fetchone()
+        parse_runs = connection.execute(
+            "SELECT COUNT(*) AS count FROM document_parse_runs"
+        ).fetchone()["count"]
+        pages = connection.execute(
+            "SELECT COUNT(*) AS count FROM document_pages"
+        ).fetchone()["count"]
+
+    assert database.schema_version() == 6
+    assert dict(document) == {
+        "id": "doc-existing",
+        "document_type": "rulebook",
+        "language": "it",
+        "version_label": "v1",
+        "edition": "Retail IT",
+        "is_official": 1,
+    }
+    assert parse_runs == 0
+    assert pages == 0
+
+
+def test_pdf_page_provenance_cannot_cross_documents(tmp_path: Path) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO board_games (
+                bgg_id, title, source_metadata_json, created_at, updated_at
+            ) VALUES (70001, 'Provenance Game', '{}', 'now', 'now')
+            """
+        )
+        game_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id = 70001"
+        ).fetchone()["id"]
+        for document_id, suffix in (("doc-a", "a"), ("doc-b", "b")):
+            connection.execute(
+                """
+                INSERT INTO game_documents (
+                    id, board_game_id, document_type, language, title,
+                    original_filename, storage_path, sha256, size_bytes,
+                    mime_type, source_kind, is_official, provenance_json,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, 'rulebook', 'en', ?,
+                    ?, ?, ?, 10,
+                    'application/pdf', 'manual_upload', 0, '{}',
+                    'now', 'now'
+                )
+                """,
+                (
+                    document_id,
+                    game_id,
+                    document_id,
+                    f"{document_id}.pdf",
+                    f"70001/{document_id}.pdf",
+                    suffix * 64,
+                ),
+            )
+        connection.execute(
+            """
+            INSERT INTO document_parse_runs (
+                id, document_id, document_sha256,
+                parser_name, parser_version, status,
+                page_count, text_page_count, empty_page_count,
+                error_page_count, total_text_chars, warning_count,
+                diagnostics_json, started_at, finished_at
+            ) VALUES (
+                'run-a', 'doc-a', ?, 'pypdf', '6.19.0', 'succeeded',
+                1, 1, 0, 0, 4, 0, '{}', 'now', 'now'
+            )
+            """,
+            ("a" * 64,),
+        )
+
+    with database.connect() as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO document_pages (
+                    id, document_id, parse_run_id,
+                    page_index, page_number, text, text_sha256,
+                    char_count, extraction_status, diagnostics_json, created_at
+                ) VALUES (
+                    'page-crossed', 'doc-b', 'run-a',
+                    0, 1, 'text', ?, 4, 'text', '{}', 'now'
+                )
+                """,
+                ("c" * 64,),
+            )

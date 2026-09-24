@@ -519,6 +519,109 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
     )
 
 
+def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_parse_runs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL
+                REFERENCES game_documents(id) ON DELETE CASCADE,
+            document_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_sha256) = 64
+                    AND document_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            parser_name TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK(status IN ('succeeded', 'failed')),
+            page_count INTEGER CHECK(page_count IS NULL OR page_count >= 0),
+            text_page_count INTEGER
+                CHECK(text_page_count IS NULL OR text_page_count >= 0),
+            empty_page_count INTEGER
+                CHECK(empty_page_count IS NULL OR empty_page_count >= 0),
+            error_page_count INTEGER
+                CHECK(error_page_count IS NULL OR error_page_count >= 0),
+            total_text_chars INTEGER
+                CHECK(total_text_chars IS NULL OR total_text_chars >= 0),
+            warning_count INTEGER NOT NULL DEFAULT 0
+                CHECK(warning_count >= 0),
+            diagnostics_json TEXT NOT NULL DEFAULT '{}',
+            error_code TEXT,
+            error_message TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL,
+            UNIQUE(id, document_id),
+            CHECK(
+                (
+                    status = 'succeeded'
+                    AND page_count IS NOT NULL
+                    AND text_page_count IS NOT NULL
+                    AND empty_page_count IS NOT NULL
+                    AND error_page_count IS NOT NULL
+                    AND total_text_chars IS NOT NULL
+                    AND page_count =
+                        text_page_count + empty_page_count + error_page_count
+                    AND error_code IS NULL
+                    AND error_message IS NULL
+                )
+                OR (
+                    status = 'failed'
+                    AND page_count IS NULL
+                    AND text_page_count IS NULL
+                    AND empty_page_count IS NULL
+                    AND error_page_count IS NULL
+                    AND total_text_chars IS NULL
+                    AND error_code IS NOT NULL
+                    AND error_message IS NOT NULL
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_parse_runs_document
+        ON document_parse_runs(document_id, finished_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_pages (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL
+                REFERENCES game_documents(id) ON DELETE CASCADE,
+            parse_run_id TEXT NOT NULL,
+            page_index INTEGER NOT NULL CHECK(page_index >= 0),
+            page_number INTEGER NOT NULL CHECK(page_number >= 1),
+            text TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL
+                CHECK(
+                    length(text_sha256) = 64
+                    AND text_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            char_count INTEGER NOT NULL CHECK(char_count >= 0),
+            extraction_status TEXT NOT NULL
+                CHECK(extraction_status IN ('text', 'empty', 'error')),
+            diagnostics_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(parse_run_id, document_id)
+                REFERENCES document_parse_runs(id, document_id)
+                ON DELETE CASCADE,
+            CHECK(page_number = page_index + 1),
+            UNIQUE(document_id, page_index),
+            UNIQUE(document_id, page_number)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_pages_run
+        ON document_pages(parse_run_id, page_number)
+        """
+    )
+
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -526,6 +629,7 @@ MIGRATIONS = (
     Migration(3, "game-documents", _game_documents),
     Migration(4, "rulebook-review-queue", _rulebook_reviews),
     Migration(5, "rulebook-scheduled-updates", _rulebook_updates),
+    Migration(6, "pdf-page-ingestion", _pdf_page_ingestion),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
