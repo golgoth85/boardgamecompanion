@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     import_dir: Path = Path("/data/import")
     manuals_dir: Path = Path("/data/manuals")
     max_document_bytes: int = 100 * 1024 * 1024
+    pdf_parse_timeout_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
+    pdf_parse_max_pages: int = Field(default=2000, ge=1, le=10000)
+    pdf_parse_max_chars_per_page: int = Field(
+        default=500_000, ge=1000, le=5_000_000
+    )
+    pdf_parse_max_total_chars: int = Field(
+        default=20_000_000, ge=10_000, le=100_000_000
+    )
+    pdf_parse_memory_mb: int = Field(default=768, ge=128, le=4096)
     rulebook_fetch_max_bytes: int = Field(
         default=32 * 1024 * 1024,
         ge=1024,
