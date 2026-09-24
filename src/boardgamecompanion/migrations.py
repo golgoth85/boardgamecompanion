@@ -526,7 +526,11 @@ def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL
                 REFERENCES game_documents(id) ON DELETE CASCADE,
-            document_sha256 TEXT NOT NULL,
+            document_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_sha256) = 64
+                    AND document_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
             parser_name TEXT NOT NULL,
             parser_version TEXT NOT NULL,
             status TEXT NOT NULL
@@ -547,6 +551,7 @@ def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
             error_message TEXT,
             started_at TEXT NOT NULL,
             finished_at TEXT NOT NULL,
+            UNIQUE(id, document_id),
             CHECK(
                 (
                     status = 'succeeded'
@@ -568,6 +573,7 @@ def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
                     AND error_page_count IS NULL
                     AND total_text_chars IS NULL
                     AND error_code IS NOT NULL
+                    AND error_message IS NOT NULL
                 )
             )
         )
@@ -585,17 +591,23 @@ def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             document_id TEXT NOT NULL
                 REFERENCES game_documents(id) ON DELETE CASCADE,
-            parse_run_id TEXT NOT NULL
-                REFERENCES document_parse_runs(id) ON DELETE CASCADE,
+            parse_run_id TEXT NOT NULL,
             page_index INTEGER NOT NULL CHECK(page_index >= 0),
             page_number INTEGER NOT NULL CHECK(page_number >= 1),
             text TEXT NOT NULL,
-            text_sha256 TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL
+                CHECK(
+                    length(text_sha256) = 64
+                    AND text_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
             char_count INTEGER NOT NULL CHECK(char_count >= 0),
             extraction_status TEXT NOT NULL
                 CHECK(extraction_status IN ('text', 'empty', 'error')),
             diagnostics_json TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL,
+            FOREIGN KEY(parse_run_id, document_id)
+                REFERENCES document_parse_runs(id, document_id)
+                ON DELETE CASCADE,
             CHECK(page_number = page_index + 1),
             UNIQUE(document_id, page_index),
             UNIQUE(document_id, page_number)
