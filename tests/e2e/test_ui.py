@@ -1347,3 +1347,44 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
         expect(page.locator("#scannerResult")).to_contain_text("1234567890123")
     finally:
         context.close()
+
+
+def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    page.add_init_script(
+        """
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            getUserMedia: () => new Promise((resolve) => {
+              window.__bgcResolveCamera = resolve;
+            }),
+          },
+        });
+        HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+        window.BarcodeDetector = class {
+          static async getSupportedFormats() {
+            return ["ean_13", "ean_8", "upc_a", "upc_e"];
+          }
+          async detect() { return []; }
+        };
+        """
+    )
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+        page.wait_for_function("typeof window.__bgcResolveCamera === 'function'")
+
+        page.get_by_role("button", name="Chiudi scanner").click()
+        expect(page.locator("#scannerDialog")).not_to_be_visible()
+
+        page.evaluate(
+            "window.__bgcResolveCamera(new MediaStream())"
+        )
+        page.wait_for_timeout(100)
+        assert page.evaluate(
+            "document.querySelector('#scannerVideo').srcObject === null"
+        )
+        expect(page.locator("#scannerDialog")).not_to_be_visible()
+    finally:
+        context.close()

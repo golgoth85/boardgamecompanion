@@ -100,6 +100,7 @@ let scannerDetector = null;
 let scannerFallbackControls = null;
 let scannerDetectionLocked = false;
 let scannerBackend = null;
+let scannerStartId = 0;
 let documentBusy = false;
 let documentBggId = null;
 
@@ -500,6 +501,7 @@ async function applyScannerFocus(stream) {
 }
 
 function stopScannerCamera() {
+  scannerStartId += 1;
   if (scannerFrameHandle) {
     cancelAnimationFrame(scannerFrameHandle);
     scannerFrameHandle = null;
@@ -524,7 +526,7 @@ function stopScannerCamera() {
 
 function acceptScannerDetection(rawValue) {
   const code = String(rawValue || "").trim();
-  if (!code || scannerDetectionLocked) return;
+  if (!code || scannerDetectionLocked || !scannerDialog.open) return;
   scannerDetectionLocked = true;
   scannerBarcode.value = code;
   stopScannerCamera();
@@ -558,7 +560,12 @@ function configureZxingFormats(reader) {
   ].filter((value) => value !== undefined);
 }
 
-async function startZxingScanner(existingStream = null) {
+async function startZxingScanner(existingStream = null, startId = scannerStartId) {
+  if (startId !== scannerStartId || !scannerDialog.open) {
+    for (const track of existingStream?.getTracks?.() || []) track.stop();
+    return;
+  }
+
   const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
   if (!Reader) throw new Error("Fallback ZXing non caricato");
   const reader = new Reader(undefined, {
@@ -566,14 +573,13 @@ async function startZxingScanner(existingStream = null) {
     delayBetweenScanSuccess: 500,
   });
   configureZxingFormats(reader);
-  scannerBackend = "zxing";
   const callback = (result) => {
     const text = result?.getText?.() ?? result?.text;
     if (text) acceptScannerDetection(text);
   };
+
   let controls;
   if (existingStream) {
-    scannerStream = existingStream;
     controls = await reader.decodeFromStream(
       existingStream,
       scannerVideo,
@@ -585,19 +591,28 @@ async function startZxingScanner(existingStream = null) {
       scannerVideo,
       callback,
     );
-    scannerStream = scannerVideo.srcObject || null;
   }
-  if (scannerDetectionLocked) {
+
+  const stream = existingStream || scannerVideo.srcObject || null;
+  if (
+    startId !== scannerStartId ||
+    scannerDetectionLocked ||
+    !scannerDialog.open
+  ) {
     try {
       void controls.stop();
     } catch (_) {
-      // Detection already won the race; there is nothing else to do.
+      for (const track of stream?.getTracks?.() || []) track.stop();
     }
-    scannerStream = null;
+    if (scannerVideo.srcObject === stream) scannerVideo.srcObject = null;
     return;
   }
+
+  scannerBackend = "zxing";
+  scannerStream = stream;
   scannerFallbackControls = controls;
-  await applyScannerFocus(scannerStream);
+  await applyScannerFocus(stream);
+  if (startId !== scannerStartId || !scannerDialog.open) return;
   toggleCamera.textContent = "Ferma fotocamera";
   cameraHint.textContent = "Inquadra EAN/UPC. Scanner compatibile ZXing attivo.";
 }
@@ -624,8 +639,9 @@ async function scanCameraFrame() {
       scannerFrameHandle = null;
     }
     scannerDetectionLocked = false;
+    const fallbackStartId = scannerStartId;
     try {
-      await startZxingScanner(stream);
+      await startZxingScanner(stream, fallbackStartId);
       return;
     } catch (_) {
       for (const track of stream?.getTracks?.() || []) track.stop();
@@ -670,25 +686,40 @@ async function startScannerCamera() {
     return;
   }
 
+  const startId = ++scannerStartId;
   try {
     const detector = await createNativeScannerDetector();
+    if (startId !== scannerStartId || !scannerDialog.open) return;
+
     if (detector) {
-      scannerDetector = detector;
-      scannerBackend = "native";
-      scannerStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: scannerVideoConstraints(),
         audio: false,
       });
-      scannerVideo.srcObject = scannerStream;
+      if (startId !== scannerStartId || !scannerDialog.open) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+
+      scannerDetector = detector;
+      scannerBackend = "native";
+      scannerStream = stream;
+      scannerVideo.srcObject = stream;
       await scannerVideo.play();
-      await applyScannerFocus(scannerStream);
+      if (startId !== scannerStartId || !scannerDialog.open) return;
+
+      await applyScannerFocus(stream);
+      if (startId !== scannerStartId || !scannerDialog.open) return;
+
       toggleCamera.textContent = "Ferma fotocamera";
       cameraHint.textContent = "Inquadra EAN/UPC. Scanner nativo attivo.";
       scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
       return;
     }
-    await startZxingScanner();
+
+    await startZxingScanner(null, startId);
   } catch (error) {
+    if (startId !== scannerStartId || !scannerDialog.open) return;
     stopScannerCamera();
     cameraHint.textContent = scannerCameraErrorMessage(error);
     scannerManualFallback.open = true;
