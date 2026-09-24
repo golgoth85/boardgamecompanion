@@ -408,6 +408,8 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
             last_failure_message TEXT,
             lease_owner TEXT,
             lease_until TEXT,
+            lease_generation INTEGER NOT NULL DEFAULT 0
+                CHECK(lease_generation >= 0),
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             CHECK(
@@ -430,6 +432,18 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
                     AND last_checked_at IS NOT NULL
                     AND consecutive_failures > 0
                     AND last_failure_code IS NOT NULL
+                    AND (
+                        (
+                            last_success_at IS NULL
+                            AND last_document_id IS NULL
+                            AND last_sha256 IS NULL
+                        )
+                        OR (
+                            last_success_at IS NOT NULL
+                            AND last_document_id IS NOT NULL
+                            AND last_sha256 IS NOT NULL
+                        )
+                    )
                 )
                 OR (
                     last_outcome IN ('created', 'unchanged')
@@ -470,7 +484,7 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
             document_id TEXT
                 REFERENCES game_documents(id) ON DELETE RESTRICT,
             sha256 TEXT,
-            requested_url TEXT NOT NULL,
+            requested_url TEXT,
             final_url TEXT,
             status_code INTEGER,
             byte_size INTEGER NOT NULL DEFAULT 0
@@ -482,12 +496,14 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
             CHECK(
                 (
                     outcome = 'failed'
+                    AND document_id IS NULL
                     AND failure_code IS NOT NULL
                 )
                 OR (
                     outcome IN ('created', 'unchanged')
                     AND document_id IS NOT NULL
                     AND sha256 IS NOT NULL
+                    AND requested_url IS NOT NULL
                     AND failure_code IS NULL
                     AND failure_message IS NULL
                 )

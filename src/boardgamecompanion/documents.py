@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -340,6 +341,10 @@ class DocumentStore:
         is_official: bool,
         provenance: dict[str, Any],
         max_bytes: int,
+        transaction_guard: Callable[[sqlite3.Connection], None] | None = None,
+        transaction_finalize: (
+            Callable[[sqlite3.Connection, str], None] | None
+        ) = None,
     ) -> tuple[dict[str, Any], bool]:
         doc_type = normalize_document_type(document_type)
         lang = normalize_language(language)
@@ -355,6 +360,7 @@ class DocumentStore:
                 f"Fetched PDF size is outside the {max_bytes} byte archive limit"
             )
 
+        self.manuals_dir.mkdir(parents=True, exist_ok=True)
         root = self.manuals_dir.resolve()
         resolved_source = Path(source_path).resolve()
         if root not in resolved_source.parents or not resolved_source.is_file():
@@ -393,17 +399,89 @@ class DocumentStore:
             if duplicate is not None:
                 return _row_to_document(duplicate), False
 
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        if no_follow is None or directory_flag is None:
+            raise DocumentError(
+                "Scheduled archive requires no-follow directory support"
+            )
+
         document_id = str(uuid4())
-        game_dir = self.manuals_dir / str(int(bgg_id))
-        game_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = game_dir / f".{document_id}.part"
-        final_path = game_dir / f"{document_id}.pdf"
-        digest = hashlib.sha256()
-        size = 0
-        first_bytes = b""
+        game_name = str(int(bgg_id))
+        temp_name = f".{document_id}.part"
+        final_name = f"{document_id}.pdf"
+        relative_path = f"{game_name}/{final_name}"
+        root_fd = os.open(root, os.O_RDONLY | directory_flag)
+        game_fd: int | None = None
+        temp_fd: int | None = None
+        temp_created = False
+        final_created = False
+
+        def assert_game_directory_unchanged() -> None:
+            if game_fd is None:
+                raise DocumentError("Scheduled archive directory is unavailable")
+            try:
+                check_fd = os.open(
+                    game_name,
+                    os.O_RDONLY | directory_flag | no_follow,
+                    dir_fd=root_fd,
+                )
+            except OSError as exc:
+                raise DocumentError(
+                    "Scheduled archive directory escaped manuals root"
+                ) from exc
+            try:
+                expected_stat = os.fstat(game_fd)
+                current_stat = os.fstat(check_fd)
+                if (
+                    expected_stat.st_dev != current_stat.st_dev
+                    or expected_stat.st_ino != current_stat.st_ino
+                ):
+                    raise DocumentError(
+                        "Scheduled archive directory changed during write"
+                    )
+                proc_fd = Path(f"/proc/self/fd/{game_fd}")
+                if proc_fd.exists():
+                    actual_directory = proc_fd.resolve()
+                    if root not in actual_directory.parents:
+                        raise DocumentError(
+                            "Scheduled archive directory moved outside manuals root"
+                        )
+            finally:
+                os.close(check_fd)
 
         try:
-            with resolved_source.open("rb") as source, temp_path.open("wb") as destination:
+            try:
+                os.mkdir(game_name, mode=0o755, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+
+            try:
+                game_fd = os.open(
+                    game_name,
+                    os.O_RDONLY | directory_flag | no_follow,
+                    dir_fd=root_fd,
+                )
+            except OSError as exc:
+                raise DocumentError(
+                    "Scheduled archive game directory is not a safe directory"
+                ) from exc
+
+            assert_game_directory_unchanged()
+            temp_fd = os.open(
+                temp_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | no_follow,
+                0o600,
+                dir_fd=game_fd,
+            )
+            temp_created = True
+            destination = os.fdopen(temp_fd, "wb", closefd=True)
+            temp_fd = None
+            digest = hashlib.sha256()
+            size = 0
+            first_bytes = b""
+
+            with resolved_source.open("rb") as source, destination:
                 while True:
                     chunk = source.read(1024 * 1024)
                     if not chunk:
@@ -427,8 +505,16 @@ class DocumentStore:
             if digest.hexdigest() != expected_sha256:
                 raise InvalidPdf("Fetched PDF digest changed during archive")
 
-            os.replace(temp_path, final_path)
-            relative_path = final_path.relative_to(self.manuals_dir).as_posix()
+            assert_game_directory_unchanged()
+            os.replace(
+                temp_name,
+                final_name,
+                src_dir_fd=game_fd,
+                dst_dir_fd=game_fd,
+            )
+            temp_created = False
+            final_created = True
+
             now = datetime.now(UTC).isoformat()
             doc_title = (
                 _clean_text(title, max_length=500)
@@ -446,6 +532,9 @@ class DocumentStore:
 
             try:
                 with self.database.transaction(immediate=True) as connection:
+                    assert_game_directory_unchanged()
+                    if transaction_guard is not None:
+                        transaction_guard(connection)
                     game = connection.execute(
                         "SELECT id FROM board_games WHERE bgg_id = ?",
                         (bgg_id,),
@@ -504,14 +593,32 @@ class DocumentStore:
                             raise RuntimeError(
                                 "Fetched PDF conflict completed without a readable row"
                             )
-                        final_path.unlink(missing_ok=True)
+                        os.unlink(final_name, dir_fd=game_fd)
+                        final_created = False
                         return _row_to_document(duplicate), False
+                    assert_game_directory_unchanged()
+                    if transaction_finalize is not None:
+                        transaction_finalize(connection, document_id)
             except Exception:
-                final_path.unlink(missing_ok=True)
+                if final_created:
+                    try:
+                        os.unlink(final_name, dir_fd=game_fd)
+                    except FileNotFoundError:
+                        pass
+                    final_created = False
                 raise
 
             created = self.get(document_id)
             assert created is not None
             return created, True
         finally:
-            temp_path.unlink(missing_ok=True)
+            if temp_fd is not None:
+                os.close(temp_fd)
+            if game_fd is not None:
+                if temp_created:
+                    try:
+                        os.unlink(temp_name, dir_fd=game_fd)
+                    except FileNotFoundError:
+                        pass
+                os.close(game_fd)
+            os.close(root_fd)

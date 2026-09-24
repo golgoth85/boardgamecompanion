@@ -141,7 +141,9 @@ They are intentionally not present in the default Unraid template.
 
 Approved rulebook candidates are monitored independently from the review queue at `/updates`. New targets are due immediately; subsequent successful checks use the configured interval (30 days by default). Failed checks use bounded exponential backoff and remain auditable without changing the approval decision.
 
-The scheduler reuses the guarded P5B fetch path and archives a new `game_documents` version only when the fetched SHA-256 is new for that game. Existing document metadata is not overwritten.
+The scheduler reuses the guarded P5B fetch path and archives a new `game_documents` version only when the fetched SHA-256 is new for that game. Existing document metadata is not overwritten. Lease claims carry a monotonically increasing fencing generation and are renewed by a heartbeat while work is in flight; both archive insertion and completion verify the exact fence so a stale worker cannot publish a document after another worker has reclaimed the target. Scheduled archive destinations are opened through no-follow directory descriptors rooted under the manuals directory. Corrupt post-claim review data is recorded as a failed attempt and does not stop later due targets in the same batch.
+
+The update worker shuts down gracefully by waiting for an already-running bounded job instead of cancelling only the asyncio wrapper. The `/updates` UI also refreshes periodically so background scheduler transitions do not remain indefinitely stale.
 
 API endpoints:
 

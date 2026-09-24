@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -173,17 +173,23 @@ class RulebookUpdateSchedulePayload(BaseModel):
     )
 
 
-async def _rulebook_update_worker() -> None:
-    while True:
-        await asyncio.sleep(settings.rulebook_update_poll_seconds)
+async def _rulebook_update_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.rulebook_update_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
         try:
             service = get_rulebook_update_service()
             await asyncio.to_thread(
                 service.run_due,
                 limit=settings.rulebook_update_batch_size,
             )
-        except asyncio.CancelledError:
-            raise
         except Exception:
             LOGGER.exception("Scheduled rulebook update worker failed")
 
@@ -194,6 +200,7 @@ async def lifespan(_: FastAPI):
     get_database().initialize()
 
     worker_task: asyncio.Task[None] | None = None
+    worker_stop: asyncio.Event | None = None
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(
@@ -203,15 +210,17 @@ async def lifespan(_: FastAPI):
             LOGGER.exception(
                 "Initial rulebook update target synchronization failed"
             )
-        worker_task = asyncio.create_task(_rulebook_update_worker())
+        worker_stop = asyncio.Event()
+        worker_task = asyncio.create_task(
+            _rulebook_update_worker(worker_stop)
+        )
 
     try:
         yield
     finally:
-        if worker_task is not None:
-            worker_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await worker_task
+        if worker_task is not None and worker_stop is not None:
+            worker_stop.set()
+            await worker_task
 
 
 app = FastAPI(

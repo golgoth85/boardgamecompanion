@@ -1620,7 +1620,27 @@ async function renderReviews({reset = false} = {}) {
 
 
 const UPDATE_PAGE_SIZE = 50;
+const UPDATE_REFRESH_MS = 30_000;
 let updateOffset = 0;
+let updateRefreshTimer = null;
+
+
+function clearUpdateRefresh() {
+  if (updateRefreshTimer !== null) {
+    window.clearTimeout(updateRefreshTimer);
+    updateRefreshTimer = null;
+  }
+}
+
+
+function scheduleUpdateRefresh() {
+  clearUpdateRefresh();
+  if (!/^\/updates\/?$/.test(window.location.pathname)) return;
+  updateRefreshTimer = window.setTimeout(() => {
+    updateRefreshTimer = null;
+    void renderUpdates();
+  }, UPDATE_REFRESH_MS);
+}
 
 
 function formatUpdateTime(value) {
@@ -1810,6 +1830,7 @@ async function changeUpdateInterval(reviewId, intervalSeconds) {
 
 
 async function renderUpdates({reset = false} = {}) {
+  clearUpdateRefresh();
   if (reset) updateOffset = 0;
   app.innerHTML = '<div class="empty">Caricamento aggiornamenti rulebook…</div>';
   try {
@@ -1882,14 +1903,19 @@ async function renderUpdates({reset = false} = {}) {
       });
     });
     document.title = "Aggiornamenti · BoardGameCompanion";
+    scheduleUpdateRefresh();
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare gli aggiornamenti: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
+    scheduleUpdateRefresh();
   }
 }
 
 
 async function route() {
+  if (!/^\/updates\/?$/.test(window.location.pathname)) {
+    clearUpdateRefresh();
+  }
   if (/^\/reviews\/?$/.test(window.location.pathname)) {
     await renderReviews({reset: true});
     return;

@@ -287,3 +287,71 @@ def test_update_api_quarantines_target_whose_review_was_corrupted(
     assert row["candidate_json"] == "{"
     assert row["url"] == "javascript:alert(1)"
     assert row["status"] == "approved"
+
+
+def test_run_history_api_remains_available_if_review_later_corrupts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    database = configure(monkeypatch, tmp_path)
+    review, _ = RulebookReviewQueue(database).submit(
+        bgg_id=900001,
+        candidate=official_candidate(),
+    )
+    fetcher = ApiFetcher(settings.manuals_dir)
+    service = update_service(database, fetcher)
+    monkeypatch.setattr(main_module, "get_rulebook_update_service", lambda: service)
+    service.run_review_now(review["id"], owner="manual", now=NOW)
+
+    with database.connect() as connection:
+        connection.execute(
+            """
+            UPDATE rulebook_review_items
+            SET candidate_json = '{'
+            WHERE id = ?
+            """,
+            (review["id"],),
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/rulebook-updates/{review['id']}/runs")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["outcome"] == "created"
+
+
+def test_run_history_api_quarantines_corrupt_audit_json(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    database = configure(monkeypatch, tmp_path)
+    review, _ = RulebookReviewQueue(database).submit(
+        bgg_id=900001,
+        candidate=official_candidate(),
+    )
+    fetcher = ApiFetcher(settings.manuals_dir)
+    service = update_service(database, fetcher)
+    monkeypatch.setattr(main_module, "get_rulebook_update_service", lambda: service)
+    service.run_review_now(review["id"], owner="manual", now=NOW)
+    run_id = service.list_runs(review["id"])["items"][0]["id"]
+
+    with database.connect() as connection:
+        connection.execute(
+            """
+            UPDATE rulebook_update_runs
+            SET http_metadata_json = ?
+            WHERE id = ?
+            """,
+            ('{"value":"' + ("x" * 70000) + '"}', run_id),
+        )
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/rulebook-updates/{review['id']}/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"] == []
+    assert payload["corrupt_count"] == 1
+    assert payload["corrupt_items"][0]["id"] == run_id
