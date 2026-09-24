@@ -519,6 +519,43 @@ def _rulebook_updates(connection: sqlite3.Connection) -> None:
     )
 
 
+def _game_metadata_cache(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_metadata_cache (
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            source TEXT NOT NULL,
+            media_id TEXT NOT NULL,
+            provider_title TEXT,
+            source_url TEXT,
+            image_url TEXT,
+            synopsis TEXT,
+            genres_json TEXT NOT NULL DEFAULT '[]',
+            score REAL,
+            score_count INTEGER,
+            year_published INTEGER,
+            players_text TEXT,
+            playtime_text TEXT,
+            min_age TEXT,
+            designers TEXT,
+            publishers TEXT,
+            payload_sha256 TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(board_game_id, provider),
+            UNIQUE(provider, source, media_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_metadata_provider
+        ON game_metadata_cache(provider, fetched_at)
+        """
+    )
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -526,6 +563,7 @@ MIGRATIONS = (
     Migration(3, "game-documents", _game_documents),
     Migration(4, "rulebook-review-queue", _rulebook_reviews),
     Migration(5, "rulebook-scheduled-updates", _rulebook_updates),
+    Migration(6, "game-metadata-cache", _game_metadata_cache),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
