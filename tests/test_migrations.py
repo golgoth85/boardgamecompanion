@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
-import pytest
 from pathlib import Path
+
+import pytest
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.migrations import (
@@ -20,8 +22,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 6
-    assert second_version == 6
+    assert first_version == LATEST_SCHEMA_VERSION == 7
+    assert second_version == 7
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -41,6 +43,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (4, "rulebook-review-queue"),
         (5, "rulebook-scheduled-updates"),
         (6, "pdf-page-ingestion"),
+        (7, "document-chunks"),
     ]
     assert {
         "board_games",
@@ -56,6 +59,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "rulebook_update_runs",
         "document_parse_runs",
         "document_pages",
+        "document_chunk_runs",
+        "document_chunks",
         "schema_migrations",
     } <= tables
 
@@ -131,7 +136,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5, 6]
+    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5, 6, 7]
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",
@@ -230,7 +235,7 @@ def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
             "SELECT COUNT(*) AS count FROM rulebook_update_runs"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 6
+    assert database.schema_version() == 7
     assert dict(review) == {
         "id": "review-existing",
         "status": "approved",
@@ -316,7 +321,7 @@ def test_v5_database_with_archived_document_upgrades_to_v6_without_loss(
             "SELECT COUNT(*) AS count FROM document_pages"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 6
+    assert database.schema_version() == 7
     assert dict(document) == {
         "id": "doc-existing",
         "document_type": "rulebook",
@@ -398,4 +403,233 @@ def test_pdf_page_provenance_cannot_cross_documents(tmp_path: Path) -> None:
                 )
                 """,
                 ("c" * 64,),
+            )
+
+
+def test_v6_database_with_pages_upgrades_to_v7_without_loss(tmp_path: Path) -> None:
+    path = tmp_path / "v6.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    for migration in MIGRATIONS[:6]:
+        migration.apply(connection)
+        connection.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, 'before')
+            """,
+            (migration.version, migration.name),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO board_games (
+            bgg_id, title, source_metadata_json, created_at, updated_at
+        ) VALUES (71234, 'Chunk Migration Game', '{}', 'before', 'before')
+        """
+    )
+    game_id = connection.execute(
+        "SELECT id FROM board_games WHERE bgg_id = 71234"
+    ).fetchone()["id"]
+    connection.execute(
+        """
+        INSERT INTO game_documents (
+            id, board_game_id, document_type, language, title,
+            original_filename, storage_path, sha256, size_bytes,
+            mime_type, source_kind, is_official, provenance_json,
+            created_at, updated_at
+        ) VALUES (
+            'doc-v6', ?, 'rulebook', 'en', 'Rules',
+            'rules.pdf', '71234/doc-v6.pdf', ?, 10,
+            'application/pdf', 'manual_upload', 0, '{}',
+            'before', 'before'
+        )
+        """,
+        (game_id, "a" * 64),
+    )
+    connection.execute(
+        """
+        INSERT INTO document_parse_runs (
+            id, document_id, document_sha256,
+            parser_name, parser_version, status,
+            page_count, text_page_count, empty_page_count,
+            error_page_count, total_text_chars, warning_count,
+            diagnostics_json, started_at, finished_at
+        ) VALUES (
+            'run-v6', 'doc-v6', ?, 'pypdf', '6.19.0', 'succeeded',
+            1, 1, 0, 0, 4, 0, '{}', 'before', 'before'
+        )
+        """,
+        ("a" * 64,),
+    )
+    connection.execute(
+        """
+        INSERT INTO document_pages (
+            id, document_id, parse_run_id,
+            page_index, page_number, text, text_sha256,
+            char_count, extraction_status, diagnostics_json, created_at
+        ) VALUES (
+            'page-v6', 'doc-v6', 'run-v6',
+            0, 1, 'text', ?, 4, 'text', '{}', 'before'
+        )
+        """,
+        (hashlib.sha256(b"text").hexdigest(),),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connect() as connection:
+        page = connection.execute(
+            """
+            SELECT id, document_id, parse_run_id, page_number, text
+            FROM document_pages
+            WHERE id = 'page-v6'
+            """
+        ).fetchone()
+        runs = connection.execute(
+            "SELECT COUNT(*) AS count FROM document_chunk_runs"
+        ).fetchone()["count"]
+        chunks = connection.execute(
+            "SELECT COUNT(*) AS count FROM document_chunks"
+        ).fetchone()["count"]
+
+    assert database.schema_version() == 7
+    assert dict(page) == {
+        "id": "page-v6",
+        "document_id": "doc-v6",
+        "parse_run_id": "run-v6",
+        "page_number": 1,
+        "text": "text",
+    }
+    assert runs == 0
+    assert chunks == 0
+
+
+def test_v7_chunk_foreign_keys_reject_cross_run_provenance(tmp_path: Path) -> None:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO board_games (
+                bgg_id, title, source_metadata_json, created_at, updated_at
+            ) VALUES (72345, 'Chunk FK Game', '{}', 'now', 'now')
+            """
+        )
+        game_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id = 72345"
+        ).fetchone()["id"]
+        connection.execute(
+            """
+            INSERT INTO game_documents (
+                id, board_game_id, document_type, language, title,
+                original_filename, storage_path, sha256, size_bytes,
+                mime_type, source_kind, is_official, provenance_json,
+                created_at, updated_at
+            ) VALUES (
+                'doc-fk', ?, 'rulebook', 'en', 'Rules',
+                'rules.pdf', '72345/doc-fk.pdf', ?, 10,
+                'application/pdf', 'manual_upload', 0, '{}',
+                'now', 'now'
+            )
+            """,
+            (game_id, "a" * 64),
+        )
+        page_sha = hashlib.sha256(b"text").hexdigest()
+        connection.execute(
+            """
+            INSERT INTO document_parse_runs (
+                id, document_id, document_sha256,
+                parser_name, parser_version, status,
+                page_count, text_page_count, empty_page_count,
+                error_page_count, total_text_chars, warning_count,
+                diagnostics_json, started_at, finished_at
+            ) VALUES (
+                'run-fk', 'doc-fk', ?, 'pypdf', '6.19.0', 'succeeded',
+                1, 1, 0, 0, 4, 0, '{}', 'now', 'now'
+            )
+            """,
+            ("a" * 64,),
+        )
+        connection.execute(
+            """
+            INSERT INTO document_pages (
+                id, document_id, parse_run_id,
+                page_index, page_number, text, text_sha256,
+                char_count, extraction_status, diagnostics_json, created_at
+            ) VALUES (
+                'page-fk', 'doc-fk', 'run-fk',
+                0, 1, 'text', ?, 4, 'text', '{}', 'now'
+            )
+            """,
+            (page_sha,),
+        )
+        connection.execute(
+            """
+            INSERT INTO document_chunk_runs (
+                id, document_id, board_game_id, parse_run_id,
+                document_sha256, document_metadata_sha256,
+                source_pages_sha256, chunker_name, chunker_version,
+                chunker_config_json, page_count, indexed_page_count,
+                chunk_count, total_chunk_chars, created_at
+            ) VALUES (
+                'chunk-run-fk', 'doc-fk', ?, 'run-fk',
+                ?, ?, ?, 'page-char-window', '1',
+                '{"max_chars":200,"min_break_chars":100,"overlap_chars":20}',
+                1, 1, 1, 4, 'now'
+            )
+            """,
+            (game_id, "a" * 64, "b" * 64, "c" * 64),
+        )
+
+    with database.connect() as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO document_chunks (
+                    id, chunk_key, chunk_run_id,
+                    board_game_id, document_id, document_sha256,
+                    document_metadata_sha256, parse_run_id,
+                    page_id, page_number, page_text_sha256,
+                    chunk_index, start_char, end_char,
+                    text, text_sha256, char_count,
+                    language, document_type,
+                    source_kind, is_official, document_provenance_json,
+                    chunker_name, chunker_version, chunker_config_json,
+                    created_at
+                ) VALUES (
+                    'chunk-fk', ?, 'chunk-run-fk',
+                    ?, 'doc-fk', ?,
+                    ?, 'run-fk',
+                    'page-fk', 1, ?,
+                    0, 0, 4,
+                    'text', ?, 4,
+                    'en', 'rulebook',
+                    'manual_upload', 0, '{}',
+                    'different-chunker', '1',
+                    '{"max_chars":200,"min_break_chars":100,"overlap_chars":20}',
+                    'now'
+                )
+                """,
+                (
+                    "d" * 64,
+                    game_id,
+                    "a" * 64,
+                    "b" * 64,
+                    page_sha,
+                    page_sha,
+                ),
             )

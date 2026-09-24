@@ -16,6 +16,14 @@ from boardgamecompanion.app_settings import (
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.catalog import SORT_SQL, Catalog
+from boardgamecompanion.chunk_index import (
+    ChunkIndexConflict,
+    ChunkIndexCorruptSource,
+    ChunkIndexDocumentNotFound,
+    ChunkIndexError,
+    ChunkIndexService,
+    ChunkIndexSourceNotReady,
+)
 from boardgamecompanion.copies import (
     BoardGameNotFound,
     PhysicalCopyError,
@@ -526,6 +534,77 @@ def get_document_page(document_id: str, page_number: int) -> dict[str, object]:
     if page is None:
         raise HTTPException(status_code=404, detail="Document page not found")
     return page
+
+
+
+def get_chunk_index_service() -> ChunkIndexService:
+    database = get_database()
+    database.initialize()
+    return ChunkIndexService(
+        database,
+        settings.manuals_dir,
+        max_chars=settings.chunk_max_chars,
+        overlap_chars=settings.chunk_overlap_chars,
+        min_break_chars=settings.chunk_min_break_chars,
+    )
+
+
+@app.post("/api/documents/{document_id}/chunks/build", tags=["documents"])
+def build_document_chunks(
+    document_id: str,
+    force: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_chunk_index_service().build(document_id, force=force)
+    except ChunkIndexDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ChunkIndexSourceNotReady, ChunkIndexConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ChunkIndexCorruptSource as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except ChunkIndexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/documents/{document_id}/chunk-index", tags=["documents"])
+def get_document_chunk_index(document_id: str) -> dict[str, object]:
+    try:
+        return get_chunk_index_service().status(document_id)
+    except ChunkIndexDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChunkIndexCorruptSource as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/documents/{document_id}/chunks", tags=["documents"])
+def list_document_chunks(
+    document_id: str,
+    page_number: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    try:
+        return get_chunk_index_service().list_chunks(
+            document_id,
+            page_number=page_number,
+            limit=limit,
+            offset=offset,
+        )
+    except ChunkIndexDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChunkIndexCorruptSource as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/chunks/{chunk_id}", tags=["documents"])
+def get_document_chunk(chunk_id: str) -> dict[str, object]:
+    try:
+        chunk = get_chunk_index_service().get_chunk(chunk_id)
+    except ChunkIndexCorruptSource as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if chunk is None:
+        raise HTTPException(status_code=404, detail="Document chunk not found")
+    return chunk
 
 
 @app.get("/api/rulebook-reviews", tags=["rulebooks"])

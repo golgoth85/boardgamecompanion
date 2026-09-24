@@ -24,6 +24,9 @@ class Settings(BaseSettings):
         default=20_000_000, ge=10_000, le=100_000_000
     )
     pdf_parse_memory_mb: int = Field(default=768, ge=128, le=4096)
+    chunk_max_chars: int = Field(default=1800, ge=200, le=20000)
+    chunk_overlap_chars: int = Field(default=240, ge=0, le=5000)
+    chunk_min_break_chars: int = Field(default=900, ge=100, le=10000)
     rulebook_fetch_max_bytes: int = Field(
         default=32 * 1024 * 1024,
         ge=1024,
