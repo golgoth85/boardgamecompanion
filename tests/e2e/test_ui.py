@@ -1394,6 +1394,14 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
 def test_game_metadata_refresh_renders_cached_floppy_metadata(browser, live_server):
     context, page = new_page(browser)
     state = {"refreshed": False}
+    page.route(
+        "https://cf.geekdo-images.com/alpha.jpg",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="image/svg+xml",
+            body="<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"></svg>",
+        ),
+    )
     try:
         import_csv(page, live_server)
         base_game = page.request.get(f"{live_server}/api/games/900001").json()
