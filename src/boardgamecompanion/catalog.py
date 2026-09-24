@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from boardgamecompanion.database import Database
+from boardgamecompanion.metadata import (
+    METADATA_CATALOG_SELECT,
+    PROVIDER as METADATA_PROVIDER,
+    metadata_from_catalog_row,
+)
 
 
 SORT_SQL = {
@@ -38,6 +43,7 @@ def _game_dict(row) -> dict[str, Any]:
             "recommended_age": row["bgg_recommended_age"],
             "language_dependence": row["bgg_language_dependence"],
         },
+        "metadata": metadata_from_catalog_row(row),
         "collection": {
             "coll_id": row["coll_id"],
             "own": bool(row["own"]) if row["own"] is not None else False,
@@ -91,9 +97,12 @@ class Catalog:
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
-        from_sql = """
+        from_sql = f"""
             FROM board_games g
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
+            LEFT JOIN game_metadata_cache m
+              ON m.board_game_id = g.id
+             AND m.provider = '{METADATA_PROVIDER}'
         """
 
         with self.database.connect() as connection:
@@ -107,7 +116,8 @@ class Catalog:
                        c.previously_owned, c.preordered, c.wishlist,
                        c.wishlist_priority, c.barcode, c.version_languages,
                        c.version_publishers, c.version_year_published,
-                       c.version_nickname, c.inventory_location, c.quantity
+                       c.version_nickname, c.inventory_location, c.quantity,
+                       {METADATA_CATALOG_SELECT}
                 {from_sql}
                 {where_sql}
                 ORDER BY {order_sql}
@@ -127,15 +137,19 @@ class Catalog:
     def get_game(self, bgg_id: int) -> dict[str, Any] | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT g.*, c.coll_id, c.user_rating, c.num_plays, c.own,
                        c.for_trade, c.want, c.want_to_buy, c.want_to_play,
                        c.previously_owned, c.preordered, c.wishlist,
                        c.wishlist_priority, c.barcode, c.version_languages,
                        c.version_publishers, c.version_year_published,
-                       c.version_nickname, c.inventory_location, c.quantity
+                       c.version_nickname, c.inventory_location, c.quantity,
+                       {METADATA_CATALOG_SELECT}
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id = g.id
+                LEFT JOIN game_metadata_cache m
+                  ON m.board_game_id = g.id
+                 AND m.provider = '{METADATA_PROVIDER}'
                 WHERE g.bgg_id = ?
                 ORDER BY c.id
                 LIMIT 1

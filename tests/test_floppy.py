@@ -505,6 +505,7 @@ def test_direct_detail_provider_preview_is_not_existing_media() -> None:
         transport=httpx.MockTransport(handler),
     )
 
+    assert client.boardgame_bgg_provider_detail(224899) == provider_preview
     assert client.boardgame_bgg_detail(224899) is None
 
 

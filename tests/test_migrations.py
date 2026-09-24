@@ -19,8 +19,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 5
-    assert second_version == 5
+    assert first_version == LATEST_SCHEMA_VERSION == 6
+    assert second_version == 6
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -39,6 +39,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (3, "game-documents"),
         (4, "rulebook-review-queue"),
         (5, "rulebook-scheduled-updates"),
+        (6, "game-metadata-cache"),
     ]
     assert {
         "board_games",
@@ -52,6 +53,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "rulebook_review_items",
         "rulebook_update_targets",
         "rulebook_update_runs",
+        "game_metadata_cache",
         "schema_migrations",
     } <= tables
 
@@ -127,7 +129,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5]
+    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5, 6]
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",
@@ -137,7 +139,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     ]
 
 
-def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
+def test_v4_database_with_existing_review_upgrades_to_latest_without_loss(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "v4.sqlite3"
@@ -226,7 +228,7 @@ def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
             "SELECT COUNT(*) AS count FROM rulebook_update_runs"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 5
+    assert database.schema_version() == 6
     assert dict(review) == {
         "id": "review-existing",
         "status": "approved",

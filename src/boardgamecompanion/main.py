@@ -42,6 +42,11 @@ from boardgamecompanion.floppy import (
     local_owned_games,
     reconcile_floppy_links,
 )
+from boardgamecompanion.metadata import (
+    GameMetadataError,
+    GameMetadataGameNotFound,
+    GameMetadataStore,
+)
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
     RulebookReviewCorruptRecord,
@@ -321,6 +326,54 @@ def get_game(bgg_id: int) -> dict[str, object]:
     if game is None:
         raise HTTPException(status_code=404, detail="Board game not found")
     return game
+
+
+@app.post("/api/games/{bgg_id}/metadata/refresh", tags=["catalog"])
+def refresh_game_metadata(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    if Catalog(database).get_game(bgg_id) is None:
+        raise HTTPException(status_code=404, detail="Board game not found")
+
+    client = get_floppy_client()
+    if client is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Floppy is not configured. Open Impostazioni and configure "
+                "URL and API token."
+            ),
+        )
+
+    try:
+        provider_payload = client.boardgame_bgg_provider_detail(bgg_id)
+    except FloppyError as exc:
+        raise floppy_http_error(exc) from exc
+
+    if provider_payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail="BGG metadata was not found through Floppy",
+        )
+
+    try:
+        metadata, changed = GameMetadataStore(database).upsert_from_floppy(
+            bgg_id,
+            provider_payload,
+        )
+    except GameMetadataGameNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GameMetadataError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid BGG metadata returned through Floppy: {exc}",
+        ) from exc
+
+    return {
+        "bgg_id": bgg_id,
+        "changed": changed,
+        "metadata": metadata,
+    }
 
 
 @app.get("/api/games/{bgg_id}/copies", tags=["copies"])

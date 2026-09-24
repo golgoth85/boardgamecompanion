@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 import socket
@@ -1386,5 +1387,84 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
             "document.querySelector('#scannerVideo').srcObject === null"
         )
         expect(page.locator("#scannerDialog")).not_to_be_visible()
+    finally:
+        context.close()
+
+
+def test_game_metadata_refresh_renders_cached_floppy_metadata(browser, live_server):
+    context, page = new_page(browser)
+    state = {"refreshed": False}
+    try:
+        import_csv(page, live_server)
+        base_game = page.request.get(f"{live_server}/api/games/900001").json()
+        metadata = {
+            "provider": "floppy_bgg",
+            "source": "bgg",
+            "media_id": "900001",
+            "title": "Synthetic Alpha provider",
+            "source_url": "https://boardgamegeek.com/boardgame/900001",
+            "image_url": "https://cf.geekdo-images.com/alpha.jpg",
+            "synopsis": "Fresh provider synopsis.",
+            "genres": ["Strategy", "Economic"],
+            "score": 8.3,
+            "score_count": 5000,
+            "year_published": 2024,
+            "players": "1-5 players",
+            "playtime": "45 min",
+            "min_age": "12+",
+            "designers": "A. Designer",
+            "publishers": "Provider Publisher",
+            "payload_sha256": "a" * 64,
+            "fetched_at": "2026-09-24T12:00:00+00:00",
+            "updated_at": "2026-09-24T12:00:00+00:00",
+        }
+        def metadata_route(route):
+            request = route.request
+            if request.method == "POST":
+                state["refreshed"] = True
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "bgg_id": 900001,
+                            "changed": True,
+                            "metadata": metadata,
+                        }
+                    ),
+                )
+                return
+
+            body = dict(base_game)
+            body["metadata"] = metadata if state["refreshed"] else None
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(body),
+            )
+
+        page.route(
+            re.compile(r".*/api/games/900001(?:/metadata/refresh)?$"),
+            metadata_route,
+        )
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        expect(page.locator(".metadata-heading .section-subtitle")).to_contain_text(
+            "Il catalogo resta utilizzabile offline"
+        )
+        expect(page.locator(".detail-cover-image")).to_have_count(0)
+
+        page.get_by_role("button", name="Aggiorna metadata").click()
+
+        expect(page.locator(".detail-main h1")).to_have_text("Synthetic Alpha")
+        expect(page.locator(".metadata-synopsis")).to_have_text(
+            "Fresh provider synopsis."
+        )
+        expect(page.locator(".detail-cover-image")).to_have_attribute(
+            "src",
+            "https://cf.geekdo-images.com/alpha.jpg",
+        )
+        expect(page.locator(".metadata-facts")).to_contain_text("Provider Publisher")
+        expect(page.locator(".metadata-facts")).to_contain_text("Strategy, Economic")
+        assert state["refreshed"] is True
     finally:
         context.close()

@@ -16,6 +16,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Floppy connection health/capability checks.
+- On-demand BGG metadata enrichment through Floppy, cached locally without duplicating BGG credentials.
 - Floppy board-game comparison and guarded add-only collection synchronization.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
 - Persistent rulebook review queue with auditable unattended/manual approval state.
@@ -23,7 +24,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 
 Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
 
-Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
+BGG CSV remains the canonical import source for the local catalog. Optional live BGG metadata (cover, description and provider details) is fetched only through Floppy on explicit refresh and cached locally; the catalog remains usable when Floppy or BGG is unavailable.
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
