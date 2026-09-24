@@ -70,7 +70,9 @@ a { color: inherit; text-decoration: none; }
 .brand small { display: block; margin-top: .08rem; color: var(--muted); font-size: .78rem; }
 .topbar-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: .55rem;
 }
 
@@ -858,6 +860,99 @@ a { color: inherit; text-decoration: none; }
   color: #fecdd3;
   font-size: .82rem;
 }
+.update-page,
+.update-list {
+  display: grid;
+  gap: 1rem;
+}
+.update-list { gap: .8rem; }
+.update-worker-state {
+  padding: .72rem .85rem;
+  border: 1px solid rgba(52,211,153,.28);
+  border-radius: 12px;
+  color: #a7f3d0;
+  background: rgba(52,211,153,.07);
+  font-size: .82rem;
+  font-weight: 700;
+}
+.update-worker-state.disabled {
+  border-color: rgba(250,204,21,.3);
+  color: #fde68a;
+  background: rgba(250,204,21,.07);
+}
+.update-card {
+  display: grid;
+  gap: .78rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.update-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.update-card h3 {
+  margin: .12rem 0 0;
+}
+.update-card h3 a {
+  color: var(--text);
+  text-decoration: none;
+}
+.update-status {
+  flex: 0 0 auto;
+  padding: .32rem .55rem;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 800;
+}
+.update-status-running { background: rgba(96,165,250,.13); color: #bfdbfe; }
+.update-status-paused { background: rgba(148,163,184,.12); color: #cbd5e1; }
+.update-status-failed { background: rgba(251,113,133,.12); color: #fecdd3; }
+.update-status-created { background: rgba(52,211,153,.12); color: #a7f3d0; }
+.update-status-unchanged { background: rgba(96,165,250,.10); color: #bfdbfe; }
+.update-status-pending { background: rgba(250,204,21,.12); color: #fde68a; }
+.update-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem .8rem;
+  color: var(--muted);
+  font-size: .78rem;
+}
+.update-facts strong { color: var(--text); font-weight: 700; }
+.update-failure {
+  padding: .68rem .75rem;
+  border-radius: 10px;
+  background: rgba(251,113,133,.08);
+  color: #fecdd3;
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.update-actions {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: end;
+  gap: .55rem;
+}
+.update-interval-field {
+  display: grid;
+  gap: .3rem;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 700;
+}
+.update-interval-field select {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: .55rem .65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface-2);
+  color-scheme: dark;
+}
 
 .toast {
   position: fixed;
@@ -910,8 +1005,10 @@ a { color: inherit; text-decoration: none; }
   .game-document-head { align-items: stretch; flex-direction: column; }
   .document-download { align-self: flex-start; }
   .document-heading { align-items: flex-start; }
-  .review-page-head, .review-card-head { flex-direction: column; }
-  .review-status { align-self: flex-start; }
+  .review-page-head, .review-card-head, .update-card-head { flex-direction: column; }
+  .review-status, .update-status { align-self: flex-start; }
+  .update-actions { grid-template-columns: 1fr; align-items: stretch; }
+  .update-actions .button { width: 100%; }
   .inline-input-action { grid-template-columns: 1fr; }
   .shell { width: min(100% - 1rem, 1460px); padding-top: 1rem; }
   .hero-card { padding: 1.25rem; }

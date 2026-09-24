@@ -1618,9 +1618,310 @@ async function renderReviews({reset = false} = {}) {
 }
 
 
+
+const UPDATE_PAGE_SIZE = 50;
+const UPDATE_REFRESH_MS = 30_000;
+let updateOffset = 0;
+let updateRefreshTimer = null;
+
+
+function clearUpdateRefresh() {
+  if (updateRefreshTimer !== null) {
+    window.clearTimeout(updateRefreshTimer);
+    updateRefreshTimer = null;
+  }
+}
+
+
+function scheduleUpdateRefresh() {
+  clearUpdateRefresh();
+  if (!/^\/updates\/?$/.test(window.location.pathname)) return;
+  updateRefreshTimer = window.setTimeout(() => {
+    updateRefreshTimer = null;
+    void renderUpdates();
+  }, UPDATE_REFRESH_MS);
+}
+
+
+function formatUpdateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("it-IT", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+
+function formatUpdateInterval(seconds) {
+  const value = Number(seconds || 0);
+  if (value < 3600) {
+    const minutes = Math.max(1, Math.round(value / 60));
+    return minutes === 1 ? "1 minuto" : `${minutes} minuti`;
+  }
+  if (value % 86400 === 0) {
+    const days = value / 86400;
+    return days === 1 ? "1 giorno" : `${days} giorni`;
+  }
+  const hours = Math.max(1, Math.round(value / 3600));
+  return hours === 1 ? "1 ora" : `${hours} ore`;
+}
+
+
+function updateIntervalOptions(current) {
+  const presets = [
+    [86400, "Ogni giorno"],
+    [604800, "Ogni 7 giorni"],
+    [2592000, "Ogni 30 giorni"],
+    [7776000, "Ogni 90 giorni"],
+  ];
+  const values = new Set(presets.map(([value]) => value));
+  const options = presets.map(([value, label]) => (
+    `<option value="${value}" ${Number(current) === value ? "selected" : ""}>${label}</option>`
+  ));
+  if (!values.has(Number(current))) {
+    options.unshift(
+      `<option value="${Number(current)}" selected>${escapeHtml(formatUpdateInterval(current))}</option>`
+    );
+  }
+  return options.join("");
+}
+
+
+function updateStatus(target) {
+  if (target.leased) return ["In esecuzione", "running"];
+  if (!target.enabled) return ["In pausa", "paused"];
+  if (target.last_outcome === "failed") return ["Errore", "failed"];
+  if (target.last_outcome === "created") return ["Nuova versione", "created"];
+  if (target.last_outcome === "unchanged") return ["Invariato", "unchanged"];
+  return ["In attesa", "pending"];
+}
+
+
+function updateCard(target) {
+  const [statusLabel, statusClass] = updateStatus(target);
+  const source = String(target.source_kind || "unknown").replaceAll("_", " ");
+  const failure = target.last_outcome === "failed" && target.last_failure_message
+    ? `<div class="update-failure">${escapeHtml(target.last_failure_message)}</div>`
+    : "";
+  const hash = target.last_sha256
+    ? `<span>SHA ${escapeHtml(target.last_sha256.slice(0, 12))}…</span>`
+    : "";
+
+  return `
+    <article class="update-card" data-update-review-id="${escapeHtml(target.review_item_id)}">
+      <div class="update-card-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(source)} · ${escapeHtml(target.provider || "provider")}</p>
+          <h3><a href="/games/${target.bgg_id}" data-nav>${escapeHtml(target.game_title)}</a></h3>
+        </div>
+        <span class="update-status update-status-${statusClass}">${statusLabel}</span>
+      </div>
+      <a class="review-url" href="${escapeHtml(target.url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${escapeHtml(target.url || "URL non disponibile")}
+      </a>
+      <div class="update-facts">
+        <span>Prossimo check: <strong>${formatUpdateTime(target.next_check_at)}</strong></span>
+        <span>Ultimo check: <strong>${formatUpdateTime(target.last_checked_at)}</strong></span>
+        <span>Fallimenti consecutivi: <strong>${Number(target.consecutive_failures || 0)}</strong></span>
+        ${hash}
+      </div>
+      ${failure}
+      <div class="update-actions">
+        <label class="update-interval-field">
+          <span>Intervallo</span>
+          <select class="update-interval" data-review-id="${escapeHtml(target.review_item_id)}" ${target.leased ? "disabled" : ""}>
+            ${updateIntervalOptions(target.interval_seconds)}
+          </select>
+        </label>
+        <button
+          class="button button-ghost update-toggle"
+          data-review-id="${escapeHtml(target.review_item_id)}"
+          data-enabled="${target.enabled ? "true" : "false"}"
+          type="button"
+          ${target.leased ? "disabled" : ""}
+        >${target.enabled ? "Pausa" : "Riprendi"}</button>
+        <button
+          class="button button-primary update-run"
+          data-review-id="${escapeHtml(target.review_item_id)}"
+          type="button"
+          ${target.leased ? "disabled" : ""}
+        >Controlla ora</button>
+      </div>
+    </article>
+  `;
+}
+
+
+function updatePager(data) {
+  if (data.total <= data.limit) return "";
+  const start = data.total ? data.offset + 1 : 0;
+  const end = Math.min(data.offset + data.limit, data.total);
+  return `
+    <div class="review-pagination">
+      <span>${start}–${end} di ${data.total}</span>
+      <div>
+        <button class="button button-ghost update-page-button"
+          data-update-offset="${Math.max(0, data.offset - data.limit)}"
+          type="button" ${data.offset === 0 ? "disabled" : ""}>Precedente</button>
+        <button class="button button-ghost update-page-button"
+          data-update-offset="${data.offset + data.limit}"
+          type="button" ${data.offset + data.limit >= data.total ? "disabled" : ""}>Successiva</button>
+      </div>
+    </div>
+  `;
+}
+
+
+async function runUpdateNow(reviewId) {
+  const button = document.querySelector(`.update-run[data-review-id="${reviewId}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Controllo…";
+  }
+  try {
+    const result = await api(`/api/rulebook-updates/${reviewId}/run`, {
+      method: "POST",
+    });
+    const message = result.outcome === "failed"
+      ? `Controllo completato con errore: ${result.failure_code || "errore"}.`
+      : result.outcome === "created"
+        ? "Nuova versione archiviata."
+        : "Documento invariato.";
+    showToast(message, result.outcome === "failed");
+    await renderUpdates();
+  } catch (error) {
+    showToast(error.message, true);
+    await renderUpdates();
+  }
+}
+
+
+async function toggleUpdate(reviewId, enabled) {
+  try {
+    await api(`/api/rulebook-updates/${reviewId}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({enabled: !enabled}),
+    });
+    showToast(enabled ? "Aggiornamenti automatici in pausa." : "Aggiornamenti automatici riattivati.");
+    await renderUpdates();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+
+async function changeUpdateInterval(reviewId, intervalSeconds) {
+  try {
+    await api(`/api/rulebook-updates/${reviewId}`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({interval_seconds: Number(intervalSeconds)}),
+    });
+    showToast("Intervallo aggiornato.");
+    await renderUpdates();
+  } catch (error) {
+    showToast(error.message, true);
+    await renderUpdates();
+  }
+}
+
+
+async function renderUpdates({reset = false} = {}) {
+  clearUpdateRefresh();
+  if (reset) updateOffset = 0;
+  app.innerHTML = '<div class="empty">Caricamento aggiornamenti rulebook…</div>';
+  try {
+    const data = await api(
+      `/api/rulebook-updates?limit=${UPDATE_PAGE_SIZE}&offset=${updateOffset}`
+    );
+    if (data.total === 0) {
+      updateOffset = 0;
+    } else if (updateOffset >= data.total) {
+      updateOffset = Math.floor((data.total - 1) / UPDATE_PAGE_SIZE) * UPDATE_PAGE_SIZE;
+      return renderUpdates();
+    }
+
+    const worker = data.worker || {};
+    const workerLabel = worker.enabled
+      ? `Scheduler attivo · scansione coda ogni ${escapeHtml(formatUpdateInterval(worker.poll_seconds || 60))}`
+      : "Scheduler automatico disattivato";
+    const corruptWarning = data.corrupt_count
+      ? `<div class="review-warning">${data.corrupt_count} target collegati a review corrotte sono stati esclusi da questa pagina.</div>`
+      : "";
+
+    app.innerHTML = `
+      <section class="update-page">
+        <div class="review-page-head">
+          <div>
+            <p class="eyebrow">P6B · Rulebook updates</p>
+            <h1>Aggiornamenti automatici</h1>
+            <p class="muted">
+              I candidati approvati vengono ricontrollati con il guarded fetch.
+              Una nuova versione viene archiviata solo quando cambia il contenuto.
+            </p>
+          </div>
+          <span class="review-counter">${data.total} target</span>
+        </div>
+        <div class="update-worker-state ${worker.enabled ? "" : "disabled"}">
+          ${workerLabel}
+        </div>
+        ${corruptWarning}
+        <div class="update-list">
+          ${data.items.length
+            ? data.items.map(updateCard).join("")
+            : '<div class="empty">Nessun candidato approvato da monitorare.</div>'}
+        </div>
+        ${updatePager(data)}
+      </section>
+    `;
+
+    document.querySelectorAll(".update-run").forEach((button) => {
+      button.addEventListener("click", () => {
+        void runUpdateNow(button.dataset.reviewId);
+      });
+    });
+    document.querySelectorAll(".update-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        void toggleUpdate(
+          button.dataset.reviewId,
+          button.dataset.enabled === "true",
+        );
+      });
+    });
+    document.querySelectorAll(".update-interval").forEach((select) => {
+      select.addEventListener("change", () => {
+        void changeUpdateInterval(select.dataset.reviewId, select.value);
+      });
+    });
+    document.querySelectorAll(".update-page-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        updateOffset = Number(button.dataset.updateOffset || 0);
+        void renderUpdates();
+      });
+    });
+    document.title = "Aggiornamenti · BoardGameCompanion";
+    scheduleUpdateRefresh();
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare gli aggiornamenti: ${escapeHtml(error.message)}</div>`;
+    showToast(error.message, true);
+    scheduleUpdateRefresh();
+  }
+}
+
+
 async function route() {
+  if (!/^\/updates\/?$/.test(window.location.pathname)) {
+    clearUpdateRefresh();
+  }
   if (/^\/reviews\/?$/.test(window.location.pathname)) {
     await renderReviews({reset: true});
+    return;
+  }
+  if (/^\/updates\/?$/.test(window.location.pathname)) {
+    await renderUpdates({reset: true});
     return;
   }
 

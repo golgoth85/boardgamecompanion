@@ -1009,3 +1009,200 @@ def test_review_queue_ui_refreshes_after_conflicting_decision(browser, live_serv
         expect(page.get_by_role("button", name="Approva")).to_have_count(0)
     finally:
         context.close()
+
+
+def test_rulebook_updates_ui_schedule_and_run_controls(browser, live_server):
+    context, page = new_page(browser)
+    state = {
+        "id": "target-1",
+        "review_item_id": "review-update-1",
+        "bgg_id": 900001,
+        "game_title": "Synthetic Alpha",
+        "provider": "publisher-test",
+        "source_kind": "official_publisher",
+        "url": "https://publisher.example/rules.pdf",
+        "review_status": "approved",
+        "enabled": True,
+        "interval_seconds": 2592000,
+        "next_check_at": "2026-10-23T18:00:00+00:00",
+        "last_checked_at": None,
+        "last_success_at": None,
+        "last_document_id": None,
+        "last_sha256": None,
+        "consecutive_failures": 0,
+        "last_outcome": None,
+        "last_failure_code": None,
+        "last_failure_message": None,
+        "leased": False,
+        "lease_until": None,
+        "created_at": "2026-09-23T18:00:00+00:00",
+        "updated_at": "2026-09-23T18:00:00+00:00",
+    }
+    patch_requests = []
+    run_requests = []
+
+    def list_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "total": 1,
+                    "limit": 50,
+                    "offset": 0,
+                    "items": [state.copy()],
+                    "worker": {
+                        "enabled": True,
+                        "poll_seconds": 60,
+                        "batch_size": 5,
+                    },
+                }
+            ),
+        )
+
+    def patch_route(route):
+        payload = route.request.post_data_json
+        patch_requests.append(payload)
+        if "enabled" in payload:
+            state["enabled"] = payload["enabled"]
+        if "interval_seconds" in payload:
+            state["interval_seconds"] = payload["interval_seconds"]
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(state),
+        )
+
+    def run_route(route):
+        run_requests.append(True)
+        state["last_outcome"] = "created"
+        state["last_checked_at"] = "2026-09-23T19:00:00+00:00"
+        state["last_success_at"] = state["last_checked_at"]
+        state["last_document_id"] = "document-1"
+        state["last_sha256"] = "a" * 64
+        state["next_check_at"] = "2026-09-30T19:00:00+00:00"
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "target_id": state["id"],
+                    "review_item_id": state["review_item_id"],
+                    "run_id": "run-1",
+                    "outcome": "created",
+                    "document": {"id": "document-1"},
+                    "next_check_at": state["next_check_at"],
+                }
+            ),
+        )
+
+    try:
+        page.route(
+            re.compile(r".*/api/rulebook-updates\?limit=50&offset=0$"),
+            list_route,
+        )
+        page.route(
+            "**/api/rulebook-updates/review-update-1/run",
+            run_route,
+        )
+        page.route(
+            "**/api/rulebook-updates/review-update-1",
+            patch_route,
+        )
+
+        page.goto(live_server)
+        page.get_by_role("link", name="Aggiornamenti").click()
+        expect(page).to_have_url(f"{live_server}/updates")
+        expect(
+            page.get_by_role("heading", name="Aggiornamenti automatici")
+        ).to_be_visible()
+        expect(page.locator(".update-card")).to_have_count(1)
+        expect(page.locator(".update-card")).to_contain_text("Synthetic Alpha")
+        expect(page.locator(".update-worker-state")).to_contain_text(
+            "ogni 1 minuto"
+        )
+
+        page.locator(".update-interval").select_option("604800")
+        expect(page.locator(".update-interval")).to_have_value("604800")
+        assert {"interval_seconds": 604800} in patch_requests
+
+        page.get_by_role("button", name="Pausa").click()
+        expect(page.get_by_role("button", name="Riprendi")).to_be_visible()
+        expect(page.locator(".update-status-paused")).to_have_text("In pausa")
+        assert {"enabled": False} in patch_requests
+
+        page.get_by_role("button", name="Controlla ora").click()
+        expect(page.locator("#toast")).to_contain_text("Nuova versione archiviata")
+        expect(page.locator(".update-card")).to_contain_text("SHA aaaaaaaaaaaa")
+        assert len(run_requests) == 1
+
+        page.get_by_role("button", name="Riprendi").click()
+        expect(page.get_by_role("button", name="Pausa")).to_be_visible()
+        expect(page.locator(".update-status-created")).to_have_text(
+            "Nuova versione"
+        )
+    finally:
+        context.close()
+
+
+def test_mobile_updates_page_has_no_horizontal_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+
+    def list_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=__import__("json").dumps(
+                {
+                    "total": 1,
+                    "limit": 50,
+                    "offset": 0,
+                    "items": [
+                        {
+                            "id": "target-mobile",
+                            "review_item_id": "review-mobile",
+                            "bgg_id": 900001,
+                            "game_title": "Synthetic Alpha",
+                            "provider": "publisher-test",
+                            "source_kind": "official_publisher",
+                            "url": "https://publisher.example/very/long/path/rules.pdf",
+                            "review_status": "approved",
+                            "enabled": True,
+                            "interval_seconds": 2592000,
+                            "next_check_at": "2026-10-23T18:00:00+00:00",
+                            "last_checked_at": None,
+                            "last_success_at": None,
+                            "last_document_id": None,
+                            "last_sha256": None,
+                            "consecutive_failures": 0,
+                            "last_outcome": None,
+                            "last_failure_code": None,
+                            "last_failure_message": None,
+                            "leased": False,
+                            "lease_until": None,
+                            "created_at": "2026-09-23T18:00:00+00:00",
+                            "updated_at": "2026-09-23T18:00:00+00:00",
+                        }
+                    ],
+                    "worker": {
+                        "enabled": True,
+                        "poll_seconds": 60,
+                        "batch_size": 5,
+                    },
+                }
+            ),
+        )
+
+    try:
+        page.route(
+            re.compile(r".*/api/rulebook-updates\?limit=50&offset=0$"),
+            list_route,
+        )
+        page.goto(f"{live_server}/updates")
+        expect(page.locator(".update-card")).to_have_count(1)
+        expect(page.get_by_role("button", name="Controlla ora")).to_be_visible()
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        context.close()

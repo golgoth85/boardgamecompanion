@@ -4,7 +4,11 @@ import sqlite3
 from pathlib import Path
 
 from boardgamecompanion.database import Database
-from boardgamecompanion.migrations import BASELINE_STATEMENTS, LATEST_SCHEMA_VERSION
+from boardgamecompanion.migrations import (
+    BASELINE_STATEMENTS,
+    LATEST_SCHEMA_VERSION,
+    MIGRATIONS,
+)
 
 
 def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> None:
@@ -15,8 +19,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 4
-    assert second_version == 4
+    assert first_version == LATEST_SCHEMA_VERSION == 5
+    assert second_version == 5
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -34,6 +38,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (2, "physical-copies"),
         (3, "game-documents"),
         (4, "rulebook-review-queue"),
+        (5, "rulebook-scheduled-updates"),
     ]
     assert {
         "board_games",
@@ -45,6 +50,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "physical_copies",
         "game_documents",
         "rulebook_review_items",
+        "rulebook_update_targets",
+        "rulebook_update_runs",
         "schema_migrations",
     } <= tables
 
@@ -120,7 +127,7 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3, 4]
+    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5]
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",
@@ -128,3 +135,102 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
             "bgg_id": 12345,
         }
     ]
+
+
+def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "v4.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    for migration in MIGRATIONS[:4]:
+        migration.apply(connection)
+        connection.execute(
+            """
+            INSERT INTO schema_migrations (version, name, applied_at)
+            VALUES (?, ?, 'before')
+            """,
+            (migration.version, migration.name),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO board_games (
+            bgg_id, title, source_metadata_json, created_at, updated_at
+        ) VALUES (54321, 'Existing Review Game', '{}', 'before', 'before')
+        """
+    )
+    game_id = connection.execute(
+        "SELECT id FROM board_games WHERE bgg_id = 54321"
+    ).fetchone()["id"]
+    connection.execute(
+        """
+        INSERT INTO rulebook_review_items (
+            id, board_game_id, candidate_key, candidate_json,
+            provider, source_kind, url, language, document_type,
+            official, confidence, policy_action, policy_reasons_json,
+            status, decision_source, decision_note,
+            created_at, updated_at, decided_at
+        ) VALUES (
+            'review-existing', ?, ?, ?,
+            'publisher-test', 'official_publisher',
+            'https://publisher.example/rules.pdf', 'it', 'rulebook',
+            1, 100, 'unattended',
+            '["source:official","confidence:100","bgg_id:exact","language:it"]',
+            'approved', 'policy', NULL,
+            'before', 'before', 'before'
+        )
+        """,
+        (
+            game_id,
+            "a" * 64,
+            (
+                '{"bgg_id":54321,"confidence":100,"document_type":"rulebook",'
+                '"edition":null,"game_title":"Existing Review Game",'
+                '"language":"it","metadata":{},"official":true,'
+                '"provider":"publisher-test","publisher":null,'
+                '"source_kind":"official_publisher","title":null,'
+                '"url":"https://publisher.example/rules.pdf",'
+                '"version_label":null,"year":null}'
+            ),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connect() as connection:
+        review = connection.execute(
+            """
+            SELECT id, status, decision_source
+            FROM rulebook_review_items
+            WHERE id = 'review-existing'
+            """
+        ).fetchone()
+        targets = connection.execute(
+            "SELECT COUNT(*) AS count FROM rulebook_update_targets"
+        ).fetchone()["count"]
+        runs = connection.execute(
+            "SELECT COUNT(*) AS count FROM rulebook_update_runs"
+        ).fetchone()["count"]
+
+    assert database.schema_version() == 5
+    assert dict(review) == {
+        "id": "review-existing",
+        "status": "approved",
+        "decision_source": "policy",
+    }
+    assert targets == 0
+    assert runs == 0
