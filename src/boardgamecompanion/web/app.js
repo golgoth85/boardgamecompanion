@@ -994,11 +994,15 @@ function gameCard(game) {
   const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
   const year = game.year_published || "—";
   const rating = game.bgg?.average ? `★ ${formatNumber(game.bgg.average, 1)}` : "★ —";
+  const imageUrl = game.metadata?.image_url;
   return `
     <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
       <div class="cover">
-        <span class="badge card-badge">${type}</span>
         <span class="cover-initials">${escapeHtml(initials(game.title))}</span>
+        ${imageUrl
+          ? `<img class="cover-image" src="${escapeHtml(imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+          : ""}
+        <span class="badge card-badge">${type}</span>
       </div>
       <div class="card-body">
         <h3 class="card-title">${escapeHtml(game.title)}</h3>
@@ -1024,7 +1028,7 @@ async function renderCatalog() {
         <h1>La tua ludoteca, ordinata.</h1>
         <p class="lead">
           Cerca giochi ed espansioni, consulta i dati BGG già presenti nel tuo export
-          e aggiorna la collezione senza dipendere dall'API di BoardGameGeek.
+          e arricchisci i metadata su richiesta attraverso Floppy senza rendere il catalogo dipendente dalla rete.
         </p>
       </article>
       <section class="stats-panel" id="statsPanel" aria-label="Statistiche catalogo">
@@ -1531,6 +1535,27 @@ function physicalCopyCard(copy, index) {
   `;
 }
 
+async function refreshGameMetadata(bggId) {
+  const button = document.querySelector("#refreshGameMetadata");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Aggiornamento…";
+  }
+  try {
+    const result = await api(`/api/games/${bggId}/metadata/refresh`, {
+      method: "POST",
+    });
+    showToast(result.changed ? "Metadata BGG aggiornati." : "Metadata BGG già aggiornati.");
+    await renderDetail(bggId);
+  } catch (error) {
+    showToast(error.message, true);
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = "Aggiorna metadata";
+    }
+  }
+}
+
 async function renderDetail(bggId) {
   app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -1550,6 +1575,7 @@ async function renderDetail(bggId) {
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
+    const metadata = game.metadata || null;
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
 
@@ -1558,6 +1584,9 @@ async function renderDetail(bggId) {
       <section class="detail">
         <div class="detail-cover">
           <span class="cover-initials">${escapeHtml(initials(game.title))}</span>
+          ${metadata?.image_url
+            ? `<img class="detail-cover-image" src="${escapeHtml(metadata.image_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`
+            : ""}
         </div>
         <article class="panel detail-main">
           <p class="eyebrow">BGG #${game.bgg_id}</p>
@@ -1605,7 +1634,42 @@ async function renderDetail(bggId) {
               : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
           </div>
 
-          <h2 class="section-title">Dati BGG</h2>
+          <div class="section-heading-row metadata-heading">
+            <div>
+              <h2 class="section-title">Metadata BGG via Floppy</h2>
+              <p class="section-subtitle">
+                ${metadata
+                  ? `Cache aggiornata: ${escapeHtml(formatUpdateTime(metadata.fetched_at))}`
+                  : "Nessun metadata live in cache. Il catalogo resta utilizzabile offline."}
+              </p>
+            </div>
+            <button class="button button-ghost" id="refreshGameMetadata" type="button">
+              Aggiorna metadata
+            </button>
+          </div>
+
+          ${metadata ? `
+            <div class="fact-grid metadata-facts">
+              ${fact("Rating live", metadata.score != null ? `★ ${formatNumber(metadata.score, 1)}` : "—")}
+              ${fact("Valutazioni", metadata.score_count != null ? formatNumber(metadata.score_count, 0) : "—")}
+              ${fact("Giocatori", metadata.players || "—")}
+              ${fact("Durata", metadata.playtime || "—")}
+              ${fact("Età minima", metadata.min_age || "—")}
+              ${fact("Anno provider", metadata.year_published || "—")}
+              ${fact("Designer", metadata.designers || "—")}
+              ${fact("Editori", metadata.publishers || "—")}
+              ${fact("Categorie", metadata.genres?.length ? metadata.genres.join(", ") : "—")}
+            </div>
+            ${metadata.synopsis
+              ? `<p class="metadata-synopsis">${escapeHtml(metadata.synopsis)}</p>`
+              : ""}
+          ` : `
+            <div class="metadata-empty">
+              Cover, descrizione e dettagli correnti possono essere recuperati su richiesta tramite Floppy.
+            </div>
+          `}
+
+          <h2 class="section-title">Dati BGG dal CSV</h2>
           <div class="fact-grid">
             ${fact("Best players", bgg.best_players || "—")}
             ${fact("Età consigliata", bgg.recommended_age || "—")}
@@ -1633,6 +1697,9 @@ async function renderDetail(bggId) {
     });
     document.querySelector("#addDocument")?.addEventListener("click", () => {
       openDocumentDialog(game.bgg_id, game.title);
+    });
+    document.querySelector("#refreshGameMetadata")?.addEventListener("click", () => {
+      void refreshGameMetadata(game.bgg_id);
     });
 
     document.title = `${game.title} · BoardGameCompanion`;
