@@ -40,6 +40,7 @@ MAX_FAILURE_MESSAGE_LENGTH = 1000
 MAX_RUN_HTTP_METADATA_BYTES = 64 * 1024
 MAX_RUN_REDIRECT_CHAIN_BYTES = 64 * 1024
 MAX_RUN_REDIRECTS = 64
+MAX_RUN_JSON_NESTING = 64
 
 
 class RulebookUpdateError(ValueError):
@@ -132,6 +133,31 @@ def _row_to_target(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _validate_json_nesting(value: str, *, field_name: str) -> None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in value:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > MAX_RUN_JSON_NESTING:
+                raise RulebookUpdateCorruptRun(
+                    f"{field_name} exceeds safe JSON nesting depth"
+                )
+        elif character in "]}":
+            depth = max(0, depth - 1)
+
+
 def _load_run_json(
     value: Any,
     *,
@@ -151,6 +177,7 @@ def _load_run_json(
         raise RulebookUpdateCorruptRun(
             f"{field_name} exceeds {max_bytes} bytes"
         )
+    _validate_json_nesting(value, field_name=field_name)
     try:
         parsed = json.loads(value)
     except (json.JSONDecodeError, RecursionError) as exc:
