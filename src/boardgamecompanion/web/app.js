@@ -32,6 +32,7 @@ const scannerDialog = document.querySelector("#scannerDialog");
 const scannerButton = document.querySelector("#scannerButton");
 const closeScanner = document.querySelector("#closeScanner");
 const scannerForm = document.querySelector("#scannerForm");
+const scannerManualFallback = document.querySelector("#scannerManualFallback");
 const scannerBarcode = document.querySelector("#scannerBarcode");
 const lookupBarcode = document.querySelector("#lookupBarcode");
 const scannerResult = document.querySelector("#scannerResult");
@@ -96,7 +97,9 @@ let scannerBusy = false;
 let scannerStream = null;
 let scannerFrameHandle = null;
 let scannerDetector = null;
-let scannerLastCode = null;
+let scannerFallbackControls = null;
+let scannerDetectionLocked = false;
+let scannerBackend = null;
 let documentBusy = false;
 let documentBggId = null;
 
@@ -469,87 +472,256 @@ async function saveDocumentUpload(event) {
   }
 }
 
+const SCANNER_NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
+
+function scannerCameraUsable() {
+  return Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+}
+
+function scannerVideoConstraints() {
+  return {
+    facingMode: {ideal: "environment"},
+    width: {ideal: 1280},
+    height: {ideal: 720},
+  };
+}
+
+async function applyScannerFocus(stream) {
+  const track = stream?.getVideoTracks?.()[0];
+  if (!track?.getCapabilities || !track?.applyConstraints) return;
+  try {
+    const capabilities = track.getCapabilities();
+    if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
+      await track.applyConstraints({advanced: [{focusMode: "continuous"}]});
+    }
+  } catch (_) {
+    // Autofocus constraints are an optional enhancement, never a scan blocker.
+  }
+}
+
 function stopScannerCamera() {
   if (scannerFrameHandle) {
     cancelAnimationFrame(scannerFrameHandle);
     scannerFrameHandle = null;
   }
+  if (scannerFallbackControls) {
+    try {
+      void scannerFallbackControls.stop();
+    } catch (_) {
+      // Continue with direct track cleanup below.
+    }
+    scannerFallbackControls = null;
+  }
   if (scannerStream) {
     for (const track of scannerStream.getTracks()) track.stop();
     scannerStream = null;
   }
+  scannerDetector = null;
+  scannerBackend = null;
   scannerVideo.srcObject = null;
   if (toggleCamera) toggleCamera.textContent = "Avvia fotocamera";
 }
 
+function acceptScannerDetection(rawValue) {
+  const code = String(rawValue || "").trim();
+  if (!code || scannerDetectionLocked) return;
+  scannerDetectionLocked = true;
+  scannerBarcode.value = code;
+  stopScannerCamera();
+  cameraHint.textContent = "Codice letto. Ricerca in corso…";
+  void lookupScannerBarcode(code);
+}
+
+async function createNativeScannerDetector() {
+  if (typeof window.BarcodeDetector !== "function") return null;
+  try {
+    let formats = SCANNER_NATIVE_FORMATS;
+    if (typeof window.BarcodeDetector.getSupportedFormats === "function") {
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      formats = SCANNER_NATIVE_FORMATS.filter((format) => supported.includes(format));
+      if (!formats.length) return null;
+    }
+    return new window.BarcodeDetector({formats});
+  } catch (_) {
+    return null;
+  }
+}
+
+function configureZxingFormats(reader) {
+  const formats = window.ZXingBrowser?.BarcodeFormat;
+  if (!formats) return;
+  reader.possibleFormats = [
+    formats.EAN_13,
+    formats.EAN_8,
+    formats.UPC_A,
+    formats.UPC_E,
+  ].filter((value) => value !== undefined);
+}
+
+async function startZxingScanner(existingStream = null) {
+  const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
+  if (!Reader) throw new Error("Fallback ZXing non caricato");
+  const reader = new Reader(undefined, {
+    delayBetweenScanAttempts: 180,
+    delayBetweenScanSuccess: 500,
+  });
+  configureZxingFormats(reader);
+  scannerBackend = "zxing";
+  const callback = (result) => {
+    const text = result?.getText?.() ?? result?.text;
+    if (text) acceptScannerDetection(text);
+  };
+  let controls;
+  if (existingStream) {
+    scannerStream = existingStream;
+    controls = await reader.decodeFromStream(
+      existingStream,
+      scannerVideo,
+      callback,
+    );
+  } else {
+    controls = await reader.decodeFromConstraints(
+      {video: scannerVideoConstraints(), audio: false},
+      scannerVideo,
+      callback,
+    );
+    scannerStream = scannerVideo.srcObject || null;
+  }
+  if (scannerDetectionLocked) {
+    try {
+      void controls.stop();
+    } catch (_) {
+      // Detection already won the race; there is nothing else to do.
+    }
+    scannerStream = null;
+    return;
+  }
+  scannerFallbackControls = controls;
+  await applyScannerFocus(scannerStream);
+  toggleCamera.textContent = "Ferma fotocamera";
+  cameraHint.textContent = "Inquadra EAN/UPC. Scanner compatibile ZXing attivo.";
+}
+
 async function scanCameraFrame() {
-  if (!scannerStream || !scannerDetector || scannerVideo.readyState < 2) {
-    if (scannerStream) scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
+  if (scannerBackend !== "native" || !scannerStream || !scannerDetector) return;
+  if (scannerVideo.readyState < 2) {
+    scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
     return;
   }
   try {
     const barcodes = await scannerDetector.detect(scannerVideo);
     const rawValue = barcodes?.[0]?.rawValue?.trim();
-    if (rawValue && rawValue !== scannerLastCode) {
-      scannerLastCode = rawValue;
-      scannerBarcode.value = rawValue;
-      stopScannerCamera();
-      await lookupScannerBarcode(rawValue);
+    if (rawValue) {
+      acceptScannerDetection(rawValue);
       return;
     }
   } catch (error) {
-    cameraHint.textContent = `Scanner non disponibile: ${error.message}`;
-    stopScannerCamera();
-    return;
+    const stream = scannerStream;
+    scannerStream = null;
+    scannerDetector = null;
+    if (scannerFrameHandle) {
+      cancelAnimationFrame(scannerFrameHandle);
+      scannerFrameHandle = null;
+    }
+    scannerDetectionLocked = false;
+    try {
+      await startZxingScanner(stream);
+      return;
+    } catch (_) {
+      for (const track of stream?.getTracks?.() || []) track.stop();
+      stopScannerCamera();
+      cameraHint.textContent = `Scanner non disponibile: ${error.message || "errore di rilevazione"}`;
+      scannerManualFallback.open = true;
+      return;
+    }
   }
-  if (scannerStream) scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
+  if (scannerBackend === "native" && scannerStream) {
+    scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
+  }
+}
+
+function scannerCameraErrorMessage(error) {
+  if (!window.isSecureContext) {
+    return "La fotocamera richiede HTTPS (oppure localhost). Usa l’inserimento manuale.";
+  }
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+    return "Permesso fotocamera negato. Abilitalo nel browser oppure usa l’inserimento manuale.";
+  }
+  if (error?.name === "NotFoundError") {
+    return "Nessuna fotocamera disponibile. Usa l’inserimento manuale.";
+  }
+  if (error?.name === "NotReadableError") {
+    return "La fotocamera è occupata o non leggibile. Chiudi le altre app che la usano e riprova.";
+  }
+  return "Fotocamera non disponibile. Usa l’inserimento manuale.";
 }
 
 async function startScannerCamera() {
-  if (scannerStream) {
+  if (scannerBackend || scannerStream || scannerFallbackControls) {
     stopScannerCamera();
+    scannerDetectionLocked = false;
     cameraHint.textContent = "Fotocamera arrestata.";
     return;
   }
+  scannerDetectionLocked = false;
+  if (!scannerCameraUsable()) {
+    cameraHint.textContent = scannerCameraErrorMessage();
+    scannerManualFallback.open = true;
+    return;
+  }
+
   try {
-    scannerDetector = new window.BarcodeDetector();
-    scannerStream = await navigator.mediaDevices.getUserMedia({
-      video: {facingMode: {ideal: "environment"}},
-      audio: false,
-    });
-    scannerVideo.srcObject = scannerStream;
-    await scannerVideo.play();
-    toggleCamera.textContent = "Ferma fotocamera";
-    cameraHint.textContent = "Inquadra il barcode della scatola.";
-    scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
+    const detector = await createNativeScannerDetector();
+    if (detector) {
+      scannerDetector = detector;
+      scannerBackend = "native";
+      scannerStream = await navigator.mediaDevices.getUserMedia({
+        video: scannerVideoConstraints(),
+        audio: false,
+      });
+      scannerVideo.srcObject = scannerStream;
+      await scannerVideo.play();
+      await applyScannerFocus(scannerStream);
+      toggleCamera.textContent = "Ferma fotocamera";
+      cameraHint.textContent = "Inquadra EAN/UPC. Scanner nativo attivo.";
+      scannerFrameHandle = requestAnimationFrame(scanCameraFrame);
+      return;
+    }
+    await startZxingScanner();
   } catch (error) {
     stopScannerCamera();
-    cameraHint.textContent =
-      "Fotocamera non disponibile. Su rete locale può essere necessario HTTPS; usa l’inserimento manuale.";
+    cameraHint.textContent = scannerCameraErrorMessage(error);
+    scannerManualFallback.open = true;
+    window.setTimeout(() => scannerBarcode.focus(), 0);
   }
 }
 
 function resetScanner() {
   stopScannerCamera();
   scannerBusy = false;
-  scannerLastCode = null;
+  scannerDetectionLocked = false;
   scannerForm.reset();
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inserisci un codice oppure usa la fotocamera, se disponibile.</p>';
-  const cameraSupported = "BarcodeDetector" in window &&
-    navigator.mediaDevices?.getUserMedia;
-  cameraSection.hidden = !cameraSupported;
-  cameraHint.textContent = cameraSupported
-    ? "Puoi usare la fotocamera oppure digitare il codice."
-    : "Scanner fotocamera non supportato: inserisci il codice manualmente.";
+    '<p class="muted">Inquadra il barcode: il lookup parte automaticamente dopo la lettura.</p>';
+  cameraSection.hidden = false;
+  const cameraUsable = scannerCameraUsable();
+  toggleCamera.disabled = !cameraUsable;
+  scannerManualFallback.open = !cameraUsable;
+  cameraHint.textContent = cameraUsable
+    ? "La fotocamera partirà automaticamente."
+    : scannerCameraErrorMessage();
 }
 
 function openScannerDialog() {
   resetScanner();
   scannerDialog.showModal();
-  window.setTimeout(() => scannerBarcode.focus(), 0);
+  if (scannerCameraUsable()) {
+    void startScannerCamera();
+  } else {
+    window.setTimeout(() => scannerBarcode.focus(), 0);
+  }
 }
 
 function closeScannerDialog() {

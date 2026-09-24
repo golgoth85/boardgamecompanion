@@ -12,6 +12,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
+- Camera-first physical-copy barcode lookup with native BarcodeDetector plus a local ZXing fallback; manual entry remains available.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Floppy connection health/capability checks.
@@ -20,11 +21,13 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Persistent rulebook review queue with auditable unattended/manual approval state.
 - Scheduled guarded re-checks for approved rulebook candidates with version-by-hash archival and run audit.
 
+Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
+
 Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
-Planned next: PDF ingestion, embeddings and page-cited RAG.
+Post-P6B roadmap: finish barcode hardening, add BGG metadata enrichment through the existing Floppy provider boundary, then deliver P7 as independently reviewable PDF-ingest, indexing/retrieval, answer/citation and UI phases. See `docs/ROADMAP.md`.
 
 ## Container
 
