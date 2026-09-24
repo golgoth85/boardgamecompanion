@@ -539,7 +539,20 @@ a { color: inherit; text-decoration: none; }
   background: rgba(11,15,23,.45);
 }
 .scanner-dialog { width: min(680px, calc(100% - 1.4rem)); }
-.scanner-manual { margin-top: 1rem; }
+.scanner-manual {
+  margin-top: .8rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(11,15,23,.24);
+}
+.scanner-manual summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 700;
+}
+.scanner-manual[open] summary { margin-bottom: .65rem; }
 .scanner-camera {
   margin-top: 1rem;
   padding: .8rem;

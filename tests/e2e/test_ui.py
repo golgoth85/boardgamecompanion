@@ -1206,3 +1206,185 @@ def test_mobile_updates_page_has_no_horizontal_overflow(browser, live_server):
         )
     finally:
         context.close()
+
+
+def _install_camera_stub(page, *, native_code: str | None = None) -> None:
+    page.add_init_script(
+        """
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            getUserMedia: async () => {
+              window.__bgcCameraRequests = (window.__bgcCameraRequests || 0) + 1;
+              return new MediaStream();
+            },
+          },
+        });
+        HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+        try {
+          Object.defineProperty(HTMLMediaElement.prototype, "readyState", {
+            configurable: true,
+            get() { return 4; },
+          });
+        } catch (_) {}
+        """
+    )
+    if native_code is not None:
+        page.add_init_script(
+            f"""
+            window.BarcodeDetector = class {{
+              static async getSupportedFormats() {{
+                return ["ean_13", "ean_8", "upc_a", "upc_e"];
+              }}
+              constructor(options) {{ window.__bgcNativeFormats = options.formats; }}
+              async detect() {{ return [{{rawValue: {native_code!r}}}]; }}
+            }};
+            """
+        )
+
+
+def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    _install_camera_stub(page, native_code="8001234567890")
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+
+        expect(page.locator("#scannerDialog")).to_be_visible()
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerBarcode")).to_have_value("8001234567890")
+        assert page.evaluate("window.__bgcCameraRequests") == 1
+        assert page.evaluate("window.__bgcNativeFormats") == [
+            "ean_13",
+            "ean_8",
+            "upc_a",
+            "upc_e",
+        ]
+        expect(page.locator("#scannerManualFallback")).not_to_have_attribute("open", "")
+    finally:
+        context.close()
+
+
+def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    _install_camera_stub(page)
+    page.add_init_script(
+        """
+        Object.defineProperty(window, "BarcodeDetector", {
+          configurable: true,
+          value: undefined,
+        });
+        """
+    )
+    page.route(
+        "**/static/zxing-browser-0.2.1.min.js",
+        lambda route: route.fulfill(
+            content_type="application/javascript",
+            body="""
+            window.ZXingBrowser = {
+              BarcodeFormat: {EAN_13: 1, EAN_8: 2, UPC_A: 3, UPC_E: 4},
+              BrowserMultiFormatReader: class {
+                set possibleFormats(value) { window.__bgcZxingFormats = value; }
+                async decodeFromConstraints(constraints, video, callback) {
+                  window.__bgcZxingConstraints = constraints;
+                  video.srcObject = new MediaStream();
+                  setTimeout(() => callback({getText: () => "9781234567897"}), 0);
+                  return {stop() { window.__bgcZxingStopped = true; }};
+                }
+              }
+            };
+            """,
+        ),
+    )
+
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
+        assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
+        constraints = page.evaluate("window.__bgcZxingConstraints")
+        assert constraints["video"]["facingMode"]["ideal"] == "environment"
+        assert page.evaluate("window.__bgcZxingStopped") is True
+    finally:
+        context.close()
+
+
+def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    _install_camera_stub(page)
+    page.add_init_script(
+        """
+        window.BarcodeDetector = class {
+          static async getSupportedFormats() {
+            return ["ean_13", "ean_8", "upc_a", "upc_e"];
+          }
+          async detect() {
+            window.__bgcDetectCalls = (window.__bgcDetectCalls || 0) + 1;
+            return await new Promise((resolve) => {
+              window.__bgcResolveDetection = resolve;
+            });
+          }
+        };
+        """
+    )
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+        page.wait_for_function("window.__bgcResolveDetection !== undefined")
+
+        page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
+        page.locator("#scannerBarcode").fill("1234567890123")
+        page.get_by_role("button", name="Cerca").click()
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
+
+        page.evaluate(
+            "window.__bgcResolveDetection([{rawValue: '9999999999999'}])"
+        )
+        page.wait_for_timeout(100)
+        expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
+        expect(page.locator("#scannerResult")).to_contain_text("1234567890123")
+    finally:
+        context.close()
+
+
+def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    page.add_init_script(
+        """
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            getUserMedia: () => new Promise((resolve) => {
+              window.__bgcResolveCamera = resolve;
+            }),
+          },
+        });
+        HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+        window.BarcodeDetector = class {
+          static async getSupportedFormats() {
+            return ["ean_13", "ean_8", "upc_a", "upc_e"];
+          }
+          async detect() { return []; }
+        };
+        """
+    )
+    try:
+        page.goto(live_server)
+        page.get_by_role("button", name="Scansiona").click()
+        page.wait_for_function("typeof window.__bgcResolveCamera === 'function'")
+
+        page.get_by_role("button", name="Chiudi scanner").click()
+        expect(page.locator("#scannerDialog")).not_to_be_visible()
+
+        page.evaluate(
+            "window.__bgcResolveCamera(new MediaStream())"
+        )
+        page.wait_for_timeout(100)
+        assert page.evaluate(
+            "document.querySelector('#scannerVideo').srcObject === null"
+        )
+        expect(page.locator("#scannerDialog")).not_to_be_visible()
+    finally:
+        context.close()

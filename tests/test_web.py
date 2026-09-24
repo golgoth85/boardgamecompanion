@@ -19,6 +19,7 @@ def test_web_home_is_served(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "BoardGameCompanion" in response.text
+    assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
 
 
@@ -54,6 +55,7 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     with TestClient(app) as client:
         css = client.get("/static/app.css")
         js = client.get("/static/app.js")
+        zxing = client.get("/static/zxing-browser-0.2.1.min.js")
 
     assert css.status_code == 200
     assert "--accent:" in css.text
@@ -61,3 +63,5 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderCatalog" in js.text
     assert "renderReviews" in js.text
     assert "renderUpdates" in js.text
+    assert zxing.status_code == 200
+    assert "ZXingBrowser" in zxing.text

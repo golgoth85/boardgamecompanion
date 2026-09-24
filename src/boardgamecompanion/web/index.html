@@ -196,24 +196,27 @@
       <button class="icon-button" id="closeScanner" type="button" aria-label="Chiudi scanner">×</button>
     </div>
 
-    <form id="scannerForm" class="scanner-manual">
-      <label class="settings-field">
-        <span>Barcode / EAN / UPC</span>
-        <div class="inline-input-action">
-          <input id="scannerBarcode" type="text" inputmode="numeric" autocomplete="off" placeholder="Scansiona o digita il codice">
-          <button class="button button-primary" type="submit" id="lookupBarcode">Cerca</button>
-        </div>
-      </label>
-    </form>
-
-    <div id="cameraSection" class="scanner-camera" hidden>
+    <div id="cameraSection" class="scanner-camera">
       <video id="scannerVideo" playsinline muted></video>
       <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
-      <p id="cameraHint" class="muted"></p>
+      <p id="cameraHint" class="muted">La fotocamera partirà automaticamente.</p>
     </div>
 
+    <details id="scannerManualFallback" class="scanner-manual">
+      <summary>Inserimento manuale</summary>
+      <form id="scannerForm">
+        <label class="settings-field">
+          <span>Barcode / EAN / UPC</span>
+          <div class="inline-input-action">
+            <input id="scannerBarcode" type="text" inputmode="numeric" autocomplete="off" placeholder="Digita il codice">
+            <button class="button button-primary" type="submit" id="lookupBarcode">Cerca</button>
+          </div>
+        </label>
+      </form>
+    </details>
+
     <div id="scannerResult" class="scanner-result">
-      <p class="muted">Inserisci un codice oppure usa la fotocamera, se disponibile.</p>
+      <p class="muted">Inquadra il barcode: il lookup parte automaticamente dopo la lettura.</p>
     </div>
   </dialog>
 
@@ -282,6 +285,7 @@
     </form>
   </dialog>
 
+  <script src="/static/zxing-browser-0.2.1.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>
