@@ -622,6 +622,206 @@ def _pdf_page_ingestion(connection: sqlite3.Connection) -> None:
     )
 
 
+def _document_chunks(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_game_documents_id_board_game
+        ON game_documents(id, board_game_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_document_pages_chunk_parent
+        ON document_pages(
+            id, document_id, parse_run_id, page_number, text_sha256
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_chunk_runs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            board_game_id INTEGER NOT NULL,
+            parse_run_id TEXT NOT NULL,
+            document_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_sha256) = 64
+                    AND document_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            document_metadata_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_metadata_sha256) = 64
+                    AND document_metadata_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            source_pages_sha256 TEXT NOT NULL
+                CHECK(
+                    length(source_pages_sha256) = 64
+                    AND source_pages_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            chunker_name TEXT NOT NULL,
+            chunker_version TEXT NOT NULL,
+            chunker_config_json TEXT NOT NULL,
+            page_count INTEGER NOT NULL CHECK(page_count >= 0),
+            indexed_page_count INTEGER NOT NULL
+                CHECK(indexed_page_count >= 0 AND indexed_page_count <= page_count),
+            chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
+            total_chunk_chars INTEGER NOT NULL CHECK(total_chunk_chars >= 0),
+            created_at TEXT NOT NULL,
+            UNIQUE(
+                id, document_id, parse_run_id, board_game_id,
+                document_sha256, document_metadata_sha256,
+                chunker_name, chunker_version, chunker_config_json
+            ),
+            FOREIGN KEY(document_id, board_game_id)
+                REFERENCES game_documents(id, board_game_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(parse_run_id, document_id)
+                REFERENCES document_parse_runs(id, document_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_chunk_runs_document
+        ON document_chunk_runs(document_id, created_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id TEXT PRIMARY KEY,
+            chunk_key TEXT NOT NULL UNIQUE
+                CHECK(
+                    length(chunk_key) = 64
+                    AND chunk_key NOT GLOB '*[^0-9a-f]*'
+                ),
+            chunk_run_id TEXT NOT NULL,
+            board_game_id INTEGER NOT NULL,
+            document_id TEXT NOT NULL,
+            document_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_sha256) = 64
+                    AND document_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            document_metadata_sha256 TEXT NOT NULL
+                CHECK(
+                    length(document_metadata_sha256) = 64
+                    AND document_metadata_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            parse_run_id TEXT NOT NULL,
+            page_id TEXT NOT NULL,
+            page_number INTEGER NOT NULL CHECK(page_number >= 1),
+            page_text_sha256 TEXT NOT NULL
+                CHECK(
+                    length(page_text_sha256) = 64
+                    AND page_text_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+            start_char INTEGER NOT NULL CHECK(start_char >= 0),
+            end_char INTEGER NOT NULL CHECK(end_char > start_char),
+            text TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL
+                CHECK(
+                    length(text_sha256) = 64
+                    AND text_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            char_count INTEGER NOT NULL CHECK(char_count > 0),
+            language TEXT NOT NULL,
+            document_type TEXT NOT NULL,
+            version_label TEXT,
+            edition TEXT,
+            source_kind TEXT NOT NULL,
+            source_provider TEXT,
+            source_url TEXT,
+            is_official INTEGER NOT NULL CHECK(is_official IN (0, 1)),
+            document_provenance_json TEXT NOT NULL DEFAULT '{}',
+            chunker_name TEXT NOT NULL,
+            chunker_version TEXT NOT NULL,
+            chunker_config_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(
+                chunk_run_id, document_id, parse_run_id, board_game_id,
+                document_sha256, document_metadata_sha256,
+                chunker_name, chunker_version, chunker_config_json
+            ) REFERENCES document_chunk_runs(
+                id, document_id, parse_run_id, board_game_id,
+                document_sha256, document_metadata_sha256,
+                chunker_name, chunker_version, chunker_config_json
+            ) ON DELETE CASCADE,
+            FOREIGN KEY(
+                page_id, document_id, parse_run_id,
+                page_number, page_text_sha256
+            ) REFERENCES document_pages(
+                id, document_id, parse_run_id,
+                page_number, text_sha256
+            ) ON DELETE CASCADE,
+            CHECK(char_count = end_char - start_char),
+            UNIQUE(document_id, page_id, chunk_index)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_chunks_document
+        ON document_chunks(document_id, page_number, chunk_index)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_chunks_game
+        ON document_chunks(board_game_id, document_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_chunks_page
+        ON document_chunks(page_id, chunk_index)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_game_documents_invalidate_chunks
+        AFTER UPDATE OF
+            board_game_id, sha256, document_type, language,
+            version_label, edition, source_kind, source_provider,
+            source_url, is_official, provenance_json
+        ON game_documents
+        WHEN
+            OLD.board_game_id IS NOT NEW.board_game_id
+            OR OLD.sha256 IS NOT NEW.sha256
+            OR OLD.document_type IS NOT NEW.document_type
+            OR OLD.language IS NOT NEW.language
+            OR OLD.version_label IS NOT NEW.version_label
+            OR OLD.edition IS NOT NEW.edition
+            OR OLD.source_kind IS NOT NEW.source_kind
+            OR OLD.source_provider IS NOT NEW.source_provider
+            OR OLD.source_url IS NOT NEW.source_url
+            OR OLD.is_official IS NOT NEW.is_official
+            OR OLD.provenance_json IS NOT NEW.provenance_json
+        BEGIN
+            DELETE FROM document_chunks WHERE document_id = NEW.id;
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_document_pages_invalidate_chunks
+        AFTER UPDATE OF text, char_count, extraction_status, diagnostics_json
+        ON document_pages
+        WHEN
+            OLD.text IS NOT NEW.text
+            OR OLD.char_count IS NOT NEW.char_count
+            OR OLD.extraction_status IS NOT NEW.extraction_status
+            OR OLD.diagnostics_json IS NOT NEW.diagnostics_json
+        BEGIN
+            DELETE FROM document_chunks WHERE page_id = NEW.id;
+        END
+        """
+    )
+
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -630,6 +830,7 @@ MIGRATIONS = (
     Migration(4, "rulebook-review-queue", _rulebook_reviews),
     Migration(5, "rulebook-scheduled-updates", _rulebook_updates),
     Migration(6, "pdf-page-ingestion", _pdf_page_ingestion),
+    Migration(7, "document-chunks", _document_chunks),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
