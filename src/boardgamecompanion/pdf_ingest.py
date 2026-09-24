@@ -361,6 +361,10 @@ class PdfIngestService:
             )
         except subprocess.TimeoutExpired as exc:
             raise PdfIngestParseError("parse_timeout: PDF parser timed out") from exc
+        except OSError as exc:
+            raise PdfIngestParseError(
+                "parser_start_failed: PDF parser process could not be started"
+            ) from exc
 
         stdout = completed.stdout or ""
         if len(stdout.encode("utf-8")) > self.max_total_chars * 4 + 1024 * 1024:

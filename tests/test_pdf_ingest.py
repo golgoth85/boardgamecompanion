@@ -264,3 +264,30 @@ def test_failed_force_reparse_keeps_previous_successful_pages(
         assert status["current"]["id"] == first.json()["ingest"]["id"]
         assert status["latest_run"]["status"] == "failed"
         assert status["latest_run"]["error"]["code"] == "forced_failure"
+
+
+def test_parser_start_failure_is_not_reported_as_document_integrity_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import boardgamecompanion.pdf_ingest as pdf_ingest_module
+
+    _configure(monkeypatch, tmp_path)
+    pdf = _pdf_with_pages("Parser startup test.")
+
+    def fail_start(*args, **kwargs):
+        raise OSError("simulated process start failure")
+
+    monkeypatch.setattr(pdf_ingest_module.subprocess, "run", fail_start)
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, pdf)
+
+        response = client.post(f"/api/documents/{document['id']}/ingest")
+        assert response.status_code == 422
+        assert "parser_start_failed" in response.json()["detail"]
+
+        status = client.get(f"/api/documents/{document['id']}/ingest").json()
+        assert status["latest_run"]["status"] == "failed"
+        assert status["latest_run"]["error"]["code"] == "parser_start_failed"
