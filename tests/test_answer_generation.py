@@ -259,10 +259,16 @@ def test_empty_retrieval_returns_not_found_without_generation() -> None:
     assert provider.generate_calls == 0
 def test_model_can_decline_when_evidence_is_insufficient() -> None:
     provider = FakeProvider({"status": "not_found", "claims": []})
-    result = _service(
-        _retrieval_payload([_result(chunk_id="chunk-1", text="Unrelated rule.")]),
+    retrieval = FakeRetrieval(
+        _retrieval_payload([_result(chunk_id="chunk-1", text="Unrelated rule.")])
+    )
+    service = AnswerGenerationService(
+        retrieval,
         provider,
-    ).answer(
+        max_evidence_chars=30000,
+        max_claims=12,
+    )
+    result = service.answer(
         bgg_id=900001,
         query="Question",
         requested_language="it",
@@ -275,6 +281,7 @@ def test_model_can_decline_when_evidence_is_insufficient() -> None:
     assert result["status"] == "not_found"
     assert result["reason"] == "retrieved_evidence_insufficient"
     assert result["generation"]["model_digest"] == "a" * 64
+    assert retrieval.validate_calls == 2
 
 
 @pytest.mark.parametrize(
