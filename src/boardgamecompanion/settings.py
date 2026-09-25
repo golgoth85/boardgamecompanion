@@ -60,8 +60,15 @@ class Settings(BaseSettings):
     ollama_embedding_dimensions: int | None = Field(default=None, ge=64, le=4096)
     ollama_embedding_batch_size: int = Field(default=16, ge=1, le=128)
     ollama_embedding_timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
+    ollama_generation_model: str | None = None
+    ollama_generation_timeout_seconds: float = Field(
+        default=120.0, ge=1.0, le=900.0
+    )
+    ollama_generation_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     ollama_verify_tls: bool = True
     retrieval_max_candidates: int = Field(default=10000, ge=100, le=100000)
+    answer_max_evidence_chars: int = Field(default=30000, ge=1000, le=200000)
+    answer_max_claims: int = Field(default=12, ge=1, le=100)
     qdrant_url: str | None = None
 
     @property
