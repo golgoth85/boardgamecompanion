@@ -46,6 +46,16 @@ from boardgamecompanion.pdf_ingest import (
     PdfIngestParseError,
     PdfIngestService,
 )
+from boardgamecompanion.embedding_retrieval import (
+    EmbeddingConflict,
+    EmbeddingCorruptRecord,
+    EmbeddingDocumentNotFound,
+    EmbeddingGameNotFound,
+    EmbeddingProviderError,
+    EmbeddingRetrievalService,
+    EmbeddingSourceNotReady,
+    OllamaEmbeddingProvider,
+)
 from boardgamecompanion.floppy import (
     FloppyClient,
     FloppyConfig,
@@ -172,6 +182,16 @@ class FloppySettingsUpdate(BaseModel):
         if value and not value.startswith(("http://", "https://")):
             raise ValueError("Floppy URL must start with http:// or https://")
         return value
+
+
+class RetrievalPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    language: str | None = Field(default=None, max_length=32)
+    document_type: str | None = Field(default=None, max_length=64)
+    version_label: str | None = Field(default=None, max_length=500)
+    edition: str | None = Field(default=None, max_length=500)
+    top_k: int = Field(default=8, ge=1, le=50)
+    min_score: float = Field(default=-1.0, ge=-1.0, le=1.0)
 
 
 class RulebookReviewDecisionPayload(BaseModel):
@@ -605,6 +625,104 @@ def get_document_chunk(chunk_id: str) -> dict[str, object]:
     if chunk is None:
         raise HTTPException(status_code=404, detail="Document chunk not found")
     return chunk
+
+
+
+def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
+    if not settings.ollama_url or not settings.ollama_embedding_model:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Embedding provider is not configured; set BGC_OLLAMA_URL "
+                "and BGC_OLLAMA_EMBEDDING_MODEL"
+            ),
+        )
+    provider = OllamaEmbeddingProvider(
+        base_url=settings.ollama_url,
+        model=settings.ollama_embedding_model,
+        requested_dimensions=settings.ollama_embedding_dimensions,
+        timeout_seconds=settings.ollama_embedding_timeout_seconds,
+        verify_tls=settings.ollama_verify_tls,
+    )
+    database = get_database()
+    database.initialize()
+    return EmbeddingRetrievalService(
+        database,
+        get_chunk_index_service(),
+        provider,
+        batch_size=settings.ollama_embedding_batch_size,
+        max_candidates=settings.retrieval_max_candidates,
+    )
+
+
+def embedding_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, EmbeddingDocumentNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, EmbeddingGameNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (EmbeddingSourceNotReady, EmbeddingConflict)):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, EmbeddingProviderError):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, EmbeddingCorruptRecord):
+        return HTTPException(status_code=500, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/documents/{document_id}/embeddings/build", tags=["retrieval"])
+def build_document_embeddings(
+    document_id: str,
+    force: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_embedding_retrieval_service().build(document_id, force=force)
+    except (
+        EmbeddingDocumentNotFound,
+        EmbeddingSourceNotReady,
+        EmbeddingConflict,
+        EmbeddingProviderError,
+        EmbeddingCorruptRecord,
+    ) as exc:
+        raise embedding_http_error(exc) from exc
+
+
+@app.get("/api/documents/{document_id}/embeddings", tags=["retrieval"])
+def get_document_embeddings(document_id: str) -> dict[str, object]:
+    try:
+        return get_embedding_retrieval_service().status(document_id)
+    except (
+        EmbeddingDocumentNotFound,
+        EmbeddingSourceNotReady,
+        EmbeddingConflict,
+        EmbeddingProviderError,
+        EmbeddingCorruptRecord,
+    ) as exc:
+        raise embedding_http_error(exc) from exc
+
+
+@app.post("/api/games/{bgg_id}/retrieve", tags=["retrieval"])
+def retrieve_game_evidence(
+    bgg_id: int,
+    payload: RetrievalPayload,
+) -> dict[str, object]:
+    try:
+        return get_embedding_retrieval_service().retrieve(
+            bgg_id=bgg_id,
+            query=payload.query,
+            requested_language=payload.language,
+            document_type=payload.document_type,
+            version_label=payload.version_label,
+            edition=payload.edition,
+            top_k=payload.top_k,
+            min_score=payload.min_score,
+        )
+    except (
+        EmbeddingGameNotFound,
+        EmbeddingConflict,
+        EmbeddingProviderError,
+        EmbeddingCorruptRecord,
+    ) as exc:
+        raise embedding_http_error(exc) from exc
 
 
 @app.get("/api/rulebook-reviews", tags=["rulebooks"])
