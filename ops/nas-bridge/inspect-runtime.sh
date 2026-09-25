@@ -6,14 +6,15 @@ name='boardgamecompanion'
 echo "lan_service_probe:"
 for target in \
   "boardgamecompanion|http://192.168.1.55:8787/health" \
-  "ollama|http://192.168.1.249:11434/api/tags"
+  "ollama_nas|http://192.168.1.55:11434/api/tags" \
+  "ollama_pc|http://192.168.1.249:11434/api/tags"
 do
   label="${target%%|*}"
   url="${target#*|}"
   if payload="$(curl -fsS --max-time 8 "$url" 2>&1)"; then
     echo "${label}_reachable=yes"
-    if [[ "$label" == "ollama" ]]; then
-      python3 -c 'import json,sys; p=json.load(sys.stdin); print("ollama_models="+",".join(sorted(str(x.get("name","")) for x in p.get("models",[]) if x.get("name"))))' <<<"$payload"
+    if [[ "$label" == ollama_* ]]; then
+      python3 -c 'import json,sys; p=json.load(sys.stdin); print("models="+",".join(sorted(str(x.get("name","")) for x in p.get("models",[]) if x.get("name"))))' <<<"$payload"
     else
       echo "${label}_payload=$payload"
     fi
