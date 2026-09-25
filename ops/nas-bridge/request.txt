@@ -1,0 +1,3 @@
+operation=inspect
+branch=
+expected_head=
