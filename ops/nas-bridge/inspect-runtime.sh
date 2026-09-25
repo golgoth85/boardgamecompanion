@@ -8,6 +8,7 @@ for target in \
   "boardgamecompanion|http://192.168.1.55:8787/health" \
   "unraid_1234_openai|http://192.168.1.55:1234/v1/models" \
   "lmstudio_pc_openai|http://192.168.1.249:1234/v1/models" \
+  "lmstudio_pc_native|http://192.168.1.249:1234/api/v1/models" \
   "lmstudio_pc_ollama|http://192.168.1.249:1234/api/tags" \
   "lmstudio_pc_root|http://192.168.1.249:1234/" \
   "ollama_nas|http://192.168.1.55:11434/api/tags"
@@ -37,9 +38,25 @@ else:
     print("lmstudio_openai_json=yes")
     models=[x for x in payload.get("data",[]) if isinstance(x,dict) and x.get("id")]
     print("models=" + ",".join(sorted(str(x["id"]) for x in models)))
+PY
+    elif [[ "$label" == "lmstudio_pc_native" ]]; then
+      python3 - "$tmp_body" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    payload=json.loads(raw)
+except Exception:
+    print("lmstudio_native_json=no")
+    print("lmstudio_native_body_prefix="+raw[:500].replace("\n","\\n"))
+else:
+    print("lmstudio_native_json=yes")
+    models=payload.get("models",[])
     for item in models:
-        if item["id"] in {"qwen3-14b","text-embedding-qwen3-embedding-0.6b","text-embedding-nomic-embed-text-v1.5"}:
-            print("model_meta=" + json.dumps(item, sort_keys=True, separators=(",",":")))
+        if not isinstance(item,dict):
+            continue
+        aliases={str(item.get("key","")),str(item.get("display_name",""))}
+        if any(x in {"qwen3-14b","text-embedding-qwen3-embedding-0.6b","text-embedding-nomic-embed-text-v1.5"} for x in aliases):
+            print("native_model_meta="+json.dumps(item,sort_keys=True,separators=(",",":")))
 PY
     elif [[ "$label" == "lmstudio_pc_ollama" || "$label" == "ollama_nas" ]]; then
       python3 - "$tmp_body" <<'PY' || true
