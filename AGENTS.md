@@ -103,3 +103,21 @@ This policy has top workflow priority for all current and future development, re
 GitHub inspection → scoped branch/worktree → implementation or read-only review as mandated → automated tests/CI → PR/review evidence → merge only if authorized → real-environment validation/deploy only if authorized and necessary.
 
 If a task can be completed reliably without involving the user in mechanical steps, it should be.
+
+## Source-integrity invariant — no local-only source changes
+
+This invariant is mandatory for every coding agent, including CloudCLI/Claude Code, Codex, ChatGPT, self-hosted runners, and future agents.
+
+1. **A production/runtime checkout is never a development workspace.** Do not edit application source in a directory whose files are consumed directly by a running service/container/plugin/runtime. Use a dedicated task branch and a separate worktree/clone.
+2. **Every source change must become a GitHub commit before handoff or deployment.** A change is not durable, shareable, reviewable, or complete while it exists only as an uncommitted/unpushed local filesystem edit.
+3. **Push before deploy.** The exact code intended for runtime must first exist on GitHub at a named branch and immutable commit SHA. Runtime actions must record/verify that SHA.
+4. **No deploy from a dirty tree.** Do not restart/redeploy merely to activate uncommitted source edits. If a runtime checkout is dirty, treat that as source-integrity drift and stop normal deployment.
+5. **Never erase drift to make Git look clean.** If a production/runtime checkout contains local-only changes, preserve them first on a rescue branch/commit and push them to GitHub before reset, checkout, pull, rebase, replacement, or cleanup.
+6. **Agent isolation is mandatory.** One task/agent = one branch/worktree. Two agents must not write concurrently to the same working tree. Handoff occurs through pushed commits/PRs, not shared uncommitted files.
+7. **Start from remote truth.** Before editing, fetch origin and verify the intended remote branch/SHA. A clean worktree whose HEAD differs from GitHub is still drifted.
+8. **End with remote truth.** Before claiming completion, verify that the final intended commit exists on GitHub and report its branch/SHA. If a task intentionally remains read-only, say so instead.
+9. **Runtime verification is separate from source publication.** Tests or behavior observed from locally modified runtime files do not prove that GitHub contains those changes.
+10. **Local-only emergency fixes are temporary quarantine states, not a workflow.** If an emergency runtime edit is unavoidable, immediately capture the exact source delta on a dedicated rescue/fix branch, test it, push it, and only then continue normal work.
+
+For repositories with a NAS bridge, the bridge should compare both the technical Git workspace and, where available, the real runtime checkout. A green technical mirror must never be interpreted as proof that production is synchronized.
+
