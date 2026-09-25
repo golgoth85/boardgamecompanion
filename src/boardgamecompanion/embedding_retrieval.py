@@ -479,10 +479,20 @@ class EmbeddingRetrievalService:
         chunk_run_id = source["chunk_run"]["id"]
         rows = connection.execute(
             """
-            SELECT id, chunk_key, text, text_sha256
-            FROM document_chunks
-            WHERE document_id = ? AND chunk_run_id = ?
-            ORDER BY page_number, chunk_index, id
+            SELECT
+                c.id,
+                c.chunk_key,
+                c.text,
+                c.text_sha256,
+                c.page_text_sha256,
+                c.start_char,
+                c.end_char,
+                p.text AS page_text,
+                p.text_sha256 AS current_page_text_sha256
+            FROM document_chunks c
+            LEFT JOIN document_pages p ON p.id = c.page_id
+            WHERE c.document_id = ? AND c.chunk_run_id = ?
+            ORDER BY c.page_number, c.chunk_index, c.id
             """,
             (source["document"]["id"], chunk_run_id),
         ).fetchall()
@@ -498,6 +508,26 @@ class EmbeddingRetrievalService:
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if digest != row["text_sha256"]:
                 raise EmbeddingCorruptRecord("Persisted chunk text digest is invalid")
+            page_text = row["page_text"]
+            if not isinstance(page_text, str):
+                raise EmbeddingCorruptRecord("Persisted chunk page is missing")
+            if (
+                row["current_page_text_sha256"] != row["page_text_sha256"]
+                or hashlib.sha256(page_text.encode("utf-8")).hexdigest()
+                != row["page_text_sha256"]
+            ):
+                raise EmbeddingCorruptRecord(
+                    "Persisted chunk page digest is invalid"
+                )
+            start_char = int(row["start_char"])
+            end_char = int(row["end_char"])
+            if (
+                end_char > len(page_text)
+                or page_text[start_char:end_char] != text
+            ):
+                raise EmbeddingCorruptRecord(
+                    "Persisted chunk does not match its page span"
+                )
             expected = source_by_id.get(row["id"])
             if expected is None:
                 raise EmbeddingConflict("P7B chunk identity changed during embedding")
@@ -760,6 +790,200 @@ class EmbeddingRetrievalService:
             return 2, "community"
         return 99, "excluded-untrusted"
 
+    def _eligible_document_ids(
+        self,
+        *,
+        board_game_id: int,
+        document_type: str | None,
+        version_label: str | None,
+        edition: str | None,
+    ) -> list[str]:
+        clauses = [
+            "board_game_id = ?",
+            "(is_official = 1 OR source_kind IN ('manual_upload', 'community'))",
+        ]
+        params: list[Any] = [board_game_id]
+        if document_type is not None:
+            clauses.append("document_type = ?")
+            params.append(document_type)
+        if version_label is not None:
+            clauses.append("version_label = ?")
+            params.append(version_label)
+        if edition is not None:
+            clauses.append("edition = ?")
+            params.append(edition)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id
+                FROM game_documents
+                WHERE {" AND ".join(clauses)}
+                ORDER BY id
+                """,
+                params,
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
+    def _coverage_state(
+        self,
+        *,
+        board_game_id: int,
+        descriptor: EmbeddingDescriptor,
+        config_sha256: str,
+        document_type: str | None,
+        version_label: str | None,
+        edition: str | None,
+    ) -> tuple[dict[str, Any], str]:
+        document_ids = self._eligible_document_ids(
+            board_game_id=board_game_id,
+            document_type=document_type,
+            version_label=version_label,
+            edition=edition,
+        )
+        states: list[dict[str, Any]] = []
+        ready_document_ids: list[str] = []
+        missing_document_ids: list[str] = []
+
+        for document_id in document_ids:
+            try:
+                source = self._source(document_id)
+            except EmbeddingSourceNotReady:
+                states.append(
+                    {
+                        "document_id": document_id,
+                        "status": "p7b_not_ready",
+                    }
+                )
+                missing_document_ids.append(document_id)
+                continue
+            except EmbeddingDocumentNotFound as exc:
+                raise EmbeddingConflict(
+                    "Eligible document changed while retrieval coverage was read"
+                ) from exc
+
+            current = self._current_run(
+                document_id=document_id,
+                chunk_run_id=str(source["chunk_run"]["id"]),
+                descriptor=descriptor,
+                config_sha256=config_sha256,
+                input_set_sha256=str(source["input_set_sha256"]),
+            )
+            if current is None:
+                states.append(
+                    {
+                        "document_id": document_id,
+                        "status": "p7c_not_ready",
+                        "chunk_run_id": source["chunk_run"]["id"],
+                        "input_set_sha256": source["input_set_sha256"],
+                    }
+                )
+                missing_document_ids.append(document_id)
+                continue
+
+            states.append(
+                {
+                    "document_id": document_id,
+                    "status": "ready",
+                    "chunk_run_id": source["chunk_run"]["id"],
+                    "input_set_sha256": source["input_set_sha256"],
+                    "embedding_run_id": current["id"],
+                    "embedding_config_sha256": current[
+                        "embedding_config_sha256"
+                    ],
+                    "model_digest": current["model_digest"],
+                }
+            )
+            ready_document_ids.append(document_id)
+
+        coverage = {
+            "current_document_count": len(document_ids),
+            "embedded_document_count": len(ready_document_ids),
+            "missing_document_ids": sorted(missing_document_ids),
+        }
+        return coverage, _sha256_json(states)
+
+    @staticmethod
+    def _candidate_set_sha256(rows: list[sqlite3.Row]) -> str:
+        return _sha256_json(
+            [
+                {
+                    "embedding_id": row["embedding_id"],
+                    "embedding_run_id": row["embedding_run_id"],
+                    "chunk_id": row["id"],
+                    "chunk_key": row["chunk_key"],
+                    "chunk_run_id": row["chunk_run_id"],
+                    "document_id": row["document_id"],
+                    "document_metadata_sha256": row[
+                        "document_metadata_sha256"
+                    ],
+                    "parse_run_id": row["parse_run_id"],
+                    "page_id": row["page_id"],
+                    "page_number": row["page_number"],
+                    "page_text_sha256": row["page_text_sha256"],
+                    "text_sha256": row["text_sha256"],
+                    "vector_sha256": row["vector_sha256"],
+                    "published_at": row["published_at"],
+                }
+                for row in rows
+            ]
+        )
+
+    def validate_retrieval_current(
+        self,
+        retrieval_payload: dict[str, Any],
+    ) -> None:
+        snapshot = retrieval_payload.get("currentness")
+        if not isinstance(snapshot, dict):
+            raise EmbeddingConflict("Retrieval currentness token is missing")
+        filters = snapshot.get("filters")
+        if not isinstance(filters, dict):
+            raise EmbeddingConflict("Retrieval currentness filters are invalid")
+
+        descriptor = self.provider.describe()
+        _, config_sha256 = _descriptor_config(descriptor)
+        if (
+            descriptor.provider != snapshot.get("provider")
+            or descriptor.model != snapshot.get("model")
+            or descriptor.model_digest != snapshot.get("model_digest")
+            or config_sha256 != snapshot.get("embedding_config_sha256")
+        ):
+            raise EmbeddingConflict(
+                "Embedding model changed after retrieval evidence was selected"
+            )
+
+        try:
+            board_game_id = int(snapshot["board_game_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise EmbeddingConflict(
+                "Retrieval currentness game identity is invalid"
+            ) from exc
+
+        coverage, coverage_sha256 = self._coverage_state(
+            board_game_id=board_game_id,
+            descriptor=descriptor,
+            config_sha256=config_sha256,
+            document_type=filters.get("document_type"),
+            version_label=filters.get("version_label"),
+            edition=filters.get("edition"),
+        )
+        rows = self._candidate_rows(
+            board_game_id=board_game_id,
+            descriptor=descriptor,
+            config_sha256=config_sha256,
+            document_type=filters.get("document_type"),
+            version_label=filters.get("version_label"),
+            edition=filters.get("edition"),
+        )
+        candidate_set_sha256 = self._candidate_set_sha256(rows)
+        if (
+            coverage_sha256 != snapshot.get("coverage_sha256")
+            or candidate_set_sha256 != snapshot.get("candidate_set_sha256")
+            or coverage != retrieval_payload.get("coverage")
+        ):
+            raise EmbeddingConflict(
+                "Retrieval evidence changed after it was selected"
+            )
+
     def _candidate_rows(
         self,
         *,
@@ -806,17 +1030,24 @@ class EmbeddingRetrievalService:
                 f"""
                 SELECT
                     e.id AS embedding_id,
+                    e.embedding_run_id,
                     e.dimensions,
                     e.vector_blob,
                     e.vector_sha256,
                     c.*,
                     d.published_at,
                     g.bgg_id,
-                    g.title AS game_title
+                    g.title AS game_title,
+                    p.document_id AS current_page_document_id,
+                    p.parse_run_id AS current_page_parse_run_id,
+                    p.page_number AS current_page_number,
+                    p.text AS current_page_text,
+                    p.text_sha256 AS current_page_text_sha256
                 FROM chunk_embeddings e
                 JOIN document_chunks c ON c.id = e.chunk_id
                 JOIN game_documents d ON d.id = c.document_id
                 JOIN board_games g ON g.id = c.board_game_id
+                LEFT JOIN document_pages p ON p.id = c.page_id
                 WHERE {where}
                 ORDER BY c.document_id, c.page_number, c.chunk_index
                 LIMIT ?
@@ -836,6 +1067,28 @@ class EmbeddingRetrievalService:
             raise EmbeddingCorruptRecord("Candidate chunk text is invalid")
         if hashlib.sha256(text.encode("utf-8")).hexdigest() != row["text_sha256"]:
             raise EmbeddingCorruptRecord("Candidate chunk text digest is invalid")
+
+        page_text = row["current_page_text"]
+        if not isinstance(page_text, str):
+            raise EmbeddingCorruptRecord("Candidate page is missing or invalid")
+        if (
+            row["current_page_document_id"] != row["document_id"]
+            or row["current_page_parse_run_id"] != row["parse_run_id"]
+            or row["current_page_number"] != row["page_number"]
+            or row["current_page_text_sha256"] != row["page_text_sha256"]
+        ):
+            raise EmbeddingCorruptRecord("Candidate page provenance is invalid")
+        if (
+            hashlib.sha256(page_text.encode("utf-8")).hexdigest()
+            != row["page_text_sha256"]
+        ):
+            raise EmbeddingCorruptRecord("Candidate page text digest is invalid")
+        start_char = int(row["start_char"])
+        end_char = int(row["end_char"])
+        if end_char > len(page_text) or page_text[start_char:end_char] != text:
+            raise EmbeddingCorruptRecord(
+                "Candidate chunk does not match its declared page span"
+            )
 
         try:
             provenance = json.loads(row["document_provenance_json"])
@@ -916,6 +1169,14 @@ class EmbeddingRetrievalService:
 
         descriptor = self.provider.describe()
         _, config_sha256 = _descriptor_config(descriptor)
+        coverage, coverage_sha256 = self._coverage_state(
+            board_game_id=game["id"],
+            descriptor=descriptor,
+            config_sha256=config_sha256,
+            document_type=document_type,
+            version_label=version_label,
+            edition=edition,
+        )
         rows = self._candidate_rows(
             board_game_id=game["id"],
             descriptor=descriptor,
@@ -924,64 +1185,22 @@ class EmbeddingRetrievalService:
             version_label=version_label,
             edition=edition,
         )
-
-        embedded_chunk_counts: dict[str, int] = {}
-        for row in rows:
-            document_id = str(row["document_id"])
-            embedded_chunk_counts[document_id] = (
-                embedded_chunk_counts.get(document_id, 0) + 1
-            )
-
-        coverage_clauses = [
-            "board_game_id = ?",
-            "chunker_name = ?",
-            "chunker_version = ?",
-            "chunker_config_json = ?",
-        ]
-        coverage_params: list[Any] = [
-            game["id"],
-            CHUNKER_NAME,
-            CHUNKER_VERSION,
-            self.chunk_service.config_json,
-        ]
-        if document_type is not None:
-            coverage_clauses.append("document_type = ?")
-            coverage_params.append(document_type)
-        if version_label is not None:
-            coverage_clauses.append("version_label = ?")
-            coverage_params.append(version_label)
-        if edition is not None:
-            coverage_clauses.append("edition = ?")
-            coverage_params.append(edition)
-
-        with self.database.connect() as connection:
-            doc_rows = connection.execute(
-                f"""
-                SELECT document_id, COUNT(*) AS chunk_count
-                FROM document_chunks
-                WHERE {" AND ".join(coverage_clauses)}
-                GROUP BY document_id
-                """,
-                coverage_params,
-            ).fetchall()
-        current_chunk_counts = {
-            str(row["document_id"]): int(row["chunk_count"])
-            for row in doc_rows
+        candidate_set_sha256 = self._candidate_set_sha256(rows)
+        currentness = {
+            "board_game_id": game["id"],
+            "provider": descriptor.provider,
+            "model": descriptor.model,
+            "model_digest": descriptor.model_digest,
+            "embedding_config_sha256": config_sha256,
+            "filters": {
+                "document_type": document_type,
+                "version_label": version_label,
+                "edition": edition,
+            },
+            "coverage_sha256": coverage_sha256,
+            "candidate_set_sha256": candidate_set_sha256,
         }
-        fully_embedded_docs = {
-            document_id
-            for document_id, chunk_count in current_chunk_counts.items()
-            if embedded_chunk_counts.get(document_id, 0) == chunk_count
-        }
-        missing_document_ids = sorted(
-            set(current_chunk_counts) - fully_embedded_docs
-        )
 
-        coverage = {
-            "current_document_count": len(current_chunk_counts),
-            "embedded_document_count": len(fully_embedded_docs),
-            "missing_document_ids": missing_document_ids,
-        }
         if not rows:
             return {
                 "game": dict(game),
@@ -990,7 +1209,7 @@ class EmbeddingRetrievalService:
                 "model": descriptor.model,
                 "model_digest": descriptor.model_digest,
                 "coverage": coverage,
-                "policy": {
+                    "currentness": currentness,\n                "policy": {
                     "selected_tier": None,
                     "selected_cohort": None,
                     "excluded_conflicting_cohorts": [],
@@ -1008,6 +1227,33 @@ class EmbeddingRetrievalService:
             raise EmbeddingConflict(
                 "Embedding model changed while query embedding was generated"
             )
+
+        coverage_after, coverage_sha256_after = self._coverage_state(
+            board_game_id=game["id"],
+            descriptor=descriptor,
+            config_sha256=config_sha256,
+            document_type=document_type,
+            version_label=version_label,
+            edition=edition,
+        )
+        rows_after = self._candidate_rows(
+            board_game_id=game["id"],
+            descriptor=descriptor,
+            config_sha256=config_sha256,
+            document_type=document_type,
+            version_label=version_label,
+            edition=edition,
+        )
+        candidate_set_sha256_after = self._candidate_set_sha256(rows_after)
+        if (
+            coverage_sha256_after != coverage_sha256
+            or candidate_set_sha256_after != candidate_set_sha256
+        ):
+            raise EmbeddingConflict(
+                "Retrieval source changed while query embedding was generated"
+            )
+        coverage = coverage_after
+        rows = rows_after
 
         scored: list[dict[str, Any]] = []
         for row in rows:
@@ -1041,7 +1287,7 @@ class EmbeddingRetrievalService:
                 "model": descriptor.model,
                 "model_digest": descriptor.model_digest,
                 "coverage": coverage,
-                "policy": {
+                    "currentness": currentness,\n                "policy": {
                     "selected_tier": None,
                     "selected_cohort": None,
                     "excluded_conflicting_cohorts": [],
@@ -1136,7 +1382,7 @@ class EmbeddingRetrievalService:
             "model": descriptor.model,
             "model_digest": descriptor.model_digest,
             "coverage": coverage,
-            "policy": {
+                "currentness": currentness,\n                "policy": {
                 "selected_tier": {
                     "rank": best_tier,
                     "name": selected_items[0]["tier_name"],
