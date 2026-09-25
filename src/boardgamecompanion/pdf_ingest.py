@@ -430,7 +430,32 @@ class PdfIngestService:
     def ingest(self, document_id: str, *, force: bool = False) -> dict[str, Any]:
         document = self._document(document_id)
         document_sha256 = str(document["sha256"])
+        document_size = int(document["size_bytes"])
+        started_at = _now()
+
+        def verify_archive(prefix: str) -> None:
+            try:
+                with self._verified_snapshot(
+                    document_id=document_id,
+                    expected_sha256=document_sha256,
+                    expected_size=document_size,
+                ):
+                    pass
+            except PdfIngestIntegrityError:
+                raise
+
         if not force:
+            try:
+                verify_archive(".p7a-current-")
+            except PdfIngestIntegrityError as exc:
+                self._record_failure(
+                    document_id=document_id,
+                    document_sha256=document_sha256,
+                    started_at=started_at,
+                    code="integrity_mismatch",
+                    message=str(exc),
+                )
+                raise
             current = self._current_success(
                 document_id=document_id,
                 document_sha256=document_sha256,
@@ -438,12 +463,11 @@ class PdfIngestService:
             if current is not None:
                 return {"created": False, "ingest": current}
 
-        started_at = _now()
         try:
             with self._verified_snapshot(
                 document_id=document_id,
                 expected_sha256=document_sha256,
-                expected_size=int(document["size_bytes"]),
+                expected_size=document_size,
             ) as snapshot:
                 payload = self._run_parser(snapshot)
             pages = self._validate_payload(payload)
@@ -473,6 +497,8 @@ class PdfIngestService:
         if not isinstance(diagnostics, dict):
             diagnostics = {}
 
+        created = False
+        result_run: dict[str, Any] | None = None
         with self.database.transaction(immediate=True) as connection:
             row = connection.execute(
                 "SELECT sha256, size_bytes FROM game_documents WHERE id = ?",
@@ -484,7 +510,7 @@ class PdfIngestService:
                 )
             if (
                 row["sha256"] != document_sha256
-                or int(row["size_bytes"]) != int(document["size_bytes"])
+                or int(row["size_bytes"]) != document_size
             ):
                 raise PdfIngestIntegrityError(
                     "Document provenance changed during ingestion"
@@ -498,7 +524,7 @@ class PdfIngestService:
                 ).create_verified_snapshot(
                     document_id,
                     expected_sha256=document_sha256,
-                    expected_size_bytes=int(document["size_bytes"]),
+                    expected_size_bytes=document_size,
                     prefix=".p7a-commit-",
                 )
             except DocumentError as exc:
@@ -514,84 +540,113 @@ class PdfIngestService:
                     document_sha256=document_sha256,
                 )
                 if current is not None:
-                    return {"created": False, "ingest": current}
+                    result_run = current
 
-            finished_at = _now()
-            connection.execute(
-                """
-                INSERT INTO document_parse_runs (
-                    id, document_id, document_sha256,
-                    parser_name, parser_version, status,
-                    page_count, text_page_count, empty_page_count,
-                    error_page_count, total_text_chars, warning_count,
-                    diagnostics_json, error_code, error_message,
-                    started_at, finished_at
-                ) VALUES (
-                    ?, ?, ?, ?, ?, 'succeeded',
-                    ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?
-                )
-                """,
-                (
-                    run_id,
-                    document_id,
-                    document_sha256,
-                    PARSER_NAME,
-                    self.parser_version,
-                    int(payload["page_count"]),
-                    int(payload["text_page_count"]),
-                    int(payload["empty_page_count"]),
-                    int(payload["error_page_count"]),
-                    int(payload["total_text_chars"]),
-                    int(payload["warning_count"]),
-                    _json_object(diagnostics, max_bytes=MAX_DIAGNOSTICS_BYTES),
-                    started_at,
-                    finished_at,
-                ),
-            )
-            connection.execute(
-                "DELETE FROM document_pages WHERE document_id = ?",
-                (document_id,),
-            )
-            for page in pages:
-                page_id = str(
-                    uuid5(
-                        NAMESPACE_URL,
-                        (
-                            "boardgamecompanion:"
-                            f"{document_id}:page:{page['page_number']}"
-                        ),
-                    )
-                )
+            if result_run is None:
+                finished_at = _now()
                 connection.execute(
                     """
-                    INSERT INTO document_pages (
-                        id, document_id, parse_run_id,
-                        page_index, page_number, text, text_sha256,
-                        char_count, extraction_status, diagnostics_json,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO document_parse_runs (
+                        id, document_id, document_sha256,
+                        parser_name, parser_version, status,
+                        page_count, text_page_count, empty_page_count,
+                        error_page_count, total_text_chars, warning_count,
+                        diagnostics_json, error_code, error_message,
+                        started_at, finished_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, 'succeeded',
+                        ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?
+                    )
                     """,
                     (
-                        page_id,
-                        document_id,
                         run_id,
-                        page["page_index"],
-                        page["page_number"],
-                        page["text"],
-                        page["text_sha256"],
-                        page["char_count"],
-                        page["extraction_status"],
-                        page["diagnostics_json"],
+                        document_id,
+                        document_sha256,
+                        PARSER_NAME,
+                        self.parser_version,
+                        int(payload["page_count"]),
+                        int(payload["text_page_count"]),
+                        int(payload["empty_page_count"]),
+                        int(payload["error_page_count"]),
+                        int(payload["total_text_chars"]),
+                        int(payload["warning_count"]),
+                        _json_object(
+                            diagnostics,
+                            max_bytes=MAX_DIAGNOSTICS_BYTES,
+                        ),
+                        started_at,
                         finished_at,
                     ),
                 )
-            run_row = connection.execute(
-                "SELECT * FROM document_parse_runs WHERE id = ?",
-                (run_id,),
-            ).fetchone()
+                connection.execute(
+                    "DELETE FROM document_pages WHERE document_id = ?",
+                    (document_id,),
+                )
+                for page in pages:
+                    page_id = str(
+                        uuid5(
+                            NAMESPACE_URL,
+                            (
+                                "boardgamecompanion:"
+                                f"{document_id}:page:{page['page_number']}"
+                            ),
+                        )
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO document_pages (
+                            id, document_id, parse_run_id,
+                            page_index, page_number, text, text_sha256,
+                            char_count, extraction_status, diagnostics_json,
+                            created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            page_id,
+                            document_id,
+                            run_id,
+                            page["page_index"],
+                            page["page_number"],
+                            page["text"],
+                            page["text_sha256"],
+                            page["char_count"],
+                            page["extraction_status"],
+                            page["diagnostics_json"],
+                            finished_at,
+                        ),
+                    )
+                run_row = connection.execute(
+                    "SELECT * FROM document_parse_runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()
+                assert run_row is not None
+                result_run = _row_to_run(run_row)
+                created = True
 
-        assert run_row is not None
-        return {"created": True, "ingest": _row_to_run(run_row)}
+        assert result_run is not None
+
+        # The filesystem is outside SQLite's transaction. Re-verify after the
+        # DB commit so a replacement in the pre-commit verification window is
+        # detected before the ingest request can succeed. On mismatch, remove
+        # all page material for the document; FK cascades invalidate P7B/P7C.
+        try:
+            verify_archive(".p7a-postcommit-")
+        except PdfIngestIntegrityError as exc:
+            with self.database.transaction(immediate=True) as connection:
+                connection.execute(
+                    "DELETE FROM document_pages WHERE document_id = ?",
+                    (document_id,),
+                )
+            self._record_failure(
+                document_id=document_id,
+                document_sha256=document_sha256,
+                started_at=started_at,
+                code="integrity_mismatch",
+                message=str(exc),
+            )
+            raise
+
+        return {"created": created, "ingest": result_run}
 
     def status(self, document_id: str) -> dict[str, Any]:
         document = self._document(document_id)
