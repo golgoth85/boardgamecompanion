@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 import socket
@@ -21,7 +22,24 @@ SAMPLE = Path(__file__).parents[1] / "fixtures" / "bgg_collection_sample.csv"
 @pytest.fixture(scope="session")
 def browser():
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        launch_kwargs = {}
+        candidates = [
+            os.environ.get("BGC_CHROMIUM_EXECUTABLE"),
+            os.environ.get("CHROMIUM_EXECUTABLE"),
+            "/root/bin/chromium",
+            "/mnt/user/appdata/claude-code-home/bin/chromium",
+        ]
+        executable = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate and Path(candidate).exists()
+            ),
+            None,
+        )
+        if executable:
+            launch_kwargs["executable_path"] = executable
+        browser = p.chromium.launch(**launch_kwargs)
         yield browser
         browser.close()
 
@@ -1386,5 +1404,330 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
             "document.querySelector('#scannerVideo').srcObject === null"
         )
         expect(page.locator("#scannerDialog")).not_to_be_visible()
+    finally:
+        context.close()
+
+
+def _rag_document_response() -> dict:
+    return {
+        "bgg_id": 900001,
+        "count": 1,
+        "items": [
+            {
+                "id": "doc-rag",
+                "document_type": "rulebook",
+                "language": "it",
+                "title": "Regolamento RAG",
+                "version_label": "v2",
+                "edition": "Retail IT",
+                "original_filename": "rules.pdf",
+                "size_bytes": 12345,
+                "source": {
+                    "kind": "official_publisher",
+                    "provider": "publisher-test",
+                    "url": "https://publisher.example/rules.pdf",
+                    "official": True,
+                },
+            }
+        ],
+    }
+
+
+def _rag_answer_response() -> dict:
+    return {
+        "status": "answer",
+        "reason": None,
+        "game": {"id": 1, "bgg_id": 900001, "title": "Synthetic Alpha"},
+        "query": "Come si prepara?",
+        "answer": "Si usano cinque carte. [1]",
+        "claims": [
+            {
+                "text": 'Si usano cinque carte <img src=x onerror="window.__bgc_rag_xss=1">.',
+                "citations": [1],
+                "supports": [
+                    {
+                        "citation": 1,
+                        "evidence_id": "E1",
+                        "quote": "Setup uses five cards.",
+                    }
+                ],
+            }
+        ],
+        "citations": [
+            {
+                "index": 1,
+                "document": {
+                    "id": "doc-rag",
+                    "document_type": "rulebook",
+                    "language": "it",
+                    "version_label": "v2",
+                    "edition": "Retail IT",
+                    "published_at": "2026-01-01",
+                    "official": True,
+                    "source_kind": "official_publisher",
+                    "source_provider": "publisher-test",
+                    "source_url": "https://publisher.example/rules.pdf",
+                },
+                "page": {
+                    "id": "page-2",
+                    "number": 2,
+                    "text_sha256": "c" * 64,
+                },
+                "evidence": [
+                    {
+                        "evidence_id": "E1",
+                        "chunk_id": "chunk-1",
+                        "chunk_index": 0,
+                        "score": 0.94,
+                    }
+                ],
+            }
+        ],
+        "retrieval": {
+            "provider": "fake-embed",
+            "model": "embed-v1",
+            "model_digest": "e" * 64,
+            "coverage": {
+                "current_document_count": 1,
+                "embedded_document_count": 1,
+                "missing_document_ids": [],
+            },
+            "selected_tier": {
+                "rank": 0,
+                "name": "official-requested-language",
+            },
+            "retrieved_evidence_count": 1,
+            "generation_evidence_count": 1,
+        },
+        "conflicts": {
+            "has_conflict": True,
+            "selected_cohort": {
+                "version_label": "v2",
+                "edition": "Retail IT",
+            },
+            "excluded_cohorts": [
+                {
+                    "version_label": "v1",
+                    "edition": "Retail IT",
+                    "candidate_count": 2,
+                }
+            ],
+        },
+        "generation": {
+            "provider": "ollama",
+            "model": "rules-test:latest",
+            "model_digest": "f" * 64,
+        },
+    }
+
+
+def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_server):
+    context, page = new_page(browser)
+    answer_requests = []
+
+    def answer_route(route):
+        answer_requests.append(route.request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_rag_answer_response()),
+        )
+    try:
+        import_csv(page, live_server)
+        page.route(
+            "**/api/games/900001/documents",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(_rag_document_response()),
+            ),
+        )
+        page.route(
+            "**/api/documents/doc-rag/embeddings",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "document_id": "doc-rag",
+                        "current": {"id": "embedding-run"},
+                        "latest_run": {"id": "embedding-run"},
+                    }
+                ),
+            ),
+        )
+        page.route("**/api/games/900001/answer", answer_route)
+
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
+        expect(page.locator("#ragIndexStatus")).to_contain_text("1/1 documenti indicizzati")
+
+        page.locator("#ragQuestion").fill("Come si prepara?")
+        page.locator(".rag-filters summary").click()
+        page.locator("#ragVersion").fill("v2")
+        page.locator("#ragEdition").fill("Retail IT")
+        page.locator("#ragAsk").click()
+        expect(page.locator(".rag-answer")).to_be_visible()
+        expect(page.locator(".rag-claim")).to_contain_text("<img src=x")
+        assert page.locator(".rag-claim img").count() == 0
+        assert page.evaluate("window.__bgc_rag_xss") is None
+        expect(page.locator(".rag-conflict")).to_contain_text("Conflitto di versione")
+        expect(page.locator(".rag-conflict")).to_contain_text("Versione v1")
+        expect(page.locator(".rag-citation-card")).to_contain_text("Pagina 2")
+        expect(page.locator(".rag-citation-card")).to_contain_text("Versione v2")
+        expect(page.locator(".rag-citation-card")).to_contain_text("Retail IT")
+        expect(page.locator(".rag-citation-card")).to_contain_text("Ufficiale")
+
+        pdf_href = page.locator(".rag-citation-card a").get_attribute("href")
+        assert pdf_href == "/api/documents/doc-rag/file#page=2"
+        assert answer_requests == [
+            {
+                "query": "Come si prepara?",
+                "language": "it",
+                "document_type": None,
+                "version_label": "v2",
+                "edition": "Retail IT",
+            }
+        ]
+
+        page.locator(".rag-citation-ref").click()
+        expect(page.locator(".rag-citation-card")).to_have_class(
+            re.compile(r".*rag-highlight.*")
+        )
+        page.locator(".rag-document-jump").click()
+        expect(page.locator(".game-document-card")).to_have_class(
+            re.compile(r".*rag-highlight.*")
+        )
+    finally:
+        context.close()
+
+
+def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
+    context, page = new_page(browser)
+    build_calls = []
+
+    def embeddings_route(route):
+        if route.request.method == "GET":
+            route.fulfill(
+                status=409,
+                content_type="application/json",
+                body=json.dumps({"detail": "Document has no current P7B chunk index"}),
+            )
+            return
+        build_calls.append("embeddings")
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "created": True,
+                    "embedding_index": {"id": "embedding-run", "chunk_count": 3},
+                }
+            ),
+        )
+
+    def ingest_route(route):
+        build_calls.append("ingest")
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"created": True, "ingest": {"id": "parse-run"}}),
+        )
+    def chunks_route(route):
+        build_calls.append("chunks")
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"created": True, "index": {"id": "chunk-run"}}),
+        )
+
+    not_found = {
+        "status": "not_found",
+        "reason": "index_incomplete",
+        "game": {"id": 1, "bgg_id": 900001, "title": "Synthetic Alpha"},
+        "query": "Quando finisce il turno?",
+        "answer": None,
+        "claims": [],
+        "citations": [],
+        "retrieval": {
+            "provider": "fake",
+            "model": "embed",
+            "model_digest": "e" * 64,
+            "coverage": {
+                "current_document_count": 1,
+                "embedded_document_count": 0,
+                "missing_document_ids": ["doc-rag"],
+            },
+            "selected_tier": None,
+        },
+        "conflicts": {
+            "has_conflict": False,
+            "selected_cohort": None,
+            "excluded_cohorts": [],
+        },
+        "generation": None,
+    }
+    try:
+        import_csv(page, live_server)
+        page.route(
+            "**/api/games/900001/documents",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(_rag_document_response()),
+            ),
+        )
+        page.route("**/api/documents/doc-rag/embeddings", embeddings_route)
+        page.route("**/api/documents/doc-rag/embeddings/build", embeddings_route)
+        page.route("**/api/documents/doc-rag/ingest", ingest_route)
+        page.route("**/api/documents/doc-rag/chunks/build", chunks_route)
+        page.route(
+            "**/api/games/900001/answer",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(not_found),
+            ),
+        )
+
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        expect(page.locator("#ragIndexStatus")).to_contain_text("Indice incompleto")
+
+        page.locator("#ragQuestion").fill("Quando finisce il turno?")
+        page.locator("#ragAsk").click()
+        expect(page.locator(".rag-state-not-found")).to_contain_text(
+            "Nessuna risposta affidabile"
+        )
+        expect(page.locator(".rag-state-not-found")).to_contain_text(
+            "indice dei documenti non è completo"
+        )
+        page.locator(".rag-state-not-found .rag-prepare-index").click()
+        expect(page.locator("#ragIndexStatus")).to_contain_text("Indice pronto")
+        assert build_calls == ["ingest", "chunks", "embeddings"]
+    finally:
+        context.close()
+
+
+def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
+        expect(page.locator("#ragIndexStatus")).to_contain_text(
+            "Nessun documento archiviato"
+        )
+        page.locator(".rag-filters summary").click()
+        expect(page.locator("#ragLanguage")).to_be_visible()
+        expect(page.locator("#ragVersion")).to_be_visible()
+
+        box = page.locator("#ragPanel").bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= 391
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
     finally:
         context.close()
