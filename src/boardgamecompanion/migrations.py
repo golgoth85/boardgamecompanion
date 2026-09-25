@@ -822,6 +822,184 @@ def _document_chunks(connection: sqlite3.Connection) -> None:
     )
 
 
+def _chunk_embeddings(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chunk_runs_embedding_parent
+        ON document_chunk_runs(id, document_id, board_game_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_embedding_parent
+        ON document_chunks(id, document_id, chunk_run_id, board_game_id)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_embedding_runs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            board_game_id INTEGER NOT NULL,
+            chunk_run_id TEXT NOT NULL,
+            provider TEXT NOT NULL CHECK(length(provider) > 0),
+            model TEXT NOT NULL CHECK(length(model) > 0),
+            model_digest TEXT NOT NULL
+                CHECK(
+                    length(model_digest) = 64
+                    AND model_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+            embedding_config_json TEXT NOT NULL,
+            embedding_config_sha256 TEXT NOT NULL
+                CHECK(
+                    length(embedding_config_sha256) = 64
+                    AND embedding_config_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            input_set_sha256 TEXT NOT NULL
+                CHECK(
+                    length(input_set_sha256) = 64
+                    AND input_set_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            dimensions INTEGER CHECK(dimensions IS NULL OR dimensions > 0),
+            vector_format TEXT NOT NULL CHECK(vector_format = 'f32le'),
+            chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
+            created_at TEXT NOT NULL,
+            CHECK(chunk_count = 0 OR dimensions IS NOT NULL),
+            UNIQUE(
+                id, document_id, chunk_run_id, board_game_id,
+                provider, model, model_digest,
+                embedding_config_sha256, dimensions
+            ),
+            FOREIGN KEY(document_id, board_game_id)
+                REFERENCES game_documents(id, board_game_id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(chunk_run_id, document_id, board_game_id)
+                REFERENCES document_chunk_runs(id, document_id, board_game_id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_embedding_runs_document
+        ON document_embedding_runs(document_id, created_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            id TEXT PRIMARY KEY,
+            embedding_run_id TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,
+            board_game_id INTEGER NOT NULL,
+            document_id TEXT NOT NULL,
+            chunk_run_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            model_digest TEXT NOT NULL
+                CHECK(
+                    length(model_digest) = 64
+                    AND model_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+            embedding_config_sha256 TEXT NOT NULL
+                CHECK(
+                    length(embedding_config_sha256) = 64
+                    AND embedding_config_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+            vector_format TEXT NOT NULL CHECK(vector_format = 'f32le'),
+            vector_blob BLOB NOT NULL,
+            vector_sha256 TEXT NOT NULL
+                CHECK(
+                    length(vector_sha256) = 64
+                    AND vector_sha256 NOT GLOB '*[^0-9a-f]*'
+                ),
+            created_at TEXT NOT NULL,
+            CHECK(length(vector_blob) = dimensions * 4),
+            UNIQUE(
+                chunk_id, provider, model, model_digest,
+                embedding_config_sha256
+            ),
+            FOREIGN KEY(
+                embedding_run_id, document_id, chunk_run_id, board_game_id,
+                provider, model, model_digest,
+                embedding_config_sha256, dimensions
+            ) REFERENCES document_embedding_runs(
+                id, document_id, chunk_run_id, board_game_id,
+                provider, model, model_digest,
+                embedding_config_sha256, dimensions
+            ) ON DELETE CASCADE,
+            FOREIGN KEY(chunk_id, document_id, chunk_run_id, board_game_id)
+                REFERENCES document_chunks(
+                    id, document_id, chunk_run_id, board_game_id
+                )
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_game_model
+        ON chunk_embeddings(
+            board_game_id, provider, model, model_digest
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_document
+        ON chunk_embeddings(document_id, provider, model)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_document_chunks_invalidate_embeddings
+        AFTER UPDATE OF
+            chunk_key, board_game_id, document_id,
+            document_sha256, document_metadata_sha256, parse_run_id,
+            page_id, page_number, page_text_sha256,
+            chunk_index, start_char, end_char,
+            text, text_sha256, char_count,
+            language, document_type, version_label, edition,
+            source_kind, source_provider, source_url, is_official,
+            document_provenance_json,
+            chunker_name, chunker_version, chunker_config_json
+        ON document_chunks
+        WHEN
+            OLD.chunk_key IS NOT NEW.chunk_key
+            OR OLD.board_game_id IS NOT NEW.board_game_id
+            OR OLD.document_id IS NOT NEW.document_id
+            OR OLD.document_sha256 IS NOT NEW.document_sha256
+            OR OLD.document_metadata_sha256 IS NOT NEW.document_metadata_sha256
+            OR OLD.parse_run_id IS NOT NEW.parse_run_id
+            OR OLD.page_id IS NOT NEW.page_id
+            OR OLD.page_number IS NOT NEW.page_number
+            OR OLD.page_text_sha256 IS NOT NEW.page_text_sha256
+            OR OLD.chunk_index IS NOT NEW.chunk_index
+            OR OLD.start_char IS NOT NEW.start_char
+            OR OLD.end_char IS NOT NEW.end_char
+            OR OLD.text IS NOT NEW.text
+            OR OLD.text_sha256 IS NOT NEW.text_sha256
+            OR OLD.char_count IS NOT NEW.char_count
+            OR OLD.language IS NOT NEW.language
+            OR OLD.document_type IS NOT NEW.document_type
+            OR OLD.version_label IS NOT NEW.version_label
+            OR OLD.edition IS NOT NEW.edition
+            OR OLD.source_kind IS NOT NEW.source_kind
+            OR OLD.source_provider IS NOT NEW.source_provider
+            OR OLD.source_url IS NOT NEW.source_url
+            OR OLD.is_official IS NOT NEW.is_official
+            OR OLD.document_provenance_json IS NOT NEW.document_provenance_json
+            OR OLD.chunker_name IS NOT NEW.chunker_name
+            OR OLD.chunker_version IS NOT NEW.chunker_version
+            OR OLD.chunker_config_json IS NOT NEW.chunker_config_json
+        BEGIN
+            DELETE FROM chunk_embeddings WHERE chunk_id = NEW.id;
+        END
+        """
+    )
+
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -831,6 +1009,7 @@ MIGRATIONS = (
     Migration(5, "rulebook-scheduled-updates", _rulebook_updates),
     Migration(6, "pdf-page-ingestion", _pdf_page_ingestion),
     Migration(7, "document-chunks", _document_chunks),
+    Migration(8, "chunk-embeddings", _chunk_embeddings),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

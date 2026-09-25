@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     floppy_timeout_seconds: float = 45.0
     floppy_verify_tls: bool = True
     ollama_url: str | None = None
+    ollama_embedding_model: str | None = None
+    ollama_embedding_dimensions: int | None = Field(default=None, ge=64, le=4096)
+    ollama_embedding_batch_size: int = Field(default=16, ge=1, le=128)
+    ollama_embedding_timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
+    ollama_verify_tls: bool = True
+    retrieval_max_candidates: int = Field(default=10000, ge=100, le=100000)
     qdrant_url: str | None = None
 
     @property
