@@ -563,6 +563,8 @@ def get_document_ingest(document_id: str) -> dict[str, object]:
         return get_pdf_ingest_service().status(document_id)
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/documents/{document_id}/pages", tags=["documents"])
@@ -579,6 +581,8 @@ def list_document_pages(
         )
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/documents/{document_id}/pages/{page_number}", tags=["documents"])
@@ -589,6 +593,8 @@ def get_document_page(document_id: str, page_number: int) -> dict[str, object]:
         page = get_pdf_ingest_service().get_page(document_id, page_number)
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if page is None:
         raise HTTPException(status_code=404, detail="Document page not found")
     return page
