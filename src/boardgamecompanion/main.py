@@ -10,6 +10,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from boardgamecompanion import __version__
+from boardgamecompanion.answer_generation import (
+    AnswerGenerationService,
+    AnswerProtocolError,
+    AnswerProviderError,
+    AnswerSourceNotReady,
+    OllamaGenerationProvider,
+)
 from boardgamecompanion.app_settings import (
     resolve_floppy_settings,
     save_floppy_settings,
@@ -191,6 +198,16 @@ class RetrievalPayload(BaseModel):
     version_label: str | None = Field(default=None, max_length=500)
     edition: str | None = Field(default=None, max_length=500)
     top_k: int = Field(default=8, ge=1, le=50)
+    min_score: float = Field(default=-1.0, ge=-1.0, le=1.0)
+
+
+class AnswerPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    language: str | None = Field(default=None, max_length=32)
+    document_type: str | None = Field(default=None, max_length=64)
+    version_label: str | None = Field(default=None, max_length=500)
+    edition: str | None = Field(default=None, max_length=500)
+    top_k: int = Field(default=8, ge=1, le=20)
     min_score: float = Field(default=-1.0, ge=-1.0, le=1.0)
 
 
@@ -723,6 +740,65 @@ def retrieve_game_evidence(
         EmbeddingCorruptRecord,
     ) as exc:
         raise embedding_http_error(exc) from exc
+
+
+def get_answer_generation_service() -> AnswerGenerationService:
+    if (
+        not settings.ollama_url
+        or not settings.ollama_embedding_model
+        or not settings.ollama_generation_model
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "RAG providers are not configured; set BGC_OLLAMA_URL, "
+                "BGC_OLLAMA_EMBEDDING_MODEL and BGC_OLLAMA_GENERATION_MODEL"
+            ),
+        )
+    provider = OllamaGenerationProvider(
+        base_url=settings.ollama_url,
+        model=settings.ollama_generation_model,
+        timeout_seconds=settings.ollama_generation_timeout_seconds,
+        verify_tls=settings.ollama_verify_tls,
+        temperature=settings.ollama_generation_temperature,
+    )
+    return AnswerGenerationService(
+        get_embedding_retrieval_service(),
+        provider,
+        max_evidence_chars=settings.answer_max_evidence_chars,
+        max_claims=settings.answer_max_claims,
+    )
+
+
+@app.post("/api/games/{bgg_id}/answer", tags=["retrieval"])
+def answer_game_question(
+    bgg_id: int,
+    payload: AnswerPayload,
+) -> dict[str, object]:
+    try:
+        return get_answer_generation_service().answer(
+            bgg_id=bgg_id,
+            query=payload.query,
+            requested_language=payload.language,
+            document_type=payload.document_type,
+            version_label=payload.version_label,
+            edition=payload.edition,
+            top_k=payload.top_k,
+            min_score=payload.min_score,
+        )
+    except (
+        EmbeddingGameNotFound,
+        EmbeddingConflict,
+        EmbeddingProviderError,
+        EmbeddingCorruptRecord,
+    ) as exc:
+        raise embedding_http_error(exc) from exc
+    except AnswerSourceNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AnswerProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AnswerProtocolError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/rulebook-reviews", tags=["rulebooks"])
