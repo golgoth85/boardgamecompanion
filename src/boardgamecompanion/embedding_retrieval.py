@@ -922,6 +922,7 @@ class EmbeddingRetrievalService:
                     "page_text_sha256": row["page_text_sha256"],
                     "text_sha256": row["text_sha256"],
                     "vector_sha256": row["vector_sha256"],
+                    "dimensions": row["dimensions"],
                     "published_at": row["published_at"],
                 }
                 for row in rows
@@ -996,6 +997,7 @@ class EmbeddingRetrievalService:
     ) -> list[sqlite3.Row]:
         clauses = [
             "c.board_game_id = ?",
+            "(c.is_official = 1 OR c.source_kind IN ('manual_upload', 'community'))",
             "c.chunker_name = ?",
             "c.chunker_version = ?",
             "c.chunker_config_json = ?",
