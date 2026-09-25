@@ -333,6 +333,28 @@ def _row_to_chunk(
     if int(row["char_count"]) != len(text):
         raise ChunkIndexCorruptSource("Chunk character count is invalid")
 
+    page_text = row["current_page_text"]
+    if not isinstance(page_text, str):
+        raise ChunkIndexCorruptSource("Chunk page is missing or invalid")
+    if (
+        row["current_page_document_id"] != row["document_id"]
+        or row["current_page_parse_run_id"] != row["parse_run_id"]
+        or row["current_page_number"] != row["page_number"]
+        or row["current_page_text_sha256"] != row["page_text_sha256"]
+    ):
+        raise ChunkIndexCorruptSource("Chunk page provenance is invalid")
+    if (
+        hashlib.sha256(page_text.encode("utf-8")).hexdigest()
+        != row["page_text_sha256"]
+    ):
+        raise ChunkIndexCorruptSource("Chunk page text digest is invalid")
+    start_char = int(row["start_char"])
+    end_char = int(row["end_char"])
+    if end_char > len(page_text) or page_text[start_char:end_char] != text:
+        raise ChunkIndexCorruptSource(
+            "Chunk text does not match its declared page span"
+        )
+
     identity = {
         "document_id": row["document_id"],
         "document_sha256": row["document_sha256"],
@@ -443,10 +465,16 @@ class ChunkIndexService:
                 r.document_metadata_sha256 AS run_metadata_sha256,
                 r.chunker_name AS run_chunker_name,
                 r.chunker_version AS run_chunker_version,
-                r.chunker_config_json AS run_chunker_config_json
+                r.chunker_config_json AS run_chunker_config_json,
+                p.document_id AS current_page_document_id,
+                p.parse_run_id AS current_page_parse_run_id,
+                p.page_number AS current_page_number,
+                p.text AS current_page_text,
+                p.text_sha256 AS current_page_text_sha256
             FROM document_chunks c
             JOIN board_games g ON g.id = c.board_game_id
             JOIN document_chunk_runs r ON r.id = c.chunk_run_id
+            LEFT JOIN document_pages p ON p.id = c.page_id
             WHERE {where}
         """
 
