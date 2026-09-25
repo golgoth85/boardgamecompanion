@@ -123,41 +123,78 @@ For repositories with a NAS bridge, the bridge should compare both the technical
 
 ## Shared NAS control bridge — canonical runtime access path
 
-This repository participates in a shared, GitHub-mediated NAS control architecture. This section is operational policy and does not override repository-specific review, deployment, or production safety gates.
+This repository participates in the shared GitHub-mediated NAS control architecture. This policy does not override repository-specific review, deployment, or production safety gates.
 
 ### Canonical path
 
-ChatGPT / connected GitHub tooling → `golgoth85/upscaler` branch `ops/nas-control` → GitHub Actions workflow `NAS Control` → self-hosted runner label `nas-control` → authenticated local agent `nas-control-agent` → Unraid Docker / approved filesystem reads / LAN services.
+ChatGPT / connected GitHub tooling → `golgoth85/upscaler` branch `ops/nas-control` → GitHub Actions workflow `NAS Control` → self-hosted runner `github-runner-nas-control-v2` / label `nas-control` → authenticated local agent `nas-control-agent` → typed operations against Unraid / approved project workspaces / LAN services.
 
 ### Security boundary
 
-- The active runner container is `github-runner-nas-control-v2`.
-- The runner is intentionally least-privilege: it has runner state plus the local control token mounted read-only; it does **not** receive `/var/run/docker.sock` and does **not** mount `/mnt/user/appdata` directly.
-- The local `nas-control-agent` is the only component with Docker-socket access. It exposes a typed allowlist of operations, not an arbitrary root shell.
-- `/mnt/user/appdata` is mounted read-only inside the agent.
-- Potentially sensitive files such as env/secret/token/credential/key material are blocked from generic file-read operations.
-- State-changing Docker actions require an explicit confirmation field.
-- Never weaken this boundary merely to make an operation more convenient. Add a typed, narrowly scoped capability instead.
+- The active runner is intentionally least-privilege. It mounts only its runner state RW plus the NAS-control token RO.
+- The runner does **not** receive `/var/run/docker.sock` and does **not** mount `/mnt/user/appdata` directly.
+- `nas-control-agent` is the only NAS-control component with Docker-socket access.
+- The agent exposes a typed allowlist; there is no generic host-root shell.
+- The base `/mnt/user/appdata` mount inside the agent is read-only.
+- Only the explicitly listed project workspaces below are overlaid read-write.
+- Generic file reads block likely secret/token/credential/key material.
+- Docker state-changing operations require explicit confirmation.
+- Never weaken this boundary for convenience; add a narrow typed capability instead.
 
-### Current verified reachability
+### Selective RW project workspaces — active and verified
+
+The following development workspaces are mounted RW in `nas-control-agent` and were verified with `mounted=true` and `writable=true` through the least-privilege runner:
+
+- `upscaler` → `/mnt/user/appdata/github-runner-worktrees/upscaler`
+- `boardgamecompanion` → `/mnt/user/appdata/github-runner-worktrees/boardgamecompanion`
+- `bookarr` → `/mnt/user/appdata/bookarr/repo`
+- `cwsync.koplugin` → `/mnt/user/appdata/github-runner-worktrees/cwsync.koplugin`
+- `komix.koplugin` → `/mnt/user/appdata/github-runner-worktrees/komix.koplugin`
+- `home-assistant` → `/mnt/user/appdata/github-runner-worktrees/home-assistant`
+
+These paths are development/source workspaces. Do not substitute runtime/config directories for them.
+
+### Controlled workspace write operations
+
+The agent supports typed workspace operations including:
+
+- `workspace_list`
+- `workspace_status`
+- `workspace_read_file`
+- `workspace_create_branch`
+- `workspace_write_file` with SHA-256 precondition
+- `workspace_apply_patch`
+- `workspace_diff`
+
+Write protection rules:
+
+- direct writes on `main`, `master`, `deploy/current`, and `production` are forbidden;
+- task branches created by the bridge must use `chatgpt/...`;
+- direct `.git` manipulation is forbidden;
+- secret/token/credential/key paths remain forbidden;
+- a technical RW capability never overrides an explicit read-only review mandate;
+- source changes still follow the repository's commit/review/merge/deploy gates.
+
+### Other active typed capabilities
+
+The hardened control agent can perform controlled Docker list/inspect/logs/start/stop/restart operations, appdata listing/read operations, Git status inspection, TCP/HTTP probes, Home Assistant discovery/probe, LM Studio model probing, and NAS filesystem capacity reporting.
+
+`disk_space` is active and reports the Unraid `/mnt/user` user-share filesystem. At the activation verification on 2026-09-25 it reported 70.93 TiB total, 58.70 TiB used, 12.23 TiB free, 83% used. Treat these numbers as a point-in-time observation; query `disk_space` again for current capacity.
+
+### Current verified LAN endpoints
 
 - Unraid main web surface: `192.168.1.55:1234`.
-- Home Assistant: `192.168.1.147:8123`; network reachability is verified. `/api/` returns 401 without authentication, so authenticated HA actions require a separately provisioned token/secret boundary.
-- LM Studio: `192.168.1.249:1234`; when the PC is on and LM Studio server is running, `/v1/models` returns an OpenAI-compatible HTTP 200 response.
-- Tailscale is installed on the Flint 2 router. Tailscale on Unraid is disabled. Normal NAS/LAN access therefore goes directly over the LAN; do not assume a local `tailscaled` socket exists on Unraid.
-
-### Available / intended typed operations
-
-The hardened agent supports or is designed to support typed operations including capabilities, Docker list/inspect/logs/start/stop/restart, controlled appdata listing/file reads, Git status, TCP/HTTP probes, Home Assistant discovery/probe, and LM Studio model probing.
-
-A read-only `disk_space` capability for the Unraid `/mnt/user` filesystem is versioned in `ops/nas-control`. If the running agent predates that version, refresh the live agent before relying on `disk_space`.
+- Home Assistant: `192.168.1.147:8123`; reachability verified. Authenticated HA actions still require the dedicated token/secret boundary.
+- LM Studio: `192.168.1.249:1234`; when the PC and LM Studio server are running, `/v1/models` returns HTTP 200 with OpenAI-compatible model data.
+- Tailscale is installed on the Flint 2 router; Tailscale on Unraid is disabled. Do not expect a local Unraid `tailscaled` socket.
 
 ### Execution preference
 
-1. Use GitHub-native repository operations for source-level work.
-2. Use the shared NAS control bridge for runtime inspection or narrowly scoped runtime actions when the current mandate authorizes them.
-3. Do not ask the operator to use Termius for routine actions that the bridge can perform.
-4. Remote Desktop Commander is not the preferred path and may be unavailable due to quota.
-5. CloudCLI still requires explicit prior user authorization.
-6. A runtime bridge capability never overrides an independent-review read-only mandate, a no-deploy/no-merge instruction, or another explicit phase gate.
+1. Use GitHub-native repository operations for source-level work when sufficient.
+2. Use the NAS control bridge for runtime inspection and authorized workspace edits.
+3. Prefer the selective RW workspace operations over direct runtime/config mutation.
+4. Do not ask the operator to use Termius for routine operations supported by the bridge.
+5. Remote Desktop Commander is not the preferred route and may be unavailable due to quota.
+6. CloudCLI still requires explicit prior user authorization.
+7. Never let bridge capabilities bypass an independent-review read-only mandate, no-deploy/no-merge instruction, or explicit phase gate.
 
