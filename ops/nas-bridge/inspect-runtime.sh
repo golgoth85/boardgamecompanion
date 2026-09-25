@@ -3,6 +3,13 @@ set -euo pipefail
 
 name='boardgamecompanion'
 
+echo "host_ssh_probe:"
+if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@192.168.1.55 'printf "ssh_ok=yes\\n"; docker ps --format "{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}" | grep -Ei "boardgamecompanion|ollama" || true' 2>&1; then
+  :
+else
+  echo "ssh_ok=no"
+fi
+
 echo "lan_service_probe:"
 for target in \
   "boardgamecompanion|http://192.168.1.55:8787/health" \
