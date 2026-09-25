@@ -69,6 +69,57 @@ PY
   rm -f "$tmp_body"
 done
 
+echo "lmstudio_openai_compat_probe:"
+openai_embed_tmp="$(mktemp)"
+openai_embed_status="$(curl -sS --max-time 60 -o "$openai_embed_tmp" -w '%{http_code}' -H 'Content-Type: application/json' \
+  -d '{"model":"text-embedding-qwen3-embedding-0.6b","input":["BoardGameCompanion OpenAI compatibility probe"]}' \
+  http://192.168.1.249:1234/v1/embeddings 2>&1 || true)"
+echo "lmstudio_v1_embeddings_status=$openai_embed_status"
+python3 - "$openai_embed_tmp" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    p=json.loads(raw)
+except Exception:
+    print("lmstudio_v1_embeddings_json=no")
+    print("lmstudio_v1_embeddings_body="+raw[:800].replace("\n","\\n"))
+else:
+    data=p.get("data")
+    print("lmstudio_v1_embeddings_json=yes")
+    print("lmstudio_v1_embeddings_count="+str(len(data) if isinstance(data,list) else -1))
+    if isinstance(data,list) and data and isinstance(data[0],dict) and isinstance(data[0].get("embedding"),list):
+        print("lmstudio_v1_embeddings_dimensions="+str(len(data[0]["embedding"])))
+    print("lmstudio_v1_embeddings_keys="+",".join(sorted(p.keys())))
+PY
+rm -f "$openai_embed_tmp"
+
+openai_chat_tmp="$(mktemp)"
+openai_chat_status="$(curl -sS --max-time 120 -o "$openai_chat_tmp" -w '%{http_code}' -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-14b","messages":[{"role":"system","content":"Return only JSON."},{"role":"user","content":"Return {\"status\":\"not_found\",\"claims\":[]}"}],"temperature":0,"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object","properties":{"status":{"type":"string","enum":["not_found"]},"claims":{"type":"array","maxItems":0}},"required":["status","claims"],"additionalProperties":false}}}}' \
+  http://192.168.1.249:1234/v1/chat/completions 2>&1 || true)"
+echo "lmstudio_v1_chat_status=$openai_chat_status"
+python3 - "$openai_chat_tmp" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    p=json.loads(raw)
+except Exception:
+    print("lmstudio_v1_chat_json=no")
+    print("lmstudio_v1_chat_body="+raw[:1000].replace("\n","\\n"))
+else:
+    choices=p.get("choices")
+    print("lmstudio_v1_chat_json=yes")
+    print("lmstudio_v1_chat_choices="+str(len(choices) if isinstance(choices,list) else -1))
+    if isinstance(choices,list) and choices:
+        m=choices[0].get("message") if isinstance(choices[0],dict) else None
+        content=m.get("content") if isinstance(m,dict) else None
+        print("lmstudio_v1_chat_has_content="+("yes" if isinstance(content,str) else "no"))
+        if isinstance(content,str):
+            print("lmstudio_v1_chat_content="+content[:500].replace("\n","\\n"))
+    print("lmstudio_v1_chat_keys="+",".join(sorted(p.keys())))
+PY
+rm -f "$openai_chat_tmp"
+
 echo "lmstudio_ollama_compat_probe:"
 embed_body='{"model":"text-embedding-qwen3-embedding-0.6b","input":["BoardGameCompanion compatibility probe"],"truncate":false}'
 embed_tmp="$(mktemp)"
