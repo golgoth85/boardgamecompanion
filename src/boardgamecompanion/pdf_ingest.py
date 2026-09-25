@@ -168,78 +168,57 @@ class PdfIngestService:
         expected_size: int,
     ) -> Iterator[Path]:
         store = DocumentStore(self.database, self.manuals_dir)
-        try:
-            path = store.resolve_path(document_id)
-        except DocumentError as exc:
-            raise PdfIngestIntegrityError(str(exc)) from exc
-
-        flags = os.O_RDONLY
-        if hasattr(os, "O_CLOEXEC"):
-            flags |= os.O_CLOEXEC
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-
-        try:
-            fd = os.open(path, flags)
-        except OSError as exc:
-            raise PdfIngestIntegrityError(
-                "Archived PDF cannot be opened safely"
-            ) from exc
         snapshot_path: Path | None = None
         try:
-            root = self.manuals_dir.resolve()
-            proc_fd = Path(f"/proc/self/fd/{fd}")
-            if proc_fd.exists():
-                opened_path = proc_fd.resolve()
-                if root != opened_path and root not in opened_path.parents:
-                    raise PdfIngestIntegrityError(
-                        "Opened document escapes manuals directory"
-                    )
-
-            stat = os.fstat(fd)
-            if stat.st_size != expected_size:
-                raise PdfIngestIntegrityError(
-                    "Archived PDF size no longer matches database provenance"
-                )
-
-            self.manuals_dir.mkdir(parents=True, exist_ok=True)
-            digest = hashlib.sha256()
-            copied = 0
-            with os.fdopen(os.dup(fd), "rb", closefd=True) as source:
-                with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    prefix=".p7a-",
-                    suffix=".pdf",
-                    dir=self.manuals_dir,
-                    delete=False,
-                ) as snapshot:
-                    snapshot_path = Path(snapshot.name)
-                    while True:
-                        chunk = source.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        copied += len(chunk)
-                        digest.update(chunk)
-                        snapshot.write(chunk)
-                    snapshot.flush()
-                    os.fsync(snapshot.fileno())
-
-            if copied != expected_size or digest.hexdigest() != expected_sha256:
-                raise PdfIngestIntegrityError(
-                    "Archived PDF hash no longer matches database provenance"
-                )
+            snapshot_path = store.create_verified_snapshot(
+                document_id,
+                expected_sha256=expected_sha256,
+                expected_size_bytes=expected_size,
+                prefix=".p7a-",
+            )
             yield snapshot_path
-        except OSError as exc:
-            raise PdfIngestIntegrityError(
-                "Archived PDF could not be snapshotted safely"
-            ) from exc
+        except DocumentError as exc:
+            raise PdfIngestIntegrityError(str(exc)) from exc
         finally:
-            os.close(fd)
             if snapshot_path is not None:
-                try:
-                    snapshot_path.unlink()
-                except FileNotFoundError:
-                    pass
+                snapshot_path.unlink(missing_ok=True)
+
+    def _current_success_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        document_id: str,
+        document_sha256: str,
+    ) -> dict[str, Any] | None:
+        row = connection.execute(
+            """
+            SELECT r.*
+            FROM document_parse_runs r
+            WHERE r.document_id = ?
+              AND r.document_sha256 = ?
+              AND r.parser_name = ?
+              AND r.parser_version = ?
+              AND r.status = 'succeeded'
+              AND (
+                r.page_count = 0
+                OR (
+                    SELECT COUNT(*)
+                    FROM document_pages p
+                    WHERE p.document_id = r.document_id
+                      AND p.parse_run_id = r.id
+                ) = r.page_count
+              )
+            ORDER BY r.finished_at DESC, r.id DESC
+            LIMIT 1
+            """,
+            (
+                document_id,
+                document_sha256,
+                PARSER_NAME,
+                self.parser_version,
+            ),
+        ).fetchone()
+        return _row_to_run(row)
 
     def _current_success(
         self,
@@ -248,38 +227,11 @@ class PdfIngestService:
         document_sha256: str,
     ) -> dict[str, Any] | None:
         with self.database.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT *
-                FROM document_parse_runs
-                WHERE document_id = ?
-                  AND document_sha256 = ?
-                  AND parser_name = ?
-                  AND parser_version = ?
-                  AND status = 'succeeded'
-                ORDER BY finished_at DESC, id DESC
-                LIMIT 1
-                """,
-                (
-                    document_id,
-                    document_sha256,
-                    PARSER_NAME,
-                    self.parser_version,
-                ),
-            ).fetchone()
-            if row is None:
-                return None
-            page_count = connection.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM document_pages
-                WHERE document_id = ? AND parse_run_id = ?
-                """,
-                (document_id, row["id"]),
-            ).fetchone()["count"]
-            if page_count != row["page_count"]:
-                return None
-        return _row_to_run(row)
+            return self._current_success_in_connection(
+                connection,
+                document_id=document_id,
+                document_sha256=document_sha256,
+            )
 
     def _record_failure(
         self,
@@ -517,7 +469,6 @@ class PdfIngestService:
             raise
 
         run_id = str(uuid4())
-        finished_at = _now()
         diagnostics = payload.get("diagnostics")
         if not isinstance(diagnostics, dict):
             diagnostics = {}
@@ -539,6 +490,33 @@ class PdfIngestService:
                     "Document provenance changed during ingestion"
                 )
 
+            commit_snapshot: Path | None = None
+            try:
+                commit_snapshot = DocumentStore(
+                    self.database,
+                    self.manuals_dir,
+                ).create_verified_snapshot(
+                    document_id,
+                    expected_sha256=document_sha256,
+                    expected_size_bytes=int(document["size_bytes"]),
+                    prefix=".p7a-commit-",
+                )
+            except DocumentError as exc:
+                raise PdfIngestIntegrityError(str(exc)) from exc
+            finally:
+                if commit_snapshot is not None:
+                    commit_snapshot.unlink(missing_ok=True)
+
+            if not force:
+                current = self._current_success_in_connection(
+                    connection,
+                    document_id=document_id,
+                    document_sha256=document_sha256,
+                )
+                if current is not None:
+                    return {"created": False, "ingest": current}
+
+            finished_at = _now()
             connection.execute(
                 """
                 INSERT INTO document_parse_runs (
