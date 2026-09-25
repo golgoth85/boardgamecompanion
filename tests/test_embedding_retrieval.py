@@ -732,3 +732,167 @@ def test_direct_chunk_mutation_invalidates_embeddings(
         min_score=-1.0,
     )
     assert document["id"] in result["coverage"]["missing_document_ids"]
+
+
+class MutatingQueryProvider(FakeProvider):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.on_query = None
+
+    def embed(
+        self,
+        texts: list[str],
+        descriptor: EmbeddingDescriptor,
+    ) -> list[list[float]]:
+        vectors = super().embed(texts, descriptor)
+        if self.on_query is not None and texts == ["trigger retrieval race"]:
+            self.on_query()
+        return vectors
+
+
+def test_coverage_includes_eligible_document_without_current_chunks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = FakeProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        ready = _prepare_document(
+            client,
+            text=_long_page("Setup ready"),
+            source_url="https://publisher.example/ready.pdf",
+        )
+        missing = _upload(
+            client,
+            _pdf_with_pages(_long_page("Setup new")),
+            source_url="https://publisher.example/new.pdf",
+        )
+
+    service = _service(provider)
+    service.build(ready["id"])
+    result = service.retrieve(
+        bgg_id=900001,
+        query="setup",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=5,
+        min_score=-1.0,
+    )
+
+    assert result["coverage"]["current_document_count"] == 2
+    assert result["coverage"]["embedded_document_count"] == 1
+    assert result["coverage"]["missing_document_ids"] == [missing["id"]]
+
+
+def test_invalidated_official_document_stays_missing_during_lower_trust_fallback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = FakeProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        official = _prepare_document(
+            client,
+            text=_long_page("Setup official"),
+            language="it",
+            source_url="https://publisher.example/official.pdf",
+        )
+        community = _upload(
+            client,
+            _pdf_with_pages(_long_page("Setup community")),
+            language="it",
+            version_label="community-v1",
+            edition="Community",
+            official=False,
+            source_url="https://community.example/rules.pdf",
+        )
+        with sqlite3.connect(settings.database_path) as connection:
+            connection.execute(
+                """
+                UPDATE game_documents
+                SET source_kind = 'community',
+                    source_provider = 'community-test'
+                WHERE id = ?
+                """,
+                (community["id"],),
+            )
+            connection.commit()
+        assert client.post(
+            f"/api/documents/{community['id']}/ingest"
+        ).status_code == 200
+        assert client.post(
+            f"/api/documents/{community['id']}/chunks/build"
+        ).status_code == 200
+
+    service = _service(provider)
+    service.build(official["id"])
+    service.build(community["id"])
+
+    with TestClient(app) as client:
+        forced = client.post(
+            f"/api/documents/{official['id']}/ingest?force=true"
+        )
+        assert forced.status_code == 200
+
+    result = service.retrieve(
+        bgg_id=900001,
+        query="setup",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=5,
+        min_score=-1.0,
+    )
+    assert official["id"] in result["coverage"]["missing_document_ids"]
+    assert result["coverage"]["embedded_document_count"] == 1
+    assert result["results"]
+    assert {
+        item["document"]["id"] for item in result["results"]
+    } == {community["id"]}
+    assert result["policy"]["selected_tier"]["name"] == (
+        "community-requested-language"
+    )
+
+
+def test_retrieval_aborts_if_source_changes_during_query_embedding(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = MutatingQueryProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _prepare_document(
+            client,
+            text=_long_page("Setup race"),
+            source_url="https://publisher.example/race.pdf",
+        )
+
+    service = _service(provider)
+    service.build(document["id"])
+
+    def invalidate_source() -> None:
+        with sqlite3.connect(settings.database_path) as connection:
+            connection.execute(
+                "UPDATE game_documents SET language = 'en' WHERE id = ?",
+                (document["id"],),
+            )
+            connection.commit()
+
+    provider.on_query = invalidate_source
+    with pytest.raises(EmbeddingConflict, match="Retrieval source changed"):
+        service.retrieve(
+            bgg_id=900001,
+            query="trigger retrieval race",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=5,
+            min_score=-1.0,
+        )
