@@ -8,6 +8,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+from starlette.background import BackgroundTask
 
 from boardgamecompanion import __version__
 from boardgamecompanion.answer_generation import (
@@ -496,12 +497,19 @@ def get_document_file(document_id: str) -> FileResponse:
     database.initialize()
     store = DocumentStore(database, settings.manuals_dir)
     try:
-        path = store.resolve_path(document_id)
+        snapshot = store.create_verified_snapshot(
+            document_id,
+            prefix=".serve-",
+        )
     except DocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DocumentError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return FileResponse(path, media_type="application/pdf")
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return FileResponse(
+        snapshot,
+        media_type="application/pdf",
+        background=BackgroundTask(snapshot.unlink, missing_ok=True),
+    )
 
 
 
