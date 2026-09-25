@@ -69,6 +69,66 @@ PY
   rm -f "$tmp_body"
 done
 
+echo "lmstudio_ollama_compat_probe:"
+embed_body='{"model":"text-embedding-qwen3-embedding-0.6b","input":["BoardGameCompanion compatibility probe"],"truncate":false}'
+embed_tmp="$(mktemp)"
+embed_status="$(curl -sS --max-time 60 -o "$embed_tmp" -w '%{http_code}' -H 'Content-Type: application/json' -d "$embed_body" http://192.168.1.249:1234/api/embed 2>&1 || true)"
+echo "lmstudio_api_embed_status=$embed_status"
+python3 - "$embed_tmp" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    p=json.loads(raw)
+except Exception:
+    print("lmstudio_api_embed_json=no")
+    print("lmstudio_api_embed_body_prefix="+raw[:500].replace("\n","\\n"))
+else:
+    vectors=p.get("embeddings")
+    print("lmstudio_api_embed_json=yes")
+    print("lmstudio_api_embed_count="+str(len(vectors) if isinstance(vectors,list) else -1))
+    if isinstance(vectors,list) and vectors and isinstance(vectors[0],list):
+        print("lmstudio_api_embed_dimensions="+str(len(vectors[0])))
+PY
+rm -f "$embed_tmp"
+
+chat_body='{"model":"qwen3-14b","messages":[{"role":"system","content":"Return only valid JSON matching the schema."},{"role":"user","content":"Return a not_found result."}],"format":{"type":"object","properties":{"status":{"type":"string","enum":["not_found"]},"claims":{"type":"array","maxItems":0}},"required":["status","claims"],"additionalProperties":false},"stream":false,"options":{"temperature":0}}'
+chat_tmp="$(mktemp)"
+chat_status="$(curl -sS --max-time 120 -o "$chat_tmp" -w '%{http_code}' -H 'Content-Type: application/json' -d "$chat_body" http://192.168.1.249:1234/api/chat 2>&1 || true)"
+echo "lmstudio_api_chat_status=$chat_status"
+python3 - "$chat_tmp" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    p=json.loads(raw)
+except Exception:
+    print("lmstudio_api_chat_json=no")
+    print("lmstudio_api_chat_body_prefix="+raw[:500].replace("\n","\\n"))
+else:
+    print("lmstudio_api_chat_json=yes")
+    m=p.get("message")
+    print("lmstudio_api_chat_has_message="+("yes" if isinstance(m,dict) and isinstance(m.get("content"),str) else "no"))
+    if isinstance(m,dict) and isinstance(m.get("content"),str):
+        print("lmstudio_api_chat_content="+m["content"][:300].replace("\n","\\n"))
+PY
+rm -f "$chat_tmp"
+
+tags_tmp="$(mktemp)"
+tags_status="$(curl -sS --max-time 10 -o "$tags_tmp" -w '%{http_code}' http://192.168.1.249:1234/api/tags 2>&1 || true)"
+echo "lmstudio_api_tags_after_status=$tags_status"
+python3 - "$tags_tmp" <<'PY' || true
+import json, pathlib, sys
+raw=pathlib.Path(sys.argv[1]).read_text(errors="replace")
+try:
+    p=json.loads(raw)
+except Exception:
+    print("lmstudio_api_tags_after_json=no")
+    print("lmstudio_api_tags_after_body="+raw[:500].replace("\n","\\n"))
+else:
+    print("lmstudio_api_tags_after_json=yes")
+    print("lmstudio_api_tags_after_body="+json.dumps(p,sort_keys=True,separators=(",",":"))[:1000])
+PY
+rm -f "$tags_tmp"
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "runtime_docker=UNAVAILABLE"
   exit 0
