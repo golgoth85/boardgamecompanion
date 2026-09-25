@@ -650,6 +650,8 @@ def list_document_chunks(
         )
     except ChunkIndexDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChunkIndexSourceNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChunkIndexCorruptSource as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -658,6 +660,8 @@ def list_document_chunks(
 def get_document_chunk(chunk_id: str) -> dict[str, object]:
     try:
         chunk = get_chunk_index_service().get_chunk(chunk_id)
+    except ChunkIndexSourceNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChunkIndexCorruptSource as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if chunk is None:
