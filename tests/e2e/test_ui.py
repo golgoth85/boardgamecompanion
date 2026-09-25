@@ -29,11 +29,19 @@ def browser():
             "/root/bin/chromium",
             "/mnt/user/appdata/claude-code-home/bin/chromium",
         ]
+        def usable_browser_executable(candidate: str | None) -> bool:
+            if not candidate:
+                return False
+            try:
+                return Path(candidate).is_file() and os.access(candidate, os.X_OK)
+            except OSError:
+                return False
+
         executable = next(
             (
                 candidate
                 for candidate in candidates
-                if candidate and Path(candidate).exists()
+                if usable_browser_executable(candidate)
             ),
             None,
         )
