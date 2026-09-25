@@ -20,6 +20,8 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
 - Persistent rulebook review queue with auditable unattended/manual approval state.
 - Scheduled guarded re-checks for approved rulebook candidates with version-by-hash archival and run audit.
+- Page-preserving PDF ingestion, deterministic chunking, embeddings/retrieval and page-cited rulebook Q&A.
+- Ollama and LM Studio (OpenAI-compatible API) RAG providers with model-currentness fingerprinting.
 
 Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
 
@@ -27,7 +29,7 @@ Because the BGG CSV export does not contain cover-image URLs, the current UI use
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
-Post-P6B roadmap: finish barcode hardening, add BGG metadata enrichment through the existing Floppy provider boundary, then deliver P7 as independently reviewable PDF-ingest, indexing/retrieval, answer/citation and UI phases. See `docs/ROADMAP.md`.
+Phase 7 is complete: PDF ingestion, chunk indexing, embeddings/retrieval, grounded answer generation, server-owned page citations and the in-game query UI are available. See `docs/ROADMAP.md`.
 
 ## Container
 
@@ -54,6 +56,39 @@ docker run -d \
 Web UI: `http://<server>:8787/`
 
 OpenAPI/Swagger UI: `http://<server>:8787/docs`
+
+## RAG provider
+
+BoardGameCompanion supports either Ollama or LM Studio for rulebook embeddings and answer generation. The provider is selected at container startup.
+
+### LM Studio
+
+LM Studio is accessed through its native model metadata API plus its OpenAI-compatible embeddings and chat-completions endpoints. Native model metadata is hashed into the persisted model fingerprint so changing model/quantization metadata invalidates stale embedding/currentness state.
+
+Example:
+
+```text
+BGC_RAG_PROVIDER=lmstudio
+BGC_LMSTUDIO_URL=http://<lm-studio-host>:1234
+BGC_LMSTUDIO_EMBEDDING_MODEL=text-embedding-qwen3-embedding-0.6b
+BGC_LMSTUDIO_GENERATION_MODEL=qwen3-14b
+BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
+```
+
+`BGC_LMSTUDIO_API_KEY` is optional when LM Studio authentication is disabled. `BGC_LMSTUDIO_EMBEDDING_DIMENSIONS`, batch size, timeouts and TLS verification can also be overridden through the corresponding `BGC_LMSTUDIO_*` settings.
+
+### Ollama
+
+Ollama remains the default provider for backwards compatibility:
+
+```text
+BGC_RAG_PROVIDER=ollama
+BGC_OLLAMA_URL=http://<ollama-host>:11434
+BGC_OLLAMA_EMBEDDING_MODEL=<embedding-model>
+BGC_OLLAMA_GENERATION_MODEL=<chat-model>
+```
+
+After uploading a rulebook, use **Prepara indice** in the game detail page to run PDF parsing, chunking and embeddings. Then use **Chiedi al regolamento** for page-cited answers.
 
 ## BGG CSV import
 
