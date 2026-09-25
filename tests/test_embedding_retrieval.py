@@ -994,3 +994,43 @@ def test_atomic_snapshot_blocks_new_eligible_document_between_coverage_and_candi
     )
     assert coverage_after["current_document_count"] == 2
     assert "atomic-race-doc" in coverage_after["missing_document_ids"]
+
+
+def test_archive_invalid_document_is_missing_and_never_a_retrieval_candidate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = FakeProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _prepare_document(
+            client,
+            text=_long_page("Setup archived evidence"),
+            source_url="https://publisher.example/archive-current.pdf",
+        )
+
+    service = _service(provider)
+    service.build(document["id"])
+    calls_after_build = len(provider.calls)
+
+    stored = next((settings.manuals_dir / "900001").glob("*.pdf"))
+    stored.write_bytes(_pdf_with_pages(_long_page("Replacement archive")))
+
+    result = service.retrieve(
+        bgg_id=900001,
+        query="setup procedure",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=5,
+        min_score=-1.0,
+    )
+
+    assert result["coverage"]["current_document_count"] == 1
+    assert result["coverage"]["embedded_document_count"] == 0
+    assert result["coverage"]["missing_document_ids"] == [document["id"]]
+    assert result["results"] == []
+    assert result["policy"]["selected_tier"] is None
+    assert len(provider.calls) == calls_after_build
