@@ -525,6 +525,7 @@ class AnswerGenerationService:
             "model_digest": descriptor.model_digest,
         }
         if status == "not_found":
+            self.retrieval.validate_retrieval_current(retrieval_payload)
             return self._not_found(
                 retrieval_payload,
                 reason="retrieved_evidence_insufficient",
