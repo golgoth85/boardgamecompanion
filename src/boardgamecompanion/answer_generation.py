@@ -606,6 +606,7 @@ class AnswerGenerationService:
             for claim in rendered_claims
         )
         policy = retrieval_payload.get("policy") or {}
+        self.retrieval.validate_retrieval_current(retrieval_payload)
         return {
             "status": "answer",
             "reason": None,
