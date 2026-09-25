@@ -1476,7 +1476,7 @@ function documentCard(document) {
   const official = source.official === true;
 
   return `
-    <article class="game-document-card">
+    <article class="game-document-card" data-document-id="${escapeHtml(document.id)}">
       <div class="game-document-head">
         <div>
           <div class="document-badges">
@@ -1529,6 +1529,346 @@ function physicalCopyCard(copy, index) {
       <span class="copy-source">${escapeHtml(sourceLabel)}</span>
     </article>
   `;
+}
+
+
+function ragReasonText(reason) {
+  const reasons = {
+    index_incomplete: "L'indice dei documenti non è completo. Prepara o aggiorna l'indice prima di usare la risposta generata.",
+    no_retrieved_evidence: "Non sono state trovate evidenze sufficientemente pertinenti nei documenti indicizzati.",
+    retrieved_evidence_insufficient: "Le evidenze recuperate non supportano una risposta affidabile.",
+  };
+  return reasons[reason] || "Non è disponibile una risposta affidabile per questa domanda.";
+}
+
+function ragCohortText(cohort) {
+  if (!cohort) return "non specificata";
+  const parts = [
+    cohort.version_label ? `Versione ${cohort.version_label}` : null,
+    cohort.edition ? `Edizione ${cohort.edition}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "versione/edizione non specificata";
+}
+
+function ragTrustLabel(document) {
+  if (document?.official === true) return "Ufficiale";
+  if (document?.source_kind === "community") return "Community";
+  if (document?.source_kind === "manual_upload") return "Caricato dall'utente";
+  return "Non ufficiale";
+}
+
+function ragConflictMarkup(conflicts) {
+  if (!conflicts?.has_conflict) return "";
+  const selected = ragCohortText(conflicts.selected_cohort);
+  const excluded = (conflicts.excluded_cohorts || [])
+    .map((cohort) => `<li>${escapeHtml(ragCohortText(cohort))}</li>`)
+    .join("");
+  return `
+    <aside class="rag-conflict" role="note">
+      <strong>Conflitto di versione rilevato</strong>
+      <p>La risposta usa solo ${escapeHtml(selected)}. Le altre coorti non sono state mescolate.</p>
+      ${excluded ? `<ul>${excluded}</ul>` : ""}
+    </aside>
+  `;
+}
+
+function ragCitationCard(citation) {
+  const document = citation.document || {};
+  const page = citation.page || {};
+  const pageNumber = Number.isFinite(Number(page.number))
+    ? Math.max(1, Math.trunc(Number(page.number)))
+    : 1;
+  const documentId = String(document.id || "");
+  const language = String(document.language || "und").toUpperCase();
+  const version = ragCohortText(document);
+  const trust = ragTrustLabel(document);
+  const source = document.source_provider || document.source_kind || "Fonte registrata";
+  const evidenceCount = Array.isArray(citation.evidence) ? citation.evidence.length : 0;
+
+  return `
+    <article class="rag-citation-card" id="ragCitation${Number(citation.index) || 0}">
+      <div class="rag-citation-head">
+        <div>
+          <p class="eyebrow">Citazione ${Number(citation.index) || "?"}</p>
+          <strong>Pagina ${pageNumber}</strong>
+        </div>
+        <div class="document-badges">
+          <span class="badge">${escapeHtml(language)}</span>
+          <span class="badge ${document.official === true ? "document-official" : "document-unofficial"}">${escapeHtml(trust)}</span>
+        </div>
+      </div>
+      <p class="rag-citation-meta">${escapeHtml(version)} · ${escapeHtml(document.document_type || "documento")} · ${escapeHtml(source)}</p>
+      <p class="rag-citation-meta">${evidenceCount} ${evidenceCount === 1 ? "passaggio" : "passaggi"} usati per questa pagina</p>
+      <div class="rag-citation-actions">
+        <a class="button button-ghost"
+           href="/api/documents/${encodeURIComponent(documentId)}/file#page=${pageNumber}"
+           target="_blank" rel="noopener noreferrer">Apri PDF · pag. ${pageNumber}</a>
+        <button class="button button-ghost rag-document-jump" type="button"
+                data-document-id="${escapeHtml(documentId)}">Vai al documento</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderRagResult(payload) {
+  if (!payload || !["answer", "not_found"].includes(payload.status)) {
+    return `
+      <section class="rag-state rag-state-error">
+        <p class="eyebrow">Risposta non valida</p>
+        <h3>Il backend ha restituito un formato inatteso</h3>
+        <p>La risposta non viene mostrata perché non rispetta il contratto P7D.</p>
+      </section>
+    `;
+  }
+  const conflict = ragConflictMarkup(payload.conflicts);
+  if (payload.status === "not_found") {
+    const prepare = payload.reason === "index_incomplete"
+      ? '<button class="button button-primary rag-prepare-index" type="button">Prepara indice</button>'
+      : "";
+    return `
+      <section class="rag-state rag-state-not-found">
+        <p class="eyebrow">Risposta non disponibile</p>
+        <h3>Nessuna risposta affidabile</h3>
+        <p>${escapeHtml(ragReasonText(payload.reason))}</p>
+        ${prepare}
+      </section>
+      ${conflict}
+    `;
+  }
+
+  const claims = (payload.claims || []).map((claim) => {
+    const refs = (claim.citations || []).map((index) => `
+      <button class="rag-citation-ref" type="button"
+              data-citation-index="${Number(index)}"
+              aria-label="Vai alla citazione ${Number(index)}">[${Number(index)}]</button>
+    `).join("");
+    const supports = (claim.supports || []).map((support) => `
+      <blockquote class="rag-support">
+        <span>Supporto [${Number(support.citation)}]</span>
+        “${escapeHtml(support.quote)}”
+      </blockquote>
+    `).join("");
+    return `
+      <article class="rag-claim">
+        <p>${escapeHtml(claim.text)} <span class="rag-claim-refs">${refs}</span></p>
+        ${supports}
+      </article>
+    `;
+  }).join("");
+
+  const citations = (payload.citations || []).map(ragCitationCard).join("");
+  const tier = payload.retrieval?.selected_tier?.name
+    ? `Fonte selezionata: ${payload.retrieval.selected_tier.name}`
+    : "Fonte selezionata dal retrieval";
+  const generation = payload.generation || {};
+
+  return `
+    <section class="rag-answer">
+      <div class="rag-answer-head">
+        <div>
+          <p class="eyebrow">Risposta dai documenti</p>
+          <h3>Risposta</h3>
+        </div>
+        <span class="rag-answer-model">${escapeHtml(generation.model || "modello locale")}</span>
+      </div>
+      <div class="rag-claims">${claims}</div>
+      <p class="rag-retrieval-meta">${escapeHtml(tier)}</p>
+    </section>
+    ${conflict}
+    <section class="rag-citations" aria-label="Citazioni">
+      <div class="rag-citations-head">
+        <h3>Citazioni e pagine</h3>
+        <span>${(payload.citations || []).length}</span>
+      </div>
+      <div class="rag-citation-list">${citations}</div>
+    </section>
+  `;
+}
+
+function bindRagResultActions(bggId, documentItems) {
+  document.querySelectorAll(".rag-citation-ref").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = document.querySelector(`#ragCitation${button.dataset.citationIndex}`);
+      if (!target) return;
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      target.scrollIntoView({behavior, block: "center"});
+      target.classList.add("rag-highlight");
+      window.setTimeout(() => target.classList.remove("rag-highlight"), 1400);
+    });
+  });
+
+  document.querySelectorAll(".rag-document-jump").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = Array.from(document.querySelectorAll(".game-document-card"))
+        .find((card) => card.dataset.documentId === button.dataset.documentId);
+      if (!target) {
+        showToast("Documento non presente nell'elenco corrente.", true);
+        return;
+      }
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      target.scrollIntoView({behavior, block: "center"});
+      target.classList.add("rag-highlight");
+      window.setTimeout(() => target.classList.remove("rag-highlight"), 1400);
+    });
+  });
+
+  document.querySelectorAll(".rag-prepare-index").forEach((button) => {
+    button.addEventListener("click", () => {
+      void prepareRagIndex(bggId, documentItems);
+    });
+  });
+}
+
+async function refreshRagIndexStatus(bggId, documentItems) {
+  const status = document.querySelector("#ragIndexStatus");
+  if (!status || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+  if (!documentItems.length) {
+    status.className = "rag-index-status warning";
+    status.textContent = "Nessun documento archiviato: aggiungi almeno un PDF prima di preparare il RAG.";
+    return;
+  }
+
+  status.className = "rag-index-status";
+  status.textContent = "Controllo stato dell'indice…";
+  let ready = 0;
+  let configurationError = null;
+  let statusError = null;
+
+  await Promise.all(documentItems.map(async (item) => {
+    try {
+      const embedding = await api(`/api/documents/${encodeURIComponent(item.id)}/embeddings`);
+      if (embedding.current) ready += 1;
+    } catch (error) {
+      if (error.status === 503 && !configurationError) {
+        configurationError = error.message;
+      } else if (error.status !== 409 && !statusError) {
+        statusError = error.message;
+      }
+    }
+  }));
+
+  if (!document.querySelector("#ragIndexStatus") || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+  if (configurationError) {
+    status.className = "rag-index-status error";
+    status.innerHTML = `<strong>RAG non configurato.</strong> ${escapeHtml(configurationError)}`;
+    return;
+  }
+  if (statusError) {
+    status.className = "rag-index-status error";
+    status.innerHTML = `<strong>Stato indice non disponibile.</strong> ${escapeHtml(statusError)}`;
+    return;
+  }
+  if (ready === documentItems.length) {
+    status.className = "rag-index-status success";
+    status.innerHTML = `<strong>Indice pronto.</strong> ${ready}/${documentItems.length} documenti indicizzati.`;
+    return;
+  }
+  status.className = "rag-index-status warning";
+  status.innerHTML = `<strong>Indice incompleto.</strong> ${ready}/${documentItems.length} documenti pronti.`;
+}
+
+async function prepareRagIndex(bggId, documentItems) {
+  const panel = document.querySelector("#ragPanel");
+  const status = document.querySelector("#ragIndexStatus");
+  if (!panel || !status || panel.dataset.indexBusy === "true") return;
+  if (!documentItems.length) {
+    showToast("Aggiungi prima un PDF al gioco.", true);
+    return;
+  }
+
+  panel.dataset.indexBusy = "true";
+  document.querySelectorAll(".rag-prepare-index").forEach((button) => {
+    button.disabled = true;
+  });
+  try {
+    for (let index = 0; index < documentItems.length; index += 1) {
+      const item = documentItems[index];
+      const encodedId = encodeURIComponent(item.id);
+      status.className = "rag-index-status";
+      status.textContent = `Documento ${index + 1}/${documentItems.length}: estrazione testo…`;
+      await api(`/api/documents/${encodedId}/ingest`, {method: "POST"});
+      status.textContent = `Documento ${index + 1}/${documentItems.length}: creazione chunk…`;
+      await api(`/api/documents/${encodedId}/chunks/build`, {method: "POST"});
+      status.textContent = `Documento ${index + 1}/${documentItems.length}: embedding…`;
+      await api(`/api/documents/${encodedId}/embeddings/build`, {method: "POST"});
+    }
+    status.className = "rag-index-status success";
+    status.innerHTML = `<strong>Indice pronto.</strong> ${documentItems.length}/${documentItems.length} documenti indicizzati.`;
+    showToast("Indice dei documenti aggiornato.");
+  } catch (error) {
+    status.className = "rag-index-status error";
+    status.innerHTML = `<strong>Preparazione indice non riuscita.</strong> ${escapeHtml(error.message)}`;
+    showToast(error.message, true);
+  } finally {
+    panel.dataset.indexBusy = "false";
+    document.querySelectorAll(".rag-prepare-index").forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
+async function submitRagQuestion(bggId, documentItems) {
+  const form = document.querySelector("#ragQueryForm");
+  const result = document.querySelector("#ragResult");
+  const submit = document.querySelector("#ragAsk");
+  if (!form || !result || !submit || submit.disabled) return;
+
+  const query = document.querySelector("#ragQuestion")?.value.trim() || "";
+  if (!query) return;
+  const payload = {
+    query,
+    language: document.querySelector("#ragLanguage")?.value || null,
+    document_type: document.querySelector("#ragDocumentType")?.value || null,
+    version_label: document.querySelector("#ragVersion")?.value.trim() || null,
+    edition: document.querySelector("#ragEdition")?.value.trim() || null,
+  };
+
+  submit.disabled = true;
+  submit.textContent = "Cerco…";
+  result.innerHTML = '<div class="rag-loading" role="status">Cerco nei documenti e verifico le fonti…</div>';
+  try {
+    const answer = await api(`/api/games/${encodeURIComponent(bggId)}/answer`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    if (window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+    result.innerHTML = renderRagResult(answer);
+    bindRagResultActions(bggId, documentItems);
+  } catch (error) {
+    if (window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+    result.innerHTML = `
+      <section class="rag-state rag-state-error">
+        <p class="eyebrow">Errore RAG</p>
+        <h3>La domanda non può essere elaborata</h3>
+        <p>${escapeHtml(error.message)}</p>
+      </section>
+    `;
+  } finally {
+    if (document.querySelector("#ragAsk")) {
+      submit.disabled = false;
+      submit.textContent = "Chiedi";
+    }
+  }
+}
+
+function setupRagPanel(bggId, documentItems) {
+  const form = document.querySelector("#ragQueryForm");
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitRagQuestion(bggId, documentItems);
+  });
+  document.querySelectorAll(".rag-prepare-index").forEach((button) => {
+    button.disabled = !documentItems.length;
+    button.addEventListener("click", () => {
+      void prepareRagIndex(bggId, documentItems);
+    });
+  });
+  void refreshRagIndexStatus(bggId, documentItems);
 }
 
 async function renderDetail(bggId) {
@@ -1605,6 +1945,70 @@ async function renderDetail(bggId) {
               : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
           </div>
 
+          <section class="rag-panel" id="ragPanel" data-index-busy="false">
+            <div class="section-heading-row rag-heading">
+              <div>
+                <p class="eyebrow">RAG locale</p>
+                <h2>Chiedi al regolamento</h2>
+                <p class="section-subtitle">Risposte solo dai documenti del gioco, con pagina, versione e fonte verificabili.</p>
+              </div>
+              <button class="button button-ghost rag-prepare-index" type="button"
+                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
+            </div>
+            <div class="rag-index-status" id="ragIndexStatus" role="status">
+              Controllo stato dell'indice…
+            </div>
+            <form class="rag-query-form" id="ragQueryForm">
+              <label class="rag-question-field" for="ragQuestion">
+                <span>Domanda sulle regole</span>
+                <textarea id="ragQuestion" rows="3" maxlength="4000" required
+                  placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
+              </label>
+              <details class="rag-filters">
+                <summary>Filtri documento</summary>
+                <div class="rag-filter-grid">
+                  <label>
+                    <span>Lingua</span>
+                    <select id="ragLanguage">
+                      <option value="it" selected>Italiano</option>
+                      <option value="en">English</option>
+                      <option value="">Qualsiasi</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Tipo</span>
+                    <select id="ragDocumentType">
+                      <option value="">Tutti i documenti</option>
+                      <option value="rulebook">Regolamento</option>
+                      <option value="reference">Riferimento</option>
+                      <option value="faq">FAQ</option>
+                      <option value="errata">Errata</option>
+                      <option value="campaign_book">Campaign book</option>
+                      <option value="scenario_book">Scenario book</option>
+                      <option value="player_aid">Player aid</option>
+                      <option value="other">Altro</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Versione</span>
+                    <input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1">
+                  </label>
+                  <label>
+                    <span>Edizione</span>
+                    <input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT">
+                  </label>
+                </div>
+              </details>
+              <div class="rag-query-actions">
+                <p class="muted">Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.</p>
+                <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+              </div>
+            </form>
+            <div class="rag-result" id="ragResult" aria-live="polite">
+              <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
+            </div>
+          </section>
+
           <h2 class="section-title">Dati BGG</h2>
           <div class="fact-grid">
             ${fact("Best players", bgg.best_players || "—")}
@@ -1634,6 +2038,7 @@ async function renderDetail(bggId) {
     document.querySelector("#addDocument")?.addEventListener("click", () => {
       openDocumentDialog(game.bgg_id, game.title);
     });
+    setupRagPanel(game.bgg_id, documentItems);
 
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
