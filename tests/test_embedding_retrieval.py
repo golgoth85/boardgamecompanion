@@ -22,12 +22,95 @@ from boardgamecompanion.embedding_retrieval import (
 )
 from boardgamecompanion.main import app
 from boardgamecompanion.settings import settings
-from tests.test_chunk_index import (
-    _configure,
-    _import_game,
-    _long_page,
-    _pdf_with_pages,
-)
+FIXTURE = Path(__file__).parent / "fixtures" / "bgg_collection_sample.csv"
+
+
+def _pdf_with_pages(*texts: str) -> bytes:
+    objects: list[bytes] = []
+    page_ids: list[int] = []
+    content_ids: list[int] = []
+    next_id = 3
+    for _ in texts:
+        page_ids.append(next_id)
+        content_ids.append(next_id + 1)
+        next_id += 2
+    font_id = next_id
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(texts)} >>".encode()
+    )
+    for page_id, content_id, text in zip(page_ids, content_ids, texts, strict=True):
+        assert len(objects) + 1 == page_id
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                f"/Resources << /Font << /F1 {font_id} 0 R >> >> "
+                f"/Contents {content_id} 0 R >>"
+            ).encode()
+        )
+        escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        stream = f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode()
+        objects.append(
+            f"<< /Length {len(stream)} >>\nstream\n".encode()
+            + stream
+            + b"\nendstream"
+        )
+    assert len(objects) + 1 == font_id
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj_id, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out.extend(f"{obj_id} 0 obj\n".encode())
+        out.extend(body)
+        out.extend(b"\nendobj\n")
+    xref = len(out)
+    out.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    out.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        out.extend(f"{offset:010d} 00000 n \n".encode())
+    out.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref}\n%%EOF\n"
+        ).encode()
+    )
+    return bytes(out)
+
+
+def _configure(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "import_dir", tmp_path / "import")
+    monkeypatch.setattr(settings, "manuals_dir", tmp_path / "manuals")
+    monkeypatch.setattr(settings, "max_document_bytes", 1024 * 1024)
+    monkeypatch.setattr(settings, "pdf_parse_timeout_seconds", 20.0)
+    monkeypatch.setattr(settings, "pdf_parse_max_pages", 20)
+    monkeypatch.setattr(settings, "pdf_parse_max_chars_per_page", 100_000)
+    monkeypatch.setattr(settings, "pdf_parse_max_total_chars", 500_000)
+    monkeypatch.setattr(settings, "pdf_parse_memory_mb", 512)
+    monkeypatch.setattr(settings, "chunk_max_chars", 200)
+    monkeypatch.setattr(settings, "chunk_overlap_chars", 20)
+    monkeypatch.setattr(settings, "chunk_min_break_chars", 100)
+
+
+def _import_game(client: TestClient) -> None:
+    with FIXTURE.open("rb") as handle:
+        response = client.post(
+            "/api/imports/bgg-csv",
+            files={"file": ("collection.csv", handle, "text/csv")},
+        )
+    assert response.status_code == 200
+
+
+def _long_page(label: str) -> str:
+    sentences = [
+        f"{label} rule {number}: perform this exact action before the next step."
+        for number in range(1, 10)
+    ]
+    return " ".join(sentences)
 
 
 class FakeProvider:
