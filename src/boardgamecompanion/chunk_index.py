@@ -10,7 +10,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from boardgamecompanion.database import Database
-from boardgamecompanion.documents import DocumentStore
+from boardgamecompanion.documents import DocumentError, DocumentStore
 
 CHUNKER_NAME = "page-char-window"
 CHUNKER_VERSION = "1"
@@ -484,8 +484,39 @@ class ChunkIndexService:
             raise ChunkIndexDocumentNotFound(f"Document {document_id} not found")
         return document
 
+    def _verify_archive(
+        self,
+        document_id: str,
+        *,
+        expected_sha256: str | None = None,
+        expected_size_bytes: int | None = None,
+    ) -> None:
+        snapshot: Path | None = None
+        try:
+            snapshot = DocumentStore(
+                self.database,
+                self.manuals_dir,
+            ).create_verified_snapshot(
+                document_id,
+                expected_sha256=expected_sha256,
+                expected_size_bytes=expected_size_bytes,
+                prefix=".p7b-verify-",
+            )
+        except DocumentError as exc:
+            raise ChunkIndexSourceNotReady(
+                "Archived PDF no longer matches document provenance"
+            ) from exc
+        finally:
+            if snapshot is not None:
+                snapshot.unlink(missing_ok=True)
+
     def _load_source(self, document_id: str) -> dict[str, Any]:
-        self._document_exists(document_id)
+        document_summary = self._document_exists(document_id)
+        self._verify_archive(
+            document_id,
+            expected_sha256=str(document_summary["sha256"]),
+            expected_size_bytes=int(document_summary["size_bytes"]),
+        )
         with self.database.connect() as connection:
             document_row = connection.execute(
                 """
@@ -938,6 +969,11 @@ class ChunkIndexService:
         offset: int = 0,
     ) -> dict[str, Any]:
         document = self._document_exists(document_id)
+        self._verify_archive(
+            document_id,
+            expected_sha256=str(document["sha256"]),
+            expected_size_bytes=int(document["size_bytes"]),
+        )
         params: list[Any] = [document_id]
         where = "c.document_id = ?"
         if page_number is not None:
@@ -975,4 +1011,10 @@ class ChunkIndexService:
                 self._chunk_select("c.id = ?"),
                 (chunk_id,),
             ).fetchone()
-        return _row_to_chunk(row, include_text=True) if row else None
+        if row is None:
+            return None
+        self._verify_archive(
+            str(row["document_id"]),
+            expected_sha256=str(row["document_sha256"]),
+        )
+        return _row_to_chunk(row, include_text=True)
