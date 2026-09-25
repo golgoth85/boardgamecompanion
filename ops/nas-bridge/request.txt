@@ -1,4 +1,4 @@
-operation=inspect_runtime
+operation=inspect
 branch=
 expected_head=
-nonce=2026-09-25T14:lmstudio-native-meta-1
+nonce=2026-09-25T16:02Z-source-integrity-audit
