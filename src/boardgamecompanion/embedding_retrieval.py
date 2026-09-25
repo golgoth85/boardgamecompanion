@@ -389,6 +389,8 @@ class EmbeddingRetrievalService:
                     limit=500,
                     offset=offset,
                 )
+            except ChunkIndexSourceNotReady as exc:
+                raise EmbeddingSourceNotReady(str(exc)) from exc
             except ChunkIndexCorruptSource as exc:
                 raise EmbeddingCorruptRecord(str(exc)) from exc
             summaries = page["items"]
@@ -397,6 +399,8 @@ class EmbeddingRetrievalService:
             for summary in summaries:
                 try:
                     detail = self.chunk_service.get_chunk(summary["id"])
+                except ChunkIndexSourceNotReady as exc:
+                    raise EmbeddingSourceNotReady(str(exc)) from exc
                 except ChunkIndexCorruptSource as exc:
                     raise EmbeddingCorruptRecord(str(exc)) from exc
                 if detail is None:
