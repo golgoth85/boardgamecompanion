@@ -67,6 +67,22 @@ jobs:
           echo "nas_current_branch=$current_branch"
           echo "nas_current_head=$current_head"
           echo "nas_origin=$remote"
+          if [[ -z "$current_branch" ]]; then
+            github_branch_head=""
+            sync_state="DETACHED"
+          else
+            remote_line="$(git ls-remote origin "refs/heads/$current_branch" 2>/dev/null || true)"
+            github_branch_head="$(printf '%s\n' "$remote_line" | awk '{print $1}')"
+            if [[ -z "$remote_line" ]]; then
+              sync_state="LOCAL_ONLY_OR_REMOTE_UNAVAILABLE"
+            elif [[ "$github_branch_head" == "$current_head" ]]; then
+              sync_state="IN_SYNC"
+            else
+              sync_state="DRIFT"
+            fi
+          fi
+          echo "github_branch_head=${github_branch_head:-NONE}"
+          echo "nas_github_sync=$sync_state"
           if [[ -n "$porcelain" ]]; then
             echo "nas_worktree=DIRTY"
           else
