@@ -14,6 +14,7 @@ from boardgamecompanion.answer_generation import (
     GenerationDescriptor,
     OllamaGenerationProvider,
 )
+from boardgamecompanion.embedding_retrieval import EmbeddingConflict
 from boardgamecompanion.main import app
 from boardgamecompanion.settings import settings
 
@@ -22,10 +23,20 @@ class FakeRetrieval:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
         self.calls: list[dict] = []
+        self.validate_calls = 0
 
     def retrieve(self, **kwargs):
         self.calls.append(kwargs)
         return copy.deepcopy(self.payload)
+
+    def validate_retrieval_current(self, payload):
+        self.validate_calls += 1
+
+
+class StaleAfterGenerationRetrieval(FakeRetrieval):
+    def validate_retrieval_current(self, payload):
+        super().validate_retrieval_current(payload)
+        raise EmbeddingConflict("Retrieval evidence changed after it was selected")
 class FakeProvider:
     def __init__(self, output: dict) -> None:
         self.output = output
@@ -532,3 +543,45 @@ def test_answer_api_is_explicitly_unconfigured_without_models(
         )
     assert response.status_code == 503
     assert "BGC_OLLAMA_GENERATION_MODEL" in response.json()["detail"]
+
+
+def test_answer_aborts_if_evidence_becomes_stale_during_generation() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Supported claim.",
+                    "supports": [
+                        {"evidence_id": "E1", "quote": "Evidence"}
+                    ],
+                }
+            ],
+        }
+    )
+    retrieval = StaleAfterGenerationRetrieval(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="Evidence")]
+        )
+    )
+    service = AnswerGenerationService(
+        retrieval,
+        provider,
+        max_evidence_chars=30000,
+        max_claims=12,
+    )
+
+    with pytest.raises(EmbeddingConflict, match="Retrieval evidence changed"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type=None,
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+    assert provider.generate_calls == 1
+    assert retrieval.validate_calls == 1
