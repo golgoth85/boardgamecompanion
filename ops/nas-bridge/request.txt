@@ -1,4 +1,4 @@
 operation=inspect_runtime
 branch=
 expected_head=
-nonce=2026-09-25T14:ollama-probe-2
+nonce=2026-09-25T14:lmstudio-probe-1
