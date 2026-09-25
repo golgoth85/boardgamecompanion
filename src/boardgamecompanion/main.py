@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -491,17 +491,38 @@ def get_document(document_id: str) -> dict[str, object]:
 
 
 @app.get("/api/documents/{document_id}/file", tags=["documents"])
-def get_document_file(document_id: str) -> FileResponse:
+def get_document_file(document_id: str) -> StreamingResponse:
     database = get_database()
     database.initialize()
     store = DocumentStore(database, settings.manuals_dir)
     try:
-        path = store.resolve_path(document_id)
+        handle = store.open_verified_file(
+            document_id,
+            prefix=".serve-",
+        )
     except DocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DocumentError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return FileResponse(path, media_type="application/pdf")
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    size = handle.seek(0, 2)
+    handle.seek(0)
+
+    def stream_verified_pdf():
+        try:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            handle.close()
+
+    return StreamingResponse(
+        stream_verified_pdf(),
+        media_type="application/pdf",
+        headers={"Content-Length": str(size)},
+    )
 
 
 
@@ -542,6 +563,8 @@ def get_document_ingest(document_id: str) -> dict[str, object]:
         return get_pdf_ingest_service().status(document_id)
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/documents/{document_id}/pages", tags=["documents"])
@@ -558,6 +581,8 @@ def list_document_pages(
         )
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/documents/{document_id}/pages/{page_number}", tags=["documents"])
@@ -568,6 +593,8 @@ def get_document_page(document_id: str, page_number: int) -> dict[str, object]:
         page = get_pdf_ingest_service().get_page(document_id, page_number)
     except PdfIngestDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if page is None:
         raise HTTPException(status_code=404, detail="Document page not found")
     return page
@@ -629,6 +656,8 @@ def list_document_chunks(
         )
     except ChunkIndexDocumentNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChunkIndexSourceNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChunkIndexCorruptSource as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -637,6 +666,8 @@ def list_document_chunks(
 def get_document_chunk(chunk_id: str) -> dict[str, object]:
     try:
         chunk = get_chunk_index_service().get_chunk(chunk_id)
+    except ChunkIndexSourceNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChunkIndexCorruptSource as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if chunk is None:

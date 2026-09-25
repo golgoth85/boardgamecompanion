@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 from fastapi.testclient import TestClient
 
+from boardgamecompanion.database import Database
+from boardgamecompanion.documents import DocumentStore
 from boardgamecompanion.main import app
+from boardgamecompanion.pdf_ingest import PdfIngestService
 from boardgamecompanion.settings import settings
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bgg_collection_sample.csv"
@@ -291,3 +296,215 @@ def test_parser_start_failure_is_not_reported_as_document_integrity_failure(
         status = client.get(f"/api/documents/{document['id']}/ingest").json()
         assert status["latest_run"]["status"] == "failed"
         assert status["latest_run"]["error"]["code"] == "parser_start_failed"
+
+
+def _ingest_service() -> PdfIngestService:
+    database = Database(settings.database_path)
+    database.initialize()
+    return PdfIngestService(
+        database,
+        settings.manuals_dir,
+        timeout_seconds=settings.pdf_parse_timeout_seconds,
+        max_pages=settings.pdf_parse_max_pages,
+        max_chars_per_page=settings.pdf_parse_max_chars_per_page,
+        max_total_chars=settings.pdf_parse_max_total_chars,
+        memory_mb=settings.pdf_parse_memory_mb,
+    )
+
+
+def test_pdf_ingest_revalidates_archive_after_parser_snapshot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Trusted snapshot text.")
+    replacement = _pdf_with_pages("Replacement archive text.")
+    original_run_parser = PdfIngestService._run_parser
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+
+        def mutate_after_parse(self, snapshot):
+            payload = original_run_parser(self, snapshot)
+            stored.write_bytes(replacement)
+            return payload
+
+        monkeypatch.setattr(PdfIngestService, "_run_parser", mutate_after_parse)
+        response = client.post(f"/api/documents/{document['id']}/ingest")
+        assert response.status_code == 409
+        pages = client.get(f"/api/documents/{document['id']}/pages").json()
+        assert pages["count"] == 0
+
+
+def test_document_download_refuses_bytes_that_no_longer_match_provenance(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Trusted download text.")
+    replacement = _pdf_with_pages("Replacement download text.")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        initial = client.get(f"/api/documents/{document['id']}/file")
+        assert initial.status_code == 200
+        assert initial.content == trusted
+
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+        stored.write_bytes(replacement)
+        changed = client.get(f"/api/documents/{document['id']}/file")
+        assert changed.status_code == 409
+        assert changed.content != replacement
+
+
+def test_concurrent_non_force_pdf_ingest_persists_one_current_run(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    pdf = _pdf_with_pages("Concurrent ingest page.")
+    barrier = Barrier(2)
+    original_run_parser = PdfIngestService._run_parser
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, pdf)
+
+    def synchronized_parser(self, snapshot):
+        payload = original_run_parser(self, snapshot)
+        barrier.wait(timeout=10)
+        return payload
+
+    monkeypatch.setattr(PdfIngestService, "_run_parser", synchronized_parser)
+    first_service = _ingest_service()
+    second_service = _ingest_service()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(first_service.ingest, document["id"])
+        second_future = executor.submit(second_service.ingest, document["id"])
+        results = [
+            first_future.result(timeout=30),
+            second_future.result(timeout=30),
+        ]
+
+    assert sorted(result["created"] for result in results) == [False, True]
+    run_ids = {result["ingest"]["id"] for result in results}
+    assert len(run_ids) == 1
+
+    database = Database(settings.database_path)
+    with database.connect() as connection:
+        succeeded = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM document_parse_runs
+            WHERE document_id = ? AND status = 'succeeded'
+            """,
+            (document["id"],),
+        ).fetchone()["count"]
+        pages = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM document_pages
+            WHERE document_id = ?
+            """,
+            (document["id"],),
+        ).fetchone()["count"]
+    assert succeeded == 1
+    assert pages == 1
+
+
+def test_pdf_ingest_detects_archive_replacement_after_precommit_verification(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("VERSION-ONE")
+    replacement = _pdf_with_pages("VERSION-TWO")
+    original = DocumentStore.create_verified_snapshot
+    mutated = False
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+
+        def replace_after_commit_check(self, document_id, **kwargs):
+            nonlocal mutated
+            snapshot = original(self, document_id, **kwargs)
+            if kwargs.get("prefix") == ".p7a-commit-" and not mutated:
+                stored.write_bytes(replacement)
+                mutated = True
+            return snapshot
+
+        monkeypatch.setattr(
+            DocumentStore,
+            "create_verified_snapshot",
+            replace_after_commit_check,
+        )
+
+        response = client.post(f"/api/documents/{document['id']}/ingest")
+        assert response.status_code == 409
+        assert mutated is True
+
+        pages = client.get(f"/api/documents/{document['id']}/pages").json()
+        assert pages["count"] == 0
+        status = client.get(f"/api/documents/{document['id']}/ingest").json()
+        assert status["current"] is None
+        assert status["latest_run"]["status"] == "failed"
+        assert status["latest_run"]["error"]["code"] == "integrity_mismatch"
+
+
+def test_verified_document_handle_survives_path_replacement(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Trusted descriptor bytes.")
+    replacement = _pdf_with_pages("Replacement descriptor bytes.")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+
+    database = Database(settings.database_path)
+    database.initialize()
+    store = DocumentStore(database, settings.manuals_dir)
+    handle = store.open_verified_file(
+        document["id"],
+        prefix=".serve-probe-",
+    )
+    try:
+        assert not list((tmp_path / "manuals").glob(".serve-probe-*"))
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+        stored.write_bytes(replacement)
+        assert handle.read() == trusted
+    finally:
+        handle.close()
+
+
+def test_page_apis_reject_current_pages_after_archive_replacement(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Current page provenance.")
+    replacement = _pdf_with_pages("Different archive provenance.")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        assert client.post(f"/api/documents/{document['id']}/ingest").status_code == 200
+
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+        stored.write_bytes(replacement)
+
+        status = client.get(f"/api/documents/{document['id']}/ingest")
+        listing = client.get(f"/api/documents/{document['id']}/pages")
+        page = client.get(f"/api/documents/{document['id']}/pages/1")
+
+        assert status.status_code == 409
+        assert listing.status_code == 409
+        assert page.status_code == 409

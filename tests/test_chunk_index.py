@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi.testclient import TestClient
 
@@ -618,3 +620,80 @@ def test_build_revalidates_page_bytes_after_source_snapshot(
             (document["id"],),
         ).fetchone()[0]
     assert run_count == 0
+
+
+def test_chunk_read_rejects_coherent_text_that_is_not_page_substring(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, _pdf_with_pages(_long_page("Span")))
+        assert client.post(f"/api/documents/{document['id']}/ingest").status_code == 200
+        assert client.post(f"/api/documents/{document['id']}/chunks/build").status_code == 200
+
+        with sqlite3.connect(settings.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                """
+                SELECT *
+                FROM document_chunks
+                WHERE document_id = ?
+                ORDER BY page_number, chunk_index
+                LIMIT 1
+                """,
+                (document["id"],),
+            ).fetchone()
+            assert row is not None
+            replacement = "X" * len(row["text"])
+            replacement_sha = hashlib.sha256(
+                replacement.encode("utf-8")
+            ).hexdigest()
+            identity = {
+                "document_id": row["document_id"],
+                "document_sha256": row["document_sha256"],
+                "page_id": row["page_id"],
+                "page_number": row["page_number"],
+                "page_text_sha256": row["page_text_sha256"],
+                "chunk_index": row["chunk_index"],
+                "start_char": row["start_char"],
+                "end_char": row["end_char"],
+                "text_sha256": replacement_sha,
+                "chunker_name": row["chunker_name"],
+                "chunker_version": row["chunker_version"],
+                "chunker_config": json.loads(row["chunker_config_json"]),
+            }
+            chunk_key = hashlib.sha256(
+                json.dumps(
+                    identity,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            chunk_id = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    f"boardgamecompanion:chunk:{chunk_key}",
+                )
+            )
+            connection.execute(
+                """
+                UPDATE document_chunks
+                SET id = ?, chunk_key = ?, text = ?, text_sha256 = ?
+                WHERE id = ?
+                """,
+                (
+                    chunk_id,
+                    chunk_key,
+                    replacement,
+                    replacement_sha,
+                    row["id"],
+                ),
+            )
+            connection.commit()
+
+        response = client.get(f"/api/chunks/{chunk_id}")
+        assert response.status_code == 500
+        assert "page span" in response.json()["detail"]

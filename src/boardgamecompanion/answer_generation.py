@@ -512,6 +512,8 @@ class AnswerGenerationService:
                 "Generation model changed while the answer was produced"
             )
 
+        self.retrieval.validate_retrieval_current(retrieval_payload)
+
         status, claims = _validate_generation(
             raw,
             evidence_by_id=evidence_by_id,
@@ -523,6 +525,7 @@ class AnswerGenerationService:
             "model_digest": descriptor.model_digest,
         }
         if status == "not_found":
+            self.retrieval.validate_retrieval_current(retrieval_payload)
             return self._not_found(
                 retrieval_payload,
                 reason="retrieved_evidence_insufficient",
@@ -604,6 +607,7 @@ class AnswerGenerationService:
             for claim in rendered_claims
         )
         policy = retrieval_payload.get("policy") or {}
+        self.retrieval.validate_retrieval_current(retrieval_payload)
         return {
             "status": "answer",
             "reason": None,
