@@ -4,6 +4,8 @@ import hashlib
 import json
 import math
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -19,6 +21,7 @@ from boardgamecompanion.embedding_retrieval import (
     EmbeddingProviderError,
     EmbeddingRetrievalService,
     OllamaEmbeddingProvider,
+    _descriptor_config,
 )
 from boardgamecompanion.main import app
 from boardgamecompanion.settings import settings
@@ -899,3 +902,95 @@ def test_retrieval_aborts_if_source_changes_during_query_embedding(
             top_k=5,
             min_score=-1.0,
         )
+
+
+def test_atomic_snapshot_blocks_new_eligible_document_between_coverage_and_candidates(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = FakeProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        ready = _prepare_document(
+            client,
+            text=_long_page("Atomic snapshot"),
+            source_url="https://publisher.example/atomic.pdf",
+        )
+
+    service = _service(provider)
+    service.build(ready["id"])
+    descriptor = provider.describe()
+    _, config_sha256 = _descriptor_config(descriptor)
+
+    writer_started = threading.Event()
+    writer_committed = threading.Event()
+    writer_thread: list[threading.Thread] = []
+    original_candidate_rows = service._candidate_rows
+
+    def writer() -> None:
+        writer_started.set()
+        with sqlite3.connect(settings.database_path, timeout=10) as connection:
+            connection.execute(
+                """
+                INSERT INTO game_documents (
+                    id, board_game_id, document_type, language, title,
+                    original_filename, storage_path, sha256, size_bytes,
+                    mime_type, source_kind, source_provider, source_url,
+                    is_official, version_label, edition, published_at,
+                    provenance_json, created_at, updated_at
+                )
+                SELECT
+                    'atomic-race-doc', board_game_id, document_type, language,
+                    'Atomic race doc', 'atomic-race.pdf',
+                    '900001/atomic-race.pdf',
+                    ?, size_bytes, mime_type, source_kind, source_provider,
+                    source_url, is_official, version_label, edition,
+                    published_at, provenance_json, created_at, updated_at
+                FROM game_documents
+                WHERE id = ?
+                """,
+                ("f" * 64, ready["id"]),
+            )
+            connection.commit()
+        writer_committed.set()
+
+    started_once = False
+
+    def candidate_rows_with_writer(**kwargs):
+        nonlocal started_once
+        if not started_once:
+            started_once = True
+            thread = threading.Thread(target=writer)
+            writer_thread.append(thread)
+            thread.start()
+            assert writer_started.wait(timeout=5)
+            time.sleep(0.1)
+            assert not writer_committed.is_set()
+        return original_candidate_rows(**kwargs)
+
+    monkeypatch.setattr(service, "_candidate_rows", candidate_rows_with_writer)
+    coverage, _, _, _ = service._snapshot_state(
+        board_game_id=1,
+        descriptor=descriptor,
+        config_sha256=config_sha256,
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+    )
+    assert coverage["current_document_count"] == 1
+
+    writer_thread[0].join(timeout=10)
+    assert writer_committed.is_set()
+
+    monkeypatch.setattr(service, "_candidate_rows", original_candidate_rows)
+    coverage_after, _, _, _ = service._snapshot_state(
+        board_game_id=1,
+        descriptor=descriptor,
+        config_sha256=config_sha256,
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+    )
+    assert coverage_after["current_document_count"] == 2
+    assert "atomic-race-doc" in coverage_after["missing_document_ids"]
