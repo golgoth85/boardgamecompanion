@@ -483,3 +483,28 @@ def test_verified_document_handle_survives_path_replacement(
         assert handle.read() == trusted
     finally:
         handle.close()
+
+
+def test_page_apis_reject_current_pages_after_archive_replacement(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Current page provenance.")
+    replacement = _pdf_with_pages("Different archive provenance.")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        assert client.post(f"/api/documents/{document['id']}/ingest").status_code == 200
+
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+        stored.write_bytes(replacement)
+
+        status = client.get(f"/api/documents/{document['id']}/ingest")
+        listing = client.get(f"/api/documents/{document['id']}/pages")
+        page = client.get(f"/api/documents/{document['id']}/pages/1")
+
+        assert status.status_code == 409
+        assert listing.status_code == 409
+        assert page.status_code == 409
