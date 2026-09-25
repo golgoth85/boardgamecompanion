@@ -840,7 +840,7 @@ class EmbeddingRetrievalService:
         document_type: str | None,
         version_label: str | None,
         edition: str | None,
-    ) -> tuple[dict[str, Any], str]:
+    ) -> tuple[dict[str, Any], str, frozenset[str]]:
         document_ids = self._eligible_document_ids(
             board_game_id=board_game_id,
             document_type=document_type,
@@ -907,7 +907,11 @@ class EmbeddingRetrievalService:
             "embedded_document_count": len(ready_document_ids),
             "missing_document_ids": sorted(missing_document_ids),
         }
-        return coverage, _sha256_json(states)
+        return (
+            coverage,
+            _sha256_json(states),
+            frozenset(ready_document_ids),
+        )
 
     @staticmethod
     def _candidate_set_sha256(rows: list[sqlite3.Row]) -> str:
@@ -951,7 +955,11 @@ class EmbeddingRetrievalService:
         # but while this guard is held no concurrent writer can commit between
         # the eligible-document read and the candidate-set read.
         with self.database.transaction(immediate=True):
-            coverage, coverage_sha256 = self._coverage_state(
+            (
+                coverage,
+                coverage_sha256,
+                ready_document_ids,
+            ) = self._coverage_state(
                 board_game_id=board_game_id,
                 descriptor=descriptor,
                 config_sha256=config_sha256,
@@ -966,6 +974,7 @@ class EmbeddingRetrievalService:
                 document_type=document_type,
                 version_label=version_label,
                 edition=edition,
+                ready_document_ids=ready_document_ids,
             )
             candidate_set_sha256 = self._candidate_set_sha256(rows)
         return coverage, coverage_sha256, rows, candidate_set_sha256
@@ -1028,7 +1037,10 @@ class EmbeddingRetrievalService:
         document_type: str | None,
         version_label: str | None,
         edition: str | None,
+        ready_document_ids: frozenset[str],
     ) -> list[sqlite3.Row]:
+        if not ready_document_ids:
+            return []
         clauses = [
             "c.board_game_id = ?",
             "(c.is_official = 1 OR c.source_kind IN ('manual_upload', 'community'))",
@@ -1059,6 +1071,10 @@ class EmbeddingRetrievalService:
         if edition is not None:
             clauses.append("c.edition = ?")
             params.append(edition)
+
+        placeholders = ", ".join("?" for _ in ready_document_ids)
+        clauses.append(f"c.document_id IN ({placeholders})")
+        params.extend(sorted(ready_document_ids))
 
         where = " AND ".join(clauses)
         with self.database.connect() as connection:
