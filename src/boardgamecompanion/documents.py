@@ -270,6 +270,34 @@ class DocumentStore:
         finally:
             os.close(fd)
 
+    def open_verified_file(
+        self,
+        document_id: str,
+        *,
+        expected_sha256: str | None = None,
+        expected_size_bytes: int | None = None,
+        prefix: str = ".verified-open-",
+    ) -> BinaryIO:
+        snapshot_path = self.create_verified_snapshot(
+            document_id,
+            expected_sha256=expected_sha256,
+            expected_size_bytes=expected_size_bytes,
+            prefix=prefix,
+        )
+        handle: BinaryIO | None = None
+        try:
+            handle = snapshot_path.open("rb")
+            # Remove the pathname before returning. The response will stream
+            # from this already-open descriptor, so a later path replacement
+            # cannot change the bytes being served.
+            snapshot_path.unlink()
+            return handle
+        except Exception:
+            if handle is not None:
+                handle.close()
+            snapshot_path.unlink(missing_ok=True)
+            raise
+
     def import_pdf(
         self,
         *,
