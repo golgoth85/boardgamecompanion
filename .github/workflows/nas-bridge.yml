@@ -34,7 +34,7 @@ jobs:
           branch="$(grep -E '^branch=' "$request" | tail -1 | cut -d= -f2- || true)"
           expected_head="$(grep -E '^expected_head=' "$request" | tail -1 | cut -d= -f2- || true)"
           case "$operation" in
-            inspect|publish_branch) ;;
+            inspect|inspect_runtime|publish_branch) ;;
             *) echo "Unsupported operation: $operation" >&2; exit 2 ;;
           esac
           if [[ "$operation" == publish_branch ]]; then
@@ -92,6 +92,104 @@ jobs:
           echo "current_branch=$current_branch" >> "$GITHUB_OUTPUT"
           echo "current_head=$current_head" >> "$GITHUB_OUTPUT"
           if [[ -n "$porcelain" ]]; then echo "clean=false" >> "$GITHUB_OUTPUT"; else echo "clean=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Inspect BoardGameCompanion runtime
+        if: steps.request.outputs.operation == 'inspect_runtime'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name='boardgamecompanion'
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "runtime_docker=UNAVAILABLE"
+            exit 0
+          fi
+          if ! docker inspect "$name" >/dev/null 2>&1; then
+            echo "runtime_container=NOT_FOUND"
+            echo "matching_containers:"
+            docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep -i 'boardgame' || true
+            exit 0
+          fi
+
+          echo "runtime_container=FOUND"
+          docker inspect "$name" --format 'container_name={{.Name}}'
+          docker inspect "$name" --format 'container_image_ref={{.Config.Image}}'
+          docker inspect "$name" --format 'container_image_id={{.Image}}'
+          docker inspect "$name" --format 'container_status={{.State.Status}}'
+          docker inspect "$name" --format 'container_started_at={{.State.StartedAt}}'
+          docker inspect "$name" --format 'container_restart={{.HostConfig.RestartPolicy.Name}}'
+          docker inspect "$name" --format 'container_network_mode={{.HostConfig.NetworkMode}}'
+          echo "container_ports:"
+          docker port "$name" || true
+          echo "container_mounts:"
+          docker inspect "$name" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} ({{.Mode}}){{println}}{{end}}'
+          echo "container_labels:"
+          docker inspect "$name" --format '{{range $k,$v := .Config.Labels}}{{println $k "=" $v}}{{end}}' |
+            grep -E '^(com\.docker\.compose\.|net\.unraid\.|org\.opencontainers\.)' || true
+
+          echo "rag_environment_presence:"
+          docker exec "$name" python - <<'PY'
+          import os
+          keys = [
+              "BGC_OLLAMA_URL",
+              "BGC_OLLAMA_EMBEDDING_MODEL",
+              "BGC_OLLAMA_GENERATION_MODEL",
+              "BGC_OLLAMA_EMBEDDING_DIMENSIONS",
+              "BGC_OLLAMA_VERIFY_TLS",
+          ]
+          for key in keys:
+              value = os.getenv(key)
+              print(f"{key}={'SET' if value not in (None, '') else 'UNSET'}")
+          PY
+
+          echo "application_health:"
+          docker exec "$name" python - <<'PY'
+          import json, urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8787/health", timeout=5) as r:
+                  print(f"health_status={r.status}")
+                  payload = json.load(r)
+                  print("health_payload=" + json.dumps(payload, sort_keys=True))
+          except Exception as exc:
+              print("health_error=" + type(exc).__name__ + ":" + str(exc))
+          PY
+
+          echo "ollama_runtime_probe:"
+          docker exec "$name" python - <<'PY'
+          import json, os, urllib.request
+          base = (os.getenv("BGC_OLLAMA_URL") or "").rstrip("/")
+          embed = os.getenv("BGC_OLLAMA_EMBEDDING_MODEL") or ""
+          generate = os.getenv("BGC_OLLAMA_GENERATION_MODEL") or ""
+          print("ollama_configured=" + ("yes" if base else "no"))
+          print("embedding_model_configured=" + ("yes" if embed else "no"))
+          print("generation_model_configured=" + ("yes" if generate else "no"))
+          if not base:
+              raise SystemExit(0)
+          try:
+              with urllib.request.urlopen(base + "/api/tags", timeout=8) as r:
+                  payload = json.load(r)
+              names = sorted(
+                  str(item.get("name", ""))
+                  for item in payload.get("models", [])
+                  if item.get("name")
+              )
+              print("ollama_reachable=yes")
+              print("ollama_models=" + ",".join(names))
+              print("embedding_model_present=" + ("yes" if embed in names else "no"))
+              print("generation_model_present=" + ("yes" if generate in names else "no"))
+          except Exception as exc:
+              print("ollama_reachable=no")
+              print("ollama_error=" + type(exc).__name__ + ":" + str(exc))
+          PY
+
+          echo "local_latest_image:"
+          image_ref="$(docker inspect "$name" --format '{{.Config.Image}}')"
+          if docker image inspect "$image_ref" >/dev/null 2>&1; then
+            docker image inspect "$image_ref" --format 'local_image_id={{.Id}}'
+            docker image inspect "$image_ref" --format 'local_image_created={{.Created}}'
+            docker image inspect "$image_ref" --format 'local_image_repo_digests={{join .RepoDigests ","}}'
+          else
+            echo "local_image=NOT_FOUND"
+          fi
 
       - name: Publish exact committed local branch
         if: steps.request.outputs.operation == 'publish_branch'
