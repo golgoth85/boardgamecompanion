@@ -70,7 +70,8 @@ jobs:
           echo "nas_local_repo=MOUNTED_READ_ONLY"
           echo "nas_current_branch=$current_branch"
           echo "nas_current_head=$current_head"
-          echo "nas_origin=$remote"
+          safe_remote="$(printf '%s' "$remote" | sed -E 's#https://[^/@]+@github\\.com/#https://github.com/#')"
+          echo "nas_origin=$safe_remote"
           if [[ -z "$current_branch" ]]; then
             github_branch_head=""
             sync_state="DETACHED"
