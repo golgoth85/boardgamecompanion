@@ -681,6 +681,13 @@ class PdfIngestService:
                 """,
                 (document_id,),
             ).fetchone()
+        if current is not None:
+            with self._verified_snapshot(
+                document_id=document_id,
+                expected_sha256=str(document["sha256"]),
+                expected_size=int(document["size_bytes"]),
+            ):
+                pass
         return {
             "document": document,
             "current": _row_to_run(current),
@@ -710,6 +717,13 @@ class PdfIngestService:
                 """,
                 (document_id, limit, offset),
             ).fetchall()
+        if int(total) > 0:
+            with self._verified_snapshot(
+                document_id=document_id,
+                expected_sha256=str(document["sha256"]),
+                expected_size=int(document["size_bytes"]),
+            ):
+                pass
         return {
             "document": document,
             "count": total,
@@ -719,7 +733,7 @@ class PdfIngestService:
         }
 
     def get_page(self, document_id: str, page_number: int) -> dict[str, Any] | None:
-        self._document(document_id)
+        document = self._document(document_id)
         with self.database.connect() as connection:
             row = connection.execute(
                 """
@@ -729,4 +743,11 @@ class PdfIngestService:
                 """,
                 (document_id, page_number),
             ).fetchone()
+        if row is not None:
+            with self._verified_snapshot(
+                document_id=document_id,
+                expected_sha256=str(document["sha256"]),
+                expected_size=int(document["size_bytes"]),
+            ):
+                pass
         return _row_to_page(row) if row else None
