@@ -230,8 +230,8 @@ class DocumentStore:
                         "Opened document escapes manuals directory"
                     )
 
-            stat = os.fstat(fd)
-            if stat.st_size != database_size:
+            before = os.fstat(fd)
+            if before.st_size != database_size:
                 raise DocumentError(
                     "Archived PDF size no longer matches database provenance"
                 )
@@ -258,6 +258,24 @@ class DocumentStore:
                     snapshot.flush()
                     os.fsync(snapshot.fileno())
 
+            after = os.fstat(fd)
+            try:
+                path_stat = os.stat(path, follow_symlinks=False)
+            except FileNotFoundError as exc:
+                raise DocumentError(
+                    "Archived PDF path changed during verification"
+                ) from exc
+            stable_identity = (
+                before.st_dev == after.st_dev == path_stat.st_dev
+                and before.st_ino == after.st_ino == path_stat.st_ino
+                and before.st_size == after.st_size == path_stat.st_size
+                and before.st_mtime_ns == after.st_mtime_ns
+                and before.st_ctime_ns == after.st_ctime_ns
+            )
+            if not stable_identity:
+                raise DocumentError(
+                    "Archived PDF changed during verification"
+                )
             if copied != database_size or digest.hexdigest() != database_sha256:
                 raise DocumentError(
                     "Archived PDF hash no longer matches database provenance"
@@ -278,25 +296,107 @@ class DocumentStore:
         expected_size_bytes: int | None = None,
         prefix: str = ".verified-open-",
     ) -> BinaryIO:
-        snapshot_path = self.create_verified_snapshot(
-            document_id,
-            expected_sha256=expected_sha256,
-            expected_size_bytes=expected_size_bytes,
-            prefix=prefix,
-        )
+        del prefix  # API compatibility; this path never creates a named snapshot.
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT storage_path, sha256, size_bytes
+                FROM game_documents
+                WHERE id = ?
+                """,
+                (document_id,),
+            ).fetchone()
+        if row is None:
+            raise DocumentNotFound(f"Document {document_id} not found")
+
+        database_sha256 = str(row["sha256"])
+        database_size = int(row["size_bytes"])
+        if (
+            expected_sha256 is not None
+            and database_sha256 != str(expected_sha256)
+        ) or (
+            expected_size_bytes is not None
+            and database_size != int(expected_size_bytes)
+        ):
+            raise DocumentError("Document provenance changed while it was in use")
+
+        relative = Path(row["storage_path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise DocumentError("Invalid stored document path")
+        root = self.manuals_dir.resolve()
+        path = (root / relative).resolve()
+        if root not in path.parents:
+            raise DocumentError("Document path escapes manuals directory")
+
+        flags = os.O_RDONLY
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError as exc:
+            raise DocumentNotFound(
+                f"Document file {document_id} is missing"
+            ) from exc
+        except OSError as exc:
+            raise DocumentError("Archived PDF cannot be opened safely") from exc
+
         handle: BinaryIO | None = None
         try:
-            handle = snapshot_path.open("rb")
-            # Remove the pathname before returning. The response will stream
-            # from this already-open descriptor, so a later path replacement
-            # cannot change the bytes being served.
-            snapshot_path.unlink()
+            before = os.fstat(fd)
+            if before.st_size != database_size:
+                raise DocumentError(
+                    "Archived PDF size no longer matches database provenance"
+                )
+
+            self.manuals_dir.mkdir(parents=True, exist_ok=True)
+            handle = tempfile.TemporaryFile(
+                mode="w+b",
+                dir=self.manuals_dir,
+            )
+            digest = hashlib.sha256()
+            copied = 0
+            with os.fdopen(os.dup(fd), "rb", closefd=True) as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    digest.update(chunk)
+                    handle.write(chunk)
+
+            after = os.fstat(fd)
+            try:
+                path_stat = os.stat(path, follow_symlinks=False)
+            except FileNotFoundError as exc:
+                raise DocumentError(
+                    "Archived PDF path changed during verification"
+                ) from exc
+            stable_identity = (
+                before.st_dev == after.st_dev == path_stat.st_dev
+                and before.st_ino == after.st_ino == path_stat.st_ino
+                and before.st_size == after.st_size == path_stat.st_size
+                and before.st_mtime_ns == after.st_mtime_ns
+                and before.st_ctime_ns == after.st_ctime_ns
+            )
+            if not stable_identity:
+                raise DocumentError(
+                    "Archived PDF changed during verification"
+                )
+            if copied != database_size or digest.hexdigest() != database_sha256:
+                raise DocumentError(
+                    "Archived PDF hash no longer matches database provenance"
+                )
+            handle.flush()
+            handle.seek(0)
             return handle
         except Exception:
             if handle is not None:
                 handle.close()
-            snapshot_path.unlink(missing_ok=True)
             raise
+        finally:
+            os.close(fd)
 
     def import_pdf(
         self,
