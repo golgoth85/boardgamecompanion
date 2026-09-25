@@ -932,6 +932,40 @@ class EmbeddingRetrievalService:
             ]
         )
 
+    def _snapshot_state(
+        self,
+        *,
+        board_game_id: int,
+        descriptor: EmbeddingDescriptor,
+        config_sha256: str,
+        document_type: str | None,
+        version_label: str | None,
+        edition: str | None,
+    ) -> tuple[dict[str, Any], str, list[sqlite3.Row], str]:
+        # BEGIN IMMEDIATE is deliberately used as a database-wide writer
+        # barrier. The coverage helpers still use their own read connections,
+        # but while this guard is held no concurrent writer can commit between
+        # the eligible-document read and the candidate-set read.
+        with self.database.transaction(immediate=True):
+            coverage, coverage_sha256 = self._coverage_state(
+                board_game_id=board_game_id,
+                descriptor=descriptor,
+                config_sha256=config_sha256,
+                document_type=document_type,
+                version_label=version_label,
+                edition=edition,
+            )
+            rows = self._candidate_rows(
+                board_game_id=board_game_id,
+                descriptor=descriptor,
+                config_sha256=config_sha256,
+                document_type=document_type,
+                version_label=version_label,
+                edition=edition,
+            )
+            candidate_set_sha256 = self._candidate_set_sha256(rows)
+        return coverage, coverage_sha256, rows, candidate_set_sha256
+
     def validate_retrieval_current(
         self,
         retrieval_payload: dict[str, Any],
@@ -962,23 +996,16 @@ class EmbeddingRetrievalService:
                 "Retrieval currentness game identity is invalid"
             ) from exc
 
-        coverage, coverage_sha256 = self._coverage_state(
-            board_game_id=board_game_id,
-            descriptor=descriptor,
-            config_sha256=config_sha256,
-            document_type=filters.get("document_type"),
-            version_label=filters.get("version_label"),
-            edition=filters.get("edition"),
+        coverage, coverage_sha256, rows, candidate_set_sha256 = (
+            self._snapshot_state(
+                board_game_id=board_game_id,
+                descriptor=descriptor,
+                config_sha256=config_sha256,
+                document_type=filters.get("document_type"),
+                version_label=filters.get("version_label"),
+                edition=filters.get("edition"),
+            )
         )
-        rows = self._candidate_rows(
-            board_game_id=board_game_id,
-            descriptor=descriptor,
-            config_sha256=config_sha256,
-            document_type=filters.get("document_type"),
-            version_label=filters.get("version_label"),
-            edition=filters.get("edition"),
-        )
-        candidate_set_sha256 = self._candidate_set_sha256(rows)
         if (
             coverage_sha256 != snapshot.get("coverage_sha256")
             or candidate_set_sha256 != snapshot.get("candidate_set_sha256")
@@ -1174,23 +1201,16 @@ class EmbeddingRetrievalService:
 
         descriptor = self.provider.describe()
         _, config_sha256 = _descriptor_config(descriptor)
-        coverage, coverage_sha256 = self._coverage_state(
-            board_game_id=game["id"],
-            descriptor=descriptor,
-            config_sha256=config_sha256,
-            document_type=document_type,
-            version_label=version_label,
-            edition=edition,
+        coverage, coverage_sha256, rows, candidate_set_sha256 = (
+            self._snapshot_state(
+                board_game_id=game["id"],
+                descriptor=descriptor,
+                config_sha256=config_sha256,
+                document_type=document_type,
+                version_label=version_label,
+                edition=edition,
+            )
         )
-        rows = self._candidate_rows(
-            board_game_id=game["id"],
-            descriptor=descriptor,
-            config_sha256=config_sha256,
-            document_type=document_type,
-            version_label=version_label,
-            edition=edition,
-        )
-        candidate_set_sha256 = self._candidate_set_sha256(rows)
         currentness = {
             "board_game_id": game["id"],
             "provider": descriptor.provider,
@@ -1236,7 +1256,12 @@ class EmbeddingRetrievalService:
                 "Embedding model changed while query embedding was generated"
             )
 
-        coverage_after, coverage_sha256_after = self._coverage_state(
+        (
+            coverage_after,
+            coverage_sha256_after,
+            rows_after,
+            candidate_set_sha256_after,
+        ) = self._snapshot_state(
             board_game_id=game["id"],
             descriptor=descriptor,
             config_sha256=config_sha256,
@@ -1244,15 +1269,6 @@ class EmbeddingRetrievalService:
             version_label=version_label,
             edition=edition,
         )
-        rows_after = self._candidate_rows(
-            board_game_id=game["id"],
-            descriptor=descriptor,
-            config_sha256=config_sha256,
-            document_type=document_type,
-            version_label=version_label,
-            edition=edition,
-        )
-        candidate_set_sha256_after = self._candidate_set_sha256(rows_after)
         if (
             coverage_sha256_after != coverage_sha256
             or candidate_set_sha256_after != candidate_set_sha256
