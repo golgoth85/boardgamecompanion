@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from starlette.background import BackgroundTask
 
 from boardgamecompanion import __version__
 from boardgamecompanion.answer_generation import (
@@ -492,12 +491,12 @@ def get_document(document_id: str) -> dict[str, object]:
 
 
 @app.get("/api/documents/{document_id}/file", tags=["documents"])
-def get_document_file(document_id: str) -> FileResponse:
+def get_document_file(document_id: str) -> StreamingResponse:
     database = get_database()
     database.initialize()
     store = DocumentStore(database, settings.manuals_dir)
     try:
-        snapshot = store.create_verified_snapshot(
+        handle = store.open_verified_file(
             document_id,
             prefix=".serve-",
         )
@@ -505,10 +504,24 @@ def get_document_file(document_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DocumentError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FileResponse(
-        snapshot,
+
+    size = handle.seek(0, 2)
+    handle.seek(0)
+
+    def stream_verified_pdf():
+        try:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            handle.close()
+
+    return StreamingResponse(
+        stream_verified_pdf(),
         media_type="application/pdf",
-        background=BackgroundTask(snapshot.unlink, missing_ok=True),
+        headers={"Content-Length": str(size)},
     )
 
 
