@@ -721,17 +721,20 @@ def test_direct_chunk_mutation_invalidates_embeddings(
         ).fetchone()["count"]
     assert remaining < built["embedding_index"]["chunk_count"]
 
-    result = service.retrieve(
-        bgg_id=900001,
-        query="mutable",
-        requested_language="it",
-        document_type="rulebook",
-        version_label=None,
-        edition=None,
-        top_k=5,
-        min_score=-1.0,
-    )
-    assert document["id"] in result["coverage"]["missing_document_ids"]
+    with pytest.raises(
+        EmbeddingCorruptRecord,
+        match="metadata digest",
+    ):
+        service.retrieve(
+            bgg_id=900001,
+            query="mutable",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=5,
+            min_score=-1.0,
+        )
 
 
 class MutatingQueryProvider(FakeProvider):
