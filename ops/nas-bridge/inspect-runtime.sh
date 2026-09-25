@@ -6,8 +6,9 @@ name='boardgamecompanion'
 echo "lan_service_probe:"
 for target in \
   "boardgamecompanion|http://192.168.1.55:8787/health" \
-  "lmstudio_openai|http://192.168.1.55:1234/v1/models" \
-  "lmstudio_ollama|http://192.168.1.55:1234/api/tags" \
+  "unraid_1234_openai|http://192.168.1.55:1234/v1/models" \
+  "lmstudio_pc_openai|http://192.168.1.249:1234/v1/models" \
+  "lmstudio_pc_root|http://192.168.1.249:1234/" \
   "ollama_nas|http://192.168.1.55:11434/api/tags"
 do
   label="${target%%|*}"
@@ -21,7 +22,7 @@ do
     echo "${label}_http_status=$status"
     echo "${label}_content_type=$content_type"
     echo "${label}_body_bytes=$(wc -c < "$tmp_body" | tr -d ' ')"
-    if [[ "$label" == "lmstudio_openai" ]]; then
+    if [[ "$label" == *_openai ]]; then
       python3 - "$tmp_body" <<'PY' || true
 import json, pathlib, sys
 path=pathlib.Path(sys.argv[1])
@@ -56,6 +57,8 @@ PY
     echo "${label}_reachable=no"
     echo "${label}_http_status=$status"
     echo "${label}_content_type=$content_type"
+    location="$(curl -sSI --max-time 5 "$url" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^Location:/{sub(/\r$/,""); print substr($0,11); exit}' || true)"
+    if [[ -n "$location" ]]; then echo "${label}_location=$location"; fi
     echo "${label}_body_prefix=$(head -c 500 "$tmp_body" | tr '\n' ' ')"
   fi
   rm -f "$tmp_body"
