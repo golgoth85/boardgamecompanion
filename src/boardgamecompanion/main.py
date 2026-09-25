@@ -15,6 +15,7 @@ from boardgamecompanion.answer_generation import (
     AnswerProtocolError,
     AnswerProviderError,
     AnswerSourceNotReady,
+    LMStudioGenerationProvider,
     OllamaGenerationProvider,
 )
 from boardgamecompanion.app_settings import (
@@ -61,6 +62,7 @@ from boardgamecompanion.embedding_retrieval import (
     EmbeddingProviderError,
     EmbeddingRetrievalService,
     EmbeddingSourceNotReady,
+    LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
 from boardgamecompanion.floppy import (
@@ -677,28 +679,49 @@ def get_document_chunk(chunk_id: str) -> dict[str, object]:
 
 
 def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
-    if not settings.ollama_url or not settings.ollama_embedding_model:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Embedding provider is not configured; set BGC_OLLAMA_URL "
-                "and BGC_OLLAMA_EMBEDDING_MODEL"
-            ),
+    if settings.rag_provider == "lmstudio":
+        if not settings.lmstudio_url or not settings.lmstudio_embedding_model:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "LM Studio embedding provider is not configured; set "
+                    "BGC_LMSTUDIO_URL and BGC_LMSTUDIO_EMBEDDING_MODEL"
+                ),
+            )
+        provider = LMStudioEmbeddingProvider(
+            base_url=settings.lmstudio_url,
+            model=settings.lmstudio_embedding_model,
+            requested_dimensions=settings.lmstudio_embedding_dimensions,
+            timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
+            verify_tls=settings.lmstudio_verify_tls,
+            api_key=settings.lmstudio_api_key,
         )
-    provider = OllamaEmbeddingProvider(
-        base_url=settings.ollama_url,
-        model=settings.ollama_embedding_model,
-        requested_dimensions=settings.ollama_embedding_dimensions,
-        timeout_seconds=settings.ollama_embedding_timeout_seconds,
-        verify_tls=settings.ollama_verify_tls,
-    )
+        batch_size = settings.lmstudio_embedding_batch_size
+    else:
+        if not settings.ollama_url or not settings.ollama_embedding_model:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Embedding provider is not configured; set BGC_OLLAMA_URL "
+                    "and BGC_OLLAMA_EMBEDDING_MODEL"
+                ),
+            )
+        provider = OllamaEmbeddingProvider(
+            base_url=settings.ollama_url,
+            model=settings.ollama_embedding_model,
+            requested_dimensions=settings.ollama_embedding_dimensions,
+            timeout_seconds=settings.ollama_embedding_timeout_seconds,
+            verify_tls=settings.ollama_verify_tls,
+        )
+        batch_size = settings.ollama_embedding_batch_size
+
     database = get_database()
     database.initialize()
     return EmbeddingRetrievalService(
         database,
         get_chunk_index_service(),
         provider,
-        batch_size=settings.ollama_embedding_batch_size,
+        batch_size=batch_size,
         max_candidates=settings.retrieval_max_candidates,
     )
 
@@ -774,25 +797,49 @@ def retrieve_game_evidence(
 
 
 def get_answer_generation_service() -> AnswerGenerationService:
-    if (
-        not settings.ollama_url
-        or not settings.ollama_embedding_model
-        or not settings.ollama_generation_model
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "RAG providers are not configured; set BGC_OLLAMA_URL, "
-                "BGC_OLLAMA_EMBEDDING_MODEL and BGC_OLLAMA_GENERATION_MODEL"
-            ),
+    if settings.rag_provider == "lmstudio":
+        if (
+            not settings.lmstudio_url
+            or not settings.lmstudio_embedding_model
+            or not settings.lmstudio_generation_model
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "LM Studio RAG provider is not configured; set "
+                    "BGC_LMSTUDIO_URL, BGC_LMSTUDIO_EMBEDDING_MODEL and "
+                    "BGC_LMSTUDIO_GENERATION_MODEL"
+                ),
+            )
+        provider = LMStudioGenerationProvider(
+            base_url=settings.lmstudio_url,
+            model=settings.lmstudio_generation_model,
+            timeout_seconds=settings.lmstudio_generation_timeout_seconds,
+            verify_tls=settings.lmstudio_verify_tls,
+            temperature=settings.lmstudio_generation_temperature,
+            api_key=settings.lmstudio_api_key,
         )
-    provider = OllamaGenerationProvider(
-        base_url=settings.ollama_url,
-        model=settings.ollama_generation_model,
-        timeout_seconds=settings.ollama_generation_timeout_seconds,
-        verify_tls=settings.ollama_verify_tls,
-        temperature=settings.ollama_generation_temperature,
-    )
+    else:
+        if (
+            not settings.ollama_url
+            or not settings.ollama_embedding_model
+            or not settings.ollama_generation_model
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "RAG providers are not configured; set BGC_OLLAMA_URL, "
+                    "BGC_OLLAMA_EMBEDDING_MODEL and "
+                    "BGC_OLLAMA_GENERATION_MODEL"
+                ),
+            )
+        provider = OllamaGenerationProvider(
+            base_url=settings.ollama_url,
+            model=settings.ollama_generation_model,
+            timeout_seconds=settings.ollama_generation_timeout_seconds,
+            verify_tls=settings.ollama_verify_tls,
+            temperature=settings.ollama_generation_temperature,
+        )
     return AnswerGenerationService(
         get_embedding_retrieval_service(),
         provider,
