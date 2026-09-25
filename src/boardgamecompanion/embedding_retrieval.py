@@ -1209,7 +1209,8 @@ class EmbeddingRetrievalService:
                 "model": descriptor.model,
                 "model_digest": descriptor.model_digest,
                 "coverage": coverage,
-                    "currentness": currentness,\n                "policy": {
+                "currentness": currentness,
+                "policy": {
                     "selected_tier": None,
                     "selected_cohort": None,
                     "excluded_conflicting_cohorts": [],
@@ -1287,7 +1288,8 @@ class EmbeddingRetrievalService:
                 "model": descriptor.model,
                 "model_digest": descriptor.model_digest,
                 "coverage": coverage,
-                    "currentness": currentness,\n                "policy": {
+                "currentness": currentness,
+                "policy": {
                     "selected_tier": None,
                     "selected_cohort": None,
                     "excluded_conflicting_cohorts": [],
@@ -1382,7 +1384,8 @@ class EmbeddingRetrievalService:
             "model": descriptor.model,
             "model_digest": descriptor.model_digest,
             "coverage": coverage,
-                "currentness": currentness,\n                "policy": {
+            "currentness": currentness,
+            "policy": {
                 "selected_tier": {
                     "rank": best_tier,
                     "name": selected_items[0]["tier_name"],
