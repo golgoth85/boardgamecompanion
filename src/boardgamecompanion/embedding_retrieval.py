@@ -1207,7 +1207,7 @@ class EmbeddingRetrievalService:
         }
 
         if not rows:
-            return {
+            response = {
                 "game": dict(game),
                 "query": query,
                 "provider": descriptor.provider,
@@ -1222,6 +1222,8 @@ class EmbeddingRetrievalService:
                 },
                 "results": [],
             }
+            self.validate_retrieval_current(response)
+            return response
 
         query_vectors = self.provider.embed([query], descriptor)
         if len(query_vectors) != 1:
@@ -1286,7 +1288,7 @@ class EmbeddingRetrievalService:
             )
 
         if not scored:
-            return {
+            response = {
                 "game": dict(game),
                 "query": query,
                 "provider": descriptor.provider,
@@ -1301,6 +1303,8 @@ class EmbeddingRetrievalService:
                 },
                 "results": [],
             }
+            self.validate_retrieval_current(response)
+            return response
 
         best_tier = min(item["tier"] for item in scored)
         tier_items = [item for item in scored if item["tier"] == best_tier]
@@ -1382,7 +1386,7 @@ class EmbeddingRetrievalService:
                 }
             )
 
-        return {
+        response = {
             "game": dict(game),
             "query": query,
             "provider": descriptor.provider,
@@ -1403,3 +1407,5 @@ class EmbeddingRetrievalService:
             },
             "results": results,
         }
+        self.validate_retrieval_current(response)
+        return response
