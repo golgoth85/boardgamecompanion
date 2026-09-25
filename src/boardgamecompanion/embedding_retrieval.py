@@ -383,11 +383,14 @@ class EmbeddingRetrievalService:
         chunks: list[dict[str, Any]] = []
         offset = 0
         while True:
-            page = self.chunk_service.list_chunks(
-                document_id,
-                limit=500,
-                offset=offset,
-            )
+            try:
+                page = self.chunk_service.list_chunks(
+                    document_id,
+                    limit=500,
+                    offset=offset,
+                )
+            except ChunkIndexCorruptSource as exc:
+                raise EmbeddingCorruptRecord(str(exc)) from exc
             summaries = page["items"]
             if not summaries:
                 break
