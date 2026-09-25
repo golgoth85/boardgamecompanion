@@ -3,24 +3,20 @@ set -euo pipefail
 
 name='boardgamecompanion'
 
-echo "host_ssh_probe:"
-if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@192.168.1.55 'printf "ssh_ok=yes\\n"; docker ps --format "{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}" | grep -Ei "boardgamecompanion|ollama" || true' 2>&1; then
-  :
-else
-  echo "ssh_ok=no"
-fi
-
 echo "lan_service_probe:"
 for target in \
   "boardgamecompanion|http://192.168.1.55:8787/health" \
-  "ollama_nas|http://192.168.1.55:11434/api/tags" \
-  "ollama_pc|http://192.168.1.249:11434/api/tags"
+  "lmstudio_openai|http://192.168.1.55:1234/v1/models" \
+  "lmstudio_ollama|http://192.168.1.55:1234/api/tags" \
+  "ollama_nas|http://192.168.1.55:11434/api/tags"
 do
   label="${target%%|*}"
   url="${target#*|}"
   if payload="$(curl -fsS --max-time 8 "$url" 2>&1)"; then
     echo "${label}_reachable=yes"
-    if [[ "$label" == ollama_* ]]; then
+    if [[ "$label" == "lmstudio_openai" ]]; then
+      python3 -c 'import json,sys; p=json.load(sys.stdin); print("models="+",".join(sorted(str(x.get("id","")) for x in p.get("data",[]) if x.get("id"))))' <<<"$payload"
+    elif [[ "$label" == "lmstudio_ollama" || "$label" == "ollama_nas" ]]; then
       python3 -c 'import json,sys; p=json.load(sys.stdin); print("models="+",".join(sorted(str(x.get("name","")) for x in p.get("models",[]) if x.get("name"))))' <<<"$payload"
     else
       echo "${label}_payload=$payload"
