@@ -512,6 +512,8 @@ class AnswerGenerationService:
                 "Generation model changed while the answer was produced"
             )
 
+        self.retrieval.validate_retrieval_current(retrieval_payload)
+
         status, claims = _validate_generation(
             raw,
             evidence_by_id=evidence_by_id,
