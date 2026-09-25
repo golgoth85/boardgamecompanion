@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -163,6 +164,111 @@ class DocumentStore:
         if not path.is_file():
             raise DocumentNotFound(f"Document file {document_id} is missing")
         return path
+
+    def create_verified_snapshot(
+        self,
+        document_id: str,
+        *,
+        expected_sha256: str | None = None,
+        expected_size_bytes: int | None = None,
+        prefix: str = ".verified-",
+    ) -> Path:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT storage_path, sha256, size_bytes
+                FROM game_documents
+                WHERE id = ?
+                """,
+                (document_id,),
+            ).fetchone()
+        if row is None:
+            raise DocumentNotFound(f"Document {document_id} not found")
+
+        database_sha256 = str(row["sha256"])
+        database_size = int(row["size_bytes"])
+        if (
+            expected_sha256 is not None
+            and database_sha256 != str(expected_sha256)
+        ) or (
+            expected_size_bytes is not None
+            and database_size != int(expected_size_bytes)
+        ):
+            raise DocumentError("Document provenance changed while it was in use")
+
+        relative = Path(row["storage_path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise DocumentError("Invalid stored document path")
+
+        root = self.manuals_dir.resolve()
+        path = (root / relative).resolve()
+        if root not in path.parents:
+            raise DocumentError("Document path escapes manuals directory")
+
+        flags = os.O_RDONLY
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+
+        try:
+            fd = os.open(path, flags)
+        except FileNotFoundError as exc:
+            raise DocumentNotFound(
+                f"Document file {document_id} is missing"
+            ) from exc
+        except OSError as exc:
+            raise DocumentError("Archived PDF cannot be opened safely") from exc
+
+        snapshot_path: Path | None = None
+        try:
+            proc_fd = Path(f"/proc/self/fd/{fd}")
+            if proc_fd.exists():
+                opened_path = proc_fd.resolve()
+                if root != opened_path and root not in opened_path.parents:
+                    raise DocumentError(
+                        "Opened document escapes manuals directory"
+                    )
+
+            stat = os.fstat(fd)
+            if stat.st_size != database_size:
+                raise DocumentError(
+                    "Archived PDF size no longer matches database provenance"
+                )
+
+            self.manuals_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256()
+            copied = 0
+            with os.fdopen(os.dup(fd), "rb", closefd=True) as source:
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    prefix=prefix,
+                    suffix=".pdf",
+                    dir=self.manuals_dir,
+                    delete=False,
+                ) as snapshot:
+                    snapshot_path = Path(snapshot.name)
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        copied += len(chunk)
+                        digest.update(chunk)
+                        snapshot.write(chunk)
+                    snapshot.flush()
+                    os.fsync(snapshot.fileno())
+
+            if copied != database_size or digest.hexdigest() != database_sha256:
+                raise DocumentError(
+                    "Archived PDF hash no longer matches database provenance"
+                )
+            return snapshot_path
+        except Exception:
+            if snapshot_path is not None:
+                snapshot_path.unlink(missing_ok=True)
+            raise
+        finally:
+            os.close(fd)
 
     def import_pdf(
         self,
