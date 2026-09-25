@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,6 +56,7 @@ class Settings(BaseSettings):
     floppy_api_key: str | None = None
     floppy_timeout_seconds: float = 45.0
     floppy_verify_tls: bool = True
+    rag_provider: Literal["ollama", "lmstudio"] = "ollama"
     ollama_url: str | None = None
     ollama_embedding_model: str | None = None
     ollama_embedding_dimensions: int | None = Field(default=None, ge=64, le=4096)
@@ -66,6 +68,24 @@ class Settings(BaseSettings):
     )
     ollama_generation_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     ollama_verify_tls: bool = True
+    lmstudio_url: str | None = None
+    lmstudio_api_key: str | None = None
+    lmstudio_embedding_model: str | None = None
+    lmstudio_embedding_dimensions: int | None = Field(
+        default=None, ge=64, le=4096
+    )
+    lmstudio_embedding_batch_size: int = Field(default=16, ge=1, le=128)
+    lmstudio_embedding_timeout_seconds: float = Field(
+        default=60.0, ge=1.0, le=600.0
+    )
+    lmstudio_generation_model: str | None = None
+    lmstudio_generation_timeout_seconds: float = Field(
+        default=300.0, ge=1.0, le=900.0
+    )
+    lmstudio_generation_temperature: float = Field(
+        default=0.0, ge=0.0, le=2.0
+    )
+    lmstudio_verify_tls: bool = True
     retrieval_max_candidates: int = Field(default=10000, ge=100, le=100000)
     answer_max_evidence_chars: int = Field(default=30000, ge=1000, le=200000)
     answer_max_claims: int = Field(default=12, ge=1, le=100)
