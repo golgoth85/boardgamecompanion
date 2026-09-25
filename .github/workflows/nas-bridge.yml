@@ -1,0 +1,117 @@
+name: NAS bridge
+
+on:
+  push:
+    branches:
+      - ops/nas-bridge-bootstrap
+    paths:
+      - '.github/workflows/nas-bridge.yml'
+      - 'ops/nas-bridge/request.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: boardgamecompanion-nas-bridge
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: NAS bridge
+    runs-on: [self-hosted, linux, x64, boardgamecompanion-nas]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='ops/nas-bridge/request.txt'
+          test -f "$request"
+          operation="$(grep -E '^operation=' "$request" | tail -1 | cut -d= -f2-)"
+          branch="$(grep -E '^branch=' "$request" | tail -1 | cut -d= -f2- || true)"
+          expected_head="$(grep -E '^expected_head=' "$request" | tail -1 | cut -d= -f2- || true)"
+          case "$operation" in
+            inspect|publish_branch) ;;
+            *) echo "Unsupported operation: $operation" >&2; exit 2 ;;
+          esac
+          if [[ "$operation" == publish_branch ]]; then
+            [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "Invalid branch" >&2; exit 2; }
+            [[ ! "$branch" =~ (^|/)\.\.(/|$) ]] || { echo "Invalid branch traversal" >&2; exit 2; }
+            [[ "$expected_head" =~ ^[0-9a-f]{40}$ ]] || { echo "expected_head must be a full SHA-1" >&2; exit 2; }
+          fi
+          echo "operation=$operation" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "expected_head=$expected_head" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect NAS local checkout
+        id: nas
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='/nas/repo'
+          if [[ ! -d "$repo/.git" ]]; then
+            echo "nas_local_repo=NOT_MOUNTED"
+            echo "mounted=false" >> "$GITHUB_OUTPUT"
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config --global --add safe.directory "$repo"
+          current_branch="$(git -C "$repo" branch --show-current)"
+          current_head="$(git -C "$repo" rev-parse HEAD)"
+          porcelain="$(git -C "$repo" status --porcelain=v1)"
+          remote="$(git -C "$repo" remote get-url origin 2>/dev/null || true)"
+          echo "nas_local_repo=MOUNTED_READ_ONLY"
+          echo "nas_current_branch=$current_branch"
+          echo "nas_current_head=$current_head"
+          echo "nas_origin=$remote"
+          if [[ -n "$porcelain" ]]; then
+            echo "nas_worktree=DIRTY"
+          else
+            echo "nas_worktree=CLEAN"
+          fi
+          echo "mounted=true" >> "$GITHUB_OUTPUT"
+          echo "current_branch=$current_branch" >> "$GITHUB_OUTPUT"
+          echo "current_head=$current_head" >> "$GITHUB_OUTPUT"
+          if [[ -n "$porcelain" ]]; then echo "clean=false" >> "$GITHUB_OUTPUT"; else echo "clean=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Publish exact committed local branch
+        if: steps.request.outputs.operation == 'publish_branch'
+        env:
+          REQUEST_BRANCH: ${{ steps.request.outputs.branch }}
+          EXPECTED_HEAD: ${{ steps.request.outputs.expected_head }}
+          NAS_MOUNTED: ${{ steps.nas.outputs.mounted }}
+          NAS_CURRENT_BRANCH: ${{ steps.nas.outputs.current_branch }}
+          NAS_CURRENT_HEAD: ${{ steps.nas.outputs.current_head }}
+          NAS_CLEAN: ${{ steps.nas.outputs.clean }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='/nas/repo'
+          [[ "$NAS_MOUNTED" == true ]] || { echo "No local checkout mounted; refusing publish." >&2; exit 4; }
+          [[ "$NAS_CLEAN" == true ]] || { echo "Local worktree dirty; refusing publish." >&2; exit 4; }
+          [[ "$NAS_CURRENT_BRANCH" == "$REQUEST_BRANCH" ]] || { echo "Local branch mismatch." >&2; exit 4; }
+          [[ "$NAS_CURRENT_HEAD" == "$EXPECTED_HEAD" ]] || { echo "Local HEAD mismatch." >&2; exit 4; }
+          [[ "$(git -C "$repo" rev-parse "refs/heads/$REQUEST_BRANCH")" == "$EXPECTED_HEAD" ]] || { echo "Local branch ref mismatch." >&2; exit 4; }
+
+          scratch="$RUNNER_TEMP/local-publish"
+          rm -rf "$scratch"
+          git clone --no-local "$repo" "$scratch"
+          git -C "$scratch" checkout --detach "$EXPECTED_HEAD"
+          [[ "$(git -C "$scratch" rev-parse HEAD)" == "$EXPECTED_HEAD" ]] || { echo "Scratch SHA mismatch." >&2; exit 5; }
+
+          remote_before="$(git ls-remote "https://github.com/golgoth85/boardgamecompanion.git" "refs/heads/$REQUEST_BRANCH" | awk '{print $1}')"
+          if [[ -n "$remote_before" && "$remote_before" != "$EXPECTED_HEAD" ]]; then
+            echo "Remote branch differs: $remote_before; no force-push attempted." >&2
+            exit 6
+          fi
+          if [[ "$remote_before" != "$EXPECTED_HEAD" ]]; then
+            git -C "$scratch" push "https://x-access-token:$GH_TOKEN@github.com/golgoth85/boardgamecompanion.git" "$EXPECTED_HEAD:refs/heads/$REQUEST_BRANCH"
+          fi
+          remote_after="$(git ls-remote "https://github.com/golgoth85/boardgamecompanion.git" "refs/heads/$REQUEST_BRANCH" | awk '{print $1}')"
+          [[ "$remote_after" == "$EXPECTED_HEAD" ]] || { echo "Remote verification failed." >&2; exit 7; }
+          echo "published_branch=$REQUEST_BRANCH"
+          echo "published_sha=$remote_after"
