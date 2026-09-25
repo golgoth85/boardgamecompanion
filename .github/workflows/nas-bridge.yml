@@ -106,7 +106,21 @@ jobs:
           if ! docker inspect "$name" >/dev/null 2>&1; then
             echo "runtime_container=NOT_FOUND"
             echo "matching_containers:"
-            docker ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep -i 'boardgame' || true
+            docker ps -a --format '{{.Names}}|{{.Image}}|{{.Ports}}|{{.Status}}' |
+              grep -Ei 'boardgamecompanion|golgoth85/boardgamecompanion|8787' || true
+            echo "matching_images:"
+            docker image ls --digests --format '{{.Repository}}:{{.Tag}}|{{.Digest}}|{{.ID}}|{{.CreatedSince}}' |
+              grep -Ei 'boardgamecompanion|golgoth85/boardgamecompanion' || true
+            echo "host_health_probe:"
+            python3 - <<'PY'
+            import json, urllib.request
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8787/health", timeout=5) as r:
+                    print(f"host_health_status={r.status}")
+                    print("host_health_payload=" + json.dumps(json.load(r), sort_keys=True))
+            except Exception as exc:
+                print("host_health_error=" + type(exc).__name__ + ":" + str(exc))
+            PY
             exit 0
           fi
 
