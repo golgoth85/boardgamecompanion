@@ -12,19 +12,53 @@ for target in \
 do
   label="${target%%|*}"
   url="${target#*|}"
-  if payload="$(curl -fsS --max-time 8 "$url" 2>&1)"; then
+  tmp_body="$(mktemp)"
+  http_meta="$(curl -sS --max-time 8 -o "$tmp_body" -w '%{http_code}|%{content_type}' "$url" 2>&1 || true)"
+  status="${http_meta%%|*}"
+  content_type="${http_meta#*|}"
+  if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
     echo "${label}_reachable=yes"
+    echo "${label}_http_status=$status"
+    echo "${label}_content_type=$content_type"
+    echo "${label}_body_bytes=$(wc -c < "$tmp_body" | tr -d ' ')"
     if [[ "$label" == "lmstudio_openai" ]]; then
-      python3 -c 'import json,sys; p=json.load(sys.stdin); print("models="+",".join(sorted(str(x.get("id","")) for x in p.get("data",[]) if x.get("id"))))' <<<"$payload"
+      python3 - "$tmp_body" <<'PY' || true
+import json, pathlib, sys
+path=pathlib.Path(sys.argv[1])
+raw=path.read_text(errors="replace")
+try:
+    payload=json.loads(raw)
+except Exception:
+    print("lmstudio_openai_json=no")
+    print("lmstudio_openai_body_prefix=" + raw[:500].replace("\n","\\n"))
+else:
+    print("lmstudio_openai_json=yes")
+    print("models=" + ",".join(sorted(str(x.get("id","")) for x in payload.get("data",[]) if x.get("id"))))
+PY
     elif [[ "$label" == "lmstudio_ollama" || "$label" == "ollama_nas" ]]; then
-      python3 -c 'import json,sys; p=json.load(sys.stdin); print("models="+",".join(sorted(str(x.get("name","")) for x in p.get("models",[]) if x.get("name"))))' <<<"$payload"
+      python3 - "$tmp_body" <<'PY' || true
+import json, pathlib, sys
+path=pathlib.Path(sys.argv[1])
+raw=path.read_text(errors="replace")
+try:
+    payload=json.loads(raw)
+except Exception:
+    print("ollama_json=no")
+    print("ollama_body_prefix=" + raw[:500].replace("\n","\\n"))
+else:
+    print("ollama_json=yes")
+    print("models=" + ",".join(sorted(str(x.get("name","")) for x in payload.get("models",[]) if x.get("name"))))
+PY
     else
-      echo "${label}_payload=$payload"
+      echo "${label}_payload=$(cat "$tmp_body")"
     fi
   else
     echo "${label}_reachable=no"
-    echo "${label}_error=$payload"
+    echo "${label}_http_status=$status"
+    echo "${label}_content_type=$content_type"
+    echo "${label}_body_prefix=$(head -c 500 "$tmp_body" | tr '\n' ' ')"
   fi
+  rm -f "$tmp_body"
 done
 
 if ! command -v docker >/dev/null 2>&1; then
