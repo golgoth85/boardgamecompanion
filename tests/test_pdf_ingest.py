@@ -7,6 +7,7 @@ from threading import Barrier
 from fastapi.testclient import TestClient
 
 from boardgamecompanion.database import Database
+from boardgamecompanion.documents import DocumentStore
 from boardgamecompanion.main import app
 from boardgamecompanion.pdf_ingest import PdfIngestService
 from boardgamecompanion.settings import settings
@@ -413,3 +414,72 @@ def test_concurrent_non_force_pdf_ingest_persists_one_current_run(
         ).fetchone()["count"]
     assert succeeded == 1
     assert pages == 1
+
+
+def test_pdf_ingest_detects_archive_replacement_after_precommit_verification(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("VERSION-ONE")
+    replacement = _pdf_with_pages("VERSION-TWO")
+    original = DocumentStore.create_verified_snapshot
+    mutated = False
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+
+        def replace_after_commit_check(self, document_id, **kwargs):
+            nonlocal mutated
+            snapshot = original(self, document_id, **kwargs)
+            if kwargs.get("prefix") == ".p7a-commit-" and not mutated:
+                stored.write_bytes(replacement)
+                mutated = True
+            return snapshot
+
+        monkeypatch.setattr(
+            DocumentStore,
+            "create_verified_snapshot",
+            replace_after_commit_check,
+        )
+
+        response = client.post(f"/api/documents/{document['id']}/ingest")
+        assert response.status_code == 409
+        assert mutated is True
+
+        pages = client.get(f"/api/documents/{document['id']}/pages").json()
+        assert pages["count"] == 0
+        status = client.get(f"/api/documents/{document['id']}/ingest").json()
+        assert status["current"] is None
+        assert status["latest_run"]["status"] == "failed"
+        assert status["latest_run"]["error"]["code"] == "integrity_mismatch"
+
+
+def test_verified_document_handle_survives_path_replacement(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    trusted = _pdf_with_pages("Trusted descriptor bytes.")
+    replacement = _pdf_with_pages("Replacement descriptor bytes.")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, trusted)
+
+    database = Database(settings.database_path)
+    database.initialize()
+    store = DocumentStore(database, settings.manuals_dir)
+    handle = store.open_verified_file(
+        document["id"],
+        prefix=".serve-probe-",
+    )
+    try:
+        assert not list((tmp_path / "manuals").glob(".serve-probe-*"))
+        stored = next((tmp_path / "manuals" / "900001").glob("*.pdf"))
+        stored.write_bytes(replacement)
+        assert handle.read() == trusted
+    finally:
+        handle.close()
