@@ -37,6 +37,15 @@ class StaleAfterGenerationRetrieval(FakeRetrieval):
     def validate_retrieval_current(self, payload):
         super().validate_retrieval_current(payload)
         raise EmbeddingConflict("Retrieval evidence changed after it was selected")
+
+
+class StaleAtResponseBoundaryRetrieval(FakeRetrieval):
+    def validate_retrieval_current(self, payload):
+        super().validate_retrieval_current(payload)
+        if self.validate_calls == 2:
+            raise EmbeddingConflict(
+                "Retrieval evidence changed at response boundary"
+            )
 class FakeProvider:
     def __init__(self, output: dict) -> None:
         self.output = output
@@ -592,3 +601,36 @@ def test_answer_aborts_if_evidence_becomes_stale_during_generation() -> None:
 
     assert provider.generate_calls == 1
     assert retrieval.validate_calls == 1
+
+
+def test_model_declined_not_found_aborts_if_evidence_changes_at_response_boundary() -> None:
+    provider = FakeProvider({"status": "not_found", "claims": []})
+    retrieval = StaleAtResponseBoundaryRetrieval(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="Insufficient evidence")]
+        )
+    )
+    service = AnswerGenerationService(
+        retrieval,
+        provider,
+        max_evidence_chars=30000,
+        max_claims=12,
+    )
+
+    with pytest.raises(
+        EmbeddingConflict,
+        match="response boundary",
+    ):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type=None,
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+    assert provider.generate_calls == 1
+    assert retrieval.validate_calls == 2
