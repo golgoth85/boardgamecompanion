@@ -101,6 +101,10 @@ Canonical URL duplicates collapse to the highest-ranked candidate. Within equal 
 
 Every candidate URL remains untrusted until the actual fetch. P5A deliberately performs only deterministic, network-free validation and canonicalization: it does not resolve DNS names, make HTTP requests or attempt to defend against runtime DNS changes. P5B performs those runtime checks in a separate guarded fetcher; provider-specific discovery remains outside both the resolver and fetcher.
 
+Concrete discovery is implemented as isolated adapters orchestrated by a persistent catalog scheduler. Repos Production and Asmodee Italia parse only streamed, byte-bounded HTTPS official pages, require exact page-title identity, accept PDF links only on fixed official/CDN HTTPS allowlists and produce normalized candidates. Repos emits both Italian and English when present. RuleBook.org is a known-community fallback and cannot produce official or unattended candidates. An official adapter attaches a BGG ID only when cached exact-ID BGG API metadata independently matches both official-page title and an exact publisher allowlist; otherwise the official candidate retains `bgg_id=None` and P6A routes it to review. SQLite-backed per-origin gates remain authoritative across endpoint calls and restarts. One provider failure cannot abort the others. The scheduler persists due time, lease generation, failures and per-provider audit across restarts; rediscovery converges through a stable provider/URL/language/type key while the full candidate snapshot remains immutable audit evidence.
+
+BGG metadata enrichment is independent of Floppy. An optional approved application token enables exact-ID server-side XML API2 lookups with a persistent five-second rate gate, streaming byte ceiling, bounded `202`/throttle retries and persistent cache. Returned IDs must equal the catalog ID; cover URLs are limited to HTTPS BGG CDN hosts. BGG metadata supplies matching evidence but cannot raise source trust by itself. The CSV catalog remains the internal source of truth and all core paths work with no BGG token.
+
 ## Guarded rulebook fetch (P5B)
 
 `RulebookFetcher` accepts an already-normalized `RulebookCandidate` and keeps network I/O out of `RulebookResolver`. For each request target it reapplies the shared P5A HTTP(S) URL contract, resolves A/AAAA records, validates every returned address against the project-owned public-address policy, and rejects the entire target if any result is loopback, private, link-local, multicast, unspecified, reserved/special-use, IPv4-mapped IPv6, deprecated site-local, or otherwise outside the permitted public ranges. This policy is deliberately stable across the supported Python 3.12.x matrix and does not use `IPv4Address.is_global`/`IPv6Address.is_global` as the security boundary.
@@ -139,7 +143,7 @@ New targets are due immediately. Human approval creates the target synchronously
 
 The filesystem rename and SQLite commit are separate resource managers and cannot be made one atomic transaction. Normal exceptions remove the staged/final file before propagating, but a hard process termination in the narrow interval after final rename and before database commit can leave an unreferenced UUID-named PDF that a future maintenance/reconciliation task may safely remove. It cannot create a committed document row without the fenced database transaction. Update-run history is application append-only while its target exists; the schema intentionally cascades target/run deletion with the parent review/game, and no current public API exposes such parent deletion.
 
-P6B still does not add provider-specific discovery, polling of publisher indexes, BGG scraping, PDF parsing, embeddings or RAG. Discovery of a genuinely new candidate must still enter through the resolver/provider and P6A trust/review path. P7 begins only after a document has been safely archived.
+P6B still does not add provider-specific discovery, polling of publisher indexes, BGG scraping, PDF parsing, embeddings or RAG. Discovery of a genuinely new candidate must still enter through the resolver/provider and P6A trust/review path. After a document is safely archived, P6B inserts an automatic-index job in the same SQLite transaction. A separate restart-safe worker invokes the existing P7 ingest, chunk and embedding services idempotently and persists bounded retries; P6B itself remains unaware of parsing and model details.
 
 ## RAG
 
@@ -154,6 +158,7 @@ Answers should cite document and page and should not silently merge contradictor
 Optional integrations:
 
 - Floppy: catalog/collection synchronization over HTTP API.
+- BoardGameGeek XML API2: optional direct exact-ID metadata and cover enrichment.
 - Ollama: local generation/embedding endpoint.
 - Qdrant: vector store.
 

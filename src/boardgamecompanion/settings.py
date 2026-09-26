@@ -52,6 +52,27 @@ class Settings(BaseSettings):
     )
     rulebook_update_lease_seconds: int = Field(default=15 * 60, ge=60, le=3600)
     rulebook_update_batch_size: int = Field(default=5, ge=1, le=100)
+    rulebook_discovery_worker_enabled: bool = True
+    rulebook_discovery_poll_seconds: float = Field(default=300.0, ge=30.0, le=86400.0)
+    rulebook_discovery_batch_size: int = Field(default=3, ge=1, le=100)
+    rulebook_discovery_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+    rulebook_discovery_max_attempts: int = Field(default=2, ge=1, le=3)
+    rulebook_discovery_min_interval_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    rulebook_discovery_refresh_seconds: int = Field(default=14 * 24 * 60 * 60, ge=3600, le=365 * 24 * 60 * 60)
+    rulebook_discovery_empty_refresh_seconds: int = Field(default=3 * 24 * 60 * 60, ge=3600, le=365 * 24 * 60 * 60)
+    rulebook_discovery_retry_base_seconds: int = Field(default=6 * 60 * 60, ge=60, le=30 * 24 * 60 * 60)
+    rulebook_discovery_retry_max_seconds: int = Field(default=3 * 24 * 60 * 60, ge=60, le=365 * 24 * 60 * 60)
+    rulebook_discovery_lease_seconds: int = Field(default=15 * 60, ge=60, le=3600)
+    document_index_worker_enabled: bool = True
+    document_index_poll_seconds: float = Field(default=60.0, ge=5.0, le=86400.0)
+    document_index_batch_size: int = Field(default=1, ge=1, le=20)
+    document_index_retry_base_seconds: int = Field(default=15 * 60, ge=60, le=86400)
+    document_index_retry_max_seconds: int = Field(default=24 * 60 * 60, ge=60, le=30 * 24 * 60 * 60)
+    document_index_lease_seconds: int = Field(default=30 * 60, ge=60, le=7200)
+    bgg_application_token: str | None = None
+    bgg_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
+    bgg_min_interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
+    bgg_metadata_refresh_seconds: int = Field(default=30 * 24 * 60 * 60, ge=86400, le=365 * 24 * 60 * 60)
     floppy_url: str | None = None
     floppy_api_key: str | None = None
     floppy_timeout_seconds: float = 45.0

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1000,6 +1002,230 @@ def _chunk_embeddings(connection: sqlite3.Connection) -> None:
     )
 
 
+def _rulebook_discovery(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rulebook_discovery_games (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'running', 'succeeded', 'partial', 'failed')),
+            next_attempt_at TEXT NOT NULL,
+            last_started_at TEXT,
+            last_finished_at TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+            consecutive_failures INTEGER NOT NULL DEFAULT 0
+                CHECK(consecutive_failures >= 0),
+            providers_queried INTEGER NOT NULL DEFAULT 0
+                CHECK(providers_queried >= 0),
+            candidates_found INTEGER NOT NULL DEFAULT 0
+                CHECK(candidates_found >= 0),
+            review_items_created INTEGER NOT NULL DEFAULT 0
+                CHECK(review_items_created >= 0),
+            provider_failures INTEGER NOT NULL DEFAULT 0
+                CHECK(provider_failures >= 0),
+            last_error TEXT,
+            lease_owner TEXT,
+            lease_until TEXT,
+            lease_generation INTEGER NOT NULL DEFAULT 0
+                CHECK(lease_generation >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK(
+                (lease_owner IS NULL AND lease_until IS NULL)
+                OR (lease_owner IS NOT NULL AND lease_until IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_discovery_due
+        ON rulebook_discovery_games(enabled, next_attempt_at, lease_until)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rulebook_discovery_provider_runs (
+            id TEXT PRIMARY KEY,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            lease_generation INTEGER NOT NULL CHECK(lease_generation > 0),
+            provider TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('succeeded', 'failed')),
+            candidate_count INTEGER NOT NULL DEFAULT 0
+                CHECK(candidate_count >= 0),
+            error_type TEXT,
+            error_message TEXT,
+            CHECK(
+                (outcome = 'succeeded' AND error_type IS NULL AND error_message IS NULL)
+                OR (outcome = 'failed' AND error_type IS NOT NULL AND error_message IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rulebook_discovery_provider_game
+        ON rulebook_discovery_provider_runs(board_game_id, started_at DESC)
+        """
+    )
+
+
+def _automatic_document_indexing(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_index_jobs (
+            document_id TEXT PRIMARY KEY
+                REFERENCES game_documents(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'running', 'succeeded', 'failed')),
+            stage TEXT NOT NULL DEFAULT 'queued'
+                CHECK(stage IN ('queued', 'ingest', 'chunks', 'embeddings', 'complete')),
+            next_attempt_at TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+            consecutive_failures INTEGER NOT NULL DEFAULT 0
+                CHECK(consecutive_failures >= 0),
+            last_started_at TEXT,
+            last_finished_at TEXT,
+            last_error_code TEXT,
+            last_error_message TEXT,
+            lease_owner TEXT,
+            lease_until TEXT,
+            lease_generation INTEGER NOT NULL DEFAULT 0
+                CHECK(lease_generation >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK(
+                (lease_owner IS NULL AND lease_until IS NULL)
+                OR (lease_owner IS NOT NULL AND lease_until IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_index_jobs_due
+        ON document_index_jobs(status, next_attempt_at, lease_until)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_index_runs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL
+                REFERENCES game_documents(id) ON DELETE CASCADE,
+            lease_generation INTEGER NOT NULL CHECK(lease_generation > 0),
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK(outcome IN ('succeeded', 'failed')),
+            final_stage TEXT NOT NULL,
+            error_code TEXT,
+            error_message TEXT,
+            CHECK(
+                (outcome = 'succeeded' AND error_code IS NULL AND error_message IS NULL)
+                OR (outcome = 'failed' AND error_code IS NOT NULL AND error_message IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_index_runs_document
+        ON document_index_runs(document_id, started_at DESC)
+        """
+    )
+
+
+def _catalog_enrichment(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS board_game_enrichments (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            source TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            title TEXT,
+            original_title TEXT,
+            year_published INTEGER,
+            cover_url TEXT,
+            description TEXT,
+            publishers_json TEXT NOT NULL DEFAULT '[]',
+            categories_json TEXT NOT NULL DEFAULT '[]',
+            designers_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            fetched_at TEXT,
+            next_refresh_at TEXT NOT NULL,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0
+                CHECK(consecutive_failures >= 0),
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source, external_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_board_game_enrichment_refresh
+        ON board_game_enrichments(next_refresh_at)
+        """
+    )
+
+
+def _discovery_dedup_and_rate_limits(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(rulebook_review_items)").fetchall()
+    }
+    if "discovery_key" not in columns:
+        connection.execute(
+            "ALTER TABLE rulebook_review_items ADD COLUMN discovery_key TEXT"
+        )
+    rows = connection.execute(
+        """SELECT id,board_game_id,candidate_key,candidate_json,
+                  provider,url,language,document_type
+           FROM rulebook_review_items WHERE discovery_key IS NULL
+           ORDER BY created_at,id"""
+    ).fetchall()
+    seen: set[tuple[int, str]] = set()
+    for row in rows:
+        try:
+            snapshot = json.loads(row["candidate_json"])
+            candidate_bgg_id = snapshot.get("bgg_id") if isinstance(snapshot, dict) else None
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            candidate_bgg_id = f"corrupt:{row['candidate_key']}"
+        identity = "\0".join(
+            (
+                *(str(row[key]) for key in ("provider", "url", "language", "document_type")),
+                str(candidate_bgg_id or ""),
+            )
+        )
+        key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        marker = (int(row["board_game_id"]), key)
+        if marker not in seen:
+            connection.execute(
+                "UPDATE rulebook_review_items SET discovery_key=? WHERE id=?",
+                (key, row["id"]),
+            )
+            seen.add(marker)
+    connection.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_rulebook_review_discovery_key
+           ON rulebook_review_items(board_game_id, discovery_key)
+           WHERE discovery_key IS NOT NULL"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS external_request_limits (
+            scope TEXT PRIMARY KEY,
+            next_allowed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -1010,6 +1236,10 @@ MIGRATIONS = (
     Migration(6, "pdf-page-ingestion", _pdf_page_ingestion),
     Migration(7, "document-chunks", _document_chunks),
     Migration(8, "chunk-embeddings", _chunk_embeddings),
+    Migration(9, "rulebook-provider-discovery", _rulebook_discovery),
+    Migration(10, "automatic-document-indexing", _automatic_document_indexing),
+    Migration(11, "catalog-bgg-enrichment", _catalog_enrichment),
+    Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

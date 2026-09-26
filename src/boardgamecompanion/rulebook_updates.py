@@ -19,6 +19,7 @@ from boardgamecompanion.documents import (
     DocumentTooLarge,
     InvalidPdf,
 )
+from boardgamecompanion.document_indexing import enqueue_document_index
 from boardgamecompanion.rulebook_fetch import (
     RulebookFetcher,
     RulebookFetchPolicy,
@@ -1111,6 +1112,7 @@ class RulebookUpdateService:
                 connection: sqlite3.Connection,
                 document_id: str,
             ) -> None:
+                enqueue_document_index(connection, document_id)
                 completion_time = _utcnow()
                 created_completion["next_check_at"] = (
                     self._persist_completion_in_connection(

@@ -1,4 +1,4 @@
-# BoardGameCompanion roadmap after P6B
+# BoardGameCompanion roadmap after P7 and P5 remediation
 
 This roadmap is based on the repository state after P6B, not on historical chat state.
 
@@ -6,25 +6,14 @@ This roadmap is based on the repository state after P6B, not on historical chat 
 
 BoardGameCompanion remains the owner of board-game-specific workflows: physical
 copies, local barcode mappings, documents, rulebook lifecycle, retrieval and RAG.
-Floppy remains the provider/catalog boundary for BGG metadata that it already exposes.
+Floppy remains an optional collection synchronization integration, but is not a
+dependency for BGG metadata or rulebook discovery.
 
-Current Floppy supports a BGG provider backed by the XML API2. It exposes generic
-authenticated API routes for board-game search and detail. The provider currently
-returns title, image, description, categories, rating/count, year, player range,
-play time, minimum age, designers and publishers.
-
-Floppy also owns BGG credential resolution, encrypted instance/user storage,
-cache, outbound rate limiting, bounded retries and provider error handling.
-Therefore BoardGameCompanion must not store a second BGG token at this stage.
-The user-owned BGG token belongs in Floppy Settings > Metadata, or in Floppy's
-BGG_API_TOKEN / BGG_API_TOKEN_FILE operator configuration. BoardGameCompanion
-only needs its existing Floppy credential.
-
-The current Floppy BGG provider does not request or expose BGG version data,
-edition/language data, or version product codes. BGG XML API2 can return version
-information when thing requests use versions=1, but that is not a reason to
-duplicate the token in BoardGameCompanion. If edition-level enrichment becomes
-necessary, prefer extending the Floppy provider/API boundary first.
+BGC may use its own approved BGG XML API2 application token for exact-ID metadata
+enrichment. The token is optional runtime configuration and is never committed.
+BGC owns its cache, five-second rate gate, bounded retries and exact-identity
+validation. CSV import and all local domain workflows remain usable without it.
+Private BGG JSON APIs and authenticated scraping remain prohibited.
 
 BGG version product codes must not be treated as UPC/EAN/ISBN identifiers. The
 local invariant remains:
@@ -39,10 +28,10 @@ and must continue to work even when Floppy or BGG is offline.
 
 Close the current browser-compatibility gap first. Native BarcodeDetector is only
 an optimization; a local ZXing fallback is required. Manual input remains fallback.
-### M1 — BGG metadata enrichment through Floppy
+### M1 — direct optional BGG metadata enrichment
 
-Add an explicit enrichment model/adapter in BoardGameCompanion that consumes
-Floppy's BGG search/detail API without learning the BGG token.
+Use the official XML API2 from BoardGameCompanion for exact canonical IDs,
+independently of Floppy.
 
 Initial enrichment scope:
 - cover image;
@@ -56,10 +45,18 @@ Initial enrichment scope:
 - source/provenance and fetched/refreshed timestamps.
 
 Refresh must be controlled and cached. CSV import remains independently usable.
-Floppy/BGG outage must not make the local catalog unusable.
+BGG outage or an absent token must not make the local catalog unusable.
 
 Edition, language, version and product-code enrichment are deferred until the
 provider boundary exposes trustworthy data for them.
+
+### P5 remediation — concrete provider discovery
+
+Add isolated Repos Production, Asmodee Italia and RuleBook.org adapters; a
+persistent bounded catalog scheduler; per-provider failure audit; IT/EN discovery;
+and the existing resolver → P6A → P5B/P6B path. RuleBook.org remains community
+trust and cannot be auto-promoted. A separate persistent worker automatically
+runs the existing P7 ingest, chunk and embedding stages after archival.
 
 ### P7A — PDF parsing and page model
 

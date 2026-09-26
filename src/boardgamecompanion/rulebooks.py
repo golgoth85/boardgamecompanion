@@ -399,6 +399,9 @@ class RulebookQuery:
     year: int | None = None
     item_type: str | None = None
     publishers: tuple[str, ...] = ()
+    verified_publishers: tuple[str, ...] = ()
+    verified_titles: tuple[str, ...] = ()
+    bgg_identity_verified: bool = False
 
     def __post_init__(self) -> None:
         bgg_id = _normalize_positive_identifier(self.bgg_id, field_name="bgg_id")
@@ -420,6 +423,26 @@ class RulebookQuery:
                 if (text := _clean_optional(value, max_length=500)) is not None
             ),
         )
+        object.__setattr__(
+            self,
+            "verified_publishers",
+            tuple(
+                text
+                for value in self.verified_publishers
+                if (text := _clean_optional(value, max_length=500)) is not None
+            ),
+        )
+        object.__setattr__(
+            self,
+            "verified_titles",
+            tuple(
+                text
+                for value in self.verified_titles
+                if (text := _clean_optional(value, max_length=500)) is not None
+            ),
+        )
+        if type(self.bgg_identity_verified) is not bool:
+            raise ValueError("bgg_identity_verified must be a Python bool")
 
 
 @dataclass(frozen=True, slots=True)

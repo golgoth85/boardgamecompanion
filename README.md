@@ -20,12 +20,15 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
 - Persistent rulebook review queue with auditable unattended/manual approval state.
 - Scheduled guarded re-checks for approved rulebook candidates with version-by-hash archival and run audit.
+- Production rulebook discovery through isolated Repos Production, Asmodee Italia and RuleBook.org adapters, with persistent bounded catalog scheduling.
+- Optional direct BGG XML API2 metadata enrichment (including cover URLs), independent of Floppy.
+- Automatic persistent PDF ingest, chunk and embedding jobs after archival.
 - Page-preserving PDF ingestion, deterministic chunking, embeddings/retrieval and page-cited rulebook Q&A.
 - Ollama and LM Studio (OpenAI-compatible API) RAG providers with model-currentness fingerprinting.
 
 Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
 
-Because the BGG CSV export does not contain cover-image URLs, the current UI uses generated cover placeholders. Real cover art belongs to the later metadata-enrichment phase.
+Because the BGG CSV export does not contain cover-image URLs, placeholders remain the offline fallback. When an approved BGG application token is configured, BGC refreshes exact-ID metadata and displays BGG-hosted cover art without involving Floppy.
 
 Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
 
@@ -115,7 +118,17 @@ BGC_OLLAMA_EMBEDDING_MODEL=<embedding-model>
 BGC_OLLAMA_GENERATION_MODEL=<chat-model>
 ```
 
-After uploading a rulebook, use **Prepara indice** in the game detail page to run PDF parsing, chunking and embeddings. Then use **Chiedi al regolamento** for page-cited answers.
+Newly uploaded or automatically archived rulebooks are queued for PDF parsing, chunking and embeddings. **Prepara indice** remains an explicit retry/fallback control. Then use **Chiedi al regolamento** for page-cited answers.
+
+## Direct BGG metadata (optional)
+
+BGC uses the official server-side XML API2 endpoint for exact catalog BGG IDs. It never scrapes authenticated BGG pages and never depends on Floppy for metadata. Configure an approved application token only at runtime:
+
+```text
+BGC_BGG_APPLICATION_TOKEN=<approved application token>
+```
+
+Responses are streamed under a hard byte ceiling, cached persistently for 30 days and pass through a SQLite-backed five-second rate gate shared across requests and restarts. Exact returned identity is mandatory. Publisher, year, base/expansion type and alternate title become matching evidence; they never grant trust by themselves. CSV import, rulebook discovery and RAG continue to work when the token is absent or BGG is unavailable. Use is subject to the current BGG XML API terms; BGG data is not sent into the rulebook RAG corpus.
 
 ## BGG CSV import
 
@@ -234,6 +247,33 @@ BGC_RULEBOOK_UPDATE_BATCH_SIZE
 ```
 
 Provider-specific discovery and replacement-URL search are intentionally not part of scheduled updates. A new candidate must still pass through the resolver and P6A approval policy.
+
+## Rulebook discovery and automatic indexing
+
+`/discovery` exposes persistent per-game discovery state and a bounded batch control. The game detail page provides **Cerca regolamento ora**. Concrete adapters remain isolated from the resolver:
+
+- Repos Production official game pages, restricted to its official Asmodee CDN and IT/EN rulebooks;
+- Asmodee Italia official product pages and Italian rulebooks, restricted to its official CDN;
+- RuleBook.org as a known-community fallback, always routed to human review.
+
+Discovery requires exact page/title identity and uses catalog/BGG publisher, year and item-type clues. An adapter may attach the exact BGG ID only after independently cross-checking the exact-ID BGG API title/publisher metadata against the official page; without that cached evidence even an official source enters review. Official unattended approval still requires the existing P6A policy. Results are idempotently deduplicated by stable provider/URL/language/type identity while preserving immutable audit snapshots; provider failures are isolated and audited. Games with no archived rulebook are processed first. P6B remains responsible only for guarded fetch/update of approved URLs.
+
+Successful P6B archival transactionally queues a separate P7 job. The job runs existing ingest, chunk and embedding services in order, persists retries across restarts and never silently changes the configured embedding provider.
+
+Schedulers can be tuned with `BGC_RULEBOOK_DISCOVERY_*` and `BGC_DOCUMENT_INDEX_*` environment variables. Defaults are deliberately conservative: discovery polls every five minutes with a three-game batch and provider-local rate gates; indexing polls every minute with a one-document batch.
+
+Relevant endpoints:
+
+```text
+GET  /api/rulebook-discovery
+POST /api/rulebook-discovery/run?limit=5
+GET  /api/games/{bgg_id}/rulebook-discovery
+POST /api/games/{bgg_id}/rulebook-discovery/run
+GET  /api/games/{bgg_id}/bgg-metadata
+POST /api/games/{bgg_id}/bgg-metadata/refresh
+GET  /api/document-index-jobs
+POST /api/documents/{document_id}/auto-index/run
+```
 
 ## Catalog API
 
