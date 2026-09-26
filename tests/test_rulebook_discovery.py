@@ -33,6 +33,7 @@ def query(**overrides) -> RulebookQuery:
         "item_type": "boardgame",
         "publishers": ("Repos Production",),
         "verified_publishers": ("Repos Production",),
+        "verified_titles": ("7 Wonders Duel",),
         "bgg_identity_verified": True,
     }
     values.update(overrides)
@@ -86,6 +87,10 @@ def test_official_adapter_does_not_self_attest_bgg_identity_without_api_crossche
     candidates = tuple(provider.discover(unverified))
     assert candidates and all(item.bgg_id is None for item in candidates)
     assert all(item.confidence == 100 for item in candidates)
+
+    wrong_title = query(verified_titles=("Different BGG Game",))
+    candidates = tuple(provider.discover(wrong_title))
+    assert candidates and all(item.bgg_id is None for item in candidates)
 
 
 def test_publisher_compatibility_does_not_use_substring_matches() -> None:

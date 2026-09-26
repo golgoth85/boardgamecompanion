@@ -259,6 +259,15 @@ def _title_matches(query: RulebookQuery, observed: str | None) -> bool:
     )
 
 
+def _verified_title_matches(query: RulebookQuery, observed: str | None) -> bool:
+    value = _match_text(observed)
+    return bool(
+        query.bgg_identity_verified
+        and value
+        and value in {_match_text(title) for title in query.verified_titles}
+    )
+
+
 class _OfficialPageParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -353,7 +362,6 @@ class ReposProductionProvider:
         publisher_compatible = _publisher_matches(query, self._PUBLISHERS)
         if not publisher_compatible:
             return ()
-        identity_verified = _verified_publisher_matches(query, self._PUBLISHERS)
 
         seen_pages: set[str] = set()
         candidates: list[RulebookCandidate] = []
@@ -374,6 +382,9 @@ class ReposProductionProvider:
             page = _parse_official_page(response.content)
             if not _title_matches(query, page.title):
                 continue
+            identity_verified = _verified_publisher_matches(
+                query, self._PUBLISHERS
+            ) and _verified_title_matches(query, page.title)
 
             seen_languages: set[str] = set()
             for href, label in page.links:
@@ -441,7 +452,6 @@ class AsmodeeItaliaProvider:
         self.http = http or ProviderHttpClient()
 
     def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
-        publisher_verified = _verified_publisher_matches(query, self._PUBLISHERS)
         page_url = f"{self._BASE}{quote(_slug(query.title), safe='-')}/"
         response = self.http.get(
             page_url,
@@ -453,6 +463,9 @@ class AsmodeeItaliaProvider:
         page = _parse_official_page(response.content)
         if not _title_matches(query, page.title):
             return ()
+        publisher_verified = _verified_publisher_matches(
+            query, self._PUBLISHERS
+        ) and _verified_title_matches(query, page.title)
 
         candidates: list[RulebookCandidate] = []
         for href, label in page.links:

@@ -97,6 +97,21 @@ class RulebookDiscoveryService:
                 and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
                 else ()
             ),
+            verified_titles=(
+                tuple(
+                    dict.fromkeys(
+                        str(value)
+                        for value in (
+                            metadata.get("title"),
+                            metadata.get("original_title"),
+                        )
+                        if value
+                    )
+                )
+                if metadata and metadata.get("fetched_at")
+                and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
+                else ()
+            ),
             bgg_identity_verified=bool(
                 metadata
                 and metadata.get("fetched_at")

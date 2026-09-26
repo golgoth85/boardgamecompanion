@@ -400,6 +400,7 @@ class RulebookQuery:
     item_type: str | None = None
     publishers: tuple[str, ...] = ()
     verified_publishers: tuple[str, ...] = ()
+    verified_titles: tuple[str, ...] = ()
     bgg_identity_verified: bool = False
 
     def __post_init__(self) -> None:
@@ -428,6 +429,15 @@ class RulebookQuery:
             tuple(
                 text
                 for value in self.verified_publishers
+                if (text := _clean_optional(value, max_length=500)) is not None
+            ),
+        )
+        object.__setattr__(
+            self,
+            "verified_titles",
+            tuple(
+                text
+                for value in self.verified_titles
                 if (text := _clean_optional(value, max_length=500)) is not None
             ),
         )
