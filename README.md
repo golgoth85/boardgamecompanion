@@ -59,7 +59,9 @@ OpenAPI/Swagger UI: `http://<server>:8787/docs`
 
 ## RAG provider
 
-BoardGameCompanion supports either Ollama or LM Studio for rulebook embeddings and answer generation. The provider is selected at container startup.
+BoardGameCompanion supports Ollama, LM Studio and Google Gemini for rulebook embeddings and answer generation. Embedding and generation can be selected independently at container startup.
+
+`BGC_RAG_PROVIDER` remains the backwards-compatible default. Set `BGC_EMBEDDING_PROVIDER` and/or `BGC_GENERATION_PROVIDER` to override either side independently. There is deliberately no implicit provider fallback: a configured provider failure is surfaced instead of silently changing provenance, cost or currentness semantics.
 
 ### LM Studio
 
@@ -76,6 +78,31 @@ BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
 ```
 
 `BGC_LMSTUDIO_API_KEY` is optional when LM Studio authentication is disabled. `BGC_LMSTUDIO_EMBEDDING_DIMENSIONS`, batch size, timeouts and TLS verification can also be overridden through the corresponding `BGC_LMSTUDIO_*` settings.
+
+### Gemini
+
+Gemini uses Google's HTTPS Gemini API directly through `httpx`; no Google SDK is required. The API key is passed only in the `x-goog-api-key` request header and must be supplied through runtime configuration.
+
+Default models:
+
+```text
+BGC_GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+BGC_GEMINI_EMBEDDING_DIMENSIONS=768
+BGC_GEMINI_GENERATION_MODEL=gemini-3.8-flash
+```
+
+To use Gemini for generation while keeping local embeddings:
+
+```text
+BGC_RAG_PROVIDER=lmstudio
+BGC_EMBEDDING_PROVIDER=lmstudio
+BGC_GENERATION_PROVIDER=gemini
+BGC_GEMINI_API_KEY=<runtime secret>
+```
+
+Gemini model metadata is resolved before use and a stable metadata fingerprint (including the reported model version) is persisted in provider descriptors, so model/version changes participate in the same currentness boundary as local providers.
+
+Cloud tradeoffs: Gemini can keep rule answering available when the local LM Studio PC is off, but rulebook excerpts/questions sent to Gemini leave the LAN and are subject to Google's current Gemini API pricing, quota, data-use and retention terms. Review those terms before enabling it. The API key must never be committed to Git or written to application logs.
 
 ### Ollama
 
