@@ -133,6 +133,7 @@ def _discovery_key(candidate: RulebookCandidate) -> str:
             candidate.url,
             candidate.language,
             candidate.document_type,
+            str(candidate.bgg_id or ""),
         )
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()

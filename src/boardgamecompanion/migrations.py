@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1185,15 +1186,23 @@ def _discovery_dedup_and_rate_limits(connection: sqlite3.Connection) -> None:
             "ALTER TABLE rulebook_review_items ADD COLUMN discovery_key TEXT"
         )
     rows = connection.execute(
-        """SELECT id,board_game_id,provider,url,language,document_type
+        """SELECT id,board_game_id,candidate_key,candidate_json,
+                  provider,url,language,document_type
            FROM rulebook_review_items WHERE discovery_key IS NULL
            ORDER BY created_at,id"""
     ).fetchall()
     seen: set[tuple[int, str]] = set()
     for row in rows:
+        try:
+            snapshot = json.loads(row["candidate_json"])
+            candidate_bgg_id = snapshot.get("bgg_id") if isinstance(snapshot, dict) else None
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            candidate_bgg_id = f"corrupt:{row['candidate_key']}"
         identity = "\0".join(
-            str(row[key])
-            for key in ("provider", "url", "language", "document_type")
+            (
+                *(str(row[key]) for key in ("provider", "url", "language", "document_type")),
+                str(candidate_bgg_id or ""),
+            )
         )
         key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         marker = (int(row["board_game_id"]), key)

@@ -203,6 +203,21 @@ def test_rediscovery_key_ignores_mutable_non_identity_metadata(tmp_path: Path) -
     assert second["id"] == first["id"]
 
 
+def test_verified_identity_can_supersede_prior_unverified_discovery(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    with TestClient(app) as client:
+        import_fixture(client)
+        unverified, first_created = submit_candidate(
+            official_payload(bgg_id=None, confidence=94)
+        )
+        verified, second_created = submit_candidate(
+            official_payload(bgg_id=900001, confidence=100)
+        )
+    assert first_created is True and unverified["status"] == "pending"
+    assert second_created is True and verified["status"] == "approved"
+    assert verified["id"] != unverified["id"]
+
+
 def test_policy_requires_exact_bgg_identity_and_it_or_en_language(
     tmp_path: Path,
 ) -> None:
