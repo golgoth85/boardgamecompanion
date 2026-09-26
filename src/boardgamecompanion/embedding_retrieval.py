@@ -24,6 +24,11 @@ from boardgamecompanion.chunk_index import (
     ChunkIndexSourceNotReady,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.gemini import (
+    GeminiModelMetadataError,
+    resolve_model as resolve_gemini_model,
+    validate_model_id as validate_gemini_model_id,
+)
 from boardgamecompanion.lmstudio import LMStudioModelMetadataError, resolve_model
 
 VECTOR_FORMAT = "f32le"
@@ -467,6 +472,115 @@ def _row_to_run(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "chunk_count": row["chunk_count"],
         "created_at": row["created_at"],
     }
+
+
+class GeminiEmbeddingProvider:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str,
+        requested_dimensions: int | None,
+        timeout_seconds: float,
+        verify_tls: bool,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = validate_gemini_model_id(model)
+        self.api_key = api_key.strip()
+        self.requested_dimensions = requested_dimensions
+        self.timeout_seconds = float(timeout_seconds)
+        self.verify_tls = bool(verify_tls)
+        self._client = client
+        if not self.base_url.startswith("https://"):
+            raise ValueError("Gemini URL must use https://")
+        if not self.api_key:
+            raise ValueError("Gemini API key is required")
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        headers = dict(kwargs.pop("headers", {}))
+        headers["x-goog-api-key"] = self.api_key
+        try:
+            if self._client is not None:
+                response = self._client.request(method, path, headers=headers, **kwargs)
+            else:
+                with httpx.Client(
+                    base_url=self.base_url,
+                    timeout=self.timeout_seconds,
+                    verify=self.verify_tls,
+                ) as client:
+                    response = client.request(method, path, headers=headers, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.TimeoutException as exc:
+            raise EmbeddingProviderError("Gemini embedding request timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            raise EmbeddingProviderError(
+                f"Gemini embedding request failed with HTTP {exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise EmbeddingProviderError("Gemini embedding endpoint is unreachable") from exc
+
+    def describe(self) -> EmbeddingDescriptor:
+        response = self._request("GET", f"/v1beta/models/{self.model}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EmbeddingProviderError("Gemini model metadata returned invalid JSON") from exc
+        try:
+            resolved_model, digest = resolve_gemini_model(
+                payload,
+                configured_model=self.model,
+                required_method="embedContent",
+            )
+        except GeminiModelMetadataError as exc:
+            raise EmbeddingProviderError(str(exc)) from exc
+        return EmbeddingDescriptor(
+            provider="gemini",
+            model=resolved_model,
+            model_digest=digest,
+            requested_dimensions=self.requested_dimensions,
+            endpoint=self.base_url,
+        )
+
+    def embed(
+        self,
+        texts: list[str],
+        descriptor: EmbeddingDescriptor,
+    ) -> list[list[float]]:
+        if not texts:
+            return []
+        requests: list[dict[str, Any]] = []
+        for text in texts:
+            request: dict[str, Any] = {
+                "model": f"models/{descriptor.model}",
+                "content": {"parts": [{"text": text}]},
+            }
+            if descriptor.requested_dimensions is not None:
+                request["embedContentConfig"] = {
+                    "outputDimensionality": descriptor.requested_dimensions,
+                }
+            requests.append(request)
+        response = self._request(
+            "POST",
+            f"/v1beta/models/{descriptor.model}:batchEmbedContents",
+            json={"requests": requests},
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EmbeddingProviderError("Gemini embedding response is invalid JSON") from exc
+        embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+        if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+            raise EmbeddingProviderError("Gemini embedding response count is invalid")
+        result: list[list[float]] = []
+        for item in embeddings:
+            values = item.get("values") if isinstance(item, dict) else None
+            if not isinstance(values, list):
+                raise EmbeddingProviderError("Gemini embedding vector is invalid")
+            result.append(_normalize_vector(values))
+        return result
 
 
 class EmbeddingRetrievalService:
