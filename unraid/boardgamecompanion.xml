@@ -15,6 +15,12 @@
   <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/boardgamecompanion" Mode="rw" Description="Configuration and database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/boardgamecompanion</Config>
   <Config Name="Import" Target="/data/import" Default="/mnt/user/boardgames/import" Mode="rw" Description="BGG CSV import folder" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/boardgames/import</Config>
   <Config Name="Manuals" Target="/data/manuals" Default="/mnt/user/boardgames/manuals" Mode="rw" Description="Rulebook archive" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/boardgames/manuals</Config>
+  <Config Name="RAG Provider" Target="BGC_RAG_PROVIDER" Default="ollama" Mode="" Description="RAG provider: ollama or lmstudio" Type="Variable" Display="advanced" Required="false" Mask="false">ollama</Config>
+  <Config Name="LM Studio URL" Target="BGC_LMSTUDIO_URL" Default="" Mode="" Description="LM Studio server base URL, for example http://192.168.1.249:1234" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="LM Studio API Key" Target="BGC_LMSTUDIO_API_KEY" Default="" Mode="" Description="Optional LM Studio API token" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="LM Studio Embedding Model" Target="BGC_LMSTUDIO_EMBEDDING_MODEL" Default="" Mode="" Description="LM Studio embedding model identifier" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="LM Studio Generation Model" Target="BGC_LMSTUDIO_GENERATION_MODEL" Default="" Mode="" Description="LM Studio chat model identifier" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="LM Studio Generation Timeout" Target="BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS" Default="300" Mode="" Description="Generation timeout in seconds; allow extra time for JIT model loading" Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
   <Config Name="Ollama URL" Target="BGC_OLLAMA_URL" Default="" Mode="" Description="Optional Ollama URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Qdrant URL" Target="BGC_QDRANT_URL" Default="" Mode="" Description="Optional Qdrant URL" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
 </Container>

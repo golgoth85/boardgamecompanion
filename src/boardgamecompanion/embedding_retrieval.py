@@ -24,6 +24,7 @@ from boardgamecompanion.chunk_index import (
     ChunkIndexSourceNotReady,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.lmstudio import LMStudioModelMetadataError, resolve_model
 
 VECTOR_FORMAT = "f32le"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -293,6 +294,144 @@ class OllamaEmbeddingProvider:
             result.append(_normalize_vector(vector))
         return result
 
+
+
+class LMStudioEmbeddingProvider:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        requested_dimensions: int | None,
+        timeout_seconds: float,
+        verify_tls: bool,
+        api_key: str | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model.strip()
+        self.requested_dimensions = requested_dimensions
+        self.timeout_seconds = float(timeout_seconds)
+        self.verify_tls = bool(verify_tls)
+        self.api_key = (api_key or "").strip() or None
+        self._client = client
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError("LM Studio URL must start with http:// or https://")
+        if not self.model:
+            raise ValueError("LM Studio embedding model is required")
+
+    def _headers(self) -> dict[str, str]:
+        if self.api_key is None:
+            return {}
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        headers = dict(kwargs.pop("headers", {}))
+        headers.update(self._headers())
+        try:
+            if self._client is not None:
+                response = self._client.request(
+                    method,
+                    path,
+                    headers=headers,
+                    **kwargs,
+                )
+            else:
+                with httpx.Client(
+                    base_url=self.base_url,
+                    timeout=self.timeout_seconds,
+                    verify=self.verify_tls,
+                ) as client:
+                    response = client.request(
+                        method,
+                        path,
+                        headers=headers,
+                        **kwargs,
+                    )
+            response.raise_for_status()
+            return response
+        except httpx.TimeoutException as exc:
+            raise EmbeddingProviderError(
+                "LM Studio embedding request timed out"
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise EmbeddingProviderError(
+                "LM Studio embedding request failed with HTTP "
+                f"{exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise EmbeddingProviderError(
+                "LM Studio embedding endpoint is unreachable"
+            ) from exc
+
+    def describe(self) -> EmbeddingDescriptor:
+        response = self._request("GET", "/api/v1/models")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EmbeddingProviderError(
+                "LM Studio model list returned invalid JSON"
+            ) from exc
+        try:
+            resolved_model, digest = resolve_model(
+                payload,
+                configured_model=self.model,
+                expected_type="embedding",
+            )
+        except LMStudioModelMetadataError as exc:
+            raise EmbeddingProviderError(str(exc)) from exc
+        return EmbeddingDescriptor(
+            provider="lmstudio",
+            model=resolved_model,
+            model_digest=digest,
+            requested_dimensions=self.requested_dimensions,
+            endpoint=self.base_url,
+        )
+
+    def embed(
+        self,
+        texts: list[str],
+        descriptor: EmbeddingDescriptor,
+    ) -> list[list[float]]:
+        if not texts:
+            return []
+        body: dict[str, Any] = {
+            "model": descriptor.model,
+            "input": texts,
+        }
+        if descriptor.requested_dimensions is not None:
+            body["dimensions"] = descriptor.requested_dimensions
+        response = self._request("POST", "/v1/embeddings", json=body)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise EmbeddingProviderError(
+                "LM Studio embedding response is invalid JSON"
+            ) from exc
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or len(data) != len(texts):
+            raise EmbeddingProviderError(
+                "LM Studio embedding response count is invalid"
+            )
+        ordered: list[tuple[int, list[float]]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                raise EmbeddingProviderError(
+                    "LM Studio embedding response item is invalid"
+                )
+            index = item.get("index")
+            vector = item.get("embedding")
+            if not isinstance(index, int) or not isinstance(vector, list):
+                raise EmbeddingProviderError(
+                    "LM Studio embedding response item is invalid"
+                )
+            ordered.append((index, vector))
+        ordered.sort(key=lambda item: item[0])
+        if [index for index, _ in ordered] != list(range(len(texts))):
+            raise EmbeddingProviderError(
+                "LM Studio embedding response indexes are invalid"
+            )
+        return [_normalize_vector(vector) for _, vector in ordered]
 
 def _input_set_sha256(chunk_run_id: str, chunks: list[dict[str, Any]]) -> str:
     return _sha256_json(

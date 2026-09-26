@@ -8,6 +8,7 @@ from typing import Any, Protocol
 import httpx
 
 from boardgamecompanion.embedding_retrieval import EmbeddingRetrievalService
+from boardgamecompanion.lmstudio import LMStudioModelMetadataError, resolve_model
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EVIDENCE_ID_RE = re.compile(r"^E[1-9][0-9]*$")
@@ -248,6 +249,186 @@ class OllamaGenerationProvider:
             raise AnswerProtocolError("Generated structured answer is not an object")
         return structured
 
+
+
+class LMStudioGenerationProvider:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        timeout_seconds: float,
+        verify_tls: bool,
+        temperature: float,
+        api_key: str | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model.strip()
+        self.timeout_seconds = float(timeout_seconds)
+        self.verify_tls = bool(verify_tls)
+        self.temperature = float(temperature)
+        self.api_key = (api_key or "").strip() or None
+        self._client = client
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError("LM Studio URL must start with http:// or https://")
+        if not self.model:
+            raise ValueError("LM Studio generation model is required")
+        if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError(
+                "LM Studio generation temperature must be between 0 and 2"
+            )
+
+    def _headers(self) -> dict[str, str]:
+        if self.api_key is None:
+            return {}
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        headers = dict(kwargs.pop("headers", {}))
+        headers.update(self._headers())
+        try:
+            if self._client is not None:
+                response = self._client.request(
+                    method,
+                    path,
+                    headers=headers,
+                    **kwargs,
+                )
+            else:
+                with httpx.Client(
+                    base_url=self.base_url,
+                    timeout=self.timeout_seconds,
+                    verify=self.verify_tls,
+                ) as client:
+                    response = client.request(
+                        method,
+                        path,
+                        headers=headers,
+                        **kwargs,
+                    )
+            response.raise_for_status()
+            return response
+        except httpx.TimeoutException as exc:
+            raise AnswerProviderError(
+                "LM Studio generation request timed out"
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise AnswerProviderError(
+                "LM Studio generation request failed with HTTP "
+                f"{exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AnswerProviderError(
+                "LM Studio generation endpoint is unreachable"
+            ) from exc
+
+    def describe(self) -> GenerationDescriptor:
+        response = self._request("GET", "/api/v1/models")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AnswerProviderError(
+                "LM Studio model list returned invalid JSON"
+            ) from exc
+        try:
+            resolved_model, digest = resolve_model(
+                payload,
+                configured_model=self.model,
+                expected_type="llm",
+            )
+        except LMStudioModelMetadataError as exc:
+            raise AnswerProviderError(str(exc)) from exc
+        return GenerationDescriptor(
+            provider="lmstudio",
+            model=resolved_model,
+            model_digest=digest,
+            endpoint=self.base_url,
+        )
+
+    def generate(
+        self,
+        *,
+        query: str,
+        evidence: list[dict[str, Any]],
+        descriptor: GenerationDescriptor,
+        max_claims: int,
+    ) -> dict[str, Any]:
+        user_payload = {
+            "question": query,
+            "maximum_claims": max_claims,
+            "evidence": evidence,
+        }
+        response = self._request(
+            "POST",
+            "/v1/chat/completions",
+            json={
+                "model": descriptor.model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            user_payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    },
+                ],
+                "temperature": self.temperature,
+                "stream": False,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "boardgamecompanion_answer",
+                        "strict": True,
+                        "schema": ANSWER_SCHEMA,
+                    },
+                },
+            },
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AnswerProviderError(
+                "LM Studio generation response is invalid JSON"
+            ) from exc
+        choices = payload.get("choices") if isinstance(payload, dict) else None
+        if not isinstance(choices, list) or not choices:
+            raise AnswerProviderError(
+                "LM Studio generation response has no choices"
+            )
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise AnswerProviderError(
+                "LM Studio generation response choice is invalid"
+            )
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise AnswerProviderError(
+                "LM Studio generation response has no message"
+            )
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise AnswerProviderError(
+                "LM Studio generation message content is invalid"
+            )
+        if len(content.encode("utf-8")) > MAX_GENERATION_JSON_BYTES:
+            raise AnswerProtocolError(
+                "Generated structured answer exceeds safety limit"
+            )
+        try:
+            structured = json.loads(content)
+        except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+            raise AnswerProtocolError(
+                "Generated structured answer is invalid JSON"
+            ) from exc
+        if not isinstance(structured, dict):
+            raise AnswerProtocolError(
+                "Generated structured answer is not an object"
+            )
+        return structured
 
 def _bounded_text(value: Any, *, label: str, max_chars: int) -> str:
     if not isinstance(value, str):
