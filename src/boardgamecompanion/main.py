@@ -15,6 +15,7 @@ from boardgamecompanion.answer_generation import (
     AnswerProtocolError,
     AnswerProviderError,
     AnswerSourceNotReady,
+    GeminiGenerationProvider,
     LMStudioGenerationProvider,
     OllamaGenerationProvider,
 )
@@ -62,6 +63,7 @@ from boardgamecompanion.embedding_retrieval import (
     EmbeddingProviderError,
     EmbeddingRetrievalService,
     EmbeddingSourceNotReady,
+    GeminiEmbeddingProvider,
     LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
@@ -679,7 +681,8 @@ def get_document_chunk(chunk_id: str) -> dict[str, object]:
 
 
 def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
-    if settings.rag_provider == "lmstudio":
+    selected = settings.effective_embedding_provider
+    if selected == "lmstudio":
         if not settings.lmstudio_url or not settings.lmstudio_embedding_model:
             raise HTTPException(
                 status_code=503,
@@ -697,12 +700,27 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
             api_key=settings.lmstudio_api_key,
         )
         batch_size = settings.lmstudio_embedding_batch_size
+    elif selected == "gemini":
+        if not settings.gemini_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini embedding provider is not configured; set BGC_GEMINI_API_KEY",
+            )
+        provider = GeminiEmbeddingProvider(
+            base_url=settings.gemini_url,
+            model=settings.gemini_embedding_model,
+            api_key=settings.gemini_api_key,
+            requested_dimensions=settings.gemini_embedding_dimensions,
+            timeout_seconds=settings.gemini_embedding_timeout_seconds,
+            verify_tls=settings.gemini_verify_tls,
+        )
+        batch_size = settings.gemini_embedding_batch_size
     else:
         if not settings.ollama_url or not settings.ollama_embedding_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "Embedding provider is not configured; set BGC_OLLAMA_URL "
+                    "Ollama embedding provider is not configured; set BGC_OLLAMA_URL "
                     "and BGC_OLLAMA_EMBEDDING_MODEL"
                 ),
             )
@@ -797,18 +815,14 @@ def retrieve_game_evidence(
 
 
 def get_answer_generation_service() -> AnswerGenerationService:
-    if settings.rag_provider == "lmstudio":
-        if (
-            not settings.lmstudio_url
-            or not settings.lmstudio_embedding_model
-            or not settings.lmstudio_generation_model
-        ):
+    selected = settings.effective_generation_provider
+    if selected == "lmstudio":
+        if not settings.lmstudio_url or not settings.lmstudio_generation_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "LM Studio RAG provider is not configured; set "
-                    "BGC_LMSTUDIO_URL, BGC_LMSTUDIO_EMBEDDING_MODEL and "
-                    "BGC_LMSTUDIO_GENERATION_MODEL"
+                    "LM Studio generation provider is not configured; set "
+                    "BGC_LMSTUDIO_URL and BGC_LMSTUDIO_GENERATION_MODEL"
                 ),
             )
         provider = LMStudioGenerationProvider(
@@ -819,18 +833,27 @@ def get_answer_generation_service() -> AnswerGenerationService:
             temperature=settings.lmstudio_generation_temperature,
             api_key=settings.lmstudio_api_key,
         )
+    elif selected == "gemini":
+        if not settings.gemini_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini generation provider is not configured; set BGC_GEMINI_API_KEY",
+            )
+        provider = GeminiGenerationProvider(
+            base_url=settings.gemini_url,
+            model=settings.gemini_generation_model,
+            api_key=settings.gemini_api_key,
+            timeout_seconds=settings.gemini_generation_timeout_seconds,
+            verify_tls=settings.gemini_verify_tls,
+            temperature=settings.gemini_generation_temperature,
+        )
     else:
-        if (
-            not settings.ollama_url
-            or not settings.ollama_embedding_model
-            or not settings.ollama_generation_model
-        ):
+        if not settings.ollama_url or not settings.ollama_generation_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "RAG providers are not configured; set BGC_OLLAMA_URL, "
-                    "BGC_OLLAMA_EMBEDDING_MODEL and "
-                    "BGC_OLLAMA_GENERATION_MODEL"
+                    "Ollama generation provider is not configured; set BGC_OLLAMA_URL "
+                    "and BGC_OLLAMA_GENERATION_MODEL"
                 ),
             )
         provider = OllamaGenerationProvider(

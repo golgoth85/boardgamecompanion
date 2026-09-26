@@ -11,12 +11,20 @@ services:
       BGC_MANUALS_DIR: /data/manuals
       # BGC_FLOPPY_URL: http://floppy:8000
       # BGC_FLOPPY_API_KEY: ""
-      # RAG provider: "ollama" (default) or "lmstudio".
+      # Legacy RAG provider default: "ollama", "lmstudio" or "gemini".
       # BGC_RAG_PROVIDER: lmstudio
+      # Independent overrides (optional):
+      # BGC_EMBEDDING_PROVIDER: lmstudio
+      # BGC_GENERATION_PROVIDER: gemini
       # BGC_LMSTUDIO_URL: http://192.168.1.249:1234
       # BGC_LMSTUDIO_EMBEDDING_MODEL: text-embedding-qwen3-embedding-0.6b
       # BGC_LMSTUDIO_GENERATION_MODEL: qwen3-14b
       # BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS: "300"
+      # Gemini (API key required; never commit it):
+      # BGC_GEMINI_API_KEY: ""
+      # BGC_GEMINI_EMBEDDING_MODEL: gemini-embedding-2
+      # BGC_GEMINI_EMBEDDING_DIMENSIONS: "768"
+      # BGC_GEMINI_GENERATION_MODEL: gemini-3.8-flash
       # Ollama remains supported:
       # BGC_OLLAMA_URL: http://ollama:11434
       # BGC_QDRANT_URL: http://qdrant:6333
