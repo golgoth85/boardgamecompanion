@@ -97,3 +97,29 @@ def test_enqueue_is_transactional_and_duplicate_safe(tmp_path: Path) -> None:
         assert enqueue_document_index(connection, "doc-1") is False
     with db.connect() as connection:
         assert connection.execute("SELECT COUNT(*) AS count FROM document_index_jobs").fetchone()["count"] == 1
+
+
+def test_expired_running_job_is_reclaimed_after_restart(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    calls: list[str] = []
+    first = DocumentIndexingService(
+        db,
+        ingest=Stage("ingest", calls),
+        chunks=Stage("chunks", calls),
+        embeddings=Stage("embeddings", calls),
+    )
+    first.synchronize_documents()
+    with db.transaction(immediate=True) as connection:
+        connection.execute(
+            """UPDATE document_index_jobs SET status='running',stage='chunks',
+               lease_owner='dead-worker',lease_until='2000-01-01T00:00:00+00:00'"""
+        )
+    restarted = DocumentIndexingService(
+        db,
+        ingest=Stage("ingest", calls),
+        chunks=Stage("chunks", calls),
+        embeddings=Stage("embeddings", calls),
+    )
+    result = restarted.run_due()
+    assert result["succeeded"] == 1
+    assert calls == ["ingest", "chunks", "embeddings"]

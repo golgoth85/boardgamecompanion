@@ -128,7 +128,7 @@ BGC uses the official server-side XML API2 endpoint for exact catalog BGG IDs. I
 BGC_BGG_APPLICATION_TOKEN=<approved application token>
 ```
 
-Responses are byte-bounded, cached persistently for 30 days and requested at most once every five seconds. Exact returned identity is mandatory. Publisher, year, base/expansion type and alternate title become matching evidence; they never grant trust by themselves. CSV import, rulebook discovery and RAG continue to work when the token is absent or BGG is unavailable. Use is subject to the current BGG XML API terms; BGG data is not sent into the rulebook RAG corpus.
+Responses are streamed under a hard byte ceiling, cached persistently for 30 days and pass through a SQLite-backed five-second rate gate shared across requests and restarts. Exact returned identity is mandatory. Publisher, year, base/expansion type and alternate title become matching evidence; they never grant trust by themselves. CSV import, rulebook discovery and RAG continue to work when the token is absent or BGG is unavailable. Use is subject to the current BGG XML API terms; BGG data is not sent into the rulebook RAG corpus.
 
 ## BGG CSV import
 
@@ -256,7 +256,7 @@ Provider-specific discovery and replacement-URL search are intentionally not par
 - Asmodee Italia official product pages and Italian rulebooks, restricted to its official CDN;
 - RuleBook.org as a known-community fallback, always routed to human review.
 
-Discovery requires exact page/title identity and uses catalog/BGG publisher, year and item-type clues. Official unattended approval still requires the existing P6A policy, including exact BGG ID. Results are idempotently deduplicated in the review queue; provider failures are isolated and audited. P6B remains responsible only for guarded fetch/update of approved URLs.
+Discovery requires exact page/title identity and uses catalog/BGG publisher, year and item-type clues. An adapter may attach the exact BGG ID only after independently cross-checking the exact-ID BGG API title/publisher metadata against the official page; without that cached evidence even an official source enters review. Official unattended approval still requires the existing P6A policy. Results are idempotently deduplicated by stable provider/URL/language/type identity while preserving immutable audit snapshots; provider failures are isolated and audited. Games with no archived rulebook are processed first. P6B remains responsible only for guarded fetch/update of approved URLs.
 
 Successful P6B archival transactionally queues a separate P7 job. The job runs existing ingest, chunk and embedding services in order, persists retries across restarts and never silently changes the configured embedding provider.
 

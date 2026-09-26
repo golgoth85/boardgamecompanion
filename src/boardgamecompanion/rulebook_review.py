@@ -126,6 +126,18 @@ def _canonical_snapshot(candidate: RulebookCandidate) -> tuple[str, str]:
     return serialized, key
 
 
+def _discovery_key(candidate: RulebookCandidate) -> str:
+    identity = "\0".join(
+        (
+            candidate.provider,
+            candidate.url,
+            candidate.language,
+            candidate.document_type,
+        )
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
 def evaluate_candidate(
     candidate: RulebookCandidate,
     *,
@@ -281,6 +293,7 @@ class RulebookReviewQueue:
     ) -> tuple[dict[str, Any], bool]:
         evaluation = evaluate_candidate(candidate, bgg_id=bgg_id)
         serialized, candidate_key = _canonical_snapshot(candidate)
+        discovery_key = _discovery_key(candidate)
         now = datetime.now(UTC).isoformat()
         status = (
             RulebookReviewStatus.APPROVED
@@ -306,18 +319,19 @@ class RulebookReviewQueue:
             inserted = connection.execute(
                 """
                 INSERT INTO rulebook_review_items (
-                    id, board_game_id, candidate_key, candidate_json,
+                    id, board_game_id, candidate_key, discovery_key, candidate_json,
                     provider, source_kind, url, language, document_type,
                     official, confidence, policy_action, policy_reasons_json,
                     status, decision_source, decision_note,
                     created_at, updated_at, decided_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-                ON CONFLICT(board_game_id, candidate_key) DO NOTHING
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     item_id,
                     board_game_id,
                     candidate_key,
+                    discovery_key,
                     serialized,
                     candidate.provider,
                     candidate.source_kind.value,
@@ -339,9 +353,9 @@ class RulebookReviewQueue:
             row = connection.execute(
                 self._select_sql(
                     "r.id = ?" if created
-                    else "r.board_game_id = ? AND r.candidate_key = ?"
+                    else "r.board_game_id = ? AND r.discovery_key = ?"
                 ),
-                (item_id,) if created else (board_game_id, candidate_key),
+                (item_id,) if created else (board_game_id, discovery_key),
             ).fetchone()
             if row is None:
                 raise RuntimeError("Rulebook review insert completed without a readable row")

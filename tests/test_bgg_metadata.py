@@ -96,3 +96,33 @@ def test_bgg_metadata_cache_survives_restart_without_api_client(tmp_path: Path) 
     with pytest.raises(BggMetadataError, match="not configured"):
         restarted.refresh(173346, force=True)
 
+
+def test_bgg_202_is_retried_with_bounded_retry_after() -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(202, headers={"retry-after": "2"}, request=request)
+        return httpx.Response(200, content=XML, request=request)
+
+    client = BggApiClient(
+        BggApiConfig("secret", min_interval_seconds=0, max_attempts=2),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        sleep=sleeps.append,
+    )
+    assert client.thing(173346)["bgg_id"] == 173346
+    assert calls == 2 and sleeps == [2.0]
+
+
+def test_bgg_streaming_byte_limit_is_enforced_before_parse() -> None:
+    client = BggApiClient(
+        BggApiConfig("secret", min_interval_seconds=0, max_attempts=1),
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"x" * (2 * 1024 * 1024 + 1), request=request)
+        )),
+    )
+    with pytest.raises(BggMetadataError, match="byte limit"):
+        client.thing(173346)

@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 11
+    assert first_version == LATEST_SCHEMA_VERSION == 12
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -48,6 +48,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (9, "rulebook-provider-discovery"),
         (10, "automatic-document-indexing"),
         (11, "catalog-bgg-enrichment"),
+        (12, "discovery-dedup-and-rate-limits"),
     ]
     assert {
         "board_games",
@@ -72,6 +73,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "document_index_jobs",
         "document_index_runs",
         "board_game_enrichments",
+        "external_request_limits",
         "schema_migrations",
     } <= tables
 

@@ -5,6 +5,7 @@ import json
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -52,14 +53,22 @@ class BggApiClient:
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        rate_limiter: Callable[[str, float], None] | None = None,
     ) -> None:
         self.config = config
         self.client = client
         self._sleep = sleep
         self._monotonic = monotonic
         self._last_request_at: float | None = None
+        self._persistent_rate_limiter = rate_limiter
 
     def _wait(self) -> None:
+        if self._persistent_rate_limiter is not None:
+            self._persistent_rate_limiter(
+                "bgg:xmlapi2",
+                self.config.min_interval_seconds,
+            )
+            return
         now = self._monotonic()
         if self._last_request_at is not None:
             remaining = self.config.min_interval_seconds - (now - self._last_request_at)
@@ -73,31 +82,50 @@ class BggApiClient:
             raise ValueError("BGG ID must be positive")
         url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={identifier}"
         response: httpx.Response | None = None
+        content = b""
         for attempt in range(self.config.max_attempts):
             self._wait()
             try:
-                kwargs = {
-                    "headers": {
+                client_context = (
+                    nullcontext(self.client)
+                    if self.client is not None
+                    else httpx.Client(trust_env=False)
+                )
+                with client_context as client:
+                    assert client is not None
+                    with client.stream(
+                        "GET",
+                        url,
+                        headers={
                         "Authorization": f"Bearer {self.config.application_token}",
                         "Accept": "application/xml, text/xml",
                         "Accept-Encoding": "identity",
                         "User-Agent": "BoardGameCompanion/0.1 BGG-metadata",
-                    },
-                    "timeout": self.config.timeout_seconds,
-                    "follow_redirects": False,
-                }
-                if self.client is not None:
-                    response = self.client.get(url, **kwargs)
-                else:
-                    with httpx.Client(trust_env=False) as client:
-                        response = client.get(url, **kwargs)
+                        },
+                        timeout=self.config.timeout_seconds,
+                        follow_redirects=False,
+                    ) as streamed:
+                        response = streamed
+                        declared = streamed.headers.get("content-length", "").strip()
+                        if declared.isdigit() and int(declared) > MAX_XML_BYTES:
+                            raise BggMetadataError("BGG API response exceeds the byte limit")
+                        chunks: list[bytes] = []
+                        size = 0
+                        for chunk in streamed.iter_bytes():
+                            size += len(chunk)
+                            if size > MAX_XML_BYTES:
+                                raise BggMetadataError("BGG API response exceeds the byte limit")
+                            chunks.append(chunk)
+                        content = b"".join(chunks)
             except httpx.RequestError as exc:
                 if attempt + 1 < self.config.max_attempts:
                     self._sleep(min(2**attempt, 5))
                     continue
                 raise BggMetadataError("BGG API request failed") from exc
-            if response.status_code in {429, 500, 502, 503, 504} and attempt + 1 < self.config.max_attempts:
-                self._sleep(min(2**attempt, 5))
+            if response.status_code in {202, 429, 500, 502, 503, 504} and attempt + 1 < self.config.max_attempts:
+                retry_after = response.headers.get("retry-after", "").strip()
+                delay = min(float(retry_after), 5.0) if retry_after.isdigit() else min(2**attempt, 5)
+                self._sleep(delay)
                 continue
             break
         assert response is not None
@@ -107,9 +135,7 @@ class BggApiClient:
             raise BggMetadataError("BGG application token was rejected")
         if response.status_code != 200:
             raise BggMetadataError(f"BGG API returned HTTP {response.status_code}")
-        if len(response.content) > MAX_XML_BYTES:
-            raise BggMetadataError("BGG API response exceeds the byte limit")
-        return _parse_thing(response.content, expected_bgg_id=identifier)
+        return _parse_thing(content, expected_bgg_id=identifier)
 
 
 def _attribute(node: ET.Element | None, name: str = "value") -> str | None:

@@ -161,9 +161,12 @@ class DocumentIndexingService:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """SELECT document_id FROM document_index_jobs
-                   WHERE status IN ('pending','failed') AND next_attempt_at<=?
+                   WHERE (
+                       (status IN ('pending','failed') AND next_attempt_at<=?)
+                       OR (status='running' AND lease_until<=?)
+                   )
                    AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_attempt_at LIMIT ?""",
-                (current, current, max(1, min(int(limit), 20))),
+                (current, current, current, max(1, min(int(limit), 20))),
             ).fetchall()
         items: list[dict[str, Any]] = []
         failures = 0
@@ -186,4 +189,3 @@ class DocumentIndexingService:
                     {where} ORDER BY j.updated_at DESC LIMIT ?""", (*params, max(1, min(int(limit), 500)))
             ).fetchall()
         return {"count": len(rows), "items": [dict(row) for row in rows]}
-

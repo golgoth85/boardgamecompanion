@@ -67,6 +67,7 @@ from boardgamecompanion.pdf_ingest import (
     PdfIngestParseError,
     PdfIngestService,
 )
+from boardgamecompanion.rate_limits import PersistentRateLimiter
 from boardgamecompanion.embedding_retrieval import (
     EmbeddingConflict,
     EmbeddingCorruptRecord,
@@ -149,7 +150,8 @@ def get_bgg_metadata_store() -> BggMetadataStore:
                 application_token=token,
                 timeout_seconds=settings.bgg_timeout_seconds,
                 min_interval_seconds=settings.bgg_min_interval_seconds,
-            )
+            ),
+            rate_limiter=PersistentRateLimiter(database).acquire,
         )
         if token
         else None
@@ -170,6 +172,7 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
             timeout_seconds=settings.rulebook_discovery_timeout_seconds,
             max_attempts=settings.rulebook_discovery_max_attempts,
             min_interval_seconds=settings.rulebook_discovery_min_interval_seconds,
+            rate_limiter=PersistentRateLimiter(database).acquire,
         ),
         metadata_store=get_bgg_metadata_store(),
         refresh_seconds=settings.rulebook_discovery_refresh_seconds,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -1174,6 +1175,48 @@ def _catalog_enrichment(connection: sqlite3.Connection) -> None:
     )
 
 
+def _discovery_dedup_and_rate_limits(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(rulebook_review_items)").fetchall()
+    }
+    if "discovery_key" not in columns:
+        connection.execute(
+            "ALTER TABLE rulebook_review_items ADD COLUMN discovery_key TEXT"
+        )
+    rows = connection.execute(
+        """SELECT id,board_game_id,provider,url,language,document_type
+           FROM rulebook_review_items WHERE discovery_key IS NULL
+           ORDER BY created_at,id"""
+    ).fetchall()
+    seen: set[tuple[int, str]] = set()
+    for row in rows:
+        identity = "\0".join(
+            str(row[key])
+            for key in ("provider", "url", "language", "document_type")
+        )
+        key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        marker = (int(row["board_game_id"]), key)
+        if marker not in seen:
+            connection.execute(
+                "UPDATE rulebook_review_items SET discovery_key=? WHERE id=?",
+                (key, row["id"]),
+            )
+            seen.add(marker)
+    connection.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_rulebook_review_discovery_key
+           ON rulebook_review_items(board_game_id, discovery_key)
+           WHERE discovery_key IS NOT NULL"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS external_request_limits (
+            scope TEXT PRIMARY KEY,
+            next_allowed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+
 
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
@@ -1187,6 +1230,7 @@ MIGRATIONS = (
     Migration(9, "rulebook-provider-discovery", _rulebook_discovery),
     Migration(10, "automatic-document-indexing", _automatic_document_indexing),
     Migration(11, "catalog-bgg-enrichment", _catalog_enrichment),
+    Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 import httpx
+import pytest
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
@@ -31,6 +32,8 @@ def query(**overrides) -> RulebookQuery:
         "year": 2015,
         "item_type": "boardgame",
         "publishers": ("Repos Production",),
+        "verified_publishers": ("Repos Production",),
+        "bgg_identity_verified": True,
     }
     values.update(overrides)
     return RulebookQuery(**values)
@@ -72,6 +75,32 @@ def test_repos_adapter_requires_publisher_and_exact_base_expansion_identity() ->
     assert calls == 0
     assert tuple(provider.discover(query())) == ()
     assert calls == 1
+
+
+def test_official_adapter_does_not_self_attest_bgg_identity_without_api_crosscheck() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=repos_html(), request=request))
+    provider = ReposProductionProvider(
+        ProviderHttpClient(client=httpx.Client(transport=transport), min_interval_seconds=0)
+    )
+    unverified = query(verified_publishers=(), bgg_identity_verified=False)
+    candidates = tuple(provider.discover(unverified))
+    assert candidates and all(item.bgg_id is None for item in candidates)
+    assert all(item.confidence == 100 for item in candidates)
+
+
+def test_publisher_compatibility_does_not_use_substring_matches() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, content=repos_html(), request=request)
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(client=httpx.Client(transport=httpx.MockTransport(handler)), min_interval_seconds=0)
+    )
+    assert tuple(provider.discover(query(publishers=("Not Repos Production Holdings",)))) == ()
+    assert calls == 0
 
 
 class StaticProvider:
@@ -146,6 +175,27 @@ def test_http_client_bounds_timeout_retries_and_rate_limit() -> None:
     assert response.content == b"ok"
     assert calls == 2
     assert sleeps == [0.25, 0.9]
+
+
+def test_http_client_refuses_https_downgrade_and_streams_byte_limit() -> None:
+    downgrade = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(302, headers={"location": "http://provider.example/index"}, request=request)
+        )),
+        min_interval_seconds=0,
+    )
+    with pytest.raises(RulebookProviderError, match="HTTPS"):
+        downgrade.get("https://provider.example/index", allowed_hosts={"provider.example"})
+
+    oversized = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"123456", request=request)
+        )),
+        max_response_bytes=5,
+        min_interval_seconds=0,
+    )
+    with pytest.raises(RulebookProviderError, match="byte limit"):
+        oversized.get("https://provider.example/index", allowed_hosts={"provider.example"})
 
 
 def database(tmp_path: Path) -> Database:

@@ -6,6 +6,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
@@ -57,6 +58,7 @@ class ProviderHttpClient:
         min_interval_seconds: float = 1.0,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
+        rate_limiter: Callable[[str, float], None] | None = None,
     ):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -73,10 +75,17 @@ class ProviderHttpClient:
         self.min_interval_seconds = float(min_interval_seconds)
         self._sleep = sleep
         self._monotonic = monotonic
+        self._persistent_rate_limiter = rate_limiter
         self._gate_lock = threading.Lock()
         self._last_request_at: float | None = None
 
-    def _rate_gate(self) -> None:
+    def _rate_gate(self, host: str) -> None:
+        if self._persistent_rate_limiter is not None:
+            self._persistent_rate_limiter(
+                f"rulebook-provider:{host}",
+                self.min_interval_seconds,
+            )
+            return
         with self._gate_lock:
             now = self._monotonic()
             if self._last_request_at is not None:
@@ -90,7 +99,10 @@ class ProviderHttpClient:
     @staticmethod
     def _validate_origin(url: str, allowed_hosts: frozenset[str]) -> str:
         canonical = canonical_http_url(url)
-        host = (urlsplit(canonical).hostname or "").lower()
+        parts = urlsplit(canonical)
+        if parts.scheme != "https":
+            raise ProviderHttpError("Discovery providers require HTTPS")
+        host = (parts.hostname or "").lower()
         if host not in allowed_hosts:
             raise ProviderHttpError(
                 f"Discovery redirect escaped the provider origin: {host}"
@@ -120,11 +132,23 @@ class ProviderHttpClient:
         attempt = 0
 
         while True:
-            self._rate_gate()
+            self._rate_gate((urlsplit(current).hostname or "").lower())
             response: httpx.Response | None = None
+            content = b""
             try:
-                if self.client is not None:
-                    response = self.client.get(
+                client_context = (
+                    nullcontext(self.client)
+                    if self.client is not None
+                    else httpx.Client(
+                        timeout=self.timeout_seconds,
+                        follow_redirects=False,
+                        trust_env=False,
+                    )
+                )
+                with client_context as client:
+                    assert client is not None
+                    with client.stream(
+                        "GET",
                         current,
                         headers={
                             "Accept": "text/html, application/json;q=0.9",
@@ -135,23 +159,20 @@ class ProviderHttpClient:
                         },
                         timeout=self.timeout_seconds,
                         follow_redirects=False,
-                    )
-                else:
-                    with httpx.Client(
-                        timeout=self.timeout_seconds,
-                        follow_redirects=False,
-                        trust_env=False,
-                    ) as client:
-                        response = client.get(
-                            current,
-                            headers={
-                                "Accept": "text/html, application/json;q=0.9",
-                                "Accept-Encoding": "identity",
-                                "User-Agent": (
-                                    "BoardGameCompanion/0.1 rulebook-discovery"
-                                ),
-                            },
-                        )
+                    ) as streamed:
+                        response = streamed
+                        declared = streamed.headers.get("content-length", "").strip()
+                        if declared.isdigit() and int(declared) > self.max_response_bytes:
+                            raise ProviderHttpError("Provider response exceeds the byte limit")
+                        if streamed.status_code not in {301, 302, 303, 307, 308}:
+                            chunks: list[bytes] = []
+                            size = 0
+                            for chunk in streamed.iter_bytes():
+                                size += len(chunk)
+                                if size > self.max_response_bytes:
+                                    raise ProviderHttpError("Provider response exceeds the byte limit")
+                                chunks.append(chunk)
+                            content = b"".join(chunks)
             except httpx.TimeoutException as exc:
                 if attempt + 1 < self.max_attempts:
                     self._sleep(self._retry_delay(None, attempt))
@@ -188,12 +209,6 @@ class ProviderHttpClient:
                     f"Provider returned HTTP {response.status_code}"
                 )
 
-            content = response.content
-            declared = response.headers.get("content-length", "").strip()
-            if declared.isdigit() and int(declared) > self.max_response_bytes:
-                raise ProviderHttpError("Provider response exceeds the byte limit")
-            if len(content) > self.max_response_bytes:
-                raise ProviderHttpError("Provider response exceeds the byte limit")
             return ProviderHttpResponse(
                 url=current,
                 status_code=response.status_code,
@@ -213,13 +228,22 @@ def _slug(value: str) -> str:
 
 
 def _publisher_matches(query: RulebookQuery, names: Iterable[str]) -> bool:
-    expected = tuple(_match_text(value) for value in names)
+    return _publisher_values_match(query.publishers, names)
+
+
+def _verified_publisher_matches(query: RulebookQuery, names: Iterable[str]) -> bool:
+    return query.bgg_identity_verified and _publisher_values_match(
+        query.verified_publishers,
+        names,
+    )
+
+
+def _publisher_values_match(values: Iterable[str], names: Iterable[str]) -> bool:
+    expected = {_match_text(value) for value in names if _match_text(value)}
     return any(
-        name == publisher or name in publisher or publisher in name
-        for publisher in (_match_text(value) for value in query.publishers)
+        publisher in expected
+        for publisher in (_match_text(value) for value in values)
         if publisher
-        for name in expected
-        if name
     )
 
 
@@ -326,9 +350,10 @@ class ReposProductionProvider:
         self.http = http or ProviderHttpClient()
 
     def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
-        publisher_verified = _publisher_matches(query, self._PUBLISHERS)
-        if not publisher_verified:
+        publisher_compatible = _publisher_matches(query, self._PUBLISHERS)
+        if not publisher_compatible:
             return ()
+        identity_verified = _verified_publisher_matches(query, self._PUBLISHERS)
 
         seen_pages: set[str] = set()
         candidates: list[RulebookCandidate] = []
@@ -353,7 +378,8 @@ class ReposProductionProvider:
             seen_languages: set[str] = set()
             for href, label in page.links:
                 absolute = urljoin(response.url, href)
-                if (urlsplit(absolute).hostname or "").lower() not in self._PDF_HOSTS:
+                absolute_parts = urlsplit(absolute)
+                if absolute_parts.scheme != "https" or (absolute_parts.hostname or "").lower() not in self._PDF_HOSTS:
                     continue
                 path = urlsplit(absolute).path.casefold()
                 filename = path.rsplit("/", 1)[-1]
@@ -381,17 +407,20 @@ class ReposProductionProvider:
                         official=True,
                         confidence=100,
                         title=f"{page.title} — Rules",
-                        bgg_id=query.bgg_id,
+                        bgg_id=query.bgg_id if identity_verified else None,
                         game_title=page.title,
-                        year=query.year,
+                        year=None,
                         publisher="Repos Production",
                         metadata={
                             "official_page": response.url,
-                            "identity_evidence": [
-                                "official_page_title_exact",
-                                "catalog_publisher_match",
-                                "catalog_bgg_id",
-                            ],
+                            "identity_evidence": (
+                                [
+                                    "official_page_title_exact",
+                                    "bgg_api_exact_id_title_publisher_crosscheck",
+                                ]
+                                if identity_verified
+                                else ["official_page_title_exact", "catalog_publisher_compatible"]
+                            ),
                             "catalog_item_type": query.item_type,
                         },
                     )
@@ -412,7 +441,7 @@ class AsmodeeItaliaProvider:
         self.http = http or ProviderHttpClient()
 
     def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
-        publisher_verified = _publisher_matches(query, self._PUBLISHERS)
+        publisher_verified = _verified_publisher_matches(query, self._PUBLISHERS)
         page_url = f"{self._BASE}{quote(_slug(query.title), safe='-')}/"
         response = self.http.get(
             page_url,
@@ -430,7 +459,8 @@ class AsmodeeItaliaProvider:
             if "regolamento" not in _match_text(label):
                 continue
             absolute = urljoin(response.url, href)
-            if (urlsplit(absolute).hostname or "").lower() not in self._PDF_HOSTS:
+            absolute_parts = urlsplit(absolute)
+            if absolute_parts.scheme != "https" or (absolute_parts.hostname or "").lower() not in self._PDF_HOSTS:
                 continue
             if not urlsplit(absolute).path.casefold().endswith(".pdf"):
                 continue
@@ -446,15 +476,14 @@ class AsmodeeItaliaProvider:
                     title=f"{page.title} — Regolamento italiano",
                     bgg_id=query.bgg_id if publisher_verified else None,
                     game_title=page.title,
-                    year=query.year,
+                    year=None,
                     publisher="Asmodee Italia",
                     metadata={
                         "official_page": response.url,
                         "identity_evidence": (
                             [
                                 "official_page_title_exact",
-                                "catalog_publisher_match",
-                                "catalog_bgg_id",
+                                "bgg_api_exact_id_title_publisher_crosscheck",
                             ]
                             if publisher_verified
                             else ["official_page_title_exact"]
@@ -542,6 +571,7 @@ def production_rulebook_providers(
     max_response_bytes: int = MAX_DISCOVERY_RESPONSE_BYTES,
     max_attempts: int = 2,
     min_interval_seconds: float = 1.0,
+    rate_limiter: Callable[[str, float], None] | None = None,
 ) -> tuple[RulebookProvider, ...]:
     def client() -> ProviderHttpClient:
         return ProviderHttpClient(
@@ -549,6 +579,7 @@ def production_rulebook_providers(
             max_response_bytes=max_response_bytes,
             max_attempts=max_attempts,
             min_interval_seconds=min_interval_seconds,
+            rate_limiter=rate_limiter,
         )
 
     return (

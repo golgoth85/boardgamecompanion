@@ -91,6 +91,17 @@ class RulebookDiscoveryService:
             year=(metadata or {}).get("year_published") or row["year_published"],
             item_type=(metadata or {}).get("metadata", {}).get("item_type") or row["item_type"],
             publishers=tuple(dict.fromkeys(publishers)),
+            verified_publishers=(
+                tuple(str(value) for value in metadata["publishers"])
+                if metadata and metadata.get("fetched_at")
+                and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
+                else ()
+            ),
+            bgg_identity_verified=bool(
+                metadata
+                and metadata.get("fetched_at")
+                and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
+            ),
         )
 
     def _claim(self, bgg_id: int, *, force: bool, now: datetime) -> tuple[int, str, int]:
@@ -194,7 +205,11 @@ class RulebookDiscoveryService:
             rows = connection.execute(
                 """SELECT g.bgg_id FROM rulebook_discovery_games d JOIN board_games g ON g.id=d.board_game_id
                    WHERE d.enabled=1 AND d.next_attempt_at<=? AND (d.lease_until IS NULL OR d.lease_until<=?)
-                   ORDER BY d.next_attempt_at,g.bgg_id LIMIT ?""", (current, current, max(1, min(int(limit), 100)))
+                   ORDER BY EXISTS(
+                       SELECT 1 FROM game_documents doc
+                       WHERE doc.board_game_id=d.board_game_id
+                         AND doc.document_type='rulebook'
+                   ), d.next_attempt_at,g.bgg_id LIMIT ?""", (current, current, max(1, min(int(limit), 100)))
             ).fetchall()
         items = []
         for row in rows:
