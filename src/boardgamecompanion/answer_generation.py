@@ -8,6 +8,11 @@ from typing import Any, Protocol
 import httpx
 
 from boardgamecompanion.embedding_retrieval import EmbeddingRetrievalService
+from boardgamecompanion.gemini import (
+    GeminiModelMetadataError,
+    resolve_model as resolve_gemini_model,
+    validate_model_id as validate_gemini_model_id,
+)
 from boardgamecompanion.lmstudio import LMStudioModelMetadataError, resolve_model
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -429,6 +434,154 @@ class LMStudioGenerationProvider:
                 "Generated structured answer is not an object"
             )
         return structured
+
+class GeminiGenerationProvider:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout_seconds: float,
+        verify_tls: bool,
+        temperature: float,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = validate_gemini_model_id(model)
+        self.api_key = api_key.strip()
+        self.timeout_seconds = float(timeout_seconds)
+        self.verify_tls = bool(verify_tls)
+        self.temperature = float(temperature)
+        self._client = client
+        if not self.base_url.startswith("https://"):
+            raise ValueError("Gemini URL must use https://")
+        if not self.api_key:
+            raise ValueError("Gemini API key is required")
+        if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError("Gemini generation temperature must be between 0 and 2")
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        headers = dict(kwargs.pop("headers", {}))
+        headers["x-goog-api-key"] = self.api_key
+        try:
+            if self._client is not None:
+                response = self._client.request(method, path, headers=headers, **kwargs)
+            else:
+                with httpx.Client(
+                    base_url=self.base_url,
+                    timeout=self.timeout_seconds,
+                    verify=self.verify_tls,
+                ) as client:
+                    response = client.request(method, path, headers=headers, **kwargs)
+            response.raise_for_status()
+            return response
+        except httpx.TimeoutException as exc:
+            raise AnswerProviderError("Gemini generation request timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            raise AnswerProviderError(
+                f"Gemini generation request failed with HTTP {exc.response.status_code}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AnswerProviderError("Gemini generation endpoint is unreachable") from exc
+
+    def describe(self) -> GenerationDescriptor:
+        response = self._request("GET", f"/v1beta/models/{self.model}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AnswerProviderError("Gemini model metadata returned invalid JSON") from exc
+        try:
+            resolved_model, digest = resolve_gemini_model(
+                payload,
+                configured_model=self.model,
+                required_method="generateContent",
+            )
+        except GeminiModelMetadataError as exc:
+            raise AnswerProviderError(str(exc)) from exc
+        return GenerationDescriptor(
+            provider="gemini",
+            model=resolved_model,
+            model_digest=digest,
+            endpoint=self.base_url,
+        )
+
+    def generate(
+        self,
+        *,
+        query: str,
+        evidence: list[dict[str, Any]],
+        descriptor: GenerationDescriptor,
+        max_claims: int,
+    ) -> dict[str, Any]:
+        user_payload = {
+            "question": query,
+            "maximum_claims": max_claims,
+            "evidence": evidence,
+        }
+        response = self._request(
+            "POST",
+            f"/v1beta/models/{descriptor.model}:generateContent",
+            json={
+                "systemInstruction": {
+                    "parts": [{"text": SYSTEM_PROMPT}],
+                },
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "text": json.dumps(
+                                    user_payload,
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                )
+                            }
+                        ],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "responseFormat": {
+                        "text": {
+                            "mimeType": "APPLICATION_JSON",
+                            "schema": ANSWER_SCHEMA,
+                        }
+                    },
+                },
+            },
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AnswerProviderError("Gemini generation response is invalid JSON") from exc
+        candidates = payload.get("candidates") if isinstance(payload, dict) else None
+        if not isinstance(candidates, list) or not candidates:
+            raise AnswerProviderError("Gemini generation response has no candidates")
+        first = candidates[0]
+        content = first.get("content") if isinstance(first, dict) else None
+        parts = content.get("parts") if isinstance(content, dict) else None
+        if not isinstance(parts, list) or not parts:
+            raise AnswerProviderError("Gemini generation response has no text content")
+        text_parts = [
+            part.get("text")
+            for part in parts
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        if len(text_parts) != 1:
+            raise AnswerProviderError("Gemini generation response text shape is invalid")
+        raw = text_parts[0]
+        if len(raw.encode("utf-8")) > MAX_GENERATION_JSON_BYTES:
+            raise AnswerProtocolError("Generated structured answer exceeds safety limit")
+        try:
+            structured = json.loads(raw)
+        except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+            raise AnswerProtocolError("Generated structured answer is invalid JSON") from exc
+        if not isinstance(structured, dict):
+            raise AnswerProtocolError("Generated structured answer is not an object")
+        return structured
+
 
 def _bounded_text(value: Any, *, label: str, max_chars: int) -> str:
     if not isinstance(value, str):
