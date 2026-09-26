@@ -161,6 +161,13 @@ class ProviderHttpClient:
                         follow_redirects=False,
                     ) as streamed:
                         response = streamed
+                        content_encoding = streamed.headers.get(
+                            "content-encoding", ""
+                        ).strip().casefold()
+                        if content_encoding not in {"", "identity"}:
+                            raise ProviderHttpError(
+                                "Provider response content encoding is not allowed"
+                            )
                         declared = streamed.headers.get("content-length", "").strip()
                         if declared.isdigit() and int(declared) > self.max_response_bytes:
                             raise ProviderHttpError("Provider response exceeds the byte limit")

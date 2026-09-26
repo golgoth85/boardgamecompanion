@@ -106,6 +106,13 @@ class BggApiClient:
                         follow_redirects=False,
                     ) as streamed:
                         response = streamed
+                        content_encoding = streamed.headers.get(
+                            "content-encoding", ""
+                        ).strip().casefold()
+                        if content_encoding not in {"", "identity"}:
+                            raise BggMetadataError(
+                                "BGG API content encoding is not allowed"
+                            )
                         declared = streamed.headers.get("content-length", "").strip()
                         if declared.isdigit() and int(declared) > MAX_XML_BYTES:
                             raise BggMetadataError("BGG API response exceeds the byte limit")

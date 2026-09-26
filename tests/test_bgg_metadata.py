@@ -126,3 +126,19 @@ def test_bgg_streaming_byte_limit_is_enforced_before_parse() -> None:
     )
     with pytest.raises(BggMetadataError, match="byte limit"):
         client.thing(173346)
+
+
+def test_bgg_rejects_content_encoding_before_decoding() -> None:
+    client = BggApiClient(
+        BggApiConfig("secret", min_interval_seconds=0, max_attempts=1),
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"content-encoding": "gzip"},
+                stream=httpx.ByteStream(b"compressed"),
+                request=request,
+            )
+        )),
+    )
+    with pytest.raises(BggMetadataError, match="encoding"):
+        client.thing(173346)

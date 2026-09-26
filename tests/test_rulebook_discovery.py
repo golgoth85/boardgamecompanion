@@ -202,6 +202,20 @@ def test_http_client_refuses_https_downgrade_and_streams_byte_limit() -> None:
     with pytest.raises(RulebookProviderError, match="byte limit"):
         oversized.get("https://provider.example/index", allowed_hosts={"provider.example"})
 
+    encoded = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"content-encoding": "gzip"},
+                stream=httpx.ByteStream(b"compressed"),
+                request=request,
+            )
+        )),
+        min_interval_seconds=0,
+    )
+    with pytest.raises(RulebookProviderError, match="encoding"):
+        encoded.get("https://provider.example/index", allowed_hosts={"provider.example"})
+
 
 def database(tmp_path: Path) -> Database:
     db = Database(tmp_path / "db.sqlite3")
