@@ -24,6 +24,12 @@ from boardgamecompanion.app_settings import (
     save_floppy_settings,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
+from boardgamecompanion.bgg_metadata import (
+    BggApiClient,
+    BggApiConfig,
+    BggMetadataError,
+    BggMetadataStore,
+)
 from boardgamecompanion.catalog import SORT_SQL, Catalog
 from boardgamecompanion.chunk_index import (
     ChunkIndexConflict,
@@ -47,6 +53,12 @@ from boardgamecompanion.documents import (
     DocumentStore,
     DocumentTooLarge,
     InvalidPdf,
+)
+from boardgamecompanion.document_indexing import (
+    DocumentIndexingBusy,
+    DocumentIndexingError,
+    DocumentIndexingService,
+    enqueue_document_index,
 )
 from boardgamecompanion.pdf_ingest import (
     PdfIngestDocumentNotFound,
@@ -85,6 +97,13 @@ from boardgamecompanion.rulebook_review import (
     RulebookReviewNotFound,
     RulebookReviewQueue,
 )
+from boardgamecompanion.rulebook_discovery import (
+    RulebookDiscoveryBusy,
+    RulebookDiscoveryError,
+    RulebookDiscoveryNotFound,
+    RulebookDiscoveryService,
+)
+from boardgamecompanion.rulebook_providers import production_rulebook_providers
 from boardgamecompanion.rulebook_updates import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -117,6 +136,47 @@ def get_rulebook_update_service() -> RulebookUpdateService:
         lease_seconds=settings.rulebook_update_lease_seconds,
         max_archive_bytes=settings.max_document_bytes,
         fetch_max_bytes=settings.rulebook_fetch_max_bytes,
+    )
+
+
+def get_bgg_metadata_store() -> BggMetadataStore:
+    database = get_database()
+    database.initialize()
+    token = (settings.bgg_application_token or "").strip()
+    client = (
+        BggApiClient(
+            BggApiConfig(
+                application_token=token,
+                timeout_seconds=settings.bgg_timeout_seconds,
+                min_interval_seconds=settings.bgg_min_interval_seconds,
+            )
+        )
+        if token
+        else None
+    )
+    return BggMetadataStore(
+        database,
+        client,
+        refresh_seconds=settings.bgg_metadata_refresh_seconds,
+    )
+
+
+def get_rulebook_discovery_service() -> RulebookDiscoveryService:
+    database = get_database()
+    database.initialize()
+    return RulebookDiscoveryService(
+        database,
+        production_rulebook_providers(
+            timeout_seconds=settings.rulebook_discovery_timeout_seconds,
+            max_attempts=settings.rulebook_discovery_max_attempts,
+            min_interval_seconds=settings.rulebook_discovery_min_interval_seconds,
+        ),
+        metadata_store=get_bgg_metadata_store(),
+        refresh_seconds=settings.rulebook_discovery_refresh_seconds,
+        empty_refresh_seconds=settings.rulebook_discovery_empty_refresh_seconds,
+        retry_base_seconds=settings.rulebook_discovery_retry_base_seconds,
+        retry_max_seconds=settings.rulebook_discovery_retry_max_seconds,
+        lease_seconds=settings.rulebook_discovery_lease_seconds,
     )
 
 
@@ -250,13 +310,48 @@ async def _rulebook_update_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled rulebook update worker failed")
 
 
+async def _rulebook_discovery_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=settings.rulebook_discovery_poll_seconds)
+            break
+        except TimeoutError:
+            pass
+        try:
+            await asyncio.to_thread(
+                get_rulebook_discovery_service().run_due,
+                limit=settings.rulebook_discovery_batch_size,
+            )
+            await asyncio.to_thread(
+                get_rulebook_update_service().synchronize_approved_targets
+            )
+        except Exception:
+            LOGGER.exception("Scheduled rulebook discovery worker failed")
+
+
+async def _document_index_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=settings.document_index_poll_seconds)
+            break
+        except TimeoutError:
+            pass
+        try:
+            await asyncio.to_thread(
+                get_document_indexing_service().run_due,
+                limit=settings.document_index_batch_size,
+            )
+        except Exception:
+            LOGGER.exception("Scheduled document indexing worker failed")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
     get_database().initialize()
 
-    worker_task: asyncio.Task[None] | None = None
-    worker_stop: asyncio.Event | None = None
+    worker_tasks: list[asyncio.Task[None]] = []
+    worker_stop = asyncio.Event()
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(
@@ -266,17 +361,26 @@ async def lifespan(_: FastAPI):
             LOGGER.exception(
                 "Initial rulebook update target synchronization failed"
             )
-        worker_stop = asyncio.Event()
-        worker_task = asyncio.create_task(
-            _rulebook_update_worker(worker_stop)
-        )
+        worker_tasks.append(asyncio.create_task(_rulebook_update_worker(worker_stop)))
+    if settings.rulebook_discovery_worker_enabled:
+        try:
+            await asyncio.to_thread(get_rulebook_discovery_service().synchronize_catalog)
+        except Exception:
+            LOGGER.exception("Initial rulebook discovery synchronization failed")
+        worker_tasks.append(asyncio.create_task(_rulebook_discovery_worker(worker_stop)))
+    if settings.document_index_worker_enabled:
+        try:
+            await asyncio.to_thread(get_document_indexing_service().synchronize_documents)
+        except Exception:
+            LOGGER.exception("Initial document index synchronization failed")
+        worker_tasks.append(asyncio.create_task(_document_index_worker(worker_stop)))
 
     try:
         yield
     finally:
-        if worker_task is not None and worker_stop is not None:
+        if worker_tasks:
             worker_stop.set()
-            await worker_task
+            await asyncio.gather(*worker_tasks)
 
 
 app = FastAPI(
@@ -304,6 +408,11 @@ def web_reviews() -> FileResponse:
 
 @app.get("/updates", include_in_schema=False)
 def web_updates() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/discovery", include_in_schema=False)
+def web_discovery() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -345,6 +454,8 @@ async def import_bgg_csv(file: UploadFile = File(...)) -> dict[str, object]:
     if not snapshot_path.exists():
         snapshot_path.write_bytes(payload)
 
+    get_rulebook_discovery_service().synchronize_catalog()
+
     return {**result.to_dict(), "snapshot": str(snapshot_path)}
 
 
@@ -376,6 +487,7 @@ def get_game(bgg_id: int) -> dict[str, object]:
     game = Catalog(database).get_game(bgg_id)
     if game is None:
         raise HTTPException(status_code=404, detail="Board game not found")
+    game["bgg_metadata"] = get_bgg_metadata_store().get(bgg_id)
     return game
 
 
@@ -480,6 +592,10 @@ def upload_game_document(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except (InvalidPdf, DocumentError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if created:
+        with database.transaction(immediate=True) as connection:
+            enqueue_document_index(connection, str(document["id"]))
 
     return {"created": created, "document": document}
 
@@ -744,6 +860,20 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
     )
 
 
+def get_document_indexing_service() -> DocumentIndexingService:
+    database = get_database()
+    database.initialize()
+    return DocumentIndexingService(
+        database,
+        ingest=lambda document_id: get_pdf_ingest_service().ingest(document_id),
+        chunks=lambda document_id: get_chunk_index_service().build(document_id),
+        embeddings=lambda document_id: get_embedding_retrieval_service().build(document_id),
+        retry_base_seconds=settings.document_index_retry_base_seconds,
+        retry_max_seconds=settings.document_index_retry_max_seconds,
+        lease_seconds=settings.document_index_lease_seconds,
+    )
+
+
 def embedding_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, EmbeddingDocumentNotFound):
         return HTTPException(status_code=404, detail=str(exc))
@@ -900,6 +1030,88 @@ def answer_game_question(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except AnswerProtocolError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/rulebook-discovery", tags=["rulebooks"])
+def list_rulebook_discovery(
+    bgg_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=250, ge=1, le=500),
+) -> dict[str, object]:
+    payload = get_rulebook_discovery_service().list_status(bgg_id=bgg_id, limit=limit)
+    payload["worker"] = {
+        "enabled": settings.rulebook_discovery_worker_enabled,
+        "poll_seconds": settings.rulebook_discovery_poll_seconds,
+        "batch_size": settings.rulebook_discovery_batch_size,
+    }
+    return payload
+
+
+@app.post("/api/rulebook-discovery/run", tags=["rulebooks"])
+def run_rulebook_discovery_batch(
+    limit: int = Query(default=5, ge=1, le=25),
+) -> dict[str, object]:
+    result = get_rulebook_discovery_service().run_due(limit=limit)
+    get_rulebook_update_service().synchronize_approved_targets()
+    return result
+
+
+@app.post("/api/games/{bgg_id}/rulebook-discovery/run", tags=["rulebooks"])
+def run_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
+    service = get_rulebook_discovery_service()
+    service.synchronize_catalog()
+    try:
+        result = service.run_game(bgg_id, force=True)
+        get_rulebook_update_service().synchronize_approved_targets()
+        return result
+    except RulebookDiscoveryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RulebookDiscoveryBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RulebookDiscoveryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/games/{bgg_id}/rulebook-discovery", tags=["rulebooks"])
+def get_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
+    result = get_rulebook_discovery_service().list_status(bgg_id=bgg_id, limit=1)
+    if not result["items"]:
+        raise HTTPException(status_code=404, detail="Board game discovery state not found")
+    return result["items"][0]
+
+
+@app.get("/api/games/{bgg_id}/bgg-metadata", tags=["catalog"])
+def get_game_bgg_metadata(bgg_id: int) -> dict[str, object]:
+    item = get_bgg_metadata_store().get(bgg_id)
+    return {"configured": bool((settings.bgg_application_token or "").strip()), "item": item}
+
+
+@app.post("/api/games/{bgg_id}/bgg-metadata/refresh", tags=["catalog"])
+def refresh_game_bgg_metadata(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_bgg_metadata_store().refresh(bgg_id, force=True)
+    except BggMetadataError as exc:
+        code = 503 if "not configured" in str(exc) or "request" in str(exc) or "token" in str(exc) else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+
+
+@app.get("/api/document-index-jobs", tags=["documents"])
+def list_document_index_jobs(
+    document_id: str | None = Query(default=None),
+    limit: int = Query(default=250, ge=1, le=500),
+) -> dict[str, object]:
+    service = get_document_indexing_service()
+    service.synchronize_documents()
+    return service.status(document_id=document_id, limit=limit)
+
+
+@app.post("/api/documents/{document_id}/auto-index/run", tags=["documents"])
+def run_document_auto_index(document_id: str) -> dict[str, object]:
+    try:
+        return get_document_indexing_service().run(document_id, force=True)
+    except DocumentIndexingBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DocumentIndexingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/rulebook-reviews", tags=["rulebooks"])

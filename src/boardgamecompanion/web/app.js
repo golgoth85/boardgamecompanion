@@ -998,7 +998,9 @@ function gameCard(game) {
     <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
       <div class="cover">
         <span class="badge card-badge">${type}</span>
-        <span class="cover-initials">${escapeHtml(initials(game.title))}</span>
+        ${game.bgg_metadata?.cover_url
+          ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
       </div>
       <div class="card-body">
         <h3 class="card-title">${escapeHtml(game.title)}</h3>
@@ -1023,9 +1025,10 @@ async function renderCatalog() {
         <p class="eyebrow">Catalogo locale</p>
         <h1>La tua ludoteca, ordinata.</h1>
         <p class="lead">
-          Cerca giochi ed espansioni, consulta i dati BGG già presenti nel tuo export
-          e aggiorna la collezione senza dipendere dall'API di BoardGameGeek.
+          Cerca giochi ed espansioni, consulta il catalogo locale e arricchiscilo
+          opzionalmente tramite l'API ufficiale, senza dipendere da Floppy.
         </p>
+        <p class="muted"><a class="external-link" href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">Powered by BoardGameGeek</a></p>
       </article>
       <section class="stats-panel" id="statsPanel" aria-label="Statistiche catalogo">
         <div class="stat"><strong>—</strong><span>Totale</span></div>
@@ -1897,7 +1900,9 @@ async function renderDetail(bggId) {
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
       <section class="detail">
         <div class="detail-cover">
-          <span class="cover-initials">${escapeHtml(initials(game.title))}</span>
+          ${game.bgg_metadata?.cover_url
+            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+            : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
         </div>
         <article class="panel detail-main">
           <p class="eyebrow">BGG #${game.bgg_id}</p>
@@ -1912,6 +1917,14 @@ async function renderDetail(bggId) {
             ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             <span class="badge">${copyItems.length} ${copyItems.length === 1 ? "copia" : "copie"}</span>
           </div>
+
+          <section class="rulebook-discovery-panel">
+            <div>
+              <p class="eyebrow">Discovery regolamenti</p>
+              <p class="muted" id="gameDiscoveryStatus">Caricamento stato…</p>
+            </div>
+            <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca regolamento ora</button>
+          </section>
 
           <div class="fact-grid">
             ${fact("Giocatori", playerText(game))}
@@ -2039,6 +2052,7 @@ async function renderDetail(bggId) {
       openDocumentDialog(game.bgg_id, game.title);
     });
     setupRagPanel(game.bgg_id, documentItems);
+    setupGameDiscovery(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
@@ -2047,6 +2061,73 @@ async function renderDetail(bggId) {
       <div class="empty">Impossibile caricare il gioco: ${escapeHtml(error.message)}</div>
     `;
     showToast(error.message, true);
+  }
+}
+
+async function setupGameDiscovery(bggId) {
+  const status = document.querySelector("#gameDiscoveryStatus");
+  const button = document.querySelector("#discoverRulebooksNow");
+  const refresh = async () => {
+    try {
+      const item = await api(`/api/games/${bggId}/rulebook-discovery`);
+      const providers = (item.providers || []).map((value) => `${value.provider}: ${value.outcome}`).join(" · ");
+      status.textContent = `Stato ${item.status} · ultimo tentativo ${item.last_finished_at || "mai"} · ${item.candidates_found} candidate · ${item.provider_failures} errori${providers ? ` · ${providers}` : ""}`;
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  };
+  button?.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Ricerca…";
+    try {
+      await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
+      showToast("Discovery completata: controlla revisioni e aggiornamenti.");
+      await refresh();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Cerca regolamento ora";
+    }
+  });
+  await refresh();
+}
+
+async function renderDiscovery() {
+  app.innerHTML = '<div class="empty">Caricamento discovery…</div>';
+  try {
+    const data = await api("/api/rulebook-discovery?limit=500");
+    app.innerHTML = `
+      <section class="review-page">
+        <div class="review-page-head">
+          <div><p class="eyebrow">P5 · Provider discovery</p><h1>Discovery regolamenti</h1>
+          <p class="muted">Ricerca incrementale IT/EN. I risultati attraversano sempre la trust policy P6A.</p></div>
+          <button class="button button-primary" id="runDiscoveryBatch" type="button">Avvia batch bounded</button>
+        </div>
+        <div class="update-list">
+          ${data.items.map((item) => `<article class="update-card">
+            <div><strong>${escapeHtml(item.title)}</strong> <span class="badge">BGG #${item.bgg_id}</span></div>
+            <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · candidate: ${item.candidates_found} · nuove review: ${item.review_items_created}</p>
+            <p class="muted">${(item.providers || []).map((value) => `${escapeHtml(value.provider)}: ${escapeHtml(value.outcome)} (${value.candidate_count})`).join(" · ") || "Nessun provider ancora interrogato"}</p>
+            ${item.last_error ? `<p class="integration-error">${escapeHtml(item.last_error)}</p>` : ""}
+            <a class="external-link" href="/games/${item.bgg_id}" data-nav>Apri gioco →</a>
+          </article>`).join("") || '<div class="empty">Nessun gioco nel catalogo.</div>'}
+        </div>
+      </section>`;
+    document.querySelector("#runDiscoveryBatch")?.addEventListener("click", async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        const result = await api("/api/rulebook-discovery/run?limit=5", {method: "POST"});
+        showToast(`Discovery completata per ${result.attempted} giochi.`);
+        await renderDiscovery();
+      } catch (error) {
+        showToast(error.message, true);
+        event.currentTarget.disabled = false;
+      }
+    });
+    document.title = "Discovery · BoardGameCompanion";
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare la discovery: ${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -2530,6 +2611,10 @@ async function route() {
   }
   if (/^\/updates\/?$/.test(window.location.pathname)) {
     await renderUpdates({reset: true});
+    return;
+  }
+  if (/^\/discovery\/?$/.test(window.location.pathname)) {
+    await renderDiscovery();
     return;
   }
 

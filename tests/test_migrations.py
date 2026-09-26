@@ -22,8 +22,8 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 8
-    assert second_version == 8
+    assert first_version == LATEST_SCHEMA_VERSION == 11
+    assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
         rows = connection.execute(
@@ -45,6 +45,9 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (6, "pdf-page-ingestion"),
         (7, "document-chunks"),
         (8, "chunk-embeddings"),
+        (9, "rulebook-provider-discovery"),
+        (10, "automatic-document-indexing"),
+        (11, "catalog-bgg-enrichment"),
     ]
     assert {
         "board_games",
@@ -64,6 +67,11 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "document_chunks",
         "document_embedding_runs",
         "chunk_embeddings",
+        "rulebook_discovery_games",
+        "rulebook_discovery_provider_runs",
+        "document_index_jobs",
+        "document_index_runs",
+        "board_game_enrichments",
         "schema_migrations",
     } <= tables
 
@@ -139,7 +147,9 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     }
     assert dict(collection) == {"coll_id": 777, "own": 1}
     assert setting["value"] == "http://floppy:8000"
-    assert [row["version"] for row in migrations] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert [row["version"] for row in migrations] == list(
+        range(1, LATEST_SCHEMA_VERSION + 1)
+    )
     assert [dict(row) for row in copies] == [
         {
             "source_kind": "bgg_csv",
@@ -238,7 +248,7 @@ def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(
             "SELECT COUNT(*) AS count FROM rulebook_update_runs"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 8
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert dict(review) == {
         "id": "review-existing",
         "status": "approved",
@@ -324,7 +334,7 @@ def test_v5_database_with_archived_document_upgrades_to_v6_without_loss(
             "SELECT COUNT(*) AS count FROM document_pages"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 8
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert dict(document) == {
         "id": "doc-existing",
         "document_type": "rulebook",
@@ -508,7 +518,7 @@ def test_v6_database_with_pages_upgrades_to_v8_without_loss(tmp_path: Path) -> N
             "SELECT COUNT(*) AS count FROM document_chunks"
         ).fetchone()["count"]
 
-    assert database.schema_version() == 8
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert dict(page) == {
         "id": "page-v6",
         "document_id": "doc-v6",
@@ -789,7 +799,7 @@ def test_v7_database_with_chunks_upgrades_to_v8_without_loss(tmp_path: Path) -> 
         ).fetchone()["count"]
         fk_check = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-    assert database.schema_version() == 8
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert dict(chunk) == {"id": "chunk-v7", "text": "text"}
     assert embedding_runs == 0
     assert embeddings == 0

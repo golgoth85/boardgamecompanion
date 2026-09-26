@@ -20,6 +20,9 @@ services:
       # BGC_LMSTUDIO_EMBEDDING_MODEL: text-embedding-qwen3-embedding-0.6b
       # BGC_LMSTUDIO_GENERATION_MODEL: qwen3-14b
       # BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS: "300"
+      # Optional approved BoardGameGeek XML API application token. CSV import,
+      # rulebook discovery and RAG remain usable when it is unset.
+      # BGC_BGG_APPLICATION_TOKEN: replace-with-approved-bgg-application-token
       # Gemini (API key required; never commit it):
       # BGC_GEMINI_API_KEY: ""
       # BGC_GEMINI_EMBEDDING_MODEL: gemini-embedding-2

@@ -15,7 +15,7 @@ SORT_SQL = {
 
 
 def _game_dict(row) -> dict[str, Any]:
-    return {
+    result = {
         "bgg_id": row["bgg_id"],
         "title": row["title"],
         "original_title": row["original_title"],
@@ -60,6 +60,14 @@ def _game_dict(row) -> dict[str, Any]:
             "quantity": row["quantity"],
         },
     }
+    if "cover_url" in row.keys():
+        result["bgg_metadata"] = {
+            "source": row["metadata_source"],
+            "cover_url": row["cover_url"],
+            "description": row["enriched_description"],
+            "fetched_at": row["metadata_fetched_at"],
+        }
+    return result
 
 
 class Catalog:
@@ -94,6 +102,7 @@ class Catalog:
         from_sql = """
             FROM board_games g
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
+            LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
         """
 
         with self.database.connect() as connection:
@@ -108,6 +117,9 @@ class Catalog:
                        c.wishlist_priority, c.barcode, c.version_languages,
                        c.version_publishers, c.version_year_published,
                        c.version_nickname, c.inventory_location, c.quantity
+                       , e.source AS metadata_source, e.cover_url,
+                       e.description AS enriched_description,
+                       e.fetched_at AS metadata_fetched_at
                 {from_sql}
                 {where_sql}
                 ORDER BY {order_sql}
@@ -134,8 +146,12 @@ class Catalog:
                        c.wishlist_priority, c.barcode, c.version_languages,
                        c.version_publishers, c.version_year_published,
                        c.version_nickname, c.inventory_location, c.quantity
+                       , e.source AS metadata_source, e.cover_url,
+                       e.description AS enriched_description,
+                       e.fetched_at AS metadata_fetched_at
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id = g.id
+                LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
                 WHERE g.bgg_id = ?
                 ORDER BY c.id
                 LIMIT 1
