@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     floppy_api_key: str | None = None
     floppy_timeout_seconds: float = 45.0
     floppy_verify_tls: bool = True
-    rag_provider: Literal["ollama", "lmstudio"] = "ollama"
+    rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
+    embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
+    generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     ollama_url: str | None = None
     ollama_embedding_model: str | None = None
     ollama_embedding_dimensions: int | None = Field(default=None, ge=64, le=4096)
@@ -86,10 +88,28 @@ class Settings(BaseSettings):
         default=0.0, ge=0.0, le=2.0
     )
     lmstudio_verify_tls: bool = True
+    gemini_url: str = "https://generativelanguage.googleapis.com"
+    gemini_api_key: str | None = None
+    gemini_embedding_model: str = "gemini-embedding-2"
+    gemini_embedding_dimensions: int | None = Field(default=768, ge=128, le=3072)
+    gemini_embedding_batch_size: int = Field(default=16, ge=1, le=100)
+    gemini_embedding_timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
+    gemini_generation_model: str = "gemini-3.8-flash"
+    gemini_generation_timeout_seconds: float = Field(default=120.0, ge=1.0, le=900.0)
+    gemini_generation_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    gemini_verify_tls: bool = True
     retrieval_max_candidates: int = Field(default=10000, ge=100, le=100000)
     answer_max_evidence_chars: int = Field(default=30000, ge=1000, le=200000)
     answer_max_claims: int = Field(default=12, ge=1, le=100)
     qdrant_url: str | None = None
+
+    @property
+    def effective_embedding_provider(self) -> Literal["ollama", "lmstudio", "gemini"]:
+        return self.embedding_provider or self.rag_provider
+
+    @property
+    def effective_generation_provider(self) -> Literal["ollama", "lmstudio", "gemini"]:
+        return self.generation_provider or self.rag_provider
 
     @property
     def database_path(self) -> Path:
