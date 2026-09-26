@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Canonical runtime access — including CloudCLI/Claude Code
+
+- Do not infer that NAS or Home Assistant access is unavailable just because the current session has no Home Assistant app/plugin, Desktop Commander, direct SSH surface, or direct NAS tool.
+- The canonical runtime route is GitHub → `golgoth85/upscaler` branch `ops/nas-control` → GitHub Actions workflow `NAS Control` → self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations.
+- Keep source work in this repository's normal GitHub branch/PR flow. Use NAS Control for runtime inspection, managed deploys, Docker actions, Home Assistant operations, and approved workspace actions.
+- Before updating `ops/nas-control/request.txt`, re-fetch the current `ops/nas-control` HEAD and request file, check for an active concurrent run/request, update non-force, and verify the resulting workflow/runtime evidence.
+- CloudCLI/Claude Code follows the same runtime path. This rule does not itself authorize starting CloudCLI; existing explicit user-authorization requirements still apply. If CloudCLI is already authorized/running, terminal availability is not a reason to bypass the typed control plane.
+- A missing Home Assistant plugin is not a blocker. Use the existing NAS Control Home Assistant capabilities and managed deploy path where applicable.
+- If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/upscaler` `ops/nas-control`, validate it in CI, then use it.
+- Canonical runbook: `golgoth85/upscaler`, branch `ops/nas-control`, `ops/nas-control/RUNBOOK.md`.
+- Existing review-only, no-deploy/no-merge, destructive-action, protected-branch, and secret-handling boundaries still apply.
+
 ## Mission
 
 BoardGameCompanion is a self-hosted Docker/Unraid application for managing a physical board-game collection, locating and archiving rulebooks, and querying those documents with RAG.
