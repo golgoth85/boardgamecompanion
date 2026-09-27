@@ -9,8 +9,6 @@ services:
       BGC_CONFIG_DIR: /config
       BGC_IMPORT_DIR: /data/import
       BGC_MANUALS_DIR: /data/manuals
-      # BGC_FLOPPY_URL: http://floppy:8000
-      # BGC_FLOPPY_API_KEY: ""
       # Legacy RAG provider default: "ollama", "lmstudio" or "gemini".
       # BGC_RAG_PROVIDER: lmstudio
       # Independent overrides (optional):

@@ -12,25 +12,21 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
-- Camera-first physical-copy barcode lookup with native BarcodeDetector plus a local ZXing fallback; manual entry remains available.
+- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
-- Floppy connection health/capability checks.
-- Floppy board-game comparison and guarded add-only collection synchronization.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
 - Persistent rulebook review queue with auditable unattended/manual approval state.
 - Scheduled guarded re-checks for approved rulebook candidates with version-by-hash archival and run audit.
 - Production rulebook discovery through isolated Repos Production, Asmodee Italia and RuleBook.org adapters, with persistent bounded catalog scheduling.
-- Optional direct BGG XML API2 metadata enrichment (including cover URLs), independent of Floppy.
+- Optional direct BGG XML API2 metadata enrichment (including cover URLs).
 - Automatic persistent PDF ingest, chunk and embedding jobs after archival.
 - Page-preserving PDF ingestion, deterministic chunking, embeddings/retrieval and page-cited rulebook Q&A.
 - Ollama and LM Studio (OpenAI-compatible API) RAG providers with model-currentness fingerprinting.
 
 Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
 
-Because the BGG CSV export does not contain cover-image URLs, placeholders remain the offline fallback. When an approved BGG application token is configured, BGC refreshes exact-ID metadata and displays BGG-hosted cover art without involving Floppy.
-
-Floppy synchronization is add-only and guarded by a dry-run plan hash. BoardGameCompanion never removes Floppy media, collection copies or history during sync.
+Because the BGG CSV export does not contain cover-image URLs, placeholders remain the offline fallback. When an approved BGG application token is configured, BGC refreshes exact-ID metadata and displays BGG-hosted cover art.
 
 Phase 7 is complete: PDF ingestion, chunk indexing, embeddings/retrieval, grounded answer generation, server-owned page citations and the in-game query UI are available. See `docs/ROADMAP.md`.
 
@@ -122,7 +118,7 @@ Newly uploaded or automatically archived rulebooks are queued for PDF parsing, c
 
 ## Direct BGG metadata (optional)
 
-BGC uses the official server-side XML API2 endpoint for exact catalog BGG IDs. It never scrapes authenticated BGG pages and never depends on Floppy for metadata. Configure an approved application token only at runtime:
+BGC uses the official server-side XML API2 endpoint for exact catalog BGG IDs. It never scrapes authenticated BGG pages. Configure an approved Application Token from **Impostazioni** in the web UI. The token is stored under `/config`, is never returned in clear text, and can be replaced or removed from the same screen. For automated deployments, `BGC_BGG_APPLICATION_TOKEN` remains an optional runtime override and takes precedence over the stored value:
 
 ```text
 BGC_BGG_APPLICATION_TOKEN=<approved application token>
@@ -148,72 +144,9 @@ Re-importing the exact same CSV re-validates the rows and leaves existing record
 Missing rows are **not deleted automatically**. This is intentional because an `owned` export is only a partial view of a BGG account and must not erase wishlist or other states imported from a broader export.
 
 
-## Floppy integration
+## Barcode import
 
-Configure Floppy from the BoardGameCompanion web UI:
-
-1. open **Impostazioni**;
-2. enter the Floppy base URL;
-3. enter the API Token from Floppy **Settings → Integrations**;
-4. optionally adjust timeout/TLS verification;
-5. choose **Salva** or **Salva e verifica**.
-
-Settings are persisted in the SQLite database under `/config`. The API token is never returned to the browser or exposed by the settings API after it has been saved.
-
-The home page can verify Floppy connectivity and compare the owned local catalog with both tracked board games and the Floppy collection. Matching uses, in order:
-
-1. a previously persisted BoardGameCompanion ↔ Floppy link;
-2. explicit BGG ID when Floppy exposes one;
-3. exact normalized title + publication year as a lower-confidence fallback.
-
-A `manual` Floppy `media_id` is never assumed to be a BGG ID.
-
-### Add-only synchronization
-
-**Confronta cataloghi** always performs a dry-run first. The preview separates games into:
-
-- already owned in Floppy;
-- tracked in Floppy but missing from its collection;
-- media missing entirely from Floppy;
-- ambiguous matches, which block automatic write sync.
-
-When the live Floppy OpenAPI schema exposes the validated media and collection write contracts, the UI offers a sync button. Each apply request:
-
-- requires the exact `plan_hash` returned by the preceding preview;
-- re-reads Floppy before writing and rejects a stale plan;
-- processes at most 20 items from the UI (API maximum: 50);
-- only adds missing records;
-- never deletes Floppy media, collection entries or history;
-- persists BGG ↔ Floppy links locally for idempotence and recovery.
-
-For a missing game, BoardGameCompanion first tries Floppy's BGG provider. If provider resolution is unavailable, it can create a manual Floppy board-game item and retains the canonical BGG ID in its local link. Infrastructure/authentication failures do not trigger this fallback.
-
-At present one owned BGG row maps to one Floppy collection copy; quantity-aware multi-copy synchronization is intentionally deferred.
-
-API endpoints:
-
-```text
-GET  /api/settings/floppy
-PUT  /api/settings/floppy
-GET  /api/integrations/floppy/status
-GET  /api/integrations/floppy/preview
-POST /api/integrations/floppy/sync
-```
-
-The sync endpoint accepts the dry-run `plan_hash` and an optional `batch_size`.
-
-### Advanced environment overrides
-
-For automated deployments, these optional environment variables override values saved in the app:
-
-```text
-BGC_FLOPPY_URL
-BGC_FLOPPY_API_KEY
-BGC_FLOPPY_TIMEOUT_SECONDS
-BGC_FLOPPY_VERIFY_TLS
-```
-
-They are intentionally not present in the default Unraid template.
+Choose **Importa barcode** from the top bar. On HTTPS or localhost the rear camera starts automatically; native `BarcodeDetector` is preferred and the bundled ZXing reader is the fallback. Unknown EAN/UPC values can be assigned to an existing unbarcoded physical copy or used to create a new copy for an owned game. After each assignment, **Scansiona prossimo** continues the same import session. Manual barcode entry remains available when camera access is unavailable.
 
 ## Rulebook updates
 

@@ -47,15 +47,10 @@ const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
 const saveTestSettings = document.querySelector("#saveTestSettings");
-const floppyUrl = document.querySelector("#floppyUrl");
-const floppyApiKey = document.querySelector("#floppyApiKey");
-const floppyTimeout = document.querySelector("#floppyTimeout");
-const floppyVerifyTls = document.querySelector("#floppyVerifyTls");
-const floppyClearToken = document.querySelector("#floppyClearToken");
+const bggApplicationToken = document.querySelector("#bggApplicationToken");
+const bggClearToken = document.querySelector("#bggClearToken");
 const clearTokenRow = document.querySelector("#clearTokenRow");
-const floppyUrlHint = document.querySelector("#floppyUrlHint");
-const floppyTokenHint = document.querySelector("#floppyTokenHint");
-const floppyTimeoutHint = document.querySelector("#floppyTimeoutHint");
+const bggTokenHint = document.querySelector("#bggTokenHint");
 const settingsResult = document.querySelector("#settingsResult");
 const documentDialog = document.querySelector("#documentDialog");
 const documentForm = document.querySelector("#documentForm");
@@ -89,7 +84,7 @@ let searchTimer;
 let catalogRequestController;
 let importInProgress = false;
 let settingsBusy = false;
-let currentFloppySettings = null;
+let currentBggSettings = null;
 let copyBusy = false;
 let editingCopyId = null;
 let editingCopyBggId = null;
@@ -101,6 +96,7 @@ let scannerFallbackControls = null;
 let scannerDetectionLocked = false;
 let scannerBackend = null;
 let scannerStartId = 0;
+let scannerImportCount = 0;
 let documentBusy = false;
 let documentBggId = null;
 
@@ -204,38 +200,28 @@ function closeSettingsDialog() {
   }
 }
 
-function applyFloppySettingsToForm(data) {
-  currentFloppySettings = data;
-  floppyUrl.value = data.url || "";
-  floppyApiKey.value = "";
-  floppyTimeout.value = String(data.timeout_seconds ?? 45);
-  floppyVerifyTls.checked = data.verify_tls !== false;
-  floppyClearToken.checked = false;
+function applyBggSettingsToForm(data) {
+  currentBggSettings = data;
+  bggApplicationToken.value = "";
+  bggClearToken.checked = false;
 
-  const overrides = data.overrides || {};
-  floppyUrl.disabled = Boolean(overrides.url);
-  floppyApiKey.disabled = Boolean(overrides.api_key);
-  floppyTimeout.disabled = Boolean(overrides.timeout_seconds);
-  floppyVerifyTls.disabled = Boolean(overrides.verify_tls);
+  const overridden = Boolean(data.overrides?.application_token);
+  bggApplicationToken.disabled = overridden;
+  bggClearToken.disabled = overridden;
 
-  floppyUrlHint.textContent = overrides.url
-    ? "Override attivo da variabile Docker."
-    : "Salvato localmente in /config.";
-
-  if (overrides.api_key) {
-    floppyTokenHint.textContent = "Token configurato tramite variabile Docker.";
+  if (overridden) {
+    bggTokenHint.textContent =
+      "Token configurato tramite BGC_BGG_APPLICATION_TOKEN. L'override runtime ha precedenza.";
     clearTokenRow.hidden = true;
-  } else if (data.api_key_configured) {
-    floppyTokenHint.textContent = "Token configurato. Lascia vuoto per mantenerlo invariato.";
+  } else if (data.stored_application_token_configured) {
+    bggTokenHint.textContent =
+      "Token BGG configurato. Lascia vuoto per mantenerlo invariato.";
     clearTokenRow.hidden = false;
   } else {
-    floppyTokenHint.textContent = "Nessun token configurato.";
+    bggTokenHint.textContent =
+      "Nessun Application Token BGG configurato.";
     clearTokenRow.hidden = true;
   }
-
-  floppyTimeoutHint.textContent = overrides.timeout_seconds
-    ? "Override attivo da variabile Docker."
-    : "Intervallo consentito: 1–60 secondi.";
 }
 
 async function openSettingsDialog() {
@@ -243,8 +229,8 @@ async function openSettingsDialog() {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const data = await api("/api/settings/floppy");
-    applyFloppySettingsToForm(data);
+    const data = await api("/api/settings/bgg");
+    applyBggSettingsToForm(data);
     settingsDialog.showModal();
   } catch (error) {
     settingsDialog.showModal();
@@ -255,48 +241,40 @@ async function openSettingsDialog() {
   }
 }
 
-async function persistFloppySettings({verifyAfter = false} = {}) {
+async function persistBggSettings({verifyAfter = false} = {}) {
   if (settingsBusy) return;
   setSettingsBusy(true);
   settingsResult.hidden = true;
 
   const payload = {
-    url: floppyUrl.value.trim(),
-    api_key: floppyApiKey.disabled || !floppyApiKey.value.trim()
-      ? null
-      : floppyApiKey.value.trim(),
-    clear_api_key: !floppyClearToken.disabled && floppyClearToken.checked,
-    timeout_seconds: Number(floppyTimeout.value || 45),
-    verify_tls: floppyVerifyTls.checked,
+    application_token:
+      bggApplicationToken.disabled || !bggApplicationToken.value.trim()
+        ? null
+        : bggApplicationToken.value.trim(),
+    clear_application_token:
+      !bggClearToken.disabled && bggClearToken.checked,
   };
 
   try {
-    const saved = await api("/api/settings/floppy", {
+    const saved = await api("/api/settings/bgg", {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
-    applyFloppySettingsToForm(saved);
+    applyBggSettingsToForm(saved);
     settingsResult.hidden = false;
-    settingsResult.innerHTML = "<strong>Impostazioni salvate.</strong>";
-    showToast("Impostazioni Floppy salvate.");
+    settingsResult.innerHTML = "<strong>Impostazioni BGG salvate.</strong>";
+    showToast("Application Token BGG salvato.");
 
     if (verifyAfter) {
-      const status = await api("/api/integrations/floppy/status");
-      if (status.authenticated && status.boardgame_api) {
-        const version = status.info?.version ? ` · versione ${escapeHtml(status.info.version)}` : "";
+      const status = await api("/api/settings/bgg/verify", {method: "POST"});
+      if (status.verified) {
         settingsResult.innerHTML =
-          `<strong>Connessione riuscita.</strong> API board game disponibile${version}.`;
-      } else if (!status.configured) {
-        settingsResult.textContent = "Configurazione incompleta: URL e token sono entrambi necessari.";
-      } else {
-        settingsResult.textContent =
-          status.error?.message || "Floppy risponde, ma la verifica API non è riuscita.";
+          `<strong>Token verificato.</strong> Accesso XML API2 riuscito con ${escapeHtml(status.title || `BGG #${status.bgg_id}`)}.`;
+      } else if (status.reason === "catalog_empty") {
+        settingsResult.innerHTML =
+          "<strong>Token salvato.</strong> Importa almeno un gioco per eseguire una verifica XML API2.";
       }
-    }
-
-    if (document.querySelector("#floppyPanel")) {
-      await loadFloppyStatus();
     }
   } catch (error) {
     settingsResult.hidden = false;
@@ -731,11 +709,12 @@ function resetScanner() {
   stopScannerCamera();
   scannerBusy = false;
   scannerDetectionLocked = false;
+  scannerImportCount = 0;
   scannerForm.reset();
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inquadra il barcode: il lookup parte automaticamente dopo la lettura.</p>';
+    '<p class="muted">Inquadra il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
   cameraSection.hidden = false;
   const cameraUsable = scannerCameraUsable();
   toggleCamera.disabled = !cameraUsable;
@@ -743,6 +722,43 @@ function resetScanner() {
   cameraHint.textContent = cameraUsable
     ? "La fotocamera partirà automaticamente."
     : scannerCameraErrorMessage();
+}
+
+function beginNextScannerImport() {
+  stopScannerCamera();
+  scannerBusy = false;
+  scannerDetectionLocked = false;
+  scannerBarcode.value = "";
+  lookupBarcode.disabled = false;
+  lookupBarcode.textContent = "Cerca";
+  scannerResult.innerHTML =
+    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra il prossimo codice.</p>`;
+  cameraSection.hidden = false;
+  if (scannerCameraUsable()) {
+    cameraHint.textContent = "Fotocamera pronta per il prossimo barcode.";
+    void startScannerCamera();
+  } else {
+    scannerManualFallback.open = true;
+    cameraHint.textContent = scannerCameraErrorMessage();
+    window.setTimeout(() => scannerBarcode.focus(), 0);
+  }
+}
+
+function renderScannerImported(barcode, title) {
+  scannerImportCount += 1;
+  scannerBarcode.value = barcode;
+  scannerResult.innerHTML = `
+    <div class="scanner-success">
+      <strong>Barcode importato</strong>
+      <span class="muted">${escapeHtml(title || "Copia fisica")} · ${escapeHtml(barcode)}</span>
+    </div>
+    <div class="dialog-actions scanner-next-actions">
+      <button class="button button-primary" id="scannerNextBarcode" type="button">
+        Scansiona prossimo
+      </button>
+    </div>
+  `;
+  scannerResult.querySelector("#scannerNextBarcode")?.addEventListener("click", beginNextScannerImport);
 }
 
 function openScannerDialog() {
@@ -792,10 +808,16 @@ function renderScannerMatches(result) {
         </article>
       `).join("")}
     </div>
+    <div class="dialog-actions scanner-next-actions">
+      <button class="button button-primary" id="scannerNextBarcode" type="button">
+        Scansiona prossimo
+      </button>
+    </div>
   `;
   scannerResult.querySelectorAll(".scanner-open-game").forEach((link) => {
     link.addEventListener("click", () => closeScannerDialog(), {once: true});
   });
+  scannerResult.querySelector("#scannerNextBarcode")?.addEventListener("click", beginNextScannerImport);
 }
 
 function renderScannerUnmatched(barcode) {
@@ -903,15 +925,14 @@ async function searchScannerGames(query, barcode) {
   }
 }
 
-async function assignBarcodeToCopy(copyId, barcode) {
+async function assignBarcodeToCopy(copyId, barcode, title = null) {
   await api(`/api/copies/${encodeURIComponent(copyId)}`, {
     method: "PATCH",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({barcode}),
   });
-  scannerBarcode.value = barcode;
-  showToast("Barcode assegnato alla copia.");
-  await lookupScannerBarcode(barcode);
+  showToast("Barcode importato nella copia.");
+  renderScannerImported(barcode, title);
 }
 
 async function assignScannedBarcodeToGame(bggId, title, barcode) {
@@ -921,7 +942,7 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
     const unbarcoded = (copies.items || []).filter((copy) => !copy.barcode_normalized);
 
     if (unbarcoded.length === 1) {
-      await assignBarcodeToCopy(unbarcoded[0].id, barcode);
+      await assignBarcodeToCopy(unbarcoded[0].id, barcode, title);
       return;
     }
 
@@ -941,7 +962,7 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
       `;
       scannerResult.querySelectorAll(".scanner-copy-choice").forEach((button) => {
         button.addEventListener("click", () => {
-          void assignBarcodeToCopy(button.dataset.copyId, barcode);
+          void assignBarcodeToCopy(button.dataset.copyId, barcode, title);
         });
       });
       return;
@@ -953,9 +974,8 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({barcode}),
       });
-      scannerBarcode.value = barcode;
       showToast("Nuova copia creata con il barcode.");
-      await lookupScannerBarcode(barcode);
+      renderScannerImported(barcode, title);
       return;
     }
 
@@ -976,9 +996,8 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({barcode}),
         });
-        scannerBarcode.value = barcode;
         showToast("Nuova copia creata.");
-        await lookupScannerBarcode(barcode);
+        renderScannerImported(barcode, title);
       } catch (error) {
         showToast(error.message, true);
       }
@@ -1026,7 +1045,7 @@ async function renderCatalog() {
         <h1>La tua ludoteca, ordinata.</h1>
         <p class="lead">
           Cerca giochi ed espansioni, consulta il catalogo locale e arricchiscilo
-          opzionalmente tramite l'API ufficiale, senza dipendere da Floppy.
+          opzionalmente tramite l'API ufficiale BoardGameGeek.
         </p>
         <p class="muted"><a class="external-link" href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">Powered by BoardGameGeek</a></p>
       </article>
@@ -1036,24 +1055,6 @@ async function renderCatalog() {
         <div class="stat"><strong>—</strong><span>Espansioni</span></div>
         <div class="stat"><strong>—</strong><span>Posseduti</span></div>
       </section>
-    </section>
-
-    <section class="panel integration-panel" id="floppyPanel" aria-label="Integrazione Floppy">
-      <div class="integration-head">
-        <div>
-          <p class="eyebrow">Integrazione</p>
-          <h2>Floppy</h2>
-        </div>
-        <span class="integration-status" id="floppyStatus">Verifica…</span>
-      </div>
-      <div id="floppyBody" class="integration-body">
-        Controllo configurazione e connettività…
-      </div>
-      <div class="integration-actions">
-        <button class="button button-ghost" id="floppyCheck" type="button">Verifica connessione</button>
-        <button class="button button-primary" id="floppyPreview" type="button" disabled>Confronta cataloghi</button>
-      </div>
-      <div id="floppyPreviewResult" class="integration-result" hidden></div>
     </section>
 
     <section class="toolbar" aria-label="Filtri catalogo">
@@ -1095,8 +1096,6 @@ async function renderCatalog() {
   `;
 
   bindCatalogControls();
-  bindFloppyControls();
-  void loadFloppyStatus();
   const requestedPath = window.location.pathname;
 
   try {
@@ -1111,219 +1110,6 @@ async function renderCatalog() {
     document.querySelector("#catalogGrid").innerHTML =
       `<div class="empty" style="grid-column:1/-1">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
-  }
-}
-
-function bindFloppyControls() {
-  document.querySelector("#floppyCheck")?.addEventListener("click", () => {
-    void loadFloppyStatus();
-  });
-  document.querySelector("#floppyPreview")?.addEventListener("click", () => {
-    void loadFloppyPreview();
-  });
-}
-
-function setFloppyStatus(label, kind = "") {
-  const badge = document.querySelector("#floppyStatus");
-  if (!badge) return;
-  badge.textContent = label;
-  badge.className = `integration-status ${kind}`.trim();
-}
-
-async function loadFloppyStatus() {
-  const body = document.querySelector("#floppyBody");
-  const previewButton = document.querySelector("#floppyPreview");
-  const previewResult = document.querySelector("#floppyPreviewResult");
-  if (!body || !previewButton) return;
-
-  previewButton.disabled = true;
-  if (previewResult) previewResult.hidden = true;
-  setFloppyStatus("Verifica…");
-  body.textContent = "Controllo configurazione e connettività…";
-
-  try {
-    const status = await api("/api/integrations/floppy/status");
-    if (!document.querySelector("#floppyPanel")) return;
-
-    if (!status.configured) {
-      setFloppyStatus("Non configurato", "neutral");
-      body.innerHTML =
-        'Apri <strong>Impostazioni</strong> e inserisci URL e API Token di Floppy.';
-      return;
-    }
-
-    if (!status.reachable) {
-      setFloppyStatus("Non raggiungibile", "error");
-      body.textContent = status.error?.message || "Impossibile raggiungere Floppy.";
-      return;
-    }
-
-    if (!status.authenticated) {
-      setFloppyStatus("Autenticazione fallita", "error");
-      body.textContent =
-        "Floppy risponde, ma il token non consente l’accesso all’API board game. Verifica l’API Token in Settings → Integrations.";
-      return;
-    }
-
-    setFloppyStatus("Connesso", "success");
-    previewButton.disabled = false;
-    const version = status.info?.version ? ` · versione ${escapeHtml(status.info.version)}` : "";
-    const schema = status.schema?.write_contract_ready
-      ? "Contratto write validato: dopo il dry-run puoi aggiungere in sicurezza i giochi mancanti alla collection."
-      : "Contratto write non disponibile: il confronto resta in sola lettura.";
-    body.innerHTML = `API board game raggiungibile${version}. ${escapeHtml(schema)}`;
-  } catch (error) {
-    setFloppyStatus("Errore", "error");
-    body.textContent = error.message;
-  }
-}
-
-async function loadFloppyPreview(syncReport = null) {
-  const button = document.querySelector("#floppyPreview");
-  const result = document.querySelector("#floppyPreviewResult");
-  if (!button || !result) return;
-
-  button.disabled = true;
-  button.textContent = "Confronto…";
-  result.hidden = false;
-  result.innerHTML = '<span class="muted">Lettura catalogo e collection Floppy…</span>';
-
-  try {
-    const preview = await api("/api/integrations/floppy/preview");
-    if (!document.querySelector("#floppyPanel")) return;
-
-    const needsMedia = (preview.needs_media_items || []).slice(0, 6);
-    const needsCollection = (preview.needs_collection_items || []).slice(0, 6);
-    const ambiguous = (preview.ambiguous_items || []).slice(0, 4);
-
-    const listBlock = (title, items, total) => {
-      if (!items.length) return "";
-      return `
-        <div class="integration-missing">
-          <strong>${escapeHtml(title)}</strong>
-          <ul>${items.map((item) =>
-            `<li>${escapeHtml(item.title)} <span class="muted">BGG #${escapeHtml(item.bgg_id)}</span></li>`
-          ).join("")}</ul>
-          ${total > items.length
-            ? `<span class="muted">…e altri ${total - items.length}</span>`
-            : ""}
-        </div>
-      `;
-    };
-
-    const reportHtml = syncReport
-      ? `
-        <div class="sync-report ${syncReport.failed ? "has-errors" : ""}">
-          <strong>Ultimo batch:</strong>
-          ${formatNumber(syncReport.attempted, 0)} tentati ·
-          ${formatNumber(syncReport.media_created, 0)} media creati ·
-          ${formatNumber(syncReport.collection_created, 0)} copie aggiunte ·
-          ${formatNumber(syncReport.failed, 0)} errori
-          ${syncReport.remaining_from_preview
-            ? ` · ${formatNumber(syncReport.remaining_from_preview, 0)} ancora da elaborare`
-            : ""}
-        </div>
-      `
-      : "";
-
-    const canApply = Boolean(preview.apply_supported) &&
-      Number(preview.actionable || 0) > 0 &&
-      Number(preview.ambiguous || 0) === 0;
-    const batchCount = Math.min(Number(preview.actionable || 0), 20);
-    const applyLabel = batchCount === Number(preview.actionable || 0)
-      ? `Sincronizza ${batchCount}`
-      : `Sincronizza prossimi ${batchCount}`;
-
-    result.innerHTML = `
-      ${reportHtml}
-      <div class="integration-summary">
-        <div><strong>${formatNumber(preview.local_owned, 0)}</strong><span>Locali posseduti</span></div>
-        <div><strong>${formatNumber(preview.remote_collection_entries, 0)}</strong><span>Copie in Floppy</span></div>
-        <div><strong>${formatNumber(preview.already_owned, 0)}</strong><span>Già allineati</span></div>
-        <div><strong>${formatNumber(preview.needs_collection, 0)}</strong><span>Da aggiungere alla collection</span></div>
-        <div><strong>${formatNumber(preview.needs_media, 0)}</strong><span>Media mancanti</span></div>
-        <div><strong>${formatNumber(preview.ambiguous, 0)}</strong><span>Ambigui</span></div>
-      </div>
-
-      ${listBlock("Media da creare in Floppy", needsMedia, preview.needs_media)}
-      ${listBlock("Media già presenti, copia da aggiungere", needsCollection, preview.needs_collection)}
-      ${listBlock("Corrispondenze ambigue — nessuna scrittura", ambiguous, preview.ambiguous)}
-
-      <div class="sync-actions">
-        ${preview.actionable === 0
-          ? '<span class="sync-ok">✓ Collection allineata</span>'
-          : canApply
-            ? `<button class="button button-primary" id="floppyApply" type="button">${applyLabel}</button>`
-            : ""}
-      </div>
-
-      <p class="muted integration-note">
-        Dry-run add-only: BoardGameCompanion non elimina media, copie o cronologia da Floppy.
-        ${preview.ambiguous
-          ? " Risolvi prima le corrispondenze ambigue."
-          : preview.apply_supported
-            ? " La scrittura richiede conferma esplicita."
-            : " L'istanza Floppy non espone il contratto write richiesto."}
-      </p>
-    `;
-
-    document.querySelector("#floppyApply")?.addEventListener("click", () => {
-      void applyFloppySync(preview);
-    });
-  } catch (error) {
-    result.innerHTML = `<span class="integration-error">${escapeHtml(error.message)}</span>`;
-    showToast(error.message, true);
-  } finally {
-    if (button.isConnected) {
-      button.disabled = false;
-      button.textContent = "Confronta cataloghi";
-    }
-  }
-}
-
-async function applyFloppySync(preview) {
-  const applyButton = document.querySelector("#floppyApply");
-  const actionable = Number(preview.actionable || 0);
-  const batchSize = Math.min(actionable, 20);
-  if (!applyButton || !batchSize) return;
-
-  const confirmed = window.confirm(
-    `Aggiungerò fino a ${batchSize} giochi alla collection di Floppy. Non verrà cancellato nulla. Procedere?`
-  );
-  if (!confirmed) return;
-
-  applyButton.disabled = true;
-  applyButton.textContent = "Sincronizzazione…";
-
-  try {
-    const report = await api("/api/integrations/floppy/sync", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        plan_hash: preview.plan_hash,
-        batch_size: batchSize,
-      }),
-    });
-
-    if (report.failed) {
-      showToast(
-        `Sync completato con ${report.failed} errori. Controlla il riepilogo.`,
-        true,
-      );
-    } else {
-      showToast(
-        `Sync completato: ${report.collection_created} copie aggiunte a Floppy.`,
-      );
-    }
-    await loadFloppyPreview(report);
-  } catch (error) {
-    showToast(error.message, true);
-    if (error.status === 409) {
-      await loadFloppyPreview();
-    } else if (applyButton.isConnected) {
-      applyButton.disabled = false;
-      applyButton.textContent = "Riprova sincronizzazione";
-    }
   }
 }
 
@@ -2712,21 +2498,22 @@ settingsDialog.addEventListener("close", () => {
   settingsForm.reset();
   settingsResult.hidden = true;
   settingsResult.textContent = "";
-  currentFloppySettings = null;
+  currentBggSettings = null;
 });
 
 settingsForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  void persistFloppySettings({verifyAfter: false});
+  void persistBggSettings({verifyAfter: false});
 });
 
 saveTestSettings.addEventListener("click", () => {
-  void persistFloppySettings({verifyAfter: true});
+  void persistBggSettings({verifyAfter: true});
 });
 
-floppyClearToken.addEventListener("change", () => {
-  floppyApiKey.disabled = floppyClearToken.checked || Boolean(currentFloppySettings?.overrides?.api_key);
-  if (floppyClearToken.checked) floppyApiKey.value = "";
+bggClearToken.addEventListener("change", () => {
+  bggApplicationToken.disabled =
+    bggClearToken.checked || Boolean(currentBggSettings?.overrides?.application_token);
+  if (bggClearToken.checked) bggApplicationToken.value = "";
 });
 
 importButton.addEventListener("click", () => {

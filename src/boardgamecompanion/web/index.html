@@ -29,7 +29,7 @@
         Discovery
       </a>
       <button class="button button-ghost" id="scannerButton" type="button">
-        Scansiona
+        Importa barcode
       </button>
       <button class="button button-ghost" id="settingsButton" type="button">
         Impostazioni
@@ -73,42 +73,27 @@
       <div class="dialog-head">
         <div>
           <p class="eyebrow">Configurazione</p>
-          <h2 id="settingsDialogTitle">Impostazioni Floppy</h2>
+          <h2 id="settingsDialogTitle">Impostazioni BoardGameGeek</h2>
         </div>
         <button class="icon-button" id="closeSettings" type="button" aria-label="Chiudi impostazioni">×</button>
       </div>
 
       <p class="muted">
-        Le impostazioni vengono salvate in /config. Il token non viene mai restituito in chiaro dalla API.
+        Inserisci l'Application Token approvato da BoardGameGeek. Il valore viene salvato
+        in /config e non viene mai restituito in chiaro dalla API o mostrato nuovamente nel browser.
       </p>
 
       <div class="settings-grid">
-        <label class="settings-field">
-          <span>URL Floppy</span>
-          <input id="floppyUrl" type="url" inputmode="url" placeholder="http://192.168.1.10:8000">
-          <small id="floppyUrlHint" class="muted"></small>
+        <label class="settings-field copy-span-2">
+          <span>BGG Application Token</span>
+          <input id="bggApplicationToken" type="password" autocomplete="new-password"
+                 placeholder="Inserisci o sostituisci il token">
+          <small id="bggTokenHint" class="muted"></small>
         </label>
 
-        <label class="settings-field">
-          <span>API Token</span>
-          <input id="floppyApiKey" type="password" autocomplete="new-password" placeholder="Inserisci o sostituisci il token">
-          <small id="floppyTokenHint" class="muted"></small>
-        </label>
-
-        <label class="settings-field">
-          <span>Timeout HTTP (secondi)</span>
-          <input id="floppyTimeout" type="number" min="1" max="60" step="1" value="45">
-          <small id="floppyTimeoutHint" class="muted"></small>
-        </label>
-
-        <label class="settings-check">
-          <input id="floppyVerifyTls" type="checkbox" checked>
-          <span>Verifica certificati TLS</span>
-        </label>
-
-        <label class="settings-check" id="clearTokenRow" hidden>
-          <input id="floppyClearToken" type="checkbox">
-          <span>Rimuovi il token salvato</span>
+        <label class="settings-check copy-span-2" id="clearTokenRow" hidden>
+          <input id="bggClearToken" type="checkbox">
+          <span>Rimuovi il token BGG salvato</span>
         </label>
       </div>
 
@@ -194,7 +179,7 @@
     <div class="dialog-head">
       <div>
         <p class="eyebrow">Inventario rapido</p>
-        <h2 id="scannerDialogTitle">Scansiona barcode</h2>
+        <h2 id="scannerDialogTitle">Importa barcode con fotocamera</h2>
       </div>
       <button class="icon-button" id="closeScanner" type="button" aria-label="Chiudi scanner">×</button>
     </div>
@@ -202,7 +187,7 @@
     <div id="cameraSection" class="scanner-camera">
       <video id="scannerVideo" playsinline muted></video>
       <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
-      <p id="cameraHint" class="muted">La fotocamera partirà automaticamente.</p>
+      <p id="cameraHint" class="muted">Inquadra EAN/UPC. Dopo l'assegnazione puoi passare subito al codice successivo.</p>
     </div>
 
     <details id="scannerManualFallback" class="scanner-manual">
@@ -219,7 +204,7 @@
     </details>
 
     <div id="scannerResult" class="scanner-result">
-      <p class="muted">Inquadra il barcode: il lookup parte automaticamente dopo la lettura.</p>
+      <p class="muted">Inquadra il barcode: se non è ancora associato potrai scegliere il gioco e importarlo.</p>
     </div>
   </dialog>
 
