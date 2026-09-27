@@ -568,9 +568,9 @@ def test_lmstudio_qwen3_generation_is_bounded_and_disables_thinking() -> None:
             assert payload["max_tokens"] == 256
             assert payload["stream"] is False
             assert payload["response_format"]["type"] == "json_schema"
+            assert payload["reasoning_effort"] == "none"
             user_content = payload["messages"][1]["content"]
-            assert user_content.endswith("\n/no_think")
-            decoded = json.loads(user_content.removesuffix("\n/no_think"))
+            decoded = json.loads(user_content)
             assert decoded["question"] == "Question"
             return httpx.Response(
                 200,
