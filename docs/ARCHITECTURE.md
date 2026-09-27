@@ -2,7 +2,7 @@
 
 ## Principles
 
-BoardGameCompanion separates the user's collection from external catalogs and integrations. BGG, Floppy, publishers and RAG services are adapters around an internal domain model.
+BoardGameCompanion owns its local collection and domain model. BGG, publisher/localizer sources and RAG services are external adapters around that local core.
 
 ## Core domain
 
@@ -61,7 +61,7 @@ Suggested fields:
 
 ### ExternalLink
 
-Maps internal objects to external systems such as Floppy.
+Maps internal objects to optional external systems when a future adapter requires a durable association.
 
 ## Import
 
@@ -103,7 +103,7 @@ Every candidate URL remains untrusted until the actual fetch. P5A deliberately p
 
 Concrete discovery is implemented as isolated adapters orchestrated by a persistent catalog scheduler. Repos Production and Asmodee Italia parse only streamed, byte-bounded HTTPS official pages, require exact page-title identity, accept PDF links only on fixed official/CDN HTTPS allowlists and produce normalized candidates. Repos emits both Italian and English when present. RuleBook.org is a known-community fallback and cannot produce official or unattended candidates. An official adapter attaches a BGG ID only when cached exact-ID BGG API metadata independently matches both official-page title and an exact publisher allowlist; otherwise the official candidate retains `bgg_id=None` and P6A routes it to review. SQLite-backed per-origin gates remain authoritative across endpoint calls and restarts. One provider failure cannot abort the others. The scheduler persists due time, lease generation, failures and per-provider audit across restarts; rediscovery converges through a stable provider/URL/language/type key while the full candidate snapshot remains immutable audit evidence.
 
-BGG metadata enrichment is independent of Floppy. An optional approved application token enables exact-ID server-side XML API2 lookups with a persistent five-second rate gate, streaming byte ceiling, bounded `202`/throttle retries and persistent cache. Returned IDs must equal the catalog ID; cover URLs are limited to HTTPS BGG CDN hosts. BGG metadata supplies matching evidence but cannot raise source trust by itself. The CSV catalog remains the internal source of truth and all core paths work with no BGG token.
+BGG metadata enrichment is owned directly by BoardGameCompanion. An optional approved Application Token, stored through the BGC settings UI or supplied by runtime override, enables exact-ID server-side XML API2 lookups with a persistent five-second rate gate, streaming byte ceiling, bounded `202`/throttle retries and persistent cache. Returned IDs must equal the catalog ID; cover URLs are limited to HTTPS BGG CDN hosts. BGG metadata supplies matching evidence but cannot raise source trust by itself. The CSV catalog remains the internal source of truth and all core paths work with no BGG token.
 
 ## Guarded rulebook fetch (P5B)
 
@@ -157,7 +157,6 @@ Answers should cite document and page and should not silently merge contradictor
 
 Optional integrations:
 
-- Floppy: catalog/collection synchronization over HTTP API.
 - BoardGameGeek XML API2: optional direct exact-ID metadata and cover enrichment.
 - Ollama: local generation/embedding endpoint.
 - Qdrant: vector store.
