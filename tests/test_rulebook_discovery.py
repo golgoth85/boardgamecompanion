@@ -350,6 +350,21 @@ def test_discovery_routes_candidates_through_policy_and_rediscovery_is_idempoten
     assert community["policy_action"] == "review"
 
 
+def test_discovery_status_read_does_not_resynchronize_catalog(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    service = RulebookDiscoveryService(db, discovery_providers())
+    assert service.synchronize_catalog() == 1
+
+    def unexpected_sync(*args, **kwargs):
+        raise AssertionError("status read attempted a catalog write")
+
+    service.synchronize_catalog = unexpected_sync  # type: ignore[method-assign]
+    status = service.list_status(bgg_id=173346)
+
+    assert status["count"] == 1
+    assert status["items"][0]["bgg_id"] == 173346
+
+
 def test_discovery_persists_state_across_service_restart_and_partial_outage(tmp_path: Path) -> None:
     db = database(tmp_path)
     providers = (StaticProvider("broken", error=RuntimeError("offline")), discovery_providers()[0])
