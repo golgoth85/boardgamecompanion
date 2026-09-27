@@ -52,6 +52,28 @@ const bggClearToken = document.querySelector("#bggClearToken");
 const clearTokenRow = document.querySelector("#clearTokenRow");
 const bggTokenHint = document.querySelector("#bggTokenHint");
 const settingsResult = document.querySelector("#settingsResult");
+const ragEmbeddingOrder = document.querySelector("#ragEmbeddingOrder");
+const ragGenerationOrder = document.querySelector("#ragGenerationOrder");
+const ollamaUrl = document.querySelector("#ollamaUrl");
+const ollamaEmbeddingModel = document.querySelector("#ollamaEmbeddingModel");
+const ollamaGenerationModel = document.querySelector("#ollamaGenerationModel");
+const lmstudioUrl = document.querySelector("#lmstudioUrl");
+const lmstudioApiKey = document.querySelector("#lmstudioApiKey");
+const lmstudioApiKeyHint = document.querySelector("#lmstudioApiKeyHint");
+const lmstudioClearApiKey = document.querySelector("#lmstudioClearApiKey");
+const clearLmstudioApiKeyRow = document.querySelector("#clearLmstudioApiKeyRow");
+const lmstudioEmbeddingModel = document.querySelector("#lmstudioEmbeddingModel");
+const lmstudioGenerationModel = document.querySelector("#lmstudioGenerationModel");
+const lmstudioGenerationTimeout = document.querySelector("#lmstudioGenerationTimeout");
+const lmstudioGenerationMaxTokens = document.querySelector("#lmstudioGenerationMaxTokens");
+const lmstudioDisableThinking = document.querySelector("#lmstudioDisableThinking");
+const geminiUrl = document.querySelector("#geminiUrl");
+const geminiApiKey = document.querySelector("#geminiApiKey");
+const geminiApiKeyHint = document.querySelector("#geminiApiKeyHint");
+const geminiClearApiKey = document.querySelector("#geminiClearApiKey");
+const clearGeminiApiKeyRow = document.querySelector("#clearGeminiApiKeyRow");
+const geminiEmbeddingModel = document.querySelector("#geminiEmbeddingModel");
+const geminiGenerationModel = document.querySelector("#geminiGenerationModel");
 const documentDialog = document.querySelector("#documentDialog");
 const documentForm = document.querySelector("#documentForm");
 const documentDialogSubtitle = document.querySelector("#documentDialogSubtitle");
@@ -85,6 +107,7 @@ let catalogRequestController;
 let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
+let currentRagSettings = null;
 let copyBusy = false;
 let editingCopyId = null;
 let editingCopyBggId = null;
@@ -224,13 +247,70 @@ function applyBggSettingsToForm(data) {
   }
 }
 
+function applyRagSettingsToForm(data) {
+  currentRagSettings = data;
+  const providers = data.providers || {};
+  const ollama = providers.ollama || {};
+  const lmstudio = providers.lmstudio || {};
+  const gemini = providers.gemini || {};
+
+  ragEmbeddingOrder.value = (data.embedding_provider_order || []).join(",");
+  ragGenerationOrder.value = (data.generation_provider_order || []).join(",");
+  ollamaUrl.value = ollama.url || "";
+  ollamaEmbeddingModel.value = ollama.embedding_model || "";
+  ollamaGenerationModel.value = ollama.generation_model || "";
+  lmstudioUrl.value = lmstudio.url || "";
+  lmstudioEmbeddingModel.value = lmstudio.embedding_model || "";
+  lmstudioGenerationModel.value = lmstudio.generation_model || "";
+  lmstudioGenerationTimeout.value = lmstudio.generation_timeout_seconds ?? 300;
+  lmstudioGenerationMaxTokens.value = lmstudio.generation_max_tokens ?? 512;
+  lmstudioDisableThinking.checked = lmstudio.generation_disable_thinking !== false;
+  lmstudioApiKey.value = "";
+  lmstudioClearApiKey.checked = false;
+  clearLmstudioApiKeyRow.hidden = lmstudio.api_key_source !== "stored";
+  lmstudioApiKeyHint.textContent = lmstudio.api_key_configured
+    ? `API key configurata (${lmstudio.api_key_source || "runtime"}). Lascia vuoto per mantenerla invariata.`
+    : "Nessuna API key LM Studio configurata.";
+
+  geminiUrl.value = gemini.url || "";
+  geminiEmbeddingModel.value = gemini.embedding_model || "";
+  geminiGenerationModel.value = gemini.generation_model || "";
+  geminiApiKey.value = "";
+  geminiClearApiKey.checked = false;
+  clearGeminiApiKeyRow.hidden = gemini.api_key_source !== "stored";
+  geminiApiKeyHint.textContent = gemini.api_key_configured
+    ? `API key configurata (${gemini.api_key_source || "runtime"}). Lascia vuoto per mantenerla invariata.`
+    : "Nessuna Gemini API key configurata.";
+}
+
+function parseProviderOrder(value, label) {
+  const allowed = new Set(["ollama", "lmstudio", "gemini"]);
+  const result = String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  if (!result.length || result.length > 3) {
+    throw new Error(`${label}: indica da 1 a 3 provider.`);
+  }
+  if (new Set(result).size !== result.length || result.some((item) => !allowed.has(item))) {
+    throw new Error(
+      `${label}: usa solo ollama, lmstudio, gemini senza duplicati.`,
+    );
+  }
+  return result;
+}
+
 async function openSettingsDialog() {
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const data = await api("/api/settings/bgg");
-    applyBggSettingsToForm(data);
+    const [bggData, ragData] = await Promise.all([
+      api("/api/settings/bgg"),
+      api("/api/settings/rag"),
+    ]);
+    applyBggSettingsToForm(bggData);
+    applyRagSettingsToForm(ragData);
     settingsDialog.showModal();
   } catch (error) {
     settingsDialog.showModal();
@@ -241,39 +321,79 @@ async function openSettingsDialog() {
   }
 }
 
-async function persistBggSettings({verifyAfter = false} = {}) {
+async function persistSettings({verifyAfter = false} = {}) {
   if (settingsBusy) return;
   setSettingsBusy(true);
   settingsResult.hidden = true;
 
-  const payload = {
-    application_token:
-      bggApplicationToken.disabled || !bggApplicationToken.value.trim()
-        ? null
-        : bggApplicationToken.value.trim(),
-    clear_application_token:
-      !bggClearToken.disabled && bggClearToken.checked,
-  };
-
   try {
-    const saved = await api("/api/settings/bgg", {
+    const ragPayload = {
+      embedding_provider_order: parseProviderOrder(
+        ragEmbeddingOrder.value,
+        "Priorità embedding",
+      ),
+      generation_provider_order: parseProviderOrder(
+        ragGenerationOrder.value,
+        "Priorità generation",
+      ),
+      ollama_url: ollamaUrl.value.trim() || null,
+      ollama_embedding_model: ollamaEmbeddingModel.value.trim() || null,
+      ollama_generation_model: ollamaGenerationModel.value.trim() || null,
+      lmstudio_url: lmstudioUrl.value.trim() || null,
+      lmstudio_api_key:
+        lmstudioClearApiKey.checked || !lmstudioApiKey.value.trim()
+          ? null
+          : lmstudioApiKey.value.trim(),
+      clear_lmstudio_api_key: lmstudioClearApiKey.checked,
+      lmstudio_embedding_model: lmstudioEmbeddingModel.value.trim() || null,
+      lmstudio_generation_model: lmstudioGenerationModel.value.trim() || null,
+      lmstudio_generation_timeout_seconds: Number(lmstudioGenerationTimeout.value || 300),
+      lmstudio_generation_max_tokens: Number(lmstudioGenerationMaxTokens.value || 512),
+      lmstudio_generation_disable_thinking: lmstudioDisableThinking.checked,
+      gemini_url: geminiUrl.value.trim() || null,
+      gemini_api_key:
+        geminiClearApiKey.checked || !geminiApiKey.value.trim()
+          ? null
+          : geminiApiKey.value.trim(),
+      clear_gemini_api_key: geminiClearApiKey.checked,
+      gemini_embedding_model: geminiEmbeddingModel.value.trim() || null,
+      gemini_generation_model: geminiGenerationModel.value.trim() || null,
+    };
+    const savedRag = await api("/api/settings/rag", {
       method: "PUT",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload),
+      body: JSON.stringify(ragPayload),
     });
-    applyBggSettingsToForm(saved);
+    applyRagSettingsToForm(savedRag);
+
+    const bggPayload = {
+      application_token:
+        bggApplicationToken.disabled || !bggApplicationToken.value.trim()
+          ? null
+          : bggApplicationToken.value.trim(),
+      clear_application_token:
+        !bggClearToken.disabled && bggClearToken.checked,
+    };
+    const savedBgg = await api("/api/settings/bgg", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(bggPayload),
+    });
+    applyBggSettingsToForm(savedBgg);
+
     settingsResult.hidden = false;
-    settingsResult.innerHTML = "<strong>Impostazioni BGG salvate.</strong>";
-    showToast("Application Token BGG salvato.");
+    settingsResult.innerHTML =
+      "<strong>Impostazioni salvate.</strong> Il primo provider di ogni ordine è quello effettivo; nessun fallback automatico.";
+    showToast("Impostazioni salvate.");
 
     if (verifyAfter) {
       const status = await api("/api/settings/bgg/verify", {method: "POST"});
       if (status.verified) {
         settingsResult.innerHTML =
-          `<strong>Token verificato.</strong> Accesso XML API2 riuscito con ${escapeHtml(status.title || `BGG #${status.bgg_id}`)}.`;
+          `<strong>Impostazioni salvate; token BGG verificato.</strong> Accesso XML API2 riuscito con ${escapeHtml(status.title || `BGG #${status.bgg_id}`)}. Nessun fallback RAG automatico.`;
       } else if (status.reason === "catalog_empty") {
         settingsResult.innerHTML =
-          "<strong>Token salvato.</strong> Importa almeno un gioco per eseguire una verifica XML API2.";
+          "<strong>Impostazioni salvate.</strong> Importa almeno un gioco per verificare XML API2.";
       }
     }
   } catch (error) {
@@ -2499,21 +2619,32 @@ settingsDialog.addEventListener("close", () => {
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   currentBggSettings = null;
+  currentRagSettings = null;
 });
 
 settingsForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  void persistBggSettings({verifyAfter: false});
+  void persistSettings({verifyAfter: false});
 });
 
 saveTestSettings.addEventListener("click", () => {
-  void persistBggSettings({verifyAfter: true});
+  void persistSettings({verifyAfter: true});
 });
 
 bggClearToken.addEventListener("change", () => {
   bggApplicationToken.disabled =
     bggClearToken.checked || Boolean(currentBggSettings?.overrides?.application_token);
   if (bggClearToken.checked) bggApplicationToken.value = "";
+});
+
+lmstudioClearApiKey.addEventListener("change", () => {
+  lmstudioApiKey.disabled = lmstudioClearApiKey.checked;
+  if (lmstudioClearApiKey.checked) lmstudioApiKey.value = "";
+});
+
+geminiClearApiKey.addEventListener("change", () => {
+  geminiApiKey.disabled = geminiClearApiKey.checked;
+  if (geminiClearApiKey.checked) geminiApiKey.value = "";
 });
 
 importButton.addEventListener("click", () => {
