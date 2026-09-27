@@ -19,6 +19,10 @@ def test_web_home_is_served(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "BoardGameCompanion" in response.text
+    assert "Importa barcode" in response.text
+    assert "Impostazioni BoardGameGeek" in response.text
+    assert 'id="bggApplicationToken"' in response.text
+    assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
 
