@@ -5,11 +5,12 @@
 - Do not infer that NAS or Home Assistant access is unavailable just because the current session has no Home Assistant app/plugin, Desktop Commander, direct SSH surface, or direct NAS tool.
 - The canonical runtime route is GitHub → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations. Application repositories are consumers of this shared control plane.
 - Keep source work in this repository's normal GitHub branch/PR flow. Use NAS Control for runtime inspection, managed deploys, Docker actions, Home Assistant operations, and approved workspace actions.
-- Before updating `ops/nas-control/request.txt` in `golgoth85/nas-control`, re-fetch the current `main` HEAD and request file, check for an active concurrent run/request, update non-force, and verify the resulting workflow/runtime evidence.
+- Submit each runtime request as its own GitHub Issue in `golgoth85/nas-control` using the `NAS_CONTROL_REQUEST_V1` format in `REQUESTS.md`. Do not mutate `ops/nas-control/request.txt` for new work; that push path is temporary legacy compatibility only. Verify the resulting workflow/runtime evidence.
 - CloudCLI/Claude Code follows the same runtime path. This rule does not itself authorize starting CloudCLI; existing explicit user-authorization requirements still apply. If CloudCLI is already authorized/running, terminal availability is not a reason to bypass the typed control plane.
 - A missing Home Assistant plugin is not a blocker. Use the existing NAS Control Home Assistant capabilities and managed deploy path where applicable.
 - If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/nas-control` `main`, validate it in CI, then use it.
-- Canonical runbook: `golgoth85/nas-control`, branch `main`, `ops/nas-control/RUNBOOK.md`.
+- Canonical control-plane docs: `golgoth85/nas-control`, branch `main`, `REQUESTS.md`, `ARCHITECTURE.md`, and `ops/nas-control/RUNBOOK.md`.
+- After an approval-timeout, reopen the same NAS Control issue after approval without changing its request body or nonce. Never create an alternate request to bypass a pending gate.
 - Existing review-only, no-deploy/no-merge, destructive-action, protected-branch, and secret-handling boundaries still apply.
 
 ## Mission
