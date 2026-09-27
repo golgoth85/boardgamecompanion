@@ -22,22 +22,29 @@ class AppSettingsStore:
         return row["value"] if row else None
 
     def set(self, key: str, value: str | None, *, sensitive: bool = False) -> None:
+        self.set_many({key: (value, sensitive)})
+
+    def set_many(
+        self,
+        values: dict[str, tuple[str | None, bool]],
+    ) -> None:
         now = datetime.now(UTC).isoformat()
         with self.database.transaction() as connection:
-            if value is None or value == "":
-                connection.execute("DELETE FROM app_settings WHERE key = ?", (key,))
-                return
-            connection.execute(
-                """
-                INSERT INTO app_settings (key, value, sensitive, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    sensitive = excluded.sensitive,
-                    updated_at = excluded.updated_at
-                """,
-                (key, value, 1 if sensitive else 0, now),
-            )
+            for key, (value, sensitive) in values.items():
+                if value is None or value == "":
+                    connection.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO app_settings (key, value, sensitive, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        sensitive = excluded.sensitive,
+                        updated_at = excluded.updated_at
+                    """,
+                    (key, value, 1 if sensitive else 0, now),
+                )
 
     def get_many(self, keys: tuple[str, ...]) -> dict[str, str | None]:
         placeholders = ",".join("?" for _ in keys)
@@ -338,17 +345,18 @@ def save_rag_settings(
         "rag_gemini_embedding_model": (gemini_embedding_model or "").strip() or None,
         "rag_gemini_generation_model": (gemini_generation_model or "").strip() or None,
     }
-    for key, value in values.items():
-        store.set(key, value)
-
+    updates: dict[str, tuple[str | None, bool]] = {
+        key: (value, False) for key, value in values.items()
+    }
     if clear_lmstudio_api_key:
-        store.set("rag_lmstudio_api_key", None, sensitive=True)
+        updates["rag_lmstudio_api_key"] = (None, True)
     elif lmstudio_api_key is not None and lmstudio_api_key.strip():
-        store.set("rag_lmstudio_api_key", lmstudio_api_key.strip(), sensitive=True)
+        updates["rag_lmstudio_api_key"] = (lmstudio_api_key.strip(), True)
 
     if clear_gemini_api_key:
-        store.set("rag_gemini_api_key", None, sensitive=True)
+        updates["rag_gemini_api_key"] = (None, True)
     elif gemini_api_key is not None and gemini_api_key.strip():
-        store.set("rag_gemini_api_key", gemini_api_key.strip(), sensitive=True)
+        updates["rag_gemini_api_key"] = (gemini_api_key.strip(), True)
 
+    store.set_many(updates)
     return resolve_rag_settings(database)
