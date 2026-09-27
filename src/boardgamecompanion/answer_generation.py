@@ -370,39 +370,39 @@ class LMStudioGenerationProvider:
             "maximum_claims": max_claims,
             "evidence": evidence,
         }
-        user_content = json.dumps(
-            user_payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        request_payload: dict[str, Any] = {
+            "model": descriptor.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        user_payload,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                },
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "boardgamecompanion_answer",
+                    "strict": True,
+                    "schema": ANSWER_SCHEMA,
+                },
+            },
+        }
         if self.disable_thinking and "qwen3" in descriptor.model.casefold():
-            user_content += "\n/no_think"
+            request_payload["reasoning_effort"] = "none"
 
         response = self._request(
             "POST",
             "/v1/chat/completions",
-            json={
-                "model": descriptor.model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": user_content,
-                    },
-                ],
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
-                "stream": False,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "boardgamecompanion_answer",
-                        "strict": True,
-                        "schema": ANSWER_SCHEMA,
-                    },
-                },
-            },
+            json=request_payload,
         )
         try:
             payload = response.json()
