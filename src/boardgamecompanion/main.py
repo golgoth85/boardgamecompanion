@@ -21,7 +21,9 @@ from boardgamecompanion.answer_generation import (
 )
 from boardgamecompanion.app_settings import (
     resolve_bgg_settings,
+    resolve_rag_settings,
     save_bgg_settings,
+    save_rag_settings,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_metadata import (
@@ -206,6 +208,31 @@ class BarcodeLookupRequest(BaseModel):
 class BggSettingsUpdate(BaseModel):
     application_token: str | None = Field(default=None, max_length=4096)
     clear_application_token: bool = False
+
+
+class RagSettingsUpdate(BaseModel):
+    embedding_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
+        min_length=1, max_length=3
+    )
+    generation_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
+        min_length=1, max_length=3
+    )
+    ollama_url: str | None = Field(default=None, max_length=4096)
+    ollama_embedding_model: str | None = Field(default=None, max_length=500)
+    ollama_generation_model: str | None = Field(default=None, max_length=500)
+    lmstudio_url: str | None = Field(default=None, max_length=4096)
+    lmstudio_api_key: str | None = Field(default=None, max_length=4096)
+    clear_lmstudio_api_key: bool = False
+    lmstudio_embedding_model: str | None = Field(default=None, max_length=500)
+    lmstudio_generation_model: str | None = Field(default=None, max_length=500)
+    lmstudio_generation_timeout_seconds: float = Field(default=300.0, ge=1.0, le=900.0)
+    lmstudio_generation_max_tokens: int = Field(default=512, ge=64, le=4096)
+    lmstudio_generation_disable_thinking: bool = True
+    gemini_url: str | None = Field(default=None, max_length=4096)
+    gemini_api_key: str | None = Field(default=None, max_length=4096)
+    clear_gemini_api_key: bool = False
+    gemini_embedding_model: str | None = Field(default=None, max_length=500)
+    gemini_generation_model: str | None = Field(default=None, max_length=500)
 
 
 class RetrievalPayload(BaseModel):
@@ -750,9 +777,12 @@ def get_document_chunk(chunk_id: str) -> dict[str, object]:
 
 
 def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
-    selected = settings.effective_embedding_provider
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    selected = rag.embedding_provider
     if selected == "lmstudio":
-        if not settings.lmstudio_url or not settings.lmstudio_embedding_model:
+        if not rag.lmstudio_url or not rag.lmstudio_embedding_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -761,31 +791,31 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
                 ),
             )
         provider = LMStudioEmbeddingProvider(
-            base_url=settings.lmstudio_url,
-            model=settings.lmstudio_embedding_model,
+            base_url=rag.lmstudio_url,
+            model=rag.lmstudio_embedding_model,
             requested_dimensions=settings.lmstudio_embedding_dimensions,
             timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
-            api_key=settings.lmstudio_api_key,
+            api_key=rag.lmstudio_api_key,
         )
         batch_size = settings.lmstudio_embedding_batch_size
     elif selected == "gemini":
-        if not settings.gemini_api_key:
+        if not rag.gemini_api_key:
             raise HTTPException(
                 status_code=503,
                 detail="Gemini embedding provider is not configured; set BGC_GEMINI_API_KEY",
             )
         provider = GeminiEmbeddingProvider(
-            base_url=settings.gemini_url,
-            model=settings.gemini_embedding_model,
-            api_key=settings.gemini_api_key,
+            base_url=rag.gemini_url,
+            model=rag.gemini_embedding_model,
+            api_key=rag.gemini_api_key,
             requested_dimensions=settings.gemini_embedding_dimensions,
             timeout_seconds=settings.gemini_embedding_timeout_seconds,
             verify_tls=settings.gemini_verify_tls,
         )
         batch_size = settings.gemini_embedding_batch_size
     else:
-        if not settings.ollama_url or not settings.ollama_embedding_model:
+        if not rag.ollama_url or not rag.ollama_embedding_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -794,16 +824,14 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
                 ),
             )
         provider = OllamaEmbeddingProvider(
-            base_url=settings.ollama_url,
-            model=settings.ollama_embedding_model,
+            base_url=rag.ollama_url,
+            model=rag.ollama_embedding_model,
             requested_dimensions=settings.ollama_embedding_dimensions,
             timeout_seconds=settings.ollama_embedding_timeout_seconds,
             verify_tls=settings.ollama_verify_tls,
         )
         batch_size = settings.ollama_embedding_batch_size
 
-    database = get_database()
-    database.initialize()
     return EmbeddingRetrievalService(
         database,
         get_chunk_index_service(),
@@ -898,9 +926,12 @@ def retrieve_game_evidence(
 
 
 def get_answer_generation_service() -> AnswerGenerationService:
-    selected = settings.effective_generation_provider
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    selected = rag.generation_provider
     if selected == "lmstudio":
-        if not settings.lmstudio_url or not settings.lmstudio_generation_model:
+        if not rag.lmstudio_url or not rag.lmstudio_generation_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -909,29 +940,31 @@ def get_answer_generation_service() -> AnswerGenerationService:
                 ),
             )
         provider = LMStudioGenerationProvider(
-            base_url=settings.lmstudio_url,
-            model=settings.lmstudio_generation_model,
-            timeout_seconds=settings.lmstudio_generation_timeout_seconds,
+            base_url=rag.lmstudio_url,
+            model=rag.lmstudio_generation_model,
+            timeout_seconds=rag.lmstudio_generation_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
             temperature=settings.lmstudio_generation_temperature,
-            api_key=settings.lmstudio_api_key,
+            max_tokens=rag.lmstudio_generation_max_tokens,
+            disable_thinking=rag.lmstudio_generation_disable_thinking,
+            api_key=rag.lmstudio_api_key,
         )
     elif selected == "gemini":
-        if not settings.gemini_api_key:
+        if not rag.gemini_api_key:
             raise HTTPException(
                 status_code=503,
                 detail="Gemini generation provider is not configured; set BGC_GEMINI_API_KEY",
             )
         provider = GeminiGenerationProvider(
-            base_url=settings.gemini_url,
-            model=settings.gemini_generation_model,
-            api_key=settings.gemini_api_key,
+            base_url=rag.gemini_url,
+            model=rag.gemini_generation_model,
+            api_key=rag.gemini_api_key,
             timeout_seconds=settings.gemini_generation_timeout_seconds,
             verify_tls=settings.gemini_verify_tls,
             temperature=settings.gemini_generation_temperature,
         )
     else:
-        if not settings.ollama_url or not settings.ollama_generation_model:
+        if not rag.ollama_url or not rag.ollama_generation_model:
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -940,8 +973,8 @@ def get_answer_generation_service() -> AnswerGenerationService:
                 ),
             )
         provider = OllamaGenerationProvider(
-            base_url=settings.ollama_url,
-            model=settings.ollama_generation_model,
+            base_url=rag.ollama_url,
+            model=rag.ollama_generation_model,
             timeout_seconds=settings.ollama_generation_timeout_seconds,
             verify_tls=settings.ollama_verify_tls,
             temperature=settings.ollama_generation_temperature,
@@ -1231,6 +1264,47 @@ def catalog_stats() -> dict[str, int]:
     database = get_database()
     database.initialize()
     return Catalog(database).stats()
+
+
+@app.get("/api/settings/rag", tags=["settings"])
+def get_rag_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return resolve_rag_settings(database).public_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.put("/api/settings/rag", tags=["settings"])
+def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        resolved = save_rag_settings(
+            database,
+            embedding_provider_order=tuple(payload.embedding_provider_order),
+            generation_provider_order=tuple(payload.generation_provider_order),
+            ollama_url=payload.ollama_url,
+            ollama_embedding_model=payload.ollama_embedding_model,
+            ollama_generation_model=payload.ollama_generation_model,
+            lmstudio_url=payload.lmstudio_url,
+            lmstudio_api_key=payload.lmstudio_api_key,
+            clear_lmstudio_api_key=payload.clear_lmstudio_api_key,
+            lmstudio_embedding_model=payload.lmstudio_embedding_model,
+            lmstudio_generation_model=payload.lmstudio_generation_model,
+            lmstudio_generation_timeout_seconds=payload.lmstudio_generation_timeout_seconds,
+            lmstudio_generation_max_tokens=payload.lmstudio_generation_max_tokens,
+            lmstudio_generation_disable_thinking=payload.lmstudio_generation_disable_thinking,
+            gemini_url=payload.gemini_url,
+            gemini_api_key=payload.gemini_api_key,
+            clear_gemini_api_key=payload.clear_gemini_api_key,
+            gemini_embedding_model=payload.gemini_embedding_model,
+            gemini_generation_model=payload.gemini_generation_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return resolved.public_dict()
 
 
 @app.get("/api/settings/bgg", tags=["settings"])

@@ -265,6 +265,8 @@ class LMStudioGenerationProvider:
         timeout_seconds: float,
         verify_tls: bool,
         temperature: float,
+        max_tokens: int = 512,
+        disable_thinking: bool = True,
         api_key: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
@@ -273,6 +275,8 @@ class LMStudioGenerationProvider:
         self.timeout_seconds = float(timeout_seconds)
         self.verify_tls = bool(verify_tls)
         self.temperature = float(temperature)
+        self.max_tokens = int(max_tokens)
+        self.disable_thinking = bool(disable_thinking)
         self.api_key = (api_key or "").strip() or None
         self._client = client
         if not self.base_url.startswith(("http://", "https://")):
@@ -283,6 +287,8 @@ class LMStudioGenerationProvider:
             raise ValueError(
                 "LM Studio generation temperature must be between 0 and 2"
             )
+        if not 64 <= self.max_tokens <= 4096:
+            raise ValueError("LM Studio generation max_tokens must be between 64 and 4096")
 
     def _headers(self) -> dict[str, str]:
         if self.api_key is None:
@@ -364,34 +370,39 @@ class LMStudioGenerationProvider:
             "maximum_claims": max_claims,
             "evidence": evidence,
         }
+        request_payload: dict[str, Any] = {
+            "model": descriptor.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        user_payload,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                },
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "boardgamecompanion_answer",
+                    "strict": True,
+                    "schema": ANSWER_SCHEMA,
+                },
+            },
+        }
+        if self.disable_thinking and "qwen3" in descriptor.model.casefold():
+            request_payload["reasoning_effort"] = "none"
+
         response = self._request(
             "POST",
             "/v1/chat/completions",
-            json={
-                "model": descriptor.model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            user_payload,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    },
-                ],
-                "temperature": self.temperature,
-                "stream": False,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "boardgamecompanion_answer",
-                        "strict": True,
-                        "schema": ANSWER_SCHEMA,
-                    },
-                },
-            },
+            json=request_payload,
         )
         try:
             payload = response.json()

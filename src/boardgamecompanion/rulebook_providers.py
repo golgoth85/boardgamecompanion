@@ -151,10 +151,17 @@ class ProviderHttpClient:
                         "GET",
                         current,
                         headers={
-                            "Accept": "text/html, application/json;q=0.9",
+                            "Accept": (
+                                "text/html,application/xhtml+xml,"
+                                "application/json;q=0.9,*/*;q=0.8"
+                            ),
+                            "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
                             "Accept-Encoding": "identity",
+                            "Cache-Control": "no-cache",
                             "User-Agent": (
-                                "BoardGameCompanion/0.1 rulebook-discovery"
+                                "Mozilla/5.0 (X11; Linux x86_64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/140.0.0.0 Safari/537.36"
                             ),
                         },
                         timeout=self.timeout_seconds,
@@ -453,66 +460,146 @@ class AsmodeeItaliaProvider:
     _BASE = "https://www.asmodee.it/product/"
     _HOSTS = frozenset({"www.asmodee.it", "asmodee.it"})
     _PUBLISHERS = ("Asmodee", "Asmodee Italia")
-    _PDF_HOSTS = frozenset({"cdn.svc.asmodee.net", "www.asmodee.it", "asmodee.it"})
+    _PDF_HOSTS = frozenset(
+        {"cdn.svc.asmodee.net", "www.asmodee.it", "asmodee.it", "www.rprod.com", "rprod.com"}
+    )
+    _RULEBOOK_PAGE_HOSTS = frozenset({"www.rprod.com", "rprod.com"})
 
     def __init__(self, http: ProviderHttpClient | None = None):
         self.http = http or ProviderHttpClient()
 
-    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
-        page_url = f"{self._BASE}{quote(_slug(query.title), safe='-')}/"
-        response = self.http.get(
-            page_url,
-            allowed_hosts=self._HOSTS,
-            accepted_statuses=frozenset({200, 404}),
+    def _candidate(
+        self,
+        *,
+        query: RulebookQuery,
+        page: _OfficialPageParser,
+        official_page_url: str,
+        pdf_url: str,
+        identity_verified: bool,
+        rulebook_page_url: str | None = None,
+    ) -> RulebookCandidate:
+        evidence = ["official_page_title_exact"]
+        if identity_verified:
+            evidence.append("bgg_api_exact_id_title_crosscheck")
+        metadata: dict[str, object] = {
+            "official_page": official_page_url,
+            "identity_evidence": evidence,
+            "catalog_item_type": query.item_type,
+        }
+        if rulebook_page_url is not None:
+            metadata["rulebook_page"] = rulebook_page_url
+        return RulebookCandidate(
+            provider=self.name,
+            source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+            url=pdf_url,
+            language="it",
+            document_type="rulebook",
+            official=True,
+            confidence=100 if identity_verified else 94,
+            title=f"{page.title} — Regolamento italiano",
+            bgg_id=query.bgg_id if identity_verified else None,
+            game_title=page.title,
+            year=None,
+            publisher="Asmodee Italia",
+            metadata=metadata,
         )
-        if response.status_code == 404:
-            return ()
-        page = _parse_official_page(response.content)
-        if not _title_matches(query, page.title):
-            return ()
-        publisher_verified = _verified_publisher_matches(
-            query, self._PUBLISHERS
-        ) and _verified_title_matches(query, page.title)
 
-        candidates: list[RulebookCandidate] = []
-        for href, label in page.links:
-            if "regolamento" not in _match_text(label):
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        seen_pages: set[str] = set()
+        for title in (query.title, query.original_title):
+            if not title:
                 continue
-            absolute = urljoin(response.url, href)
-            absolute_parts = urlsplit(absolute)
-            if absolute_parts.scheme != "https" or (absolute_parts.hostname or "").lower() not in self._PDF_HOSTS:
+            page_url = f"{self._BASE}{quote(_slug(title), safe='-')}/"
+            if page_url in seen_pages:
                 continue
-            if not urlsplit(absolute).path.casefold().endswith(".pdf"):
-                continue
-            candidates.append(
-                RulebookCandidate(
-                    provider=self.name,
-                    source_kind=RulebookSource.OFFICIAL_LOCALIZER,
-                    url=absolute,
-                    language="it",
-                    document_type="rulebook",
-                    official=True,
-                    confidence=100 if publisher_verified else 94,
-                    title=f"{page.title} — Regolamento italiano",
-                    bgg_id=query.bgg_id if publisher_verified else None,
-                    game_title=page.title,
-                    year=None,
-                    publisher="Asmodee Italia",
-                    metadata={
-                        "official_page": response.url,
-                        "identity_evidence": (
-                            [
-                                "official_page_title_exact",
-                                "bgg_api_exact_id_title_publisher_crosscheck",
-                            ]
-                            if publisher_verified
-                            else ["official_page_title_exact"]
-                        ),
-                        "catalog_item_type": query.item_type,
-                    },
-                )
+            seen_pages.add(page_url)
+            response = self.http.get(
+                page_url,
+                allowed_hosts=self._HOSTS,
+                accepted_statuses=frozenset({200, 404}),
             )
-        return tuple(candidates[:MAX_DISCOVERY_RESULTS])
+            if response.status_code == 404:
+                continue
+            page = _parse_official_page(response.content)
+            if not _title_matches(query, page.title):
+                continue
+
+            # BGG has already bound query.bgg_id to an exact verified title. For an
+            # official localizer page, an exact title match is sufficient identity
+            # evidence even when the localizer is not listed as the BGG publisher.
+            identity_verified = query.bgg_identity_verified and _verified_title_matches(
+                query, page.title
+            )
+
+            candidates: list[RulebookCandidate] = []
+            for href, label in page.links:
+                if "regolamento" not in _match_text(label):
+                    continue
+                absolute = urljoin(response.url, href)
+                parts = urlsplit(absolute)
+                host = (parts.hostname or "").lower()
+                if parts.scheme != "https":
+                    continue
+
+                if host in self._PDF_HOSTS and parts.path.casefold().endswith(".pdf"):
+                    candidates.append(
+                        self._candidate(
+                            query=query,
+                            page=page,
+                            official_page_url=response.url,
+                            pdf_url=absolute,
+                            identity_verified=identity_verified,
+                        )
+                    )
+                    continue
+
+                # Asmodee Italia currently links some "Scarica il regolamento"
+                # actions to the official Repos product page rather than directly
+                # to the PDF. Follow only that fixed trusted origin and then select
+                # the Italian rules PDF from its bounded link list.
+                if host not in self._RULEBOOK_PAGE_HOSTS:
+                    continue
+                linked = self.http.get(
+                    absolute,
+                    allowed_hosts=self._RULEBOOK_PAGE_HOSTS,
+                    accepted_statuses=frozenset({200, 404}),
+                )
+                if linked.status_code == 404:
+                    continue
+                rulebook_page = _parse_official_page(linked.content)
+                if not _title_matches(query, rulebook_page.title):
+                    continue
+                for pdf_href, pdf_label in rulebook_page.links:
+                    pdf_url = urljoin(linked.url, pdf_href)
+                    pdf_parts = urlsplit(pdf_url)
+                    if (
+                        pdf_parts.scheme != "https"
+                        or (pdf_parts.hostname or "").lower() not in self._PDF_HOSTS
+                        or not pdf_parts.path.casefold().endswith(".pdf")
+                    ):
+                        continue
+                    filename = pdf_parts.path.casefold().rsplit("/", 1)[-1]
+                    if not re.search(
+                        r"(?:^|[-_])(rule|rules|regle|regles)(?:[-_.]|$)",
+                        filename,
+                    ):
+                        continue
+                    if _language_from_url(pdf_url, pdf_label).split("-", 1)[0] != "it":
+                        continue
+                    candidates.append(
+                        self._candidate(
+                            query=query,
+                            page=page,
+                            official_page_url=response.url,
+                            pdf_url=pdf_url,
+                            identity_verified=identity_verified,
+                            rulebook_page_url=linked.url,
+                        )
+                    )
+                    break
+            if candidates:
+                return tuple(candidates[:MAX_DISCOVERY_RESULTS])
+        return ()
 
 
 class RuleBookOrgProvider:

@@ -98,3 +98,64 @@ def test_bgg_verify_requires_configured_token(tmp_path: Path) -> None:
 
     assert response.status_code == 409
     assert "not configured" in response.json()["detail"]
+
+
+def test_rag_settings_persist_priority_and_hide_secrets(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+
+    payload = {
+        "embedding_provider_order": ["lmstudio", "ollama", "gemini"],
+        "generation_provider_order": ["lmstudio", "gemini"],
+        "ollama_url": "http://ollama.test:11434",
+        "ollama_embedding_model": "nomic-embed-text",
+        "ollama_generation_model": "qwen3:8b",
+        "lmstudio_url": "http://lmstudio.test:1234",
+        "lmstudio_api_key": "lmstudio-secret",
+        "lmstudio_embedding_model": "text-embedding-qwen3-embedding-0.6b",
+        "lmstudio_generation_model": "qwen3-14b",
+        "lmstudio_generation_timeout_seconds": 300,
+        "lmstudio_generation_max_tokens": 384,
+        "lmstudio_generation_disable_thinking": True,
+        "gemini_url": "https://generativelanguage.googleapis.com",
+        "gemini_api_key": "gemini-secret",
+        "gemini_embedding_model": "gemini-embedding-2",
+        "gemini_generation_model": "gemini-3.8-flash",
+    }
+
+    with TestClient(app) as client:
+        saved = client.put("/api/settings/rag", json=payload)
+        assert saved.status_code == 200
+        body = saved.json()
+        assert body["embedding_provider_order"] == ["lmstudio", "ollama", "gemini"]
+        assert body["generation_provider_order"] == ["lmstudio", "gemini"]
+        assert body["effective_embedding_provider"] == "lmstudio"
+        assert body["effective_generation_provider"] == "lmstudio"
+        assert body["automatic_fallback"] is False
+        assert body["providers"]["lmstudio"]["generation_max_tokens"] == 384
+        assert body["providers"]["lmstudio"]["generation_disable_thinking"] is True
+        assert body["providers"]["lmstudio"]["api_key_configured"] is True
+        assert body["providers"]["gemini"]["api_key_configured"] is True
+        assert "lmstudio-secret" not in saved.text
+        assert "gemini-secret" not in saved.text
+
+        reloaded = client.get("/api/settings/rag")
+        assert reloaded.status_code == 200
+        assert reloaded.json() == body
+        assert "lmstudio-secret" not in reloaded.text
+        assert "gemini-secret" not in reloaded.text
+
+
+def test_rag_settings_reject_duplicate_provider_priority(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/settings/rag",
+            json={
+                "embedding_provider_order": ["lmstudio", "lmstudio"],
+                "generation_provider_order": ["lmstudio"],
+            },
+        )
+
+    assert response.status_code == 400
+    assert "duplicates" in response.json()["detail"]

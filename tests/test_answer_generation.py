@@ -12,6 +12,7 @@ from boardgamecompanion.answer_generation import (
     AnswerProtocolError,
     AnswerProviderError,
     GenerationDescriptor,
+    LMStudioGenerationProvider,
     OllamaGenerationProvider,
 )
 from boardgamecompanion.embedding_retrieval import EmbeddingConflict
@@ -540,6 +541,80 @@ def test_ollama_chat_contract_treats_evidence_as_untrusted_data() -> None:
     assert descriptor.model_digest == "f" * 64
     assert output["claims"][0]["supports"][0]["evidence_id"] == "E1"
     assert [request.url.path for request in requests] == ["/api/tags", "/api/chat"]
+
+
+def test_lmstudio_qwen3_generation_is_bounded_and_disables_thinking() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/v1/models":
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {
+                            "key": "qwen3-14b",
+                            "display_name": "Qwen3 14B",
+                            "type": "llm",
+                            "publisher": "Qwen",
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/v1/chat/completions":
+            payload = json.loads(request.content)
+            assert payload["model"] == "qwen3-14b"
+            assert payload["max_tokens"] == 256
+            assert payload["stream"] is False
+            assert payload["response_format"]["type"] == "json_schema"
+            assert payload["reasoning_effort"] == "none"
+            user_content = payload["messages"][1]["content"]
+            decoded = json.loads(user_content)
+            assert decoded["question"] == "Question"
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {"status": "not_found", "claims": []}
+                                )
+                            }
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.Client(
+        base_url="http://lmstudio.test",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = LMStudioGenerationProvider(
+        base_url="http://lmstudio.test",
+        model="qwen3-14b",
+        timeout_seconds=5.0,
+        verify_tls=True,
+        temperature=0.0,
+        max_tokens=256,
+        disable_thinking=True,
+        client=client,
+    )
+    descriptor = provider.describe()
+    result = provider.generate(
+        query="Question",
+        evidence=[{"evidence_id": "E1", "text": "Evidence"}],
+        descriptor=descriptor,
+        max_claims=12,
+    )
+
+    assert result == {"status": "not_found", "claims": []}
+    assert [request.url.path for request in requests] == [
+        "/api/v1/models",
+        "/v1/chat/completions",
+    ]
 
 
 def test_answer_api_is_explicitly_unconfigured_without_models(

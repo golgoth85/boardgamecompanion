@@ -10,6 +10,7 @@ import pytest
 from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
 from boardgamecompanion.rulebook_providers import (
+    AsmodeeItaliaProvider,
     ProviderHttpClient,
     ReposProductionProvider,
 )
@@ -106,6 +107,54 @@ def test_publisher_compatibility_does_not_use_substring_matches() -> None:
     )
     assert tuple(provider.discover(query(publishers=("Not Repos Production Holdings",)))) == ()
     assert calls == 0
+
+
+def test_provider_http_client_uses_browser_compatible_public_headers() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, content=b"ok", request=request)
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        min_interval_seconds=0,
+    )
+    client.get("https://provider.example/index", allowed_hosts={"provider.example"})
+
+    assert captured[0].headers["user-agent"].startswith("Mozilla/5.0")
+    assert captured[0].headers["accept-language"].startswith("it-IT")
+    assert captured[0].headers["accept-encoding"] == "identity"
+
+
+def test_asmodee_follows_trusted_official_rulebook_page_and_keeps_bgg_identity() -> None:
+    asmodee_html = b"""<!doctype html><h1>7 Wonders Duel</h1>
+      <a href='https://www.rprod.com/it/games/7-wonders-duel'>Scarica il regolamento</a>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.asmodee.it":
+            return httpx.Response(200, content=asmodee_html, request=request)
+        if request.url.host == "www.rprod.com":
+            return httpx.Response(200, content=repos_html(), request=request)
+        return httpx.Response(404, request=request)
+
+    provider = AsmodeeItaliaProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    candidates = tuple(provider.discover(query()))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.language == "it"
+    assert candidate.bgg_id == 173346
+    assert candidate.confidence == 100
+    assert candidate.source_kind.value == "official_localizer"
+    assert candidate.metadata["rulebook_page"] == (
+        "https://www.rprod.com/it/games/7-wonders-duel"
+    )
 
 
 class StaticProvider:
@@ -299,6 +348,21 @@ def test_discovery_routes_candidates_through_policy_and_rediscovery_is_idempoten
     community = next(item for item in reviews["items"] if item["candidate"]["provider"] == "community")
     assert community["candidate"]["official"] is False
     assert community["policy_action"] == "review"
+
+
+def test_discovery_status_read_does_not_resynchronize_catalog(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    service = RulebookDiscoveryService(db, discovery_providers())
+    assert service.synchronize_catalog() == 1
+
+    def unexpected_sync(*args, **kwargs):
+        raise AssertionError("status read attempted a catalog write")
+
+    service.synchronize_catalog = unexpected_sync  # type: ignore[method-assign]
+    status = service.list_status(bgg_id=173346)
+
+    assert status["count"] == 1
+    assert status["items"][0]["bgg_id"] == 173346
 
 
 def test_discovery_persists_state_across_service_restart_and_partial_outage(tmp_path: Path) -> None:
