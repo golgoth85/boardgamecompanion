@@ -15,123 +15,86 @@ def configure_paths(tmp_path: Path) -> None:
     settings.manuals_dir = tmp_path / "manuals"
 
 
-def clear_floppy_env() -> None:
-    for key in (
-        "BGC_FLOPPY_URL",
-        "BGC_FLOPPY_API_KEY",
-        "BGC_FLOPPY_TIMEOUT_SECONDS",
-        "BGC_FLOPPY_VERIFY_TLS",
-    ):
-        os.environ.pop(key, None)
+def clear_bgg_env() -> None:
+    os.environ.pop("BGC_BGG_APPLICATION_TOKEN", None)
 
 
-def test_floppy_settings_persist_without_returning_secret(tmp_path: Path) -> None:
-    clear_floppy_env()
+def test_bgg_settings_persist_without_returning_secret(tmp_path: Path) -> None:
+    clear_bgg_env()
     configure_paths(tmp_path)
 
     with TestClient(app) as client:
-        initial = client.get("/api/settings/floppy")
+        initial = client.get("/api/settings/bgg")
         assert initial.status_code == 200
-        assert initial.json()["api_key_configured"] is False
-        assert initial.json()["timeout_seconds"] == 45
+        assert initial.json()["configured"] is False
 
         saved = client.put(
-            "/api/settings/floppy",
-            json={
-                "url": "http://floppy:8000/",
-                "api_key": "super-secret-token",
-                "timeout_seconds": 12,
-                "verify_tls": False,
-            },
+            "/api/settings/bgg",
+            json={"application_token": "super-secret-bgg-token"},
         )
         assert saved.status_code == 200
         body = saved.json()
-        assert body["url"] == "http://floppy:8000"
-        assert body["api_key_configured"] is True
-        assert body["api_key_source"] == "stored"
-        assert body["timeout_seconds"] == 12
-        assert body["verify_tls"] is False
-        assert "super-secret-token" not in saved.text
-        assert "api_key" not in body
+        assert body["configured"] is True
+        assert body["application_token_source"] == "stored"
+        assert body["stored_application_token_configured"] is True
+        assert "super-secret-bgg-token" not in saved.text
+        assert "application_token" not in body
 
-        reloaded = client.get("/api/settings/floppy")
+        reloaded = client.get("/api/settings/bgg")
         assert reloaded.status_code == 200
         assert reloaded.json() == body
-        assert "super-secret-token" not in reloaded.text
+        assert "super-secret-bgg-token" not in reloaded.text
 
         kept = client.put(
-            "/api/settings/floppy",
-            json={
-                "url": "http://floppy:8000",
-                "api_key": None,
-                "timeout_seconds": 9,
-                "verify_tls": True,
-            },
+            "/api/settings/bgg",
+            json={"application_token": None},
         )
         assert kept.status_code == 200
-        assert kept.json()["api_key_configured"] is True
+        assert kept.json()["configured"] is True
 
         cleared = client.put(
-            "/api/settings/floppy",
+            "/api/settings/bgg",
             json={
-                "url": "http://floppy:8000",
-                "api_key": None,
-                "clear_api_key": True,
-                "timeout_seconds": 9,
-                "verify_tls": True,
+                "application_token": None,
+                "clear_application_token": True,
             },
         )
         assert cleared.status_code == 200
-        assert cleared.json()["api_key_configured"] is False
+        assert cleared.json()["configured"] is False
 
 
-def test_environment_url_and_token_override_stored_values(tmp_path: Path) -> None:
-    clear_floppy_env()
+def test_bgg_environment_token_overrides_stored_value(tmp_path: Path) -> None:
+    clear_bgg_env()
     configure_paths(tmp_path)
 
     with TestClient(app) as client:
         client.put(
-            "/api/settings/floppy",
-            json={
-                "url": "http://stored-floppy:8000",
-                "api_key": "stored-token",
-                "timeout_seconds": 8,
-                "verify_tls": True,
-            },
+            "/api/settings/bgg",
+            json={"application_token": "stored-token"},
         )
 
-        os.environ["BGC_FLOPPY_URL"] = "http://env-floppy:9000"
-        os.environ["BGC_FLOPPY_API_KEY"] = "env-token"
+        os.environ["BGC_BGG_APPLICATION_TOKEN"] = "env-token"
         try:
-            response = client.get("/api/settings/floppy")
+            response = client.get("/api/settings/bgg")
         finally:
-            clear_floppy_env()
+            clear_bgg_env()
 
     assert response.status_code == 200
     body = response.json()
-    assert body["url"] == "http://env-floppy:9000"
-    assert body["api_key_configured"] is True
-    assert body["url_source"] == "environment"
-    assert body["api_key_source"] == "environment"
-    assert body["overrides"]["url"] is True
-    assert body["overrides"]["api_key"] is True
+    assert body["configured"] is True
+    assert body["application_token_source"] == "environment"
+    assert body["overrides"]["application_token"] is True
+    assert body["stored_application_token_configured"] is True
     assert "env-token" not in response.text
     assert "stored-token" not in response.text
 
 
-def test_floppy_settings_validate_url_and_timeout(tmp_path: Path) -> None:
-    clear_floppy_env()
+def test_bgg_verify_requires_configured_token(tmp_path: Path) -> None:
+    clear_bgg_env()
     configure_paths(tmp_path)
 
     with TestClient(app) as client:
-        bad_url = client.put(
-            "/api/settings/floppy",
-            json={"url": "floppy:8000", "timeout_seconds": 8, "verify_tls": True},
-        )
-        bad_timeout = client.put(
-            "/api/settings/floppy",
-            json={"url": "", "timeout_seconds": 120, "verify_tls": True},
-        )
+        response = client.post("/api/settings/bgg/verify")
 
-    assert bad_url.status_code == 422
-    assert bad_timeout.status_code == 422
+    assert response.status_code == 409
+    assert "not configured" in response.json()["detail"]
