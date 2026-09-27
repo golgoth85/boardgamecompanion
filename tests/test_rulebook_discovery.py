@@ -260,6 +260,40 @@ def test_discovery_routes_candidates_through_policy_and_rediscovery_is_idempoten
 
     assert first["candidates_found"] == 3 and first["review_items_created"] == 3
     assert second["candidates_found"] == 3 and second["review_items_created"] == 0
+    assert first["generation"] == 1
+    assert second["generation"] == 2
+    assert len(first["review_items"]) == 3
+    assert {item["id"] for item in first["review_items"]} == {
+        item["id"] for item in second["review_items"]
+    }
+    assert all(item["created"] for item in first["review_items"])
+    assert not any(item["created"] for item in second["review_items"])
+    assert {
+        (
+            item["candidate"]["provider"],
+            item["candidate"]["url"],
+            item["candidate"]["language"],
+        )
+        for item in first["review_items"]
+    } == {
+        ("official", "https://publisher.example/it.pdf", "it"),
+        ("official", "https://publisher.example/en.pdf", "en"),
+        ("community", "https://community.example/it.pdf", "it"),
+    }
+    assert all(
+        set(item["candidate"])
+        == {
+            "provider",
+            "source_kind",
+            "url",
+            "language",
+            "document_type",
+            "official",
+            "confidence",
+            "bgg_id",
+        }
+        for item in first["review_items"]
+    )
     assert reviews["total"] == 3
     assert sorted(item["status"] for item in reviews["items"]) == ["approved", "approved", "pending"]
     community = next(item for item in reviews["items"] if item["candidate"]["provider"] == "community")
@@ -277,6 +311,22 @@ def test_discovery_persists_state_across_service_restart_and_partial_outage(tmp_
     state = restarted.list_status(bgg_id=173346)["items"][0]
 
     assert result["status"] == "partial"
+    assert result["provider_results"] == [
+        {
+            "provider": "broken",
+            "outcome": "failed",
+            "candidate_count": 0,
+            "error_type": "RuntimeError",
+            "error_message": "offline",
+        },
+        {
+            "provider": "official",
+            "outcome": "succeeded",
+            "candidate_count": 2,
+            "error_type": None,
+            "error_message": None,
+        },
+    ]
     assert state["status"] == "partial"
     assert state["provider_failures"] == 1
     with db.connect() as connection:
