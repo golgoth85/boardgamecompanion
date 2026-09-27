@@ -1,4 +1,4 @@
-> **CLOUDCLI / CLAUDE CODE RUNTIME ACCESS:** Do not report that NAS or Home Assistant access is unavailable merely because no Home Assistant plugin, Desktop Commander, direct SSH surface, or direct NAS tool is present. Read `AGENTS.md` → **Canonical runtime access — including CloudCLI/Claude Code** and use the GitHub-mediated NAS Control path through `golgoth85/nas-control` / `main`. This note does not authorize starting CloudCLI where explicit user authorization is still required.
+> **CLOUDCLI / CLAUDE CODE RUNTIME ACCESS:** Do not report that NAS or Home Assistant access is unavailable merely because no Home Assistant plugin, Desktop Commander, direct SSH surface, or direct NAS tool is present. Read `AGENTS.md` → **Canonical runtime access — including CloudCLI/Claude Code** and use the GitHub-mediated NAS Control path through `golgoth85/nas-control` / `main`, submitting new runtime requests as GitHub Issues according to `REQUESTS.md`. This note does not authorize starting CloudCLI where explicit user authorization is still required.
 
 # CLAUDE.md
 
