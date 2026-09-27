@@ -353,24 +353,44 @@ def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
         context.close()
 
 
-def test_bgg_settings_are_saved_from_ui_without_revealing_token(browser, live_server):
+def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_server):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
         page.get_by_role("button", name="Impostazioni").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
-        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni BoardGameGeek")
+        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni")
 
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
+        page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
+        page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
+        page.locator("#lmstudioUrl").fill("http://lmstudio.test:1234")
+        page.locator("#lmstudioEmbeddingModel").fill("embed-test")
+        page.locator("#lmstudioGenerationModel").fill("qwen3-14b")
+        page.locator("#lmstudioApiKey").fill("browser-secret-lmstudio-key")
+        page.locator("#geminiApiKey").fill("browser-secret-gemini-key")
         page.get_by_role("button", name="Salva", exact=True).click()
 
-        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni BGG salvate")
-        response = page.request.get(f"{live_server}/api/settings/bgg")
-        assert response.ok
-        body = response.json()
-        assert body["configured"] is True
-        assert body["application_token_source"] == "stored"
-        assert "browser-secret-bgg-token" not in response.text()
+        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni salvate")
+        bgg_response = page.request.get(f"{live_server}/api/settings/bgg")
+        assert bgg_response.ok
+        bgg_body = bgg_response.json()
+        assert bgg_body["configured"] is True
+        assert bgg_body["application_token_source"] == "stored"
+        assert "browser-secret-bgg-token" not in bgg_response.text()
+
+        rag_response = page.request.get(f"{live_server}/api/settings/rag")
+        assert rag_response.ok
+        rag_body = rag_response.json()
+        assert rag_body["embedding_provider_order"] == ["lmstudio", "ollama"]
+        assert rag_body["generation_provider_order"] == ["lmstudio", "gemini"]
+        assert rag_body["effective_embedding_provider"] == "lmstudio"
+        assert rag_body["effective_generation_provider"] == "lmstudio"
+        assert rag_body["automatic_fallback"] is False
+        assert rag_body["providers"]["lmstudio"]["api_key_configured"] is True
+        assert rag_body["providers"]["gemini"]["api_key_configured"] is True
+        assert "browser-secret-lmstudio-key" not in rag_response.text()
+        assert "browser-secret-gemini-key" not in rag_response.text()
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
         page.get_by_role("button", name="Impostazioni").click()
@@ -378,6 +398,12 @@ def test_bgg_settings_are_saved_from_ui_without_revealing_token(browser, live_se
         expect(page.locator("#bggApplicationToken")).to_have_value("")
         expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
         expect(page.locator("#clearTokenRow")).to_be_visible()
+        expect(page.locator("#lmstudioApiKey")).to_have_value("")
+        expect(page.locator("#lmstudioApiKeyHint")).to_contain_text("API key configurata")
+        expect(page.locator("#clearLmstudioApiKeyRow")).to_be_visible()
+        expect(page.locator("#geminiApiKey")).to_have_value("")
+        expect(page.locator("#geminiApiKeyHint")).to_contain_text("API key configurata")
+        expect(page.locator("#clearGeminiApiKeyRow")).to_be_visible()
     finally:
         context.close()
 
