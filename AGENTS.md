@@ -24,8 +24,8 @@ BoardGameCompanion is a self-hosted Docker/Unraid application for managing a phy
 4. Rulebook provenance must always be stored. A downloaded document is not trusted merely because its filename looks plausible.
 5. Official publisher/localizer sources outrank community sources.
 6. Community translations must be visibly marked as unofficial.
-7. Do not write directly to Floppy's database. Integrate through its supported HTTP API.
-8. Do not make Floppy the sole source of truth. The internal domain model must remain usable independently.
+7. BoardGameCompanion is the source of truth for its board-game domain and must remain fully usable without an external catalog manager.
+8. BGG access belongs to BoardGameCompanion itself: use only the approved XML API2 boundary and never authenticated scraping.
 9. A board-game item may have zero, one or many documents.
 10. RAG answers must retain document identity and page-level citation metadata.
 
@@ -86,7 +86,7 @@ Every provider should return normalized candidates containing at least:
 
 P0. Foundation: Docker, health endpoint, CI/GHCR, Unraid template.
 P1. BGG CSV importer and internal catalog.
-P2. Floppy synchronization adapter.
+P2. Catalog integration adapter foundation.
 P3. Physical-copy/barcode model and scanner workflow.
 P4. Rulebook document model, storage and manual upload.
 P5. Official rulebook provider framework and IT/EN resolver.
