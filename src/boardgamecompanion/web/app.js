@@ -709,11 +709,12 @@ function resetScanner() {
   stopScannerCamera();
   scannerBusy = false;
   scannerDetectionLocked = false;
+  scannerImportCount = 0;
   scannerForm.reset();
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inquadra il barcode: il lookup parte automaticamente dopo la lettura.</p>';
+    '<p class="muted">Inquadra il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
   cameraSection.hidden = false;
   const cameraUsable = scannerCameraUsable();
   toggleCamera.disabled = !cameraUsable;
@@ -721,6 +722,43 @@ function resetScanner() {
   cameraHint.textContent = cameraUsable
     ? "La fotocamera partirà automaticamente."
     : scannerCameraErrorMessage();
+}
+
+function beginNextScannerImport() {
+  stopScannerCamera();
+  scannerBusy = false;
+  scannerDetectionLocked = false;
+  scannerBarcode.value = "";
+  lookupBarcode.disabled = false;
+  lookupBarcode.textContent = "Cerca";
+  scannerResult.innerHTML =
+    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra il prossimo codice.</p>`;
+  cameraSection.hidden = false;
+  if (scannerCameraUsable()) {
+    cameraHint.textContent = "Fotocamera pronta per il prossimo barcode.";
+    void startScannerCamera();
+  } else {
+    scannerManualFallback.open = true;
+    cameraHint.textContent = scannerCameraErrorMessage();
+    window.setTimeout(() => scannerBarcode.focus(), 0);
+  }
+}
+
+function renderScannerImported(barcode, title) {
+  scannerImportCount += 1;
+  scannerBarcode.value = barcode;
+  scannerResult.innerHTML = `
+    <div class="scanner-success">
+      <strong>Barcode importato</strong>
+      <span class="muted">${escapeHtml(title || "Copia fisica")} · ${escapeHtml(barcode)}</span>
+    </div>
+    <div class="dialog-actions scanner-next-actions">
+      <button class="button button-primary" id="scannerNextBarcode" type="button">
+        Scansiona prossimo
+      </button>
+    </div>
+  `;
+  scannerResult.querySelector("#scannerNextBarcode")?.addEventListener("click", beginNextScannerImport);
 }
 
 function openScannerDialog() {
@@ -770,10 +808,16 @@ function renderScannerMatches(result) {
         </article>
       `).join("")}
     </div>
+    <div class="dialog-actions scanner-next-actions">
+      <button class="button button-primary" id="scannerNextBarcode" type="button">
+        Scansiona prossimo
+      </button>
+    </div>
   `;
   scannerResult.querySelectorAll(".scanner-open-game").forEach((link) => {
     link.addEventListener("click", () => closeScannerDialog(), {once: true});
   });
+  scannerResult.querySelector("#scannerNextBarcode")?.addEventListener("click", beginNextScannerImport);
 }
 
 function renderScannerUnmatched(barcode) {
@@ -881,15 +925,14 @@ async function searchScannerGames(query, barcode) {
   }
 }
 
-async function assignBarcodeToCopy(copyId, barcode) {
+async function assignBarcodeToCopy(copyId, barcode, title = null) {
   await api(`/api/copies/${encodeURIComponent(copyId)}`, {
     method: "PATCH",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({barcode}),
   });
-  scannerBarcode.value = barcode;
-  showToast("Barcode assegnato alla copia.");
-  await lookupScannerBarcode(barcode);
+  showToast("Barcode importato nella copia.");
+  renderScannerImported(barcode, title);
 }
 
 async function assignScannedBarcodeToGame(bggId, title, barcode) {
@@ -899,7 +942,7 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
     const unbarcoded = (copies.items || []).filter((copy) => !copy.barcode_normalized);
 
     if (unbarcoded.length === 1) {
-      await assignBarcodeToCopy(unbarcoded[0].id, barcode);
+      await assignBarcodeToCopy(unbarcoded[0].id, barcode, title);
       return;
     }
 
@@ -919,7 +962,7 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
       `;
       scannerResult.querySelectorAll(".scanner-copy-choice").forEach((button) => {
         button.addEventListener("click", () => {
-          void assignBarcodeToCopy(button.dataset.copyId, barcode);
+          void assignBarcodeToCopy(button.dataset.copyId, barcode, title);
         });
       });
       return;
@@ -931,9 +974,8 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({barcode}),
       });
-      scannerBarcode.value = barcode;
       showToast("Nuova copia creata con il barcode.");
-      await lookupScannerBarcode(barcode);
+      renderScannerImported(barcode, title);
       return;
     }
 
@@ -954,9 +996,8 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({barcode}),
         });
-        scannerBarcode.value = barcode;
         showToast("Nuova copia creata.");
-        await lookupScannerBarcode(barcode);
+        renderScannerImported(barcode, title);
       } catch (error) {
         showToast(error.message, true);
       }
