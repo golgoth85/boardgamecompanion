@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     lmstudio_generation_temperature: float = Field(
         default=0.0, ge=0.0, le=2.0
     )
+    lmstudio_generation_max_tokens: int = Field(default=512, ge=64, le=4096)
+    lmstudio_generation_disable_thinking: bool = True
     lmstudio_verify_tls: bool = True
     gemini_url: str = "https://generativelanguage.googleapis.com"
     gemini_api_key: str | None = None
