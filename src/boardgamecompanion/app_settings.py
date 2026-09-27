@@ -51,127 +51,60 @@ class AppSettingsStore:
 
 
 @dataclass(frozen=True)
-class ResolvedFloppySettings:
-    url: str | None
-    api_key: str | None
+class ResolvedBggSettings:
+    application_token: str | None
+    token_source: str | None
+    stored_token_configured: bool
     timeout_seconds: float
-    verify_tls: bool
-    url_source: str | None
-    api_key_source: str | None
-    timeout_source: str
-    verify_tls_source: str
-    stored_url: str | None
-    stored_api_key_configured: bool
+    min_interval_seconds: float
 
     @property
     def configured(self) -> bool:
-        return bool(self.url and self.api_key)
+        return bool(self.application_token)
 
     def public_dict(self) -> dict[str, object]:
         return {
-            "url": self.url or "",
-            "api_key_configured": bool(self.api_key),
-            "url_source": self.url_source,
-            "api_key_source": self.api_key_source,
+            "configured": self.configured,
+            "application_token_configured": self.configured,
+            "application_token_source": self.token_source,
+            "stored_application_token_configured": self.stored_token_configured,
             "timeout_seconds": self.timeout_seconds,
-            "verify_tls": self.verify_tls,
+            "min_interval_seconds": self.min_interval_seconds,
             "overrides": {
-                "url": self.url_source == "environment",
-                "api_key": self.api_key_source == "environment",
-                "timeout_seconds": self.timeout_source == "environment",
-                "verify_tls": self.verify_tls_source == "environment",
+                "application_token": self.token_source == "environment",
             },
         }
 
 
-def resolve_floppy_settings(database: Database) -> ResolvedFloppySettings:
+def resolve_bgg_settings(database: Database) -> ResolvedBggSettings:
     store = AppSettingsStore(database)
-    stored = store.get_many(
-        (
-            "floppy_url",
-            "floppy_api_key",
-            "floppy_timeout_seconds",
-            "floppy_verify_tls",
-        )
-    )
+    stored_token = store.get("bgg_application_token")
+    env_token = os.environ.get("BGC_BGG_APPLICATION_TOKEN")
+    token = env_token.strip() if env_token and env_token.strip() else stored_token
+    source = "environment" if env_token and env_token.strip() else "stored" if stored_token else None
 
-    env_url = os.environ.get("BGC_FLOPPY_URL")
-    env_token = os.environ.get("BGC_FLOPPY_API_KEY")
-    has_env_timeout = "BGC_FLOPPY_TIMEOUT_SECONDS" in os.environ
-    has_env_tls = "BGC_FLOPPY_VERIFY_TLS" in os.environ
-
-    stored_url = stored["floppy_url"]
-    stored_token = stored["floppy_api_key"]
-
-    url = env_url if env_url else stored_url
-    token = env_token if env_token else stored_token
-
-    stored_timeout = _to_float(stored["floppy_timeout_seconds"])
-    timeout = (
-        float(settings.floppy_timeout_seconds)
-        if has_env_timeout
-        else stored_timeout if stored_timeout is not None else 45.0
-    )
-
-    stored_tls = _to_bool(stored["floppy_verify_tls"])
-    verify_tls = (
-        bool(settings.floppy_verify_tls)
-        if has_env_tls
-        else stored_tls if stored_tls is not None else True
-    )
-
-    return ResolvedFloppySettings(
-        url=url,
-        api_key=token,
-        timeout_seconds=timeout,
-        verify_tls=verify_tls,
-        url_source="environment" if env_url else "stored" if stored_url else None,
-        api_key_source="environment" if env_token else "stored" if stored_token else None,
-        timeout_source="environment" if has_env_timeout else "stored" if stored_timeout is not None else "default",
-        verify_tls_source="environment" if has_env_tls else "stored" if stored_tls is not None else "default",
-        stored_url=stored_url,
-        stored_api_key_configured=bool(stored_token),
+    return ResolvedBggSettings(
+        application_token=token,
+        token_source=source,
+        stored_token_configured=bool(stored_token),
+        timeout_seconds=float(settings.bgg_timeout_seconds),
+        min_interval_seconds=float(settings.bgg_min_interval_seconds),
     )
 
 
-def save_floppy_settings(
+def save_bgg_settings(
     database: Database,
     *,
-    url: str,
-    api_key: str | None,
-    clear_api_key: bool,
-    timeout_seconds: float,
-    verify_tls: bool,
-) -> ResolvedFloppySettings:
+    application_token: str | None,
+    clear_application_token: bool,
+) -> ResolvedBggSettings:
     store = AppSettingsStore(database)
-    normalized_url = url.strip().rstrip("/")
-    store.set("floppy_url", normalized_url or None)
-
-    if clear_api_key:
-        store.set("floppy_api_key", None, sensitive=True)
-    elif api_key is not None and api_key.strip():
-        store.set("floppy_api_key", api_key.strip(), sensitive=True)
-
-    store.set("floppy_timeout_seconds", str(float(timeout_seconds)))
-    store.set("floppy_verify_tls", "true" if verify_tls else "false")
-    return resolve_floppy_settings(database)
-
-
-def _to_float(value: str | None) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
-def _to_bool(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    return None
+    if clear_application_token:
+        store.set("bgg_application_token", None, sensitive=True)
+    elif application_token is not None and application_token.strip():
+        store.set(
+            "bgg_application_token",
+            application_token.strip(),
+            sensitive=True,
+        )
+    return resolve_bgg_settings(database)
