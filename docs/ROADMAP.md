@@ -1,16 +1,17 @@
-# BoardGameCompanion roadmap after P7 and P5 remediation
+# BoardGameCompanion roadmap after P7, P5 remediation and standalone consolidation
 
 This roadmap is based on the repository state after P6B, not on historical chat state.
 
-## Architectural boundary: BGG and Floppy
+## Architectural boundary: standalone BGC
 
-BoardGameCompanion remains the owner of board-game-specific workflows: physical
-copies, local barcode mappings, documents, rulebook lifecycle, retrieval and RAG.
-Floppy remains an optional collection synchronization integration, but is not a
-dependency for BGG metadata or rulebook discovery.
+BoardGameCompanion owns the complete board-game workflow: catalog import, physical
+copies, local barcode mappings, direct BGG metadata enrichment, documents, rulebook
+lifecycle, retrieval and RAG. No external catalog manager is required for core
+operation.
 
-BGC may use its own approved BGG XML API2 application token for exact-ID metadata
-enrichment. The token is optional runtime configuration and is never committed.
+BGC may use its own approved BGG XML API2 Application Token for exact-ID metadata
+enrichment. The token can be stored from the web UI or supplied through the
+`BGC_BGG_APPLICATION_TOKEN` runtime override; it is optional and never committed.
 BGC owns its cache, five-second rate gate, bounded retries and exact-identity
 validation. CSV import and all local domain workflows remain usable without it.
 Private BGG JSON APIs and authenticated scraping remain prohibited.
@@ -20,18 +21,19 @@ local invariant remains:
 
 barcode -> OwnedCopy -> BoardGame
 
-and must continue to work even when Floppy or BGG is offline.
+and must continue to work when BGG is offline.
 
 ## Ordered work
 
 ### P3B — camera-first barcode hardening
 
-Close the current browser-compatibility gap first. Native BarcodeDetector is only
-an optimization; a local ZXing fallback is required. Manual input remains fallback.
+Native BarcodeDetector is used when available, with a bundled local ZXing fallback
+and manual entry as the final fallback. The scanner supports repeated import:
+unknown codes can be assigned to an unbarcoded owned copy or create a new physical
+copy, then the same session continues with the next barcode.
 ### M1 — direct optional BGG metadata enrichment
 
-Use the official XML API2 from BoardGameCompanion for exact canonical IDs,
-independently of Floppy.
+Use the official XML API2 directly from BoardGameCompanion for exact canonical IDs.
 
 Initial enrichment scope:
 - cover image;
