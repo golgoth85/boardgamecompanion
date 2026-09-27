@@ -1,0 +1,42 @@
+name: Validate NAS Control references
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/workflows/validate-nas-control-references.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - '.github/workflows/validate-nas-control-references.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate canonical NAS Control references
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'golgoth85/nas-control' AGENTS.md
+          grep -Fq 'REQUESTS.md' AGENTS.md
+          grep -Fq 'golgoth85/nas-control' CLAUDE.md
+
+          ! grep -Eiq 'golgoth85/upscaler.{0,80}ops/nas-control|ops/nas-control.{0,80}golgoth85/upscaler' AGENTS.md CLAUDE.md
+          ! grep -Fq 'github-runner-nas-control-v2' AGENTS.md CLAUDE.md
+          ! grep -Eiq 'nas-control-agent.{0,80}(only|unico).{0,80}Docker(-socket)? access|only.{0,80}component.{0,80}Docker-socket.{0,80}nas-control-agent' AGENTS.md CLAUDE.md
+
+          echo "NAS Control documentation references OK"
