@@ -159,6 +159,8 @@ def test_lmstudio_generation_provider_uses_json_schema_chat_completion() -> None
             assert body["model"] == "qwen3-14b"
             assert body["temperature"] == 0.0
             assert body["stream"] is False
+            assert body["max_tokens"] == 512
+            assert body["reasoning_effort"] == "none"
             schema = body["response_format"]["json_schema"]["schema"]
             assert schema["properties"]["status"]["enum"] == [
                 "answer",
