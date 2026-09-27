@@ -73,10 +73,6 @@ class Settings(BaseSettings):
     bgg_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     bgg_min_interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
     bgg_metadata_refresh_seconds: int = Field(default=30 * 24 * 60 * 60, ge=86400, le=365 * 24 * 60 * 60)
-    floppy_url: str | None = None
-    floppy_api_key: str | None = None
-    floppy_timeout_seconds: float = 45.0
-    floppy_verify_tls: bool = True
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
