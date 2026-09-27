@@ -219,7 +219,12 @@ class OllamaGenerationProvider:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": user_content,
+                        "content": json.dumps(
+                            user_payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
                     },
                 ],
                 "format": ANSWER_SCHEMA,
@@ -383,12 +388,7 @@ class LMStudioGenerationProvider:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": json.dumps(
-                            user_payload,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
+                        "content": user_content,
                     },
                 ],
                 "temperature": self.temperature,
