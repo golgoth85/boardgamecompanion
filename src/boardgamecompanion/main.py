@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from boardgamecompanion import __version__
 from boardgamecompanion.answer_generation import (
@@ -20,8 +20,8 @@ from boardgamecompanion.answer_generation import (
     OllamaGenerationProvider,
 )
 from boardgamecompanion.app_settings import (
-    resolve_floppy_settings,
-    save_floppy_settings,
+    resolve_bgg_settings,
+    save_bgg_settings,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_metadata import (
@@ -80,17 +80,6 @@ from boardgamecompanion.embedding_retrieval import (
     LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
-from boardgamecompanion.floppy import (
-    FloppyClient,
-    FloppyConfig,
-    FloppyError,
-    FloppyPlanChanged,
-    apply_floppy_sync,
-    build_sync_preview,
-    load_floppy_links,
-    local_owned_games,
-    reconcile_floppy_links,
-)
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
     RulebookReviewCorruptRecord,
@@ -143,13 +132,14 @@ def get_rulebook_update_service() -> RulebookUpdateService:
 def get_bgg_metadata_store() -> BggMetadataStore:
     database = get_database()
     database.initialize()
-    token = (settings.bgg_application_token or "").strip()
+    resolved = resolve_bgg_settings(database)
+    token = (resolved.application_token or "").strip()
     client = (
         BggApiClient(
             BggApiConfig(
                 application_token=token,
-                timeout_seconds=settings.bgg_timeout_seconds,
-                min_interval_seconds=settings.bgg_min_interval_seconds,
+                timeout_seconds=resolved.timeout_seconds,
+                min_interval_seconds=resolved.min_interval_seconds,
             ),
             rate_limiter=PersistentRateLimiter(database).acquire,
         )
@@ -183,30 +173,6 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     )
 
 
-def get_floppy_client() -> FloppyClient | None:
-    database = get_database()
-    database.initialize()
-    resolved = resolve_floppy_settings(database)
-    if not resolved.configured:
-        return None
-    return FloppyClient(
-        FloppyConfig(
-            base_url=resolved.url or "",
-            api_key=resolved.api_key or "",
-            timeout_seconds=resolved.timeout_seconds,
-            verify_tls=resolved.verify_tls,
-        )
-    )
-
-
-def floppy_http_error(exc: FloppyError) -> HTTPException:
-    if exc.kind == "authentication":
-        return HTTPException(status_code=502, detail="Floppy authentication failed")
-    if exc.kind in {"timeout", "unreachable"}:
-        return HTTPException(status_code=503, detail=str(exc))
-    return HTTPException(status_code=502, detail=str(exc))
-
-
 def rulebook_update_http_error(exc: RulebookUpdateError) -> HTTPException:
     if isinstance(exc, RulebookUpdateNotFound):
         return HTTPException(status_code=404, detail=str(exc))
@@ -237,25 +203,9 @@ class BarcodeLookupRequest(BaseModel):
     barcode: str = Field(min_length=1, max_length=128)
 
 
-class FloppySyncRequest(BaseModel):
-    plan_hash: str = Field(min_length=64, max_length=64)
-    batch_size: int = Field(default=20, ge=1, le=50)
-
-
-class FloppySettingsUpdate(BaseModel):
-    url: str = ""
-    api_key: str | None = None
-    clear_api_key: bool = False
-    timeout_seconds: float = Field(default=45.0, ge=1.0, le=60.0)
-    verify_tls: bool = True
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        value = value.strip()
-        if value and not value.startswith(("http://", "https://")):
-            raise ValueError("Floppy URL must start with http:// or https://")
-        return value
+class BggSettingsUpdate(BaseModel):
+    application_token: str | None = Field(default=None, max_length=4096)
+    clear_application_token: bool = False
 
 
 class RetrievalPayload(BaseModel):
@@ -1084,8 +1034,10 @@ def get_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
 
 @app.get("/api/games/{bgg_id}/bgg-metadata", tags=["catalog"])
 def get_game_bgg_metadata(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
     item = get_bgg_metadata_store().get(bgg_id)
-    return {"configured": bool((settings.bgg_application_token or "").strip()), "item": item}
+    return {"configured": resolve_bgg_settings(database).configured, "item": item}
 
 
 @app.post("/api/games/{bgg_id}/bgg-metadata/refresh", tags=["catalog"])
@@ -1281,174 +1233,53 @@ def catalog_stats() -> dict[str, int]:
     return Catalog(database).stats()
 
 
-@app.get("/api/settings/floppy", tags=["settings"])
-def get_floppy_settings() -> dict[str, object]:
+@app.get("/api/settings/bgg", tags=["settings"])
+def get_bgg_settings() -> dict[str, object]:
     database = get_database()
     database.initialize()
-    return resolve_floppy_settings(database).public_dict()
+    return resolve_bgg_settings(database).public_dict()
 
 
-@app.put("/api/settings/floppy", tags=["settings"])
-def update_floppy_settings(payload: FloppySettingsUpdate) -> dict[str, object]:
+@app.put("/api/settings/bgg", tags=["settings"])
+def update_bgg_settings(payload: BggSettingsUpdate) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    resolved = save_floppy_settings(
+    resolved = save_bgg_settings(
         database,
-        url=payload.url,
-        api_key=payload.api_key,
-        clear_api_key=payload.clear_api_key,
-        timeout_seconds=payload.timeout_seconds,
-        verify_tls=payload.verify_tls,
+        application_token=payload.application_token,
+        clear_application_token=payload.clear_application_token,
     )
     return resolved.public_dict()
 
 
-@app.get("/api/integrations/floppy/status", tags=["integrations"])
-def floppy_status() -> dict[str, object]:
-    client = get_floppy_client()
-    if client is None:
+@app.post("/api/settings/bgg/verify", tags=["settings"])
+def verify_bgg_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    if not resolved.configured:
+        raise HTTPException(status_code=409, detail="BGG application token is not configured")
+
+    with database.connect() as connection:
+        game = connection.execute(
+            "SELECT bgg_id, title FROM board_games ORDER BY title COLLATE NOCASE, bgg_id LIMIT 1"
+        ).fetchone()
+    if game is None:
         return {
-            "configured": False,
-            "reachable": False,
-            "authenticated": False,
-            "boardgame_api": False,
-            "schema": {
-                "available": False,
-                "media_write": False,
-                "collection_write": False,
-                "write_contract_ready": False,
-            },
+            "configured": True,
+            "verified": False,
+            "reason": "catalog_empty",
         }
 
-    status: dict[str, object] = {
+    try:
+        item = get_bgg_metadata_store().refresh(int(game["bgg_id"]), force=True)
+    except BggMetadataError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
         "configured": True,
-        "base_url": client.config.normalized_url,
-        "reachable": False,
-        "authenticated": False,
-        "boardgame_api": False,
+        "verified": True,
+        "bgg_id": int(game["bgg_id"]),
+        "title": item.get("title") or game["title"],
     }
 
-    try:
-        info = client.info()
-        status["reachable"] = True
-        status["info"] = {
-            key: info[key]
-            for key in ("name", "version", "app", "commit")
-            if key in info
-        }
-    except FloppyError as exc:
-        status["error"] = {"kind": exc.kind, "message": str(exc)}
-        status["schema"] = {
-            "available": False,
-            "media_write": False,
-            "collection_write": False,
-            "write_contract_ready": False,
-        }
-        return status
-
-    try:
-        client.boardgames_page(limit=1, offset=0)
-        status["authenticated"] = True
-        status["boardgame_api"] = True
-    except FloppyError as exc:
-        status["error"] = {"kind": exc.kind, "message": str(exc)}
-        status["schema"] = {
-            "available": False,
-            "media_write": False,
-            "collection_write": False,
-            "write_contract_ready": False,
-        }
-        return status
-
-    status["schema"] = client.schema_capabilities()
-    return status
-
-
-@app.get("/api/integrations/floppy/preview", tags=["integrations"])
-def floppy_preview() -> dict[str, object]:
-    client = get_floppy_client()
-    if client is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
-        )
-
-    database = get_database()
-    database.initialize()
-
-    try:
-        remote_games = client.boardgames()
-        collection_entries = client.collection_entries()
-        capabilities = client.schema_capabilities()
-    except FloppyError as exc:
-        raise floppy_http_error(exc) from exc
-
-    preview = build_sync_preview(
-        local_owned_games(database),
-        remote_games,
-        collection_entries,
-        load_floppy_links(database),
-    )
-    preview["mode"] = "dry_run"
-    preview["apply_supported"] = bool(capabilities.get("write_contract_ready"))
-    preview["schema"] = capabilities
-    preview["note"] = (
-        "Sync is add-only: it never removes Floppy media, collection entries, "
-        "history, or local BoardGameCompanion records."
-    )
-    return preview
-
-
-@app.post("/api/integrations/floppy/reconcile-links", tags=["integrations"])
-def floppy_reconcile_links() -> dict[str, object]:
-    client = get_floppy_client()
-    if client is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
-        )
-
-    database = get_database()
-    database.initialize()
-
-    try:
-        collection_entries = client.collection_entries()
-    except FloppyError as exc:
-        raise floppy_http_error(exc) from exc
-
-    return reconcile_floppy_links(database, collection_entries)
-
-
-@app.post("/api/integrations/floppy/sync", tags=["integrations"])
-def floppy_sync(payload: FloppySyncRequest) -> dict[str, object]:
-    client = get_floppy_client()
-    if client is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Floppy is not configured. Open Impostazioni and configure URL and API token.",
-        )
-
-    capabilities = client.schema_capabilities()
-    if not capabilities.get("write_contract_ready"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "The configured Floppy instance does not expose the validated "
-                "media + collection write contract."
-            ),
-        )
-
-    database = get_database()
-    database.initialize()
-
-    try:
-        return apply_floppy_sync(
-            database,
-            client,
-            expected_plan_hash=payload.plan_hash,
-            batch_size=payload.batch_size,
-        )
-    except FloppyPlanChanged as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except FloppyError as exc:
-        raise floppy_http_error(exc) from exc
