@@ -279,7 +279,9 @@ class RulebookDiscoveryService:
         return {"attempted": len(items), "items": items}
 
     def list_status(self, *, bgg_id: int | None = None, limit: int = 250) -> dict[str, Any]:
-        self.synchronize_catalog()
+        # Status reads must stay read-only. Catalog synchronization is already
+        # performed at startup, after imports, and before explicit discovery runs.
+        # Writing here made ordinary GET requests contend with background workers.
         where = "WHERE g.bgg_id=?" if bgg_id is not None else ""
         params: tuple[Any, ...] = (int(bgg_id),) if bgg_id is not None else ()
         with self.database.connect() as connection:
