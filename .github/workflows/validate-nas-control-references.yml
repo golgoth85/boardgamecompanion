@@ -37,6 +37,7 @@ jobs:
 
           ! grep -Eiq 'golgoth85/upscaler.{0,80}ops/nas-control|ops/nas-control.{0,80}golgoth85/upscaler' AGENTS.md CLAUDE.md
           ! grep -Fq 'github-runner-nas-control-v2' AGENTS.md CLAUDE.md
+          ! grep -Fq 'ops/nas-control/request.txt' AGENTS.md CLAUDE.md
           ! grep -Eiq 'nas-control-agent.{0,80}(only|unico).{0,80}Docker(-socket)? access|only.{0,80}component.{0,80}Docker-socket.{0,80}nas-control-agent' AGENTS.md CLAUDE.md
 
           echo "NAS Control documentation references OK"
