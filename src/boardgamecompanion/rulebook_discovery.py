@@ -158,9 +158,34 @@ class RulebookDiscoveryService:
         resolution = self.resolver.resolve(query, preferred_languages=("it", "en"))
         queue = RulebookReviewQueue(self.database)
         created = 0
+        review_items: list[dict[str, Any]] = []
         for resolved in resolution.candidates:
-            _, was_created = queue.submit(bgg_id=int(bgg_id), candidate=resolved.candidate)
+            item, was_created = queue.submit(
+                bgg_id=int(bgg_id),
+                candidate=resolved.candidate,
+            )
             created += int(was_created)
+            candidate = item["candidate"]
+            review_items.append(
+                {
+                    "id": item["id"],
+                    "created": bool(was_created),
+                    "status": item["status"],
+                    "policy_action": item["policy_action"],
+                    "decision_source": item["decision_source"],
+                    "candidate_key": item["candidate_key"],
+                    "candidate": {
+                        "provider": candidate["provider"],
+                        "source_kind": candidate["source_kind"],
+                        "url": candidate["url"],
+                        "language": candidate["language"],
+                        "document_type": candidate["document_type"],
+                        "official": candidate["official"],
+                        "confidence": candidate["confidence"],
+                        "bgg_id": candidate["bgg_id"],
+                    },
+                }
+            )
         finished = _now()
         failures = len(resolution.failures)
         candidates = len(resolution.candidates)
@@ -180,6 +205,7 @@ class RulebookDiscoveryService:
             delay = self.refresh_seconds if candidates else self.empty_refresh_seconds
         next_attempt = finished + timedelta(seconds=delay)
         failure_map = {failure.provider: failure for failure in resolution.failures}
+        provider_results: list[dict[str, Any]] = []
         with self.database.transaction(immediate=True) as connection:
             fenced = connection.execute(
                 "SELECT lease_owner,lease_generation FROM rulebook_discovery_games WHERE board_game_id=?", (game_id,)
@@ -190,6 +216,15 @@ class RulebookDiscoveryService:
                 name = str(provider.name)
                 failure = failure_map.get(name)
                 count = sum(1 for item in resolution.candidates if item.candidate.provider == name)
+                provider_results.append(
+                    {
+                        "provider": name,
+                        "outcome": "failed" if failure else "succeeded",
+                        "candidate_count": count,
+                        "error_type": failure.error_type if failure else None,
+                        "error_message": failure.message[:500] if failure else None,
+                    }
+                )
                 connection.execute(
                     """INSERT INTO rulebook_discovery_provider_runs
                        (id,board_game_id,lease_generation,provider,started_at,finished_at,outcome,
@@ -209,9 +244,18 @@ class RulebookDiscoveryService:
                  json.dumps([{"provider": f.provider, "type": f.error_type, "message": f.message[:500]} for f in resolution.failures]) if failures else None,
                  finished.isoformat(), game_id, owner, generation),
             )
-        return {"bgg_id": int(bgg_id), "status": status, "providers_queried": len(self.providers),
-                "candidates_found": candidates, "review_items_created": created,
-                "provider_failures": failures, "next_attempt_at": next_attempt.isoformat()}
+        return {
+            "bgg_id": int(bgg_id),
+            "status": status,
+            "generation": generation,
+            "providers_queried": len(self.providers),
+            "candidates_found": candidates,
+            "review_items_created": created,
+            "review_items": review_items,
+            "provider_failures": failures,
+            "provider_results": provider_results,
+            "next_attempt_at": next_attempt.isoformat(),
+        }
 
     def run_due(self, *, limit: int = 5) -> dict[str, Any]:
         self.synchronize_catalog()
