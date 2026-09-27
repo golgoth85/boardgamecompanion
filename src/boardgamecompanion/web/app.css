@@ -972,6 +972,15 @@ a { color: inherit; text-decoration: none; }
   padding: 1.2rem;
 }
 .dialog::backdrop { background: rgba(3,6,12,.76); backdrop-filter: blur(5px); }
+.settings-dialog {
+  width: min(760px, calc(100% - 1.4rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+.settings-dialog h3 {
+  margin: 1.25rem 0 .2rem;
+  font-size: 1rem;
+}
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .dialog h2 { margin: 0; font-size: 1.25rem; }
 .icon-button {
