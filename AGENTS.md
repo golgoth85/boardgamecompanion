@@ -3,13 +3,13 @@
 ## Canonical runtime access — including CloudCLI/Claude Code
 
 - Do not infer that NAS or Home Assistant access is unavailable just because the current session has no Home Assistant app/plugin, Desktop Commander, direct SSH surface, or direct NAS tool.
-- The canonical runtime route is GitHub → `golgoth85/upscaler` branch `ops/nas-control` → GitHub Actions workflow `NAS Control` → self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations.
+- The canonical runtime route is GitHub → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations. Application repositories are consumers of this shared control plane.
 - Keep source work in this repository's normal GitHub branch/PR flow. Use NAS Control for runtime inspection, managed deploys, Docker actions, Home Assistant operations, and approved workspace actions.
-- Before updating `ops/nas-control/request.txt`, re-fetch the current `ops/nas-control` HEAD and request file, check for an active concurrent run/request, update non-force, and verify the resulting workflow/runtime evidence.
+- Before updating `ops/nas-control/request.txt` in `golgoth85/nas-control`, re-fetch the current `main` HEAD and request file, check for an active concurrent run/request, update non-force, and verify the resulting workflow/runtime evidence.
 - CloudCLI/Claude Code follows the same runtime path. This rule does not itself authorize starting CloudCLI; existing explicit user-authorization requirements still apply. If CloudCLI is already authorized/running, terminal availability is not a reason to bypass the typed control plane.
 - A missing Home Assistant plugin is not a blocker. Use the existing NAS Control Home Assistant capabilities and managed deploy path where applicable.
-- If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/upscaler` `ops/nas-control`, validate it in CI, then use it.
-- Canonical runbook: `golgoth85/upscaler`, branch `ops/nas-control`, `ops/nas-control/RUNBOOK.md`.
+- If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/nas-control` `main`, validate it in CI, then use it.
+- Canonical runbook: `golgoth85/nas-control`, branch `main`, `ops/nas-control/RUNBOOK.md`.
 - Existing review-only, no-deploy/no-merge, destructive-action, protected-branch, and secret-handling boundaries still apply.
 
 ## Mission
@@ -139,13 +139,13 @@ This repository participates in the shared GitHub-mediated NAS control architect
 
 ### Canonical path
 
-ChatGPT / connected GitHub tooling → `golgoth85/upscaler` branch `ops/nas-control` → GitHub Actions workflow `NAS Control` → self-hosted runner `github-runner-nas-control-v2` / label `nas-control` → authenticated local agent `nas-control-agent` → typed operations against Unraid / approved project workspaces / LAN services.
+ChatGPT / connected GitHub tooling → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner `github-runner-nas-control-repo` / label `nas-control` → authenticated gateway `nas-control-agent` → typed operations, with privileged host/Docker effects delegated to `nas-control-executor`, against Unraid / approved project workspaces / LAN services.
 
 ### Security boundary
 
 - The active runner is intentionally least-privilege. It mounts only its runner state RW plus the NAS-control token RO.
 - The runner does **not** receive `/var/run/docker.sock` and does **not** mount `/mnt/user/appdata` directly.
-- `nas-control-agent` is the only NAS-control component with Docker-socket access.
+- `nas-control-agent` has no Docker socket and no persistent host-root mount; privileged host/Docker effects are delegated to `nas-control-executor`.
 - The agent exposes a typed allowlist; there is no generic host-root shell.
 - The base `/mnt/user/appdata` mount inside the agent is read-only.
 - Only the explicitly listed project workspaces below are overlaid read-write.
