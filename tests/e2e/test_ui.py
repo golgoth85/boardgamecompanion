@@ -353,175 +353,31 @@ def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
         context.close()
 
 
-def test_floppy_panel_reports_unconfigured_without_blocking_catalog(browser, live_server):
+def test_bgg_settings_are_saved_from_ui_without_revealing_token(browser, live_server):
     context, page = new_page(browser)
     try:
-        page.goto(live_server)
-        expect(page.locator("#floppyStatus")).to_have_text("Non configurato")
-        expect(page.locator("#floppyBody")).to_contain_text("Apri Impostazioni")
-        expect(page.locator("#floppyPreview")).to_be_disabled()
-        expect(page.locator("#catalogGrid")).to_be_visible()
-    finally:
-        context.close()
-
-
-def test_floppy_settings_are_saved_from_ui_without_revealing_token(browser, live_server):
-    context, page = new_page(browser)
-    try:
-        page.route(
-            "**/api/integrations/floppy/status",
-            lambda route: route.fulfill(
-                status=200,
-                content_type="application/json",
-                body='{"configured":false,"reachable":false,"authenticated":false,"boardgame_api":false,"schema":{"available":false,"media_write":false,"collection_write":false,"write_contract_ready":false}}',
-            ),
-        )
-
         page.goto(live_server)
         page.get_by_role("button", name="Impostazioni").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
+        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni BoardGameGeek")
 
-        page.locator("#floppyUrl").fill("http://floppy:8000")
-        page.locator("#floppyApiKey").fill("browser-secret-token")
-        page.locator("#floppyTimeout").fill("11")
-        page.locator("#floppyVerifyTls").uncheck()
+        page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
         page.get_by_role("button", name="Salva", exact=True).click()
 
-        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni salvate")
-        response = page.request.get(f"{live_server}/api/settings/floppy")
+        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni BGG salvate")
+        response = page.request.get(f"{live_server}/api/settings/bgg")
         assert response.ok
         body = response.json()
-        assert body["url"] == "http://floppy:8000"
-        assert body["api_key_configured"] is True
-        assert body["timeout_seconds"] == 11
-        assert body["verify_tls"] is False
-        assert "browser-secret-token" not in response.text()
+        assert body["configured"] is True
+        assert body["application_token_source"] == "stored"
+        assert "browser-secret-bgg-token" not in response.text()
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
         page.get_by_role("button", name="Impostazioni").click()
 
-        expect(page.locator("#floppyApiKey")).to_have_value("")
-        expect(page.locator("#floppyTokenHint")).to_contain_text("Token configurato")
+        expect(page.locator("#bggApplicationToken")).to_have_value("")
+        expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
         expect(page.locator("#clearTokenRow")).to_be_visible()
-    finally:
-        context.close()
-
-
-def test_floppy_sync_requires_preview_confirmation_and_refreshes(browser, live_server):
-    context, page = new_page(browser)
-    sync_requests = []
-    preview_calls = {"count": 0}
-
-    def status_route(route):
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=(
-                '{"configured":true,"reachable":true,"authenticated":true,'
-                '"boardgame_api":true,"info":{"version":"26.9"},'
-                '"schema":{"available":true,"media_write":true,'
-                '"collection_write":true,"write_contract_ready":true}}'
-            ),
-        )
-
-    def preview_route(route):
-        preview_calls["count"] += 1
-        if preview_calls["count"] == 1:
-            body = {
-                "local_owned": 2,
-                "remote_boardgames": 1,
-                "remote_collection_entries": 1,
-                "matched": 1,
-                "matched_by_saved_link": 0,
-                "matched_by_bgg_id": 1,
-                "matched_by_title_year": 0,
-                "already_owned": 1,
-                "needs_collection": 0,
-                "needs_media": 1,
-                "missing_in_floppy": 1,
-                "ambiguous": 0,
-                "actionable": 1,
-                "already_owned_items": [],
-                "needs_collection_items": [],
-                "needs_media_items": [
-                    {
-                        "bgg_id": 900002,
-                        "title": "Synthetic Beta Expansion",
-                        "year_published": 2021,
-                        "item_type": "expansion",
-                    }
-                ],
-                "missing": [],
-                "ambiguous_items": [],
-                "plan_hash": "a" * 64,
-                "mode": "dry_run",
-                "apply_supported": True,
-            }
-        else:
-            body = {
-                "local_owned": 2,
-                "remote_boardgames": 2,
-                "remote_collection_entries": 2,
-                "matched": 2,
-                "matched_by_saved_link": 1,
-                "matched_by_bgg_id": 1,
-                "matched_by_title_year": 0,
-                "already_owned": 2,
-                "needs_collection": 0,
-                "needs_media": 0,
-                "missing_in_floppy": 0,
-                "ambiguous": 0,
-                "actionable": 0,
-                "already_owned_items": [],
-                "needs_collection_items": [],
-                "needs_media_items": [],
-                "missing": [],
-                "ambiguous_items": [],
-                "plan_hash": "b" * 64,
-                "mode": "dry_run",
-                "apply_supported": True,
-            }
-        route.fulfill(status=200, content_type="application/json", body=__import__("json").dumps(body))
-
-    def sync_route(route):
-        request = route.request
-        sync_requests.append(request.post_data_json)
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=__import__("json").dumps(
-                {
-                    "plan_hash": "a" * 64,
-                    "attempted": 1,
-                    "media_created": 1,
-                    "collection_created": 1,
-                    "skipped": 0,
-                    "failed": 0,
-                    "remaining_from_preview": 0,
-                    "batch_size": 1,
-                    "results": [],
-                }
-            ),
-        )
-
-    try:
-        page.route("**/api/integrations/floppy/status", status_route)
-        page.route("**/api/integrations/floppy/preview", preview_route)
-        page.route("**/api/integrations/floppy/sync", sync_route)
-        page.on("dialog", lambda dialog: dialog.accept())
-
-        page.goto(live_server)
-        expect(page.locator("#floppyStatus")).to_have_text("Connesso")
-        page.get_by_role("button", name="Confronta cataloghi").click()
-
-        expect(page.locator("#floppyPreviewResult")).to_contain_text("Media mancanti")
-        expect(page.get_by_role("button", name="Sincronizza 1")).to_be_visible()
-        page.get_by_role("button", name="Sincronizza 1").click()
-
-        expect(page.locator("#floppyPreviewResult")).to_contain_text("Ultimo batch")
-        expect(page.locator("#floppyPreviewResult")).to_contain_text("Collection allineata")
-        assert sync_requests == [{"plan_hash": "a" * 64, "batch_size": 1}]
-        assert preview_calls["count"] == 2
     finally:
         context.close()
 
@@ -568,7 +424,7 @@ def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         expect(page.locator("#scannerDialog")).to_be_visible()
         page.locator("#scannerBarcode").fill("1234-5678-90123")
         page.get_by_role("button", name="Cerca", exact=True).click()
@@ -586,7 +442,7 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         page.locator("#scannerBarcode").fill("222-222-222")
         page.get_by_role("button", name="Cerca", exact=True).click()
 
@@ -597,8 +453,11 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
         expect(page.locator(".scanner-game-choice")).to_contain_text("Synthetic Beta Expansion")
         page.locator(".scanner-game-choice").click()
 
-        expect(page.locator("#scannerResult")).to_contain_text("Copia trovata")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode importato")
         expect(page.locator("#scannerResult")).to_contain_text("Synthetic Beta Expansion")
+        expect(page.get_by_role("button", name="Scansiona prossimo")).to_be_visible()
+        page.get_by_role("button", name="Scansiona prossimo").click()
+        expect(page.locator("#scannerBarcode")).to_have_value("")
 
         response = page.request.get(f"{live_server}/api/games/900002/copies")
         assert response.ok
@@ -615,9 +474,9 @@ def test_mobile_topbar_and_scanner_dialog_do_not_overflow(browser, live_server):
     try:
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        expect(page.get_by_role("button", name="Scansiona")).to_be_visible()
+        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
 
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         expect(page.locator("#scannerDialog")).to_be_visible()
         box = page.locator("#scannerDialog").bounding_box()
         assert box is not None
@@ -1274,7 +1133,7 @@ def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, 
     _install_camera_stub(page, native_code="8001234567890")
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
 
         expect(page.locator("#scannerDialog")).to_be_visible()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
@@ -1325,7 +1184,7 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
 
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
         expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
         assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
@@ -1356,7 +1215,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         page.wait_for_function("window.__bgcResolveDetection !== undefined")
 
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
@@ -1398,7 +1257,7 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Scansiona").click()
+        page.get_by_role("button", name="Importa barcode").click()
         page.wait_for_function("typeof window.__bgcResolveCamera === 'function'")
 
         page.get_by_role("button", name="Chiudi scanner").click()
