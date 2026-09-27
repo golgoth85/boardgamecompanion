@@ -914,6 +914,8 @@ def get_answer_generation_service() -> AnswerGenerationService:
             timeout_seconds=settings.lmstudio_generation_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
             temperature=settings.lmstudio_generation_temperature,
+            max_tokens=settings.lmstudio_generation_max_tokens,
+            disable_thinking=settings.lmstudio_generation_disable_thinking,
             api_key=settings.lmstudio_api_key,
         )
     elif selected == "gemini":
