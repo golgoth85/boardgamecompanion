@@ -151,23 +151,20 @@ class ProviderHttpClient:
                         "GET",
                         current,
                         headers={
-                            "Accept": "text/html, application/json;q=0.9",
-                            "Accept-Encoding": "identity",
+                            "Accept": (
+                                "text/html,application/xhtml+xml,"
+                                "application/json;q=0.9,*/*;q=0.8"
+                            ),
+                            "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
                             "User-Agent": (
-                                "BoardGameCompanion/0.1 rulebook-discovery"
+                                "BoardGameCompanion/0.1 "
+                                "(+https://github.com/golgoth85/boardgamecompanion)"
                             ),
                         },
                         timeout=self.timeout_seconds,
                         follow_redirects=False,
                     ) as streamed:
                         response = streamed
-                        content_encoding = streamed.headers.get(
-                            "content-encoding", ""
-                        ).strip().casefold()
-                        if content_encoding not in {"", "identity"}:
-                            raise ProviderHttpError(
-                                "Provider response content encoding is not allowed"
-                            )
                         declared = streamed.headers.get("content-length", "").strip()
                         if declared.isdigit() and int(declared) > self.max_response_bytes:
                             raise ProviderHttpError("Provider response exceeds the byte limit")
@@ -180,6 +177,10 @@ class ProviderHttpClient:
                                     raise ProviderHttpError("Provider response exceeds the byte limit")
                                 chunks.append(chunk)
                             content = b"".join(chunks)
+            except httpx.DecodingError as exc:
+                raise ProviderHttpError(
+                    "Provider response content encoding could not be decoded"
+                ) from exc
             except httpx.TimeoutException as exc:
                 if attempt + 1 < self.max_attempts:
                     self._sleep(self._retry_delay(None, attempt))
@@ -351,9 +352,43 @@ def _language_from_url(url: str, label: str = "") -> str:
     return aliases.get(clean_label, "und")
 
 
+def _rulebook_pdf_links(
+    page: _OfficialPageParser,
+    *,
+    base_url: str,
+    allowed_hosts: frozenset[str],
+    languages: frozenset[str] = frozenset({"it", "en"}),
+) -> tuple[tuple[str, str], ...]:
+    links: list[tuple[str, str]] = []
+    seen_languages: set[str] = set()
+    for href, label in page.links:
+        absolute = urljoin(base_url, href)
+        parts = urlsplit(absolute)
+        if parts.scheme != "https" or (parts.hostname or "").lower() not in allowed_hosts:
+            continue
+        filename = parts.path.casefold().rsplit("/", 1)[-1]
+        if not filename.endswith(".pdf"):
+            continue
+        if not re.search(
+            r"(?:^|[-_])(rule|rules|regle|regles)(?:[-_.]|$)",
+            filename,
+        ):
+            continue
+        language = _language_from_url(absolute, label)
+        primary = language.split("-", 1)[0]
+        if primary not in languages or primary in seen_languages:
+            continue
+        seen_languages.add(primary)
+        links.append((absolute, language))
+    return tuple(links)
+
+
 class ReposProductionProvider:
     name = "repos_production"
-    _BASE = "https://www.rprod.com/en/games/"
+    _BASES = (
+        "https://www.rprod.com/it/games/",
+        "https://www.rprod.com/en/games/",
+    )
     _HOSTS = frozenset({"www.rprod.com", "rprod.com"})
     _PUBLISHERS = (
         "Repos Production",
@@ -375,74 +410,63 @@ class ReposProductionProvider:
         for title in (query.title, query.original_title):
             if not title:
                 continue
-            page_url = f"{self._BASE}{quote(_slug(title), safe='-')}"
-            if page_url in seen_pages:
-                continue
-            seen_pages.add(page_url)
-            response = self.http.get(
-                page_url,
-                allowed_hosts=self._HOSTS,
-                accepted_statuses=frozenset({200, 404}),
-            )
-            if response.status_code == 404:
-                continue
-            page = _parse_official_page(response.content)
-            if not _title_matches(query, page.title):
-                continue
-            identity_verified = _verified_publisher_matches(
-                query, self._PUBLISHERS
-            ) and _verified_title_matches(query, page.title)
-
-            seen_languages: set[str] = set()
-            for href, label in page.links:
-                absolute = urljoin(response.url, href)
-                absolute_parts = urlsplit(absolute)
-                if absolute_parts.scheme != "https" or (absolute_parts.hostname or "").lower() not in self._PDF_HOSTS:
+            for base in self._BASES:
+                page_url = f"{base}{quote(_slug(title), safe='-')}"
+                if page_url in seen_pages:
                     continue
-                path = urlsplit(absolute).path.casefold()
-                filename = path.rsplit("/", 1)[-1]
-                if not filename.endswith(".pdf"):
-                    continue
-                if not re.search(r"(?:^|[-_])(rule|rules|regle|regles)(?:[-_.]|$)", filename):
-                    continue
-                language = _language_from_url(absolute, label)
-                if language.split("-", 1)[0] not in {"it", "en"}:
-                    continue
-                primary_language = language.split("-", 1)[0]
-                if primary_language in seen_languages:
-                    # Official pages may also list promo/goodie leaflets after the
-                    # primary rulebook. Preserve one authoritative manual per
-                    # requested language instead of misclassifying those add-ons.
-                    continue
-                seen_languages.add(primary_language)
-                candidates.append(
-                    RulebookCandidate(
-                        provider=self.name,
-                        source_kind=RulebookSource.OFFICIAL_PUBLISHER,
-                        url=absolute,
-                        language=language,
-                        document_type="rulebook",
-                        official=True,
-                        confidence=100,
-                        title=f"{page.title} — Rules",
-                        bgg_id=query.bgg_id if identity_verified else None,
-                        game_title=page.title,
-                        year=None,
-                        publisher="Repos Production",
-                        metadata={
-                            "official_page": response.url,
-                            "identity_evidence": (
-                                [
-                                    "official_page_title_exact",
-                                    "bgg_api_exact_id_title_publisher_crosscheck",
-                                ]
-                                if identity_verified
-                                else ["official_page_title_exact", "catalog_publisher_compatible"]
-                            ),
-                            "catalog_item_type": query.item_type,
-                        },
-                    )
+                seen_pages.add(page_url)
+                response = self.http.get(
+                    page_url,
+                    allowed_hosts=self._HOSTS,
+                    accepted_statuses=frozenset({200, 404}),
                 )
+                if response.status_code == 404:
+                    continue
+                page = _parse_official_page(response.content)
+                if not _title_matches(query, page.title):
+                    continue
+                identity_verified = _verified_publisher_matches(
+                    query, self._PUBLISHERS
+                ) and _verified_title_matches(query, page.title)
+
+                for absolute, language in _rulebook_pdf_links(
+                    page,
+                    base_url=response.url,
+                    allowed_hosts=self._PDF_HOSTS,
+                ):
+                    candidates.append(
+                        RulebookCandidate(
+                            provider=self.name,
+                            source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                            url=absolute,
+                            language=language,
+                            document_type="rulebook",
+                            official=True,
+                            confidence=100,
+                            title=f"{page.title} — Rules",
+                            bgg_id=query.bgg_id if identity_verified else None,
+                            game_title=page.title,
+                            year=None,
+                            publisher="Repos Production",
+                            metadata={
+                                "official_page": response.url,
+                                "identity_evidence": (
+                                    [
+                                        "official_page_title_exact",
+                                        "bgg_api_exact_id_title_publisher_crosscheck",
+                                    ]
+                                    if identity_verified
+                                    else [
+                                        "official_page_title_exact",
+                                        "catalog_publisher_compatible",
+                                    ]
+                                ),
+                                "catalog_item_type": query.item_type,
+                            },
+                        )
+                    )
+                if candidates:
+                    break
             if candidates:
                 break
         return tuple(candidates[:MAX_DISCOVERY_RESULTS])
@@ -454,6 +478,7 @@ class AsmodeeItaliaProvider:
     _HOSTS = frozenset({"www.asmodee.it", "asmodee.it"})
     _PUBLISHERS = ("Asmodee", "Asmodee Italia")
     _PDF_HOSTS = frozenset({"cdn.svc.asmodee.net", "www.asmodee.it", "asmodee.it"})
+    _PUBLISHER_PAGE_HOSTS = frozenset({"www.rprod.com", "rprod.com"})
 
     def __init__(self, http: ProviderHttpClient | None = None):
         self.http = http or ProviderHttpClient()
@@ -470,9 +495,13 @@ class AsmodeeItaliaProvider:
         page = _parse_official_page(response.content)
         if not _title_matches(query, page.title):
             return ()
-        publisher_verified = _verified_publisher_matches(
-            query, self._PUBLISHERS
-        ) and _verified_title_matches(query, page.title)
+        title_verified = _verified_title_matches(query, page.title)
+        publisher_verified = title_verified and (
+            _verified_publisher_matches(query, self._PUBLISHERS)
+            or _verified_publisher_matches(
+                query, ReposProductionProvider._PUBLISHERS
+            )
+        )
 
         candidates: list[RulebookCandidate] = []
         for href, label in page.links:
@@ -480,38 +509,73 @@ class AsmodeeItaliaProvider:
                 continue
             absolute = urljoin(response.url, href)
             absolute_parts = urlsplit(absolute)
-            if absolute_parts.scheme != "https" or (absolute_parts.hostname or "").lower() not in self._PDF_HOSTS:
+            host = (absolute_parts.hostname or "").lower()
+            if absolute_parts.scheme != "https":
                 continue
-            if not urlsplit(absolute).path.casefold().endswith(".pdf"):
-                continue
-            candidates.append(
-                RulebookCandidate(
-                    provider=self.name,
-                    source_kind=RulebookSource.OFFICIAL_LOCALIZER,
-                    url=absolute,
-                    language="it",
-                    document_type="rulebook",
-                    official=True,
-                    confidence=100 if publisher_verified else 94,
-                    title=f"{page.title} — Regolamento italiano",
-                    bgg_id=query.bgg_id if publisher_verified else None,
-                    game_title=page.title,
-                    year=None,
-                    publisher="Asmodee Italia",
-                    metadata={
-                        "official_page": response.url,
-                        "identity_evidence": (
-                            [
-                                "official_page_title_exact",
-                                "bgg_api_exact_id_title_publisher_crosscheck",
-                            ]
-                            if publisher_verified
-                            else ["official_page_title_exact"]
-                        ),
-                        "catalog_item_type": query.item_type,
-                    },
+
+            rulebook_links: tuple[tuple[str, str], ...] = ()
+            publisher_page_url: str | None = None
+            if host in self._PDF_HOSTS and absolute_parts.path.casefold().endswith(".pdf"):
+                rulebook_links = ((absolute, "it"),)
+            elif host in self._PUBLISHER_PAGE_HOSTS:
+                handoff = self.http.get(
+                    absolute,
+                    allowed_hosts=self._PUBLISHER_PAGE_HOSTS,
+                    accepted_statuses=frozenset({200, 404}),
                 )
-            )
+                if handoff.status_code == 404:
+                    continue
+                publisher_page = _parse_official_page(handoff.content)
+                if not _title_matches(query, publisher_page.title):
+                    continue
+                publisher_page_url = handoff.url
+                rulebook_links = tuple(
+                    (url, language)
+                    for url, language in _rulebook_pdf_links(
+                        publisher_page,
+                        base_url=handoff.url,
+                        allowed_hosts=ReposProductionProvider._PDF_HOSTS,
+                        languages=frozenset({"it"}),
+                    )
+                    if language.split("-", 1)[0] == "it"
+                )
+
+            for rulebook_url, language in rulebook_links:
+                candidates.append(
+                    RulebookCandidate(
+                        provider=self.name,
+                        source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+                        url=rulebook_url,
+                        language=language,
+                        document_type="rulebook",
+                        official=True,
+                        confidence=100 if publisher_verified else 94,
+                        title=f"{page.title} — Regolamento italiano",
+                        bgg_id=query.bgg_id if publisher_verified else None,
+                        game_title=page.title,
+                        year=None,
+                        publisher="Asmodee Italia",
+                        metadata={
+                            "official_page": response.url,
+                            "publisher_page": publisher_page_url,
+                            "identity_evidence": (
+                                [
+                                    "official_localizer_page_title_exact",
+                                    "official_publisher_handoff_title_exact",
+                                    "bgg_api_exact_id_title_publisher_crosscheck",
+                                ]
+                                if publisher_verified and publisher_page_url
+                                else [
+                                    "official_page_title_exact",
+                                    "bgg_api_exact_id_title_publisher_crosscheck",
+                                ]
+                                if publisher_verified
+                                else ["official_page_title_exact"]
+                            ),
+                            "catalog_item_type": query.item_type,
+                        },
+                    )
+                )
         return tuple(candidates[:MAX_DISCOVERY_RESULTS])
 
 
