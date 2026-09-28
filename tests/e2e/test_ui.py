@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 from pathlib import Path
 
 import pytest
@@ -1658,6 +1659,17 @@ def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pd
         expect(panel).to_contain_text("«+ Aggiungi PDF»")
         expect(panel.get_by_role("link", name="Stato download")).to_be_visible()
         expect(panel.get_by_role("link", name="Fonti da verificare")).to_be_visible()
+        google = panel.get_by_role("link", name="Cerca PDF su Google")
+        expect(google).to_be_visible()
+        search_url = urlsplit(google.get_attribute("href"))
+        assert (search_url.scheme, search_url.netloc, search_url.path) == (
+            "https", "www.google.com", "/search"
+        )
+        assert parse_qs(search_url.query)["q"] == [
+            '"Synthetic Alpha" regolamento italiano pdf'
+        ]
+        assert google.get_attribute("target") == "_blank"
+        assert {"noopener", "noreferrer"} <= set(google.get_attribute("rel").split())
 
         page.route(
             re.compile(r".*/api/games/\d+/rulebook-discovery/run$"),
