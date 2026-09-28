@@ -308,3 +308,55 @@ def test_http_403_is_not_bypassed_by_generic_provider():
     with pytest.raises(Exception, match="HTTP 403"):
         generic.discover(case())
     assert fallback_calls == []
+
+
+def test_same_host_redirect_to_robots_denied_path_is_refused():
+    visited = []
+
+    def handler(req):
+        visited.append(str(req.url))
+        if req.url.path == "/robots.txt":
+            return httpx.Response(
+                200, headers={"content-type": "text/plain"},
+                content=b"User-agent: *\nDisallow: /private/\n", request=req,
+            )
+        if req.url.path == "/it/download/":
+            return httpx.Response(
+                302, headers={"location": "/private/rulebooks"},
+                request=req,
+            )
+        if req.url.path == "/private/rulebooks":
+            raise AssertionError("Disallowed redirect destination was fetched")
+        return httpx.Response(404, request=req)
+
+    with pytest.raises(Exception, match="disallowed by site policy"):
+        provider(site("pendragon_italia"), handler).discover(case())
+    assert not any("/private/rulebooks" in path for path in visited)
+
+
+def test_robots_403_fails_closed_without_browser_fingerprint():
+    visited = []
+
+    def handler(req):
+        visited.append(str(req.url))
+        if req.url.path == "/robots.txt":
+            return httpx.Response(403, request=req)
+        raise AssertionError("Site page should never be requested")
+
+    assert provider(site("pendragon_italia"), handler).discover(case()) == ()
+    assert all(path.endswith("/robots.txt") for path in visited)
+
+
+def test_generic_provider_identifies_it_language_without_imposing_it_on_en():
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404, request=req)
+        return httpx.Response(
+            200, headers={"content-type": "text/html"},
+            content=b"""<h1>Last Aurora: Frozen Steel</h1>
+            <a href='/en/last-aurora-rules-en.pdf'>Download English rules</a>""",
+            request=req,
+        )
+
+    items = provider(site("pendragon_italia"), handler).discover(case())
+    assert items and all(item.language == "en" for item in items)
