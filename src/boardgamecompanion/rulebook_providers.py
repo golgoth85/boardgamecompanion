@@ -458,9 +458,6 @@ class ReposProductionProvider:
         for title in (query.title, query.original_title):
             if not title:
                 continue
-            pages.append(
-                (f"{self._BASE}{quote(_slug(title), safe='-')}", None, title)
-            )
             # Repos hosts expansions below their *parent game's* canonical
             # slug, e.g. /en/games/7-wonders-duel/pantheon. The page H1
             # contains only "Pantheon". Never infer this path for a base game.
@@ -475,6 +472,12 @@ class ReposProductionProvider:
                             title,
                         )
                     )
+            # The legacy flattened slug is only a fallback. Repos may return
+            # HTTP 500 (rather than 404) for nonexistent flattened paths, so
+            # asking it first can suppress a valid canonical nested page.
+            pages.append(
+                (f"{self._BASE}{quote(_slug(title), safe='-')}", None, title)
+            )
 
         for page_url, expected_expansion_heading, matched_query_title in pages:
             if page_url in seen_pages:
