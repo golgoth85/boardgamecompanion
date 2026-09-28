@@ -132,10 +132,10 @@ class ProviderHttpClient:
         return min(0.25 * (2**attempt), 2.0)
 
     def _browser_get_once(self, url: str) -> httpx.Response:
-        if self._browser_fetch is not None:
-            return self._browser_fetch(url)
-
         try:
+            if self._browser_fetch is not None:
+                return self._browser_fetch(url)
+
             from curl_cffi import requests as curl_requests
 
             with curl_requests.Session(
@@ -177,8 +177,14 @@ class ProviderHttpClient:
         except ProviderHttpError:
             raise
         except Exception as exc:
+            # Expose only the local exception class and bounded numeric curl
+            # status: exception text may contain remote URLs or response data.
+            detail = type(exc).__name__
+            code = getattr(exc, "code", None)
+            if isinstance(code, int) and not isinstance(code, bool) and 0 < code < 256:
+                detail += f", libcurl={code}"
             raise ProviderHttpError(
-                "Provider browser fallback request failed"
+                f"Provider browser fallback request failed ({detail})"
             ) from exc
 
     def get(
@@ -436,6 +442,7 @@ def _language_from_url(url: str, label: str = "") -> str:
 class ReposProductionProvider:
     name = "repos_production"
     _BASE = "https://www.rprod.com/en/games/"
+    _IT_BASE = "https://www.rprod.com/it/games/"
     _HOSTS = frozenset({"www.rprod.com", "rprod.com"})
     _PUBLISHERS = (
         "Repos Production",
@@ -458,36 +465,47 @@ class ReposProductionProvider:
         for title in (query.title, query.original_title):
             if not title:
                 continue
-            # Repos hosts expansions below their *parent game's* canonical
-            # slug, e.g. /en/games/7-wonders-duel/pantheon. The page H1
-            # contains only "Pantheon". Never infer this path for a base game.
+            # Repos publishes expansion pages under the parent game's path.
+            # Both EN and IT locales are official, but may differ in availability
+            # and the language of their downloadable rulebooks. Canonical nested
+            # paths precede legacy flattened paths in *both* locales.
             if query.item_type == "boardgameexpansion" and ":" in title:
                 parent, suffix = (part.strip() for part in title.rsplit(":", 1))
                 if _slug(parent) and _slug(suffix):
-                    pages.append(
-                        (
-                            f"{self._BASE}{quote(_slug(parent), safe='-')}/"
-                            f"{quote(_slug(suffix), safe='-')}",
-                            suffix,
-                            title,
+                    for base in (self._BASE, self._IT_BASE):
+                        pages.append(
+                            (
+                                f"{base}{quote(_slug(parent), safe='-')}/"
+                                f"{quote(_slug(suffix), safe='-')}",
+                                suffix,
+                                title,
+                            )
                         )
-                    )
-            # The legacy flattened slug is only a fallback. Repos may return
-            # HTTP 500 (rather than 404) for nonexistent flattened paths, so
-            # asking it first can suppress a valid canonical nested page.
-            pages.append(
-                (f"{self._BASE}{quote(_slug(title), safe='-')}", None, title)
-            )
+            for base in (self._BASE, self._IT_BASE):
+                pages.append(
+                    (f"{base}{quote(_slug(title), safe='-')}", None, title)
+                )
 
+        recorded_languages: set[str] = set()
+        recorded_urls: set[str] = set()
+        first_failure: ProviderHttpError | None = None
         for page_url, expected_expansion_heading, matched_query_title in pages:
             if page_url in seen_pages:
                 continue
             seen_pages.add(page_url)
-            response = self.http.get(
-                page_url,
-                allowed_hosts=self._HOSTS,
-                accepted_statuses=frozenset({200, 404}),
-            )
+            try:
+                response = self.http.get(
+                    page_url,
+                    allowed_hosts=self._HOSTS,
+                    accepted_statuses=frozenset({200, 404}),
+                )
+            except ProviderHttpError as exc:
+                # An inaccessible EN page must not suppress an independently
+                # reachable official IT page. If none can be read, preserve
+                # the provider failure rather than reporting "no rulebooks".
+                if first_failure is None:
+                    first_failure = exc
+                continue
             if response.status_code == 404:
                 continue
             page = _parse_official_page(response.content)
@@ -508,7 +526,6 @@ class ReposProductionProvider:
                 matched_query_title if nested_expansion_match else page.title,
             )
 
-            seen_languages: set[str] = set()
             for href, label in page.links:
                 absolute = urljoin(response.url, href)
                 absolute_parts = urlsplit(absolute)
@@ -524,12 +541,12 @@ class ReposProductionProvider:
                 if language.split("-", 1)[0] not in {"it", "en"}:
                     continue
                 primary_language = language.split("-", 1)[0]
-                if primary_language in seen_languages:
-                    # Official pages may also list promo/goodie leaflets after the
-                    # primary rulebook. Preserve one authoritative manual per
-                    # requested language instead of misclassifying those add-ons.
+                if primary_language in recorded_languages or absolute in recorded_urls:
+                    # Preserve one authoritative rulebook per language across
+                    # both locales, not just across links on a single page.
                     continue
-                seen_languages.add(primary_language)
+                recorded_languages.add(primary_language)
+                recorded_urls.add(absolute)
                 candidates.append(
                     RulebookCandidate(
                         provider=self.name,
@@ -575,8 +592,10 @@ class ReposProductionProvider:
                         },
                     )
                 )
-            if candidates:
+            if "it" in recorded_languages:
                 break
+        if not candidates and first_failure is not None:
+            raise first_failure
         return tuple(candidates[:MAX_DISCOVERY_RESULTS])
 
 
