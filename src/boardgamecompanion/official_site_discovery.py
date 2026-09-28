@@ -260,9 +260,8 @@ class PublisherSiteProvider:
         # Link to the exact BGG ID alone is not enough when a product page
         # discusses several different games. Conversely, full title + a
         # BGG-verified publisher is an acceptable cross-check.
-        strong = query.bgg_identity_verified and (
-            exact_bgg and exact_title
-            or verified_title and publisher_is_bgg_verified
+        strong = query.bgg_identity_verified and verified_title and (
+            exact_bgg or publisher_is_bgg_verified
         )
         if not (exact_title or exact_bgg):
             return 0, None, evidence
