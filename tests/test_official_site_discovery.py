@@ -437,3 +437,21 @@ def test_new_verified_publisher_requires_only_registry_data_not_a_new_adapter():
     assert items[0].confidence == 100
     assert items[0].language == "it"
     assert items[0].provider == "official_site_new_publisher"
+
+
+def test_search_results_page_cannot_self_attest_an_official_game_identity():
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404, request=req)
+        return httpx.Response(
+            200, headers={"content-type": "text/html"},
+            content=b"""<h1>Last Aurora: Frozen Steel</h1>
+            <a href='https://boardgamegeek.com/boardgameexpansion/334710'>BGG</a>
+            <a href='/it/rules-it.pdf'>Scarica il regolamento italiano</a>""",
+            request=req,
+        )
+    q = case(verified_publishers=("Pendragon Game Studio",))
+    items = provider(site("pendragon_italia"), handler).discover(q)
+    assert items
+    assert all(item.confidence <= 90 and item.bgg_id is None for item in items)
+    assert "search_page_requires_review" in items[0].metadata["identity_evidence"]
