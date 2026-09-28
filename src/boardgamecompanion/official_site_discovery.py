@@ -292,9 +292,16 @@ class PublisherSiteProvider:
         description = _match_text(label)
         if not (allowed_filename or is_pendragon_download or is_dropbox):
             return None
-        if not any(value in description for value in (
-            "regolamento", "regole", "rules", "rulebook", "manual", "scarica", "download"
-        )) and not re.search(r"(rule|regol|manual)", parts.path, re.I):
+        # A generic Download button might point at an FAQ, marketing kit,
+        # card template or promotional leaflet. Such files are not rulebooks.
+        rule_signal = any(value in description for value in (
+            "regolamento", "regole", "rules", "rulebook", "manual", "istruzioni"
+        )) or bool(re.search(r"(rule|regol|manual)", parts.path, re.I))
+        catalog_rule_signal = catalog and bool(re.search(
+            r"\b(?:regole|regolamento|rules|rulebook)\b",
+            language_hint, re.I,
+        ))
+        if not (rule_signal or catalog_rule_signal):
             return None
 
         confidence, bgg_id, evidence = self._identity(query, title, bgg_ids)
