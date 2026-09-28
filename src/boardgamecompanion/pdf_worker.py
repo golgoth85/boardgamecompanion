@@ -113,10 +113,10 @@ def parse_pdf(
             error_pages = 0
 
             for page_index in range(page_count):
-                diagnostics: dict[str, Any] = {"extraction_mode": "layout"}
+                diagnostics: dict[str, Any] = {"extraction_mode": "plain"}
                 try:
                     page = reader.pages[page_index]
-                    extracted = page.extract_text(extraction_mode="layout")
+                    extracted = page.extract_text()
                     text = extracted if isinstance(extracted, str) else ""
                     if len(text) > max_chars_per_page:
                         raise WorkerLimitError(
@@ -159,7 +159,7 @@ def parse_pdf(
                             text="",
                             status="error",
                             diagnostics={
-                                "extraction_mode": "layout",
+                                "extraction_mode": "plain",
                                 "error_type": type(exc).__name__,
                                 "error_message": str(exc)[:1000],
                             },
@@ -175,7 +175,7 @@ def parse_pdf(
             return {
                 "ok": True,
                 "parser_name": "pypdf",
-                "parser_version": pypdf.__version__,
+                "parser_version": pypdf.__version__ + "+plain-v1",
                 "page_count": page_count,
                 "text_page_count": text_pages,
                 "empty_page_count": empty_pages,
@@ -184,7 +184,7 @@ def parse_pdf(
                 "warning_count": len(warning_messages) + error_pages,
                 "diagnostics": {
                     "encrypted": bool(reader.is_encrypted),
-                    "extraction_mode": "layout",
+                    "extraction_mode": "plain",
                     "warnings": warning_messages,
                     "page_errors": error_pages,
                 },
