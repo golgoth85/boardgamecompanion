@@ -1097,5 +1097,11 @@ def production_rulebook_providers(
                 )
             )
         ),
+        PendragonItaliaProvider(
+            client(browser_fallback_hosts=PendragonItaliaProvider._HOSTS)
+        ),
+        MsEdizioniProvider(
+            client(browser_fallback_hosts=MsEdizioniProvider._HOSTS)
+        ),
         RuleBookOrgProvider(client()),
     )
