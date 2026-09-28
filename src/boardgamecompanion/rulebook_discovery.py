@@ -91,6 +91,7 @@ class RulebookDiscoveryService:
             year=(metadata or {}).get("year_published") or row["year_published"],
             item_type=(metadata or {}).get("metadata", {}).get("item_type") or row["item_type"],
             publishers=tuple(dict.fromkeys(publishers)),
+            edition_publishers=tuple(dict.fromkeys(_publishers(row["version_publishers"]))),
             verified_publishers=(
                 tuple(str(value) for value in metadata["publishers"])
                 if metadata and metadata.get("fetched_at")
