@@ -720,10 +720,61 @@ class RulebookUpdateService:
                   AND r.status = 'approved'
                   AND t.next_check_at <= ?
                   AND (t.lease_until IS NULL OR t.lease_until <= ?)
-                ORDER BY t.next_check_at, t.id
+                  AND NOT (
+                      (lower(r.language) = 'en' OR lower(r.language) LIKE 'en-%')
+                      AND (
+                          EXISTS (
+                              SELECT 1
+                              FROM game_documents d
+                              WHERE d.board_game_id = t.board_game_id
+                                AND d.document_type = 'rulebook'
+                                AND d.is_official = 1
+                                AND (
+                                    lower(d.language) = 'it'
+                                    OR lower(d.language) LIKE 'it-%'
+                                )
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM rulebook_update_targets ti
+                              JOIN rulebook_review_items ri
+                                ON ri.id = ti.review_item_id
+                              WHERE ti.board_game_id = t.board_game_id
+                                AND ti.enabled = 1
+                                AND ri.status = 'approved'
+                                AND ri.official = 1
+                                AND ri.confidence >= 95
+                                AND (
+                                    lower(ri.language) = 'it'
+                                    OR lower(ri.language) LIKE 'it-%'
+                                )
+                                AND ti.next_check_at <= ?
+                                AND (
+                                    ti.lease_until IS NULL
+                                    OR ti.lease_until <= ?
+                                )
+                          )
+                      )
+                  )
+                ORDER BY
+                    t.next_check_at,
+                    CASE
+                        WHEN lower(r.language) = 'it'
+                          OR lower(r.language) LIKE 'it-%' THEN 0
+                        WHEN lower(r.language) = 'en'
+                          OR lower(r.language) LIKE 'en-%' THEN 1
+                        ELSE 2
+                    END,
+                    t.id
                 LIMIT ?
                 """,
-                (current_iso, current_iso, int(limit)),
+                (
+                    current_iso,
+                    current_iso,
+                    current_iso,
+                    current_iso,
+                    int(limit),
+                ),
             ).fetchall()
             ids = [row["id"] for row in rows]
             for target_id in ids:
