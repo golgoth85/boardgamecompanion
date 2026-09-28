@@ -213,9 +213,21 @@ def test_browser_fallback_redirect_stays_inside_provider_origin_allowlist() -> N
 
 
 def test_production_provider_factory_limits_browser_fallback_to_official_hosts() -> None:
-    repos, asmodee, pendragon, ms_edizioni, community = production_rulebook_providers(
-        min_interval_seconds=0,
-    )
+    providers = {
+        item.name: item
+        for item in production_rulebook_providers(min_interval_seconds=0)
+    }
+    repos = providers["repos_production"]
+    asmodee = providers["asmodee_italia"]
+    pendragon = providers["pendragon_italia"]
+    ms_edizioni = providers["ms_edizioni"]
+    community = providers["rulebook_org"]
+    generic = [
+        value for name, value in providers.items()
+        if name.startswith("official_site_")
+    ]
+    assert len(generic) == 5
+    assert all(item.http.browser_fallback_hosts == frozenset() for item in generic)
 
     assert repos.http.browser_fallback_hosts == {"www.rprod.com", "rprod.com"}
     assert asmodee.http.browser_fallback_hosts == {
