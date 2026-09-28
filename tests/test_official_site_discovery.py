@@ -403,3 +403,37 @@ def test_bounded_catalog_scans_past_100_unrelated_items():
     result = provider(site("pendragon_italia"), handler).discover(case())
     assert len(result) == 1
     assert result[0].url.endswith("ddownload=last-aurora-frozen")
+
+
+def test_new_verified_publisher_requires_only_registry_data_not_a_new_adapter():
+    new_site = PublisherSite(
+        key="new_publisher",
+        aliases=("New Publisher",),
+        hosts=frozenset({"rules.new-publisher.example"}),
+        search_templates=("https://rules.new-publisher.example/product/{slug}/",),
+        italian_site=True,
+    )
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404, request=req)
+        return httpx.Response(
+            200, headers={"content-type": "text/html"},
+            content=b"""<h1>New Game</h1>
+              <a href='https://rules.new-publisher.example/files/new-game-regolamento-it.pdf'>Scarica il regolamento italiano</a>""",
+            request=req,
+        )
+    q = RulebookQuery(
+        bgg_id=900001,
+        title="New Game",
+        verified_titles=("New Game",),
+        verified_publishers=("New Publisher",),
+        edition_publishers=("New Publisher",),
+        bgg_identity_verified=True,
+        item_type="boardgame",
+    )
+    items = provider(new_site, handler).discover(q)
+    assert len(items) == 1
+    assert items[0].bgg_id == 900001
+    assert items[0].confidence == 100
+    assert items[0].language == "it"
+    assert items[0].provider == "official_site_new_publisher"
