@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -473,28 +475,65 @@ class GeminiGenerationProvider:
             raise ValueError("Gemini generation temperature must be between 0 and 2")
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Retry only transient Gemini failures within one request deadline.
+
+        Non-transient 4xx responses never retry. Bounded backoff follows
+        Google's recommendation for 408/429 and 5xx service overload.
+        No response body, credential, or request headers enter errors.
+        """
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
-        try:
-            if self._client is not None:
-                response = self._client.request(method, path, headers=headers, **kwargs)
-            else:
-                with httpx.Client(
-                    base_url=self.base_url,
-                    timeout=self.timeout_seconds,
-                    verify=self.verify_tls,
-                ) as client:
-                    response = client.request(method, path, headers=headers, **kwargs)
-            response.raise_for_status()
-            return response
-        except httpx.TimeoutException as exc:
-            raise AnswerProviderError("Gemini generation request timed out") from exc
-        except httpx.HTTPStatusError as exc:
-            raise AnswerProviderError(
-                f"Gemini generation request failed with HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise AnswerProviderError("Gemini generation endpoint is unreachable") from exc
+        deadline = time.monotonic() + self.timeout_seconds
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AnswerProviderError("Gemini generation request timed out")
+            try:
+                options = dict(kwargs)
+                options["timeout"] = remaining
+                if self._client is not None:
+                    response = self._client.request(
+                        method, path, headers=headers, **options
+                    )
+                else:
+                    with httpx.Client(
+                        base_url=self.base_url,
+                        timeout=remaining,
+                        verify=self.verify_tls,
+                    ) as client:
+                        response = client.request(
+                            method, path, headers=headers, **options
+                        )
+                response.raise_for_status()
+                return response
+            except httpx.TimeoutException as exc:
+                raise AnswerProviderError(
+                    "Gemini generation request timed out"
+                ) from exc
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if (
+                    status_code not in {408, 429, 500, 502, 503, 504}
+                    or attempt + 1 >= max_attempts
+                ):
+                    raise AnswerProviderError(
+                        f"Gemini generation request failed with HTTP {status_code}"
+                    ) from exc
+                backoff = min(2 ** attempt + random.uniform(0.0, 0.25), 8.0)
+                retry_after = exc.response.headers.get("retry-after", "").strip()
+                if retry_after.isdecimal():
+                    backoff = max(backoff, min(float(retry_after), 30.0))
+                if backoff >= deadline - time.monotonic():
+                    raise AnswerProviderError(
+                        f"Gemini generation request failed with HTTP {status_code}"
+                    ) from exc
+                time.sleep(backoff)
+            except httpx.HTTPError as exc:
+                raise AnswerProviderError(
+                    "Gemini generation endpoint is unreachable"
+                ) from exc
+        raise AnswerProviderError("Gemini generation retry budget exceeded")
 
     def describe(self) -> GenerationDescriptor:
         response = self._request("GET", f"/v1beta/models/{self.model}")
