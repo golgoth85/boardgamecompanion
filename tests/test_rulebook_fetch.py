@@ -1534,3 +1534,141 @@ def test_unicode_request_target_works_with_real_http_client(tmp_path):
     assert not thread.is_alive()
     assert received_requests
     assert b"GET /r%C3%A9gole.pdf?q=%C3%A8&keep=%7e HTTP/1.1" in received_requests[0]
+
+
+def test_official_download_attachment_mime_still_requires_pdf_magic(tmp_path):
+    """Publisher download plugins use attachment MIME types inconsistently."""
+    url = "https://rules.example/?ddownload=4228"
+    for content_type in (
+        "application/download",
+        "application/x-download",
+        "application/force-download",
+        "text/plain",
+    ):
+        good = fetcher(
+            tmp_path,
+            resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+            transport=FakeTransport({
+                url: [pdf_response(content_type=content_type)]
+            }),
+        ).fetch(candidate(url))
+        assert good.ok and good.sha256 == hashlib.sha256(PDF).hexdigest()
+
+        bad = fetcher(
+            tmp_path,
+            resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+            transport=FakeTransport({
+                url: [pdf_response(b"<html>not PDF</html>", content_type=content_type)]
+            }),
+        ).fetch(candidate(url))
+        assert failure_code(bad) == RulebookFetchFailureCode.PDF_MAGIC_MISMATCH
+
+
+def test_transient_http_statuses_retry_without_restarting_download(tmp_path, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("boardgamecompanion.rulebook_fetch.time.sleep", sleeps.append)
+    url = "https://rules.example/?ddownload=4228"
+    transient = FakeResponse(status=429, headers={"Retry-After": "1"})
+    unavailable = FakeResponse(status=503)
+    transport = FakeTransport({
+        url: [transient, unavailable, pdf_response()],
+    })
+    original = candidate(url)
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=transport,
+    ).fetch(original)
+    assert result.ok
+    assert sleeps == [1.0, 0.5]
+    assert len(transport.requests) == 3
+    assert transient.closed and unavailable.closed
+
+
+def test_http_retry_is_bounded_and_never_bypasses_access_denials(tmp_path, monkeypatch):
+    monkeypatch.setattr("boardgamecompanion.rulebook_fetch.time.sleep", lambda _: None)
+    url = "https://rules.example/?ddownload=4228"
+    denied = FakeTransport({url: [FakeResponse(status=403)]})
+    denied_result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=denied,
+    ).fetch(candidate(url))
+    assert failure_code(denied_result) == RulebookFetchFailureCode.HTTP_STATUS
+    assert len(denied.requests) == 1
+
+    unavailable = FakeTransport({url: [
+        FakeResponse(status=503),
+        FakeResponse(status=503),
+        FakeResponse(status=503),
+    ]})
+    result = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=unavailable,
+    ).fetch(candidate(url))
+    assert failure_code(result) == RulebookFetchFailureCode.HTTP_STATUS
+    assert len(unavailable.requests) == 3
+    assert list(Path(tmp_path).glob("*.part")) == []
+
+
+def test_official_page_referer_only_stays_on_the_same_https_origin(tmp_path):
+    source = "https://pendragongamestudio.com/it/download/?secret=not-forwarded"
+    url = "https://pendragongamestudio.com/it/?ddownload=4228"
+    redirected = "https://cdn.example.net/manuals/last-aurora.pdf"
+    publisher = RulebookCandidate(
+        provider="official_site_pendragon_italia",
+        source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+        url=url,
+        language="it",
+        official=True,
+        bgg_id=274450,
+        game_title="Last Aurora",
+        metadata={"official_page": source},
+    )
+    transport = FakeTransport({
+        url: [redirect(redirected)],
+        redirected: [pdf_response()],
+    })
+    fetched = RulebookFetcher(
+        manuals_dir=tmp_path,
+        resolver=FakeResolver({
+            "pendragongamestudio.com": (PUBLIC_V4,),
+            "cdn.example.net": (PUBLIC_V4_ALT,),
+        }),
+        transport=transport,
+        policy=RulebookFetchPolicy(max_bytes=1024),
+    ).fetch(publisher)
+    assert fetched.ok
+    assert transport.requests[0]["headers"]["Referer"] == (
+        "https://pendragongamestudio.com/it/download/"
+    )
+    assert "Referer" not in transport.requests[1]["headers"]
+    assert transport.requests[0]["headers"]["Accept-Language"].startswith("it-IT")
+
+
+def test_untrusted_referer_cannot_be_sent_as_header(tmp_path):
+    url = "https://rules.example/manual.pdf"
+    attacker = RulebookCandidate(
+        provider="official_site_example",
+        source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+        url=url,
+        language="it",
+        official=True,
+        bgg_id=123,
+        metadata={"official_page": "https://internal.example/token?secret"},
+    )
+    transport = FakeTransport({url: [pdf_response()]})
+    fetched = fetcher(
+        tmp_path,
+        resolver=FakeResolver({"rules.example": (PUBLIC_V4,)}),
+        transport=transport,
+    ).fetch(attacker)
+    assert fetched.ok
+    assert "Referer" not in transport.requests[0]["headers"]
+
+
+def test_large_official_pdf_under_archive_limit_is_accepted_by_default(tmp_path):
+    # This must use the production defaults, not the tiny test fetcher.
+    assert RulebookFetchPolicy().max_bytes == 100 * 1024 * 1024
+    assert RulebookFetchPolicy().max_http_retries == 2
