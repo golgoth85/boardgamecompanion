@@ -77,7 +77,7 @@ class RulebookFetchPolicy:
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 15.0
     fetch_timeout_seconds: float = 300.0
-    max_bytes: int = 32 * 1024 * 1024
+    max_bytes: int = 100 * 1024 * 1024
     max_redirects: int = 5
     max_http_retries: int = 2
     chunk_size: int = 64 * 1024
