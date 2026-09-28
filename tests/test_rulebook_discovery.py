@@ -166,10 +166,10 @@ def test_repos_tries_official_italian_page_after_browser_fallback_failure() -> N
     assert len(candidates) == 1
     assert candidates[0].language == "it"
     assert candidates[0].bgg_id == 202976
-    assert candidates[0].metadata["identity_evidence"] == [
+    assert tuple(candidates[0].metadata["identity_evidence"]) == (
         "official_nested_expansion_path_and_heading",
         "bgg_api_exact_id_title_publisher_crosscheck",
-    ]
+    )
     assert visited == [
         "/en/games/7-wonders-duel/pantheon",
         "/it/games/7-wonders-duel/pantheon",
@@ -237,6 +237,34 @@ def test_repos_all_official_pages_inaccessible_preserves_sanitized_failure() -> 
         )))
     assert "RuntimeError" in str(failure.value)
     assert "PRIVATE-UPSTREAM-EXCEPTION-DATA" not in str(failure.value)
+
+
+def test_browser_fallback_error_reports_bounded_curl_code_without_upstream_text() -> None:
+    class SimulatedCurlError(RuntimeError):
+        code = 60
+
+    def primary(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request)
+
+    def browser(url: str) -> httpx.Response:
+        raise SimulatedCurlError("SECRET-URL-OR-UPSTREAM-BODY")
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(primary)),
+        min_interval_seconds=0,
+        browser_fallback_hosts={"provider.example"},
+        browser_fetch=browser,
+    )
+    with pytest.raises(RulebookProviderError) as failure:
+        client.get(
+            "https://provider.example/rules",
+            allowed_hosts={"provider.example"},
+        )
+    assert str(failure.value) == (
+        "Provider browser fallback request failed "
+        "(SimulatedCurlError, libcurl=60)"
+    )
+    assert "SECRET-URL-OR-UPSTREAM-BODY" not in str(failure.value)
 
 
 def test_repos_nested_expansion_rejects_wrong_heading_and_never_guesses_base_path() -> None:
