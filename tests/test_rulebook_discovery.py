@@ -13,6 +13,7 @@ from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
     ProviderHttpClient,
     ReposProductionProvider,
+    production_rulebook_providers,
 )
 from boardgamecompanion.rulebook_review import RulebookReviewQueue
 from boardgamecompanion.rulebook_fetch import RulebookFetchResult
@@ -125,6 +126,103 @@ def test_provider_http_client_uses_browser_compatible_public_headers() -> None:
     assert captured[0].headers["user-agent"].startswith("Mozilla/5.0")
     assert captured[0].headers["accept-language"].startswith("it-IT")
     assert captured[0].headers["accept-encoding"] == "identity"
+
+
+def test_http_client_uses_browser_fallback_only_after_403_on_allowed_host() -> None:
+    primary_calls: list[str] = []
+    browser_calls: list[str] = []
+
+    def primary(request: httpx.Request) -> httpx.Response:
+        primary_calls.append(str(request.url))
+        return httpx.Response(403, content=b"blocked", request=request)
+
+    def browser(url: str) -> httpx.Response:
+        browser_calls.append(url)
+        return httpx.Response(
+            200,
+            content=b"official page",
+            headers={"content-type": "text/html"},
+            request=httpx.Request("GET", url),
+        )
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(primary)),
+        min_interval_seconds=0,
+        browser_fallback_hosts={"provider.example"},
+        browser_fetch=browser,
+    )
+    response = client.get(
+        "https://provider.example/index",
+        allowed_hosts={"provider.example"},
+    )
+
+    assert response.content == b"official page"
+    assert primary_calls == ["https://provider.example/index"]
+    assert browser_calls == ["https://provider.example/index"]
+
+
+def test_http_client_never_uses_browser_fallback_for_unlisted_host() -> None:
+    browser_calls: list[str] = []
+
+    def primary(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, content=b"blocked", request=request)
+
+    def browser(url: str) -> httpx.Response:
+        browser_calls.append(url)
+        return httpx.Response(200, content=b"unexpected", request=httpx.Request("GET", url))
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(primary)),
+        min_interval_seconds=0,
+        browser_fallback_hosts={"official.example"},
+        browser_fetch=browser,
+    )
+    with pytest.raises(RulebookProviderError, match="HTTP 403"):
+        client.get(
+            "https://community.example/index",
+            allowed_hosts={"community.example"},
+        )
+
+    assert browser_calls == []
+
+
+def test_browser_fallback_redirect_stays_inside_provider_origin_allowlist() -> None:
+    def primary(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, content=b"blocked", request=request)
+
+    def browser(url: str) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"location": "https://internal.invalid/private"},
+            request=httpx.Request("GET", url),
+        )
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(primary)),
+        min_interval_seconds=0,
+        browser_fallback_hosts={"provider.example"},
+        browser_fetch=browser,
+    )
+    with pytest.raises(RulebookProviderError, match="escaped the provider origin"):
+        client.get(
+            "https://provider.example/index",
+            allowed_hosts={"provider.example"},
+        )
+
+
+def test_production_provider_factory_limits_browser_fallback_to_official_hosts() -> None:
+    repos, asmodee, community = production_rulebook_providers(
+        min_interval_seconds=0,
+    )
+
+    assert repos.http.browser_fallback_hosts == {"www.rprod.com", "rprod.com"}
+    assert asmodee.http.browser_fallback_hosts == {
+        "www.asmodee.it",
+        "asmodee.it",
+        "www.rprod.com",
+        "rprod.com",
+    }
+    assert community.http.browser_fallback_hosts == frozenset()
 
 
 def test_asmodee_follows_trusted_official_rulebook_page_and_keeps_bgg_identity() -> None:
