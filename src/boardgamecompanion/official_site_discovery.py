@@ -8,6 +8,8 @@ PDF transfer is deliberately delegated to the existing guarded fetcher.
 from __future__ import annotations
 
 import re
+import threading
+import time
 from dataclasses import dataclass
 from urllib import robotparser
 from urllib.parse import quote, urljoin, urlsplit
@@ -133,7 +135,8 @@ class PublisherSiteProvider:
         self.site = site
         self.name = f"official_site_{site.key}"
         self.http = http or ProviderHttpClient()
-        self._robots: dict[str, robotparser.RobotFileParser | bool] = {}
+        self._robots: dict[str, tuple[float, robotparser.RobotFileParser | bool]] = {}
+        self._robots_lock = threading.Lock()
 
     def _allowed_url(self, url: str, *, pdf: bool = False) -> str | None:
         try:
@@ -150,26 +153,31 @@ class PublisherSiteProvider:
 
     def _robots_allows(self, url: str) -> bool:
         host = (urlsplit(url).hostname or "").lower()
-        if host not in self._robots:
-            # There is no default allow on an inaccessible robots policy.
-            robots_url = f"https://{host}/robots.txt"
-            result = self.http.get(
-                robots_url,
-                allowed_hosts=self.site.hosts,
-                accepted_statuses=frozenset({200, 403, 404}),
-            )
-            if result.status_code == 403:
-                self._robots[host] = False
-            elif result.status_code == 404:
-                self._robots[host] = True
+        with self._robots_lock:
+            now = time.monotonic()
+            cached = self._robots.get(host)
+            if cached is None or now - cached[0] >= 3600:
+                # Fail closed if robots cannot be fetched or parsed.
+                robots_url = f"https://{host}/robots.txt"
+                result = self.http.get(
+                    robots_url,
+                    allowed_hosts=self.site.hosts,
+                    accepted_statuses=frozenset({200, 403, 404}),
+                )
+                if result.status_code == 403:
+                    policy: robotparser.RobotFileParser | bool = False
+                elif result.status_code == 404:
+                    policy = True
+                else:
+                    parser = robotparser.RobotFileParser()
+                    try:
+                        parser.parse(result.content.decode("utf-8", "strict").splitlines())
+                    except (UnicodeError, ValueError, RecursionError) as exc:
+                        raise RulebookProviderError("Official robots policy cannot be parsed") from exc
+                    policy = parser
+                self._robots[host] = (now, policy)
             else:
-                parser = robotparser.RobotFileParser()
-                try:
-                    parser.parse(result.content.decode("utf-8", "strict").splitlines())
-                except (UnicodeError, ValueError, RecursionError) as exc:
-                    raise RulebookProviderError("Official robots policy cannot be parsed") from exc
-                self._robots[host] = parser
-        policy = self._robots[host]
+                policy = cached[1]
         if isinstance(policy, bool):
             return policy
         return policy.can_fetch(USER_AGENT, url)
