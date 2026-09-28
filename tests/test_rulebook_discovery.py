@@ -79,7 +79,7 @@ def test_repos_adapter_requires_publisher_and_exact_base_expansion_identity() ->
     assert tuple(provider.discover(query(publishers=("Other",)))) == ()
     assert calls == 0
     assert tuple(provider.discover(query())) == ()
-    assert calls == 1
+    assert calls == 2  # Both official locales are checked before a negative result.
 
 
 def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_identity() -> None:
@@ -127,6 +127,116 @@ def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_iden
     assert requested == [
         "https://www.rprod.com/en/games/7-wonders-duel/pantheon",
     ]
+
+
+def test_repos_tries_official_italian_page_after_browser_fallback_failure() -> None:
+    visited: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        visited.append(request.url.path)
+        if request.url.path == "/en/games/7-wonders-duel/pantheon":
+            return httpx.Response(403, request=request)
+        if request.url.path == "/it/games/7-wonders-duel/pantheon":
+            return httpx.Response(
+                200,
+                content=b"""<h1>Pantheon</h1>
+                <a href="https://cdn.svc.asmodee.net/rules/it/pantheon-rules-it.pdf">IT</a>""",
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    def browser(url: str) -> httpx.Response:
+        raise RuntimeError("PRIVATE-UPSTREAM-EXCEPTION-DATA")
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        min_interval_seconds=0,
+        browser_fallback_hosts=ReposProductionProvider._HOSTS,
+        browser_fetch=browser,
+    )
+    provider = ReposProductionProvider(client)
+    pantheon = query(
+        bgg_id=202976,
+        title="7 Wonders Duel: Pantheon",
+        original_title="7 Wonders Duel: Pantheon",
+        item_type="boardgameexpansion",
+        verified_titles=("7 Wonders Duel: Pantheon",),
+    )
+    candidates = tuple(provider.discover(pantheon))
+    assert len(candidates) == 1
+    assert candidates[0].language == "it"
+    assert candidates[0].bgg_id == 202976
+    assert candidates[0].metadata["identity_evidence"] == [
+        "official_nested_expansion_path_and_heading",
+        "bgg_api_exact_id_title_publisher_crosscheck",
+    ]
+    assert visited == [
+        "/en/games/7-wonders-duel/pantheon",
+        "/it/games/7-wonders-duel/pantheon",
+    ]
+
+
+def test_repos_combines_english_and_italian_official_pages_without_duplicate_language() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/en/games/7-wonders-duel/pantheon":
+            return httpx.Response(
+                200,
+                content=b"""<h1>Pantheon</h1>
+                <a href="https://cdn.svc.asmodee.net/rules/en/pantheon-rules-en.pdf">EN</a>""",
+                request=request,
+            )
+        if request.url.path == "/it/games/7-wonders-duel/pantheon":
+            return httpx.Response(
+                200,
+                content=b"""<h1>Pantheon</h1>
+                <a href="https://cdn.svc.asmodee.net/rules/en/pantheon-rules-en.pdf">EN</a>
+                <a href="https://cdn.svc.asmodee.net/rules/it/pantheon-rules-it.pdf">IT</a>""",
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    candidates = tuple(provider.discover(query(
+        bgg_id=202976,
+        title="7 Wonders Duel: Pantheon",
+        original_title="7 Wonders Duel: Pantheon",
+        item_type="boardgameexpansion",
+        verified_titles=("7 Wonders Duel: Pantheon",),
+    )))
+    assert [candidate.language for candidate in candidates] == ["en", "it"]
+    assert all(candidate.bgg_id == 202976 for candidate in candidates)
+    assert len({candidate.url for candidate in candidates}) == 2
+
+
+def test_repos_all_official_pages_inaccessible_preserves_sanitized_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request)
+
+    def browser(url: str) -> httpx.Response:
+        raise RuntimeError("PRIVATE-UPSTREAM-EXCEPTION-DATA")
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+            browser_fallback_hosts=ReposProductionProvider._HOSTS,
+            browser_fetch=browser,
+        )
+    )
+    with pytest.raises(RulebookProviderError, match="browser fallback request failed") as failure:
+        tuple(provider.discover(query(
+            bgg_id=202976,
+            title="7 Wonders Duel: Pantheon",
+            original_title="7 Wonders Duel: Pantheon",
+            item_type="boardgameexpansion",
+        )))
+    assert "RuntimeError" in str(failure.value)
+    assert "PRIVATE-UPSTREAM-EXCEPTION-DATA" not in str(failure.value)
 
 
 def test_repos_nested_expansion_rejects_wrong_heading_and_never_guesses_base_path() -> None:
