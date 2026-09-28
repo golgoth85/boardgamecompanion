@@ -286,6 +286,7 @@ class PublisherSiteProvider:
         bgg_ids: set[int],
         catalog: bool = False,
         language_hint: str = "",
+        product_context: bool = False,
     ) -> RulebookCandidate | None:
         normalized = self._allowed_url(pdf_url, pdf=True)
         if normalized is None:
@@ -319,6 +320,12 @@ class PublisherSiteProvider:
             evidence.append("official_download_catalog_title_exact")
         if not confidence:
             return None
+        if not (product_context or catalog):
+            # Search/result pages are not a verified product identity binding.
+            # They may show links for several distinct titles.
+            confidence = min(confidence, 90)
+            bgg_id = None
+            evidence.append("search_page_requires_review")
 
         explicit_it = (
             _language_from_url(normalized, label).split("-", 1)[0] == "it"
@@ -425,6 +432,10 @@ class PublisherSiteProvider:
                         query, page_url=response.url, title=title,
                         pdf_url=urljoin(response.url, href), label=label,
                         bgg_ids=bgg_ids,
+                        product_context=any(
+                            marker in urlsplit(response.url).path.lower()
+                            for marker in self.site.product_path_parts
+                        ),
                     )
                     if item and item.url not in seen_pdf:
                         found.append(item)
