@@ -508,3 +508,57 @@ def test_page_apis_reject_current_pages_after_archive_replacement(
         assert status.status_code == 409
         assert listing.status_code == 409
         assert page.status_code == 409
+
+
+
+def test_pdf_worker_plain_extraction_preserves_readable_words_not_layout_spacing(
+    monkeypatch,
+) -> None:
+    from boardgamecompanion import pdf_worker
+
+    class RepresentativePage:
+        def extract_text(self, *args, **kwargs):
+            assert args == ()
+            assert kwargs == {}, "RAG parsing must not request layout-spaced text"
+            return (
+                "Benvenuti in 7 Wonders Duel! "
+                "7 Wonders Duel è un gioco per 2 giocatori."
+            )
+
+    class RepresentativeReader:
+        is_encrypted = False
+        pages = [RepresentativePage()]
+
+    monkeypatch.setattr(
+        pdf_worker.pypdf,
+        "PdfReader",
+        lambda *args, **kwargs: RepresentativeReader(),
+    )
+    parsed = pdf_worker.parse_pdf(
+        Path("/tmp/representative.pdf"),
+        max_pages=2,
+        max_chars_per_page=1000,
+        max_total_chars=2000,
+    )
+    assert parsed["parser_name"] == "pypdf"
+    assert parsed["parser_version"].endswith("+plain-v1")
+    assert parsed["diagnostics"]["extraction_mode"] == "plain"
+    assert parsed["pages"][0]["diagnostics"]["extraction_mode"] == "plain"
+    assert "gioco per 2 giocatori" in parsed["pages"][0]["text"]
+
+
+def test_pdf_parser_cache_identity_includes_extraction_policy(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    service = PdfIngestService(
+        Database(settings.config_dir / "boardgamecompanion.db"),
+        settings.manuals_dir,
+        timeout_seconds=20,
+        max_pages=10,
+        max_chars_per_page=10000,
+        max_total_chars=20000,
+        memory_mb=256,
+    )
+    assert service.parser_version.endswith("+plain-v1")
+    assert service.parser_version != service.parser_version.removesuffix("+plain-v1")
