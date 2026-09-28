@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -665,6 +665,335 @@ class AsmodeeItaliaProvider:
                     break
             if candidates:
                 return tuple(candidates[:MAX_DISCOVERY_RESULTS])
+        return ()
+
+
+
+class _HeadingDownloadParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._heading_depth = 0
+        self._heading_parts: list[str] = []
+        self._current_heading = ""
+        self._anchor_href: str | None = None
+        self._anchor_text: list[str] = []
+        self.entries: list[tuple[str, str, str]] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        name = tag.lower()
+        attributes = dict(attrs)
+        if name in {"h2", "h3"}:
+            self._heading_depth += 1
+            self._heading_parts = []
+        if name == "a" and len(self.entries) < MAX_DISCOVERY_RESULTS:
+            href = attributes.get("href")
+            if href and len(href) <= 4096:
+                self._anchor_href = href
+                self._anchor_text = []
+
+    def handle_endtag(self, tag: str) -> None:
+        name = tag.lower()
+        if name in {"h2", "h3"} and self._heading_depth:
+            self._heading_depth -= 1
+            if not self._heading_depth:
+                self._current_heading = " ".join(
+                    " ".join(self._heading_parts).split()
+                )[:500]
+        if name == "a" and self._anchor_href is not None:
+            self.entries.append(
+                (
+                    self._current_heading,
+                    self._anchor_href,
+                    " ".join(" ".join(self._anchor_text).split())[:500],
+                )
+            )
+            self._anchor_href = None
+            self._anchor_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._heading_depth and len(" ".join(self._heading_parts)) < 2000:
+            self._heading_parts.append(data)
+        if self._anchor_href is not None and len(" ".join(self._anchor_text)) < 2000:
+            self._anchor_text.append(data)
+
+
+def _parse_heading_download_catalog(content: bytes) -> _HeadingDownloadParser:
+    try:
+        text = content.decode("utf-8", "strict")
+    except UnicodeDecodeError as exc:
+        raise RulebookProviderError("Provider HTML is not valid UTF-8") from exc
+    parser = _HeadingDownloadParser()
+    try:
+        parser.feed(text)
+        parser.close()
+    except (ValueError, RecursionError) as exc:
+        raise RulebookProviderError("Provider HTML could not be parsed safely") from exc
+    return parser
+
+
+def _strip_italian_rulebook_suffix(value: str) -> str:
+    clean = _match_text(value)
+    clean = re.sub(
+        r"\s+(?:regole|rules|regolamento|regolamenti)"
+        r"(?:\s+(?:in\s+italiano|italiano|italiana|it|ita))?$",
+        "",
+        clean,
+    )
+    clean = re.sub(r"\s+(?:it|ita)$", "", clean)
+    return " ".join(clean.split())
+
+
+def _bgg_id_from_url(value: str) -> int | None:
+    try:
+        parts = urlsplit(canonical_http_url(value))
+    except ValueError:
+        return None
+    if (parts.hostname or "").lower() not in {
+        "boardgamegeek.com",
+        "www.boardgamegeek.com",
+    }:
+        return None
+    match = re.search(r"/(?:boardgame|boardgameexpansion)/(\d+)(?:/|$)", parts.path)
+    if not match:
+        return None
+    identifier = int(match.group(1))
+    return identifier if identifier > 0 else None
+
+
+def _dropbox_direct_download(value: str) -> str:
+    parts = urlsplit(canonical_http_url(value))
+    host = (parts.hostname or "").lower()
+    if host not in {"dropbox.com", "www.dropbox.com"}:
+        return canonical_http_url(value)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["dl"] = "1"
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query), "")
+    )
+
+
+class PendragonItaliaProvider:
+    name = "pendragon_italia"
+    _INDEX = "https://pendragongamestudio.com/it/download/"
+    _HOSTS = frozenset(
+        {"pendragongamestudio.com", "www.pendragongamestudio.com"}
+    )
+    _PUBLISHERS = (
+        "Pendragon Game Studio",
+        "Pendragon Games",
+        "Pendragon",
+    )
+
+    def __init__(self, http: ProviderHttpClient | None = None):
+        self.http = http or ProviderHttpClient()
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if not _verified_publisher_matches(query, self._PUBLISHERS):
+            return ()
+
+        verified_titles = {
+            _match_text(value)
+            for value in query.verified_titles
+            if _match_text(value)
+        }
+        if not query.bgg_identity_verified or not verified_titles:
+            return ()
+
+        response = self.http.get(
+            self._INDEX,
+            allowed_hosts=self._HOSTS,
+            accepted_statuses=frozenset({200}),
+        )
+        catalog = _parse_heading_download_catalog(response.content)
+        candidates: list[RulebookCandidate] = []
+        seen: set[str] = set()
+
+        for heading, href, label in catalog.entries:
+            observed_title = _strip_italian_rulebook_suffix(heading)
+            if not observed_title or observed_title not in verified_titles:
+                continue
+            absolute = canonical_http_url(urljoin(response.url, href))
+            parts = urlsplit(absolute)
+            if (
+                parts.scheme != "https"
+                or (parts.hostname or "").lower() not in self._HOSTS
+            ):
+                continue
+            label_text = _match_text(label)
+            if (
+                "download" not in label_text
+                and "scarica" not in label_text
+                and "ddownload=" not in absolute
+            ):
+                continue
+            if absolute in seen:
+                continue
+            seen.add(absolute)
+            candidates.append(
+                RulebookCandidate(
+                    provider=self.name,
+                    source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+                    url=absolute,
+                    language="it",
+                    document_type="rulebook",
+                    official=True,
+                    confidence=100,
+                    bgg_id=query.bgg_id,
+                    game_title=heading,
+                    publisher="Pendragon Game Studio",
+                    metadata={
+                        "official_page": response.url,
+                        "identity_evidence": [
+                            "bgg_api_exact_id_publisher_crosscheck",
+                            "bgg_verified_title_alias_exact",
+                            "official_download_catalog",
+                        ],
+                        "catalog_item_type": query.item_type,
+                    },
+                )
+            )
+            if len(candidates) >= MAX_DISCOVERY_RESULTS:
+                break
+        return tuple(candidates)
+
+
+class MsEdizioniProvider:
+    name = "ms_edizioni"
+    _BASE = "https://www.msedizioni.it/"
+    _HOSTS = frozenset({"www.msedizioni.it", "msedizioni.it"})
+    _PUBLISHERS = ("MS Edizioni",)
+    _DOWNLOAD_HOSTS = frozenset(
+        {
+            "www.msedizioni.it",
+            "msedizioni.it",
+            "www.dropbox.com",
+            "dropbox.com",
+        }
+    )
+
+    def __init__(self, http: ProviderHttpClient | None = None):
+        self.http = http or ProviderHttpClient()
+
+    @staticmethod
+    def _search_terms(query: RulebookQuery) -> tuple[str, ...]:
+        values = [
+            query.title,
+            query.original_title,
+            *query.verified_titles,
+        ]
+        terms: list[str] = []
+        for value in values:
+            clean = " ".join(str(value or "").split())
+            if clean and clean.casefold() not in {item.casefold() for item in terms}:
+                terms.append(clean)
+        # WordPress search is token based, so a distinctive long token is a
+        # useful fallback for localized titles (e.g. "Explorers of Navoria").
+        for value in tuple(terms):
+            tokens = [
+                token
+                for token in re.findall(r"[A-Za-zÀ-ÿ0-9]+", value)
+                if len(token) >= 6
+            ]
+            for token in sorted(tokens, key=lambda item: (-len(item), item.casefold())):
+                if token.casefold() not in {item.casefold() for item in terms}:
+                    terms.append(token)
+                if len(terms) >= 8:
+                    break
+            if len(terms) >= 8:
+                break
+        return tuple(terms[:8])
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if not _verified_publisher_matches(query, self._PUBLISHERS):
+            return ()
+        if not query.bgg_identity_verified:
+            return ()
+
+        seen_products: set[str] = set()
+        for term in self._search_terms(query):
+            search_url = (
+                f"{self._BASE}?s={quote(term)}&post_type=product"
+            )
+            response = self.http.get(
+                search_url,
+                allowed_hosts=self._HOSTS,
+                accepted_statuses=frozenset({200, 404}),
+            )
+            if response.status_code == 404:
+                continue
+            search_page = _parse_official_page(response.content)
+            product_urls: list[str] = []
+            for href, _label in search_page.links:
+                absolute = canonical_http_url(urljoin(response.url, href))
+                parts = urlsplit(absolute)
+                if (
+                    parts.scheme == "https"
+                    and (parts.hostname or "").lower() in self._HOSTS
+                    and parts.path.startswith("/prodotto/")
+                    and absolute not in seen_products
+                ):
+                    seen_products.add(absolute)
+                    product_urls.append(absolute)
+                if len(product_urls) >= 12:
+                    break
+
+            for product_url in product_urls:
+                product_response = self.http.get(
+                    product_url,
+                    allowed_hosts=self._HOSTS,
+                    accepted_statuses=frozenset({200, 404}),
+                )
+                if product_response.status_code == 404:
+                    continue
+                page = _parse_official_page(product_response.content)
+                linked_bgg_ids = {
+                    identifier
+                    for href, _label in page.links
+                    for identifier in (_bgg_id_from_url(urljoin(product_response.url, href)),)
+                    if identifier is not None
+                }
+                if query.bgg_id not in linked_bgg_ids:
+                    continue
+
+                for href, label in page.links:
+                    if "regolamento" not in _match_text(label):
+                        continue
+                    absolute = canonical_http_url(
+                        urljoin(product_response.url, href)
+                    )
+                    parts = urlsplit(absolute)
+                    if (
+                        parts.scheme != "https"
+                        or (parts.hostname or "").lower() not in self._DOWNLOAD_HOSTS
+                    ):
+                        continue
+                    absolute = _dropbox_direct_download(absolute)
+                    return (
+                        RulebookCandidate(
+                            provider=self.name,
+                            source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+                            url=absolute,
+                            language="it",
+                            document_type="rulebook",
+                            official=True,
+                            confidence=100,
+                            bgg_id=query.bgg_id,
+                            game_title=page.title or query.title,
+                            publisher="MS Edizioni",
+                            metadata={
+                                "official_page": product_response.url,
+                                "identity_evidence": [
+                                    "official_page_exact_bgg_link",
+                                    "bgg_api_exact_id_publisher_crosscheck",
+                                ],
+                                "catalog_item_type": query.item_type,
+                            },
+                        ),
+                    )
         return ()
 
 
