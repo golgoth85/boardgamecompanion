@@ -88,7 +88,7 @@ def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_iden
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
         if request.url.path == "/en/games/7-wonders-duel-pantheon":
-            return httpx.Response(404, request=request)
+            return httpx.Response(500, request=request)
         if request.url.path == "/en/games/7-wonders-duel/pantheon":
             return httpx.Response(
                 200,
@@ -125,7 +125,6 @@ def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_iden
         for c in candidates
     )
     assert requested == [
-        "https://www.rprod.com/en/games/7-wonders-duel-pantheon",
         "https://www.rprod.com/en/games/7-wonders-duel/pantheon",
     ]
 
