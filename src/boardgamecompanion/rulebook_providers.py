@@ -61,6 +61,7 @@ class ProviderHttpClient:
         rate_limiter: Callable[[str, float], None] | None = None,
         browser_fallback_hosts: Iterable[str] = (),
         browser_fetch: Callable[[str], httpx.Response] | None = None,
+        user_agent: str | None = None,
     ):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -84,6 +85,11 @@ class ProviderHttpClient:
             if str(host).strip()
         )
         self._browser_fetch = browser_fetch
+        self.user_agent = user_agent or (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/140.0.0.0 Safari/537.36"
+        )
         self._gate_lock = threading.Lock()
         self._last_request_at: float | None = None
 
@@ -216,11 +222,7 @@ class ProviderHttpClient:
                             "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
                             "Accept-Encoding": "identity",
                             "Cache-Control": "no-cache",
-                            "User-Agent": (
-                                "Mozilla/5.0 (X11; Linux x86_64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                "Chrome/140.0.0.0 Safari/537.36"
-                            ),
+                            "User-Agent": self.user_agent,
                         },
                         timeout=self.timeout_seconds,
                         follow_redirects=False,
@@ -1085,7 +1087,31 @@ def production_rulebook_providers(
             browser_fallback_hosts=browser_fallback_hosts,
         )
 
+    # Import after defining ProviderHttpClient to keep the generic engine
+    # separate from the publisher-specific compatibility adapters.
+    from boardgamecompanion.official_site_discovery import (
+        PublisherSiteProvider,
+        VERIFIED_PUBLISHER_SITES,
+        USER_AGENT as SITE_USER_AGENT,
+    )
+
+    generic_providers = tuple(
+        PublisherSiteProvider(
+            site,
+            ProviderHttpClient(
+                timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
+                max_attempts=max_attempts,
+                min_interval_seconds=min_interval_seconds,
+                rate_limiter=rate_limiter,
+                user_agent=SITE_USER_AGENT,
+            ),
+        )
+        for site in VERIFIED_PUBLISHER_SITES
+    )
+
     return (
+        *generic_providers,
         ReposProductionProvider(
             client(browser_fallback_hosts=ReposProductionProvider._HOSTS)
         ),
