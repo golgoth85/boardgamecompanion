@@ -82,6 +82,125 @@ def test_repos_adapter_requires_publisher_and_exact_base_expansion_identity() ->
     assert calls == 1
 
 
+def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_identity() -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/en/games/7-wonders-duel-pantheon":
+            return httpx.Response(404, request=request)
+        if request.url.path == "/en/games/7-wonders-duel/pantheon":
+            return httpx.Response(
+                200,
+                content=b"""<!doctype html><h1>Pantheon</h1>
+                  <a href="https://cdn.svc.asmodee.net/production-rprod/storage/downloads/games/7wonders-duel-pantheon/it/7dpa-rules-it-16245352255fvc2.pdf">IT</a>
+                  <a href="https://cdn.svc.asmodee.net/production-rprod/storage/downloads/games/7wonders-duel-pantheon/en/7dpa-rules-en.pdf">GB</a>""",
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    pantheon = query(
+        bgg_id=202976,
+        title="7 Wonders Duel: Pantheon",
+        original_title="7 Wonders Duel: Pantheon",
+        item_type="boardgameexpansion",
+        verified_titles=("7 Wonders Duel: Pantheon",),
+    )
+    candidates = tuple(provider.discover(pantheon))
+    assert [c.language for c in candidates] == ["it", "en"]
+    assert [c.bgg_id for c in candidates] == [202976, 202976]
+    assert all(c.game_title == "7 Wonders Duel: Pantheon" for c in candidates)
+    assert all(
+        tuple(c.metadata["identity_evidence"])
+        == (
+            "official_nested_expansion_path_and_heading",
+            "bgg_api_exact_id_title_publisher_crosscheck",
+        )
+        for c in candidates
+    )
+    assert requested == [
+        "https://www.rprod.com/en/games/7-wonders-duel-pantheon",
+        "https://www.rprod.com/en/games/7-wonders-duel/pantheon",
+    ]
+
+
+def test_repos_nested_expansion_rejects_wrong_heading_and_never_guesses_base_path() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path.endswith("/pantheon"):
+            return httpx.Response(
+                200, content=repos_html("Agora"), request=request
+            )
+        return httpx.Response(404, request=request)
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    pantheon = query(
+        bgg_id=202976,
+        title="7 Wonders Duel: Pantheon",
+        item_type="boardgameexpansion",
+        verified_titles=("7 Wonders Duel: Pantheon",),
+    )
+    assert tuple(provider.discover(pantheon)) == ()
+    assert "/en/games/7-wonders-duel/pantheon" in requests
+    requests.clear()
+    assert tuple(provider.discover(pantheon.__class__(
+        bgg_id=202976, title="7 Wonders Duel: Pantheon",
+        item_type="boardgame", publishers=("Repos Production",),
+        verified_publishers=("Repos Production",),
+        verified_titles=("7 Wonders Duel: Pantheon",),
+        bgg_identity_verified=True,
+    ))) == ()
+    assert "/en/games/7-wonders-duel/pantheon" not in requests
+
+
+def test_repos_nested_expansion_preserves_manual_review_without_verified_bgg_identity() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/pantheon"):
+            return httpx.Response(
+                200,
+                content=b"""<h1>Pantheon</h1>
+                <a href="https://cdn.svc.asmodee.net/rules/pantheon/it/rules-it.pdf">IT</a>""",
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = ReposProductionProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    title_only = query(
+        bgg_id=202976,
+        title="7 Wonders Duel: Pantheon",
+        item_type="boardgameexpansion",
+        verified_titles=(),
+        verified_publishers=(),
+        bgg_identity_verified=False,
+    )
+    candidates = tuple(provider.discover(title_only))
+    assert len(candidates) == 1
+    assert candidates[0].bgg_id is None
+    assert candidates[0].official is True
+    assert tuple(candidates[0].metadata["identity_evidence"]) == (
+        "official_nested_expansion_path_and_heading",
+        "catalog_publisher_compatible",
+    )
+
+
 def test_official_adapter_does_not_self_attest_bgg_identity_without_api_crosscheck() -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(200, content=repos_html(), request=request))
     provider = ReposProductionProvider(

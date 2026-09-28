@@ -454,10 +454,29 @@ class ReposProductionProvider:
 
         seen_pages: set[str] = set()
         candidates: list[RulebookCandidate] = []
+        pages: list[tuple[str, str | None, str]] = []
         for title in (query.title, query.original_title):
             if not title:
                 continue
-            page_url = f"{self._BASE}{quote(_slug(title), safe='-')}"
+            pages.append(
+                (f"{self._BASE}{quote(_slug(title), safe='-')}", None, title)
+            )
+            # Repos hosts expansions below their *parent game's* canonical
+            # slug, e.g. /en/games/7-wonders-duel/pantheon. The page H1
+            # contains only "Pantheon". Never infer this path for a base game.
+            if query.item_type == "boardgameexpansion" and ":" in title:
+                parent, suffix = (part.strip() for part in title.rsplit(":", 1))
+                if _slug(parent) and _slug(suffix):
+                    pages.append(
+                        (
+                            f"{self._BASE}{quote(_slug(parent), safe='-')}/"
+                            f"{quote(_slug(suffix), safe='-')}",
+                            suffix,
+                            title,
+                        )
+                    )
+
+        for page_url, expected_expansion_heading, matched_query_title in pages:
             if page_url in seen_pages:
                 continue
             seen_pages.add(page_url)
@@ -469,11 +488,22 @@ class ReposProductionProvider:
             if response.status_code == 404:
                 continue
             page = _parse_official_page(response.content)
-            if not _title_matches(query, page.title):
+            nested_expansion_match = (
+                expected_expansion_heading is not None
+                and _match_text(page.title) == _match_text(expected_expansion_heading)
+            )
+            if not (_title_matches(query, page.title) or nested_expansion_match):
                 continue
+            # The observed short expansion heading can be used as part of an
+            # exact canonical parent/child path, but it is *not* independent
+            # BGG identity evidence. Only an exact, API-verified full title
+            # and publisher may carry the canonical BGG ID into P6A.
             identity_verified = _verified_publisher_matches(
                 query, self._PUBLISHERS
-            ) and _verified_title_matches(query, page.title)
+            ) and _verified_title_matches(
+                query,
+                matched_query_title if nested_expansion_match else page.title,
+            )
 
             seen_languages: set[str] = set()
             for href, label in page.links:
@@ -506,20 +536,37 @@ class ReposProductionProvider:
                         document_type="rulebook",
                         official=True,
                         confidence=100,
-                        title=f"{page.title} — Rules",
+                        title=(
+                            f"{matched_query_title} — Rules"
+                            if nested_expansion_match
+                            else f"{page.title} — Rules"
+                        ),
                         bgg_id=query.bgg_id if identity_verified else None,
-                        game_title=page.title,
+                        game_title=(
+                            matched_query_title if nested_expansion_match else page.title
+                        ),
                         year=None,
                         publisher="Repos Production",
                         metadata={
                             "official_page": response.url,
                             "identity_evidence": (
-                                [
-                                    "official_page_title_exact",
-                                    "bgg_api_exact_id_title_publisher_crosscheck",
-                                ]
+                                (
+                                    [
+                                        "official_nested_expansion_path_and_heading",
+                                        "bgg_api_exact_id_title_publisher_crosscheck",
+                                    ]
+                                    if nested_expansion_match
+                                    else [
+                                        "official_page_title_exact",
+                                        "bgg_api_exact_id_title_publisher_crosscheck",
+                                    ]
+                                )
                                 if identity_verified
-                                else ["official_page_title_exact", "catalog_publisher_compatible"]
+                                else (
+                                    ["official_nested_expansion_path_and_heading", "catalog_publisher_compatible"]
+                                    if nested_expansion_match
+                                    else ["official_page_title_exact", "catalog_publisher_compatible"]
+                                )
                             ),
                             "catalog_item_type": query.item_type,
                         },
