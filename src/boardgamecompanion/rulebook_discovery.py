@@ -104,6 +104,10 @@ class RulebookDiscoveryService:
                         for value in (
                             metadata.get("title"),
                             metadata.get("original_title"),
+                            *(
+                                metadata.get("metadata", {}).get("alternate_titles")
+                                or ()
+                            ),
                         )
                         if value
                     )

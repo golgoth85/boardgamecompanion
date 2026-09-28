@@ -172,7 +172,16 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
     title = _attribute(primary)
     if not title:
         raise BggMetadataError("BGG API item has no primary title")
-    alternate = next((_attribute(node) for node in names if node is not primary), None)
+    alternate_titles = tuple(
+        dict.fromkeys(
+            value
+            for node in names
+            if node is not primary
+            for value in (_attribute(node),)
+            if value and value != title
+        )
+    )
+    alternate = alternate_titles[0] if alternate_titles else None
     links = item.findall("link")
     grouped: dict[str, list[str]] = {}
     for node in links:
@@ -197,6 +206,7 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
         "bgg_id": observed_id,
         "title": title,
         "original_title": alternate,
+        "alternate_titles": list(alternate_titles),
         "year_published": int(year_text) if year_text and year_text.isdigit() else None,
         "item_type": item.attrib.get("type"),
         "cover_url": image,

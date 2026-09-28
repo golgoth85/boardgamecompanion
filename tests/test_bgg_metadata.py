@@ -19,6 +19,7 @@ XML = b"""<?xml version='1.0'?>
 <items><item type='boardgame' id='173346'>
  <name type='primary' value='7 Wonders Duel'/>
  <name type='alternate' value='7 Wonders: Duel'/>
+ <name type='alternate' value='7 Wonders Duello'/>
  <yearpublished value='2015'/>
  <image>https://cf.geekdo-images.com/cover.jpg</image>
  <description>A &amp; B</description>
@@ -64,6 +65,10 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
     assert item["cover_url"] == "https://cf.geekdo-images.com/cover.jpg"
     assert item["publishers"] == ["Repos Production"]
     assert item["metadata"]["bgg_id"] == 173346
+    assert item["metadata"]["alternate_titles"] == [
+        "7 Wonders: Duel",
+        "7 Wonders Duello",
+    ]
 
 
 def test_bgg_api_rejects_conflicting_identity_and_keeps_catalog_independent(tmp_path: Path) -> None:

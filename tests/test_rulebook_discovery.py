@@ -11,6 +11,8 @@ from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
 from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
+    MsEdizioniProvider,
+    PendragonItaliaProvider,
     ProviderHttpClient,
     ReposProductionProvider,
     production_rulebook_providers,
@@ -211,7 +213,7 @@ def test_browser_fallback_redirect_stays_inside_provider_origin_allowlist() -> N
 
 
 def test_production_provider_factory_limits_browser_fallback_to_official_hosts() -> None:
-    repos, asmodee, community = production_rulebook_providers(
+    repos, asmodee, pendragon, ms_edizioni, community = production_rulebook_providers(
         min_interval_seconds=0,
     )
 
@@ -222,7 +224,188 @@ def test_production_provider_factory_limits_browser_fallback_to_official_hosts()
         "www.rprod.com",
         "rprod.com",
     }
+    assert pendragon.http.browser_fallback_hosts == {
+        "pendragongamestudio.com",
+        "www.pendragongamestudio.com",
+    }
+    assert ms_edizioni.http.browser_fallback_hosts == {
+        "www.msedizioni.it",
+        "msedizioni.it",
+    }
     assert community.http.browser_fallback_hosts == frozenset()
+
+
+def test_pendragon_matches_verified_italian_alias_for_expansion() -> None:
+    html = b"""<!doctype html>
+      <h2>Last Aurora regole IT</h2>
+      <a href='/it/?ddownload=base'>Download</a>
+      <h2>Last Aurora Acciaio Siderale regole IT</h2>
+      <a href='/it/?ddownload=frozen'>Download</a>
+    """
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=html, request=request)
+    )
+    provider = PendragonItaliaProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=transport),
+            min_interval_seconds=0,
+        )
+    )
+    candidate_query = query(
+        bgg_id=334710,
+        title="Last Aurora: Frozen Steel",
+        original_title="Last Aurora: Frozen Steel",
+        item_type="boardgameexpansion",
+        publishers=("Pendragon Game Studio",),
+        verified_publishers=("Pendragon Game Studio",),
+        verified_titles=(
+            "Last Aurora: Frozen Steel",
+            "Last Aurora: Acciaio Siderale",
+        ),
+    )
+
+    candidates = tuple(provider.discover(candidate_query))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.language == "it"
+    assert candidate.bgg_id == 334710
+    assert candidate.official is True
+    assert candidate.confidence == 100
+    assert candidate.source_kind.value == "official_localizer"
+    assert candidate.url.endswith("?ddownload=frozen")
+
+
+def test_pendragon_refuses_unverified_localized_title() -> None:
+    html = b"""<!doctype html>
+      <h2>Different Game regole IT</h2>
+      <a href='/it/?ddownload=wrong'>Download</a>
+    """
+    provider = PendragonItaliaProvider(
+        ProviderHttpClient(
+            client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=html, request=request)
+                )
+            ),
+            min_interval_seconds=0,
+        )
+    )
+    candidate_query = query(
+        bgg_id=334710,
+        title="Last Aurora: Frozen Steel",
+        publishers=("Pendragon Game Studio",),
+        verified_publishers=("Pendragon Game Studio",),
+        verified_titles=("Last Aurora: Frozen Steel",),
+    )
+
+    assert tuple(provider.discover(candidate_query)) == ()
+
+
+def test_ms_edizioni_requires_exact_bgg_link_before_trusting_manual() -> None:
+    search_html = b"""<!doctype html>
+      <a href='https://www.msedizioni.it/prodotto/navoria/'>Navoria</a>
+      <a href='https://www.msedizioni.it/prodotto/not-navoria/'>Not Navoria</a>
+    """
+    product_html = b"""<!doctype html>
+      <h1>Navoria</h1>
+      <a href='https://www.msedizioni.it/wp-content/uploads/PDF-gdt/Navoria-MSEdizioni.pdf'>
+        Scarica il Regolamento
+      </a>
+      <a href='https://boardgamegeek.com/boardgame/371932/explorers-of-navoria'>
+        Il gioco su Boardgamegeek
+      </a>
+    """
+    wrong_html = product_html.replace(b"/371932/", b"/999999/")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/":
+            return httpx.Response(200, content=search_html, request=request)
+        if path == "/prodotto/navoria/":
+            return httpx.Response(200, content=product_html, request=request)
+        if path == "/prodotto/not-navoria/":
+            return httpx.Response(200, content=wrong_html, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = MsEdizioniProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    candidate_query = query(
+        bgg_id=371932,
+        title="Explorers of Navoria",
+        original_title="Navoria",
+        publishers=("MS Edizioni",),
+        verified_publishers=("MS Edizioni",),
+        verified_titles=("Explorers of Navoria", "Navoria"),
+    )
+
+    candidates = tuple(provider.discover(candidate_query))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.bgg_id == 371932
+    assert candidate.language == "it"
+    assert candidate.official is True
+    assert candidate.confidence == 100
+    assert candidate.url == (
+        "https://www.msedizioni.it/wp-content/uploads/PDF-gdt/"
+        "Navoria-MSEdizioni.pdf"
+    )
+    assert "official_page_exact_bgg_link" in candidate.metadata["identity_evidence"]
+
+
+def test_ms_edizioni_converts_publisher_linked_dropbox_rulebook_to_download() -> None:
+    search_html = b"""<!doctype html>
+      <a href='/prodotto/food-chain-magnate-ketchup-e-altre-idee/'>
+        Food Chain Magnate - Ketchup e altre idee
+      </a>
+    """
+    product_html = b"""<!doctype html>
+      <h1>Ketchup e altre idee</h1>
+      <a href='https://www.dropbox.com/scl/fi/file/manual.pdf?dl=0&rlkey=trusted'>
+        Scarica il regolamento in italiano
+      </a>
+      <a href='https://boardgamegeek.com/boardgame/261526/food-chain-magnate-ketchup'>
+        Il gioco su Boardgamegeek
+      </a>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/":
+            return httpx.Response(200, content=search_html, request=request)
+        if request.url.path.startswith("/prodotto/"):
+            return httpx.Response(200, content=product_html, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = MsEdizioniProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+        )
+    )
+    candidate_query = query(
+        bgg_id=261526,
+        title="Food Chain Magnate: The Ketchup Mechanism & Other Ideas",
+        item_type="boardgameexpansion",
+        publishers=("MS Edizioni",),
+        verified_publishers=("MS Edizioni",),
+        verified_titles=(
+            "Food Chain Magnate: The Ketchup Mechanism & Other Ideas",
+            "Food Chain Magnate: Ketchup e altre idee",
+        ),
+    )
+
+    candidates = tuple(provider.discover(candidate_query))
+
+    assert len(candidates) == 1
+    assert candidates[0].url.startswith("https://www.dropbox.com/")
+    assert "dl=1" in candidates[0].url
+    assert "rlkey=trusted" in candidates[0].url
 
 
 def test_asmodee_follows_trusted_official_rulebook_page_and_keeps_bgg_identity() -> None:
