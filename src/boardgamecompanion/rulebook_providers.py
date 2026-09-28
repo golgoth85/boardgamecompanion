@@ -187,6 +187,7 @@ class ProviderHttpClient:
         *,
         allowed_hosts: Iterable[str],
         accepted_statuses: frozenset[int] = frozenset({200}),
+        redirect_validator: Callable[[str], bool] | None = None,
     ) -> ProviderHttpResponse:
         hosts = frozenset(str(host).strip().lower() for host in allowed_hosts)
         if not hosts:
@@ -273,7 +274,10 @@ class ProviderHttpClient:
                 location = response.headers.get("location", "")
                 if not location or redirects >= MAX_DISCOVERY_REDIRECTS:
                     raise ProviderHttpError("Provider redirect is invalid or excessive")
-                current = self._validate_origin(urljoin(current, location), hosts)
+                next_url = self._validate_origin(urljoin(current, location), hosts)
+                if redirect_validator is not None and not redirect_validator(next_url):
+                    raise ProviderHttpError("Provider redirect is disallowed by site policy")
+                current = next_url
                 redirects += 1
                 attempt = 0
                 continue
