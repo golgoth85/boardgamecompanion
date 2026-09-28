@@ -240,7 +240,7 @@ class RulebookUpdateService:
         retry_max_seconds: int = DEFAULT_RETRY_MAX_SECONDS,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         max_archive_bytes: int = 100 * 1024 * 1024,
-        fetch_max_bytes: int = 32 * 1024 * 1024,
+        fetch_max_bytes: int = 100 * 1024 * 1024,
     ):
         self.database = database
         self.manuals_dir = Path(manuals_dir)
