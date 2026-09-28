@@ -59,6 +59,8 @@ class ProviderHttpClient:
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         rate_limiter: Callable[[str, float], None] | None = None,
+        browser_fallback_hosts: Iterable[str] = (),
+        browser_fetch: Callable[[str], httpx.Response] | None = None,
     ):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -76,6 +78,12 @@ class ProviderHttpClient:
         self._sleep = sleep
         self._monotonic = monotonic
         self._persistent_rate_limiter = rate_limiter
+        self.browser_fallback_hosts = frozenset(
+            str(host).strip().lower()
+            for host in browser_fallback_hosts
+            if str(host).strip()
+        )
+        self._browser_fetch = browser_fetch
         self._gate_lock = threading.Lock()
         self._last_request_at: float | None = None
 
@@ -116,6 +124,56 @@ class ProviderHttpClient:
             if raw.isdigit():
                 return min(float(raw), 5.0)
         return min(0.25 * (2**attempt), 2.0)
+
+    def _browser_get_once(self, url: str) -> httpx.Response:
+        if self._browser_fetch is not None:
+            return self._browser_fetch(url)
+
+        try:
+            from curl_cffi import requests as curl_requests
+
+            with curl_requests.Session(
+                timeout=self.timeout_seconds,
+                trust_env=False,
+                allow_redirects=False,
+                impersonate="chrome",
+            ) as session:
+                response = session.get(
+                    url,
+                    headers={
+                        "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+                        "Cache-Control": "no-cache",
+                    },
+                    timeout=self.timeout_seconds,
+                    allow_redirects=False,
+                    stream=True,
+                )
+                try:
+                    declared = str(response.headers.get("content-length", "")).strip()
+                    if declared.isdigit() and int(declared) > self.max_response_bytes:
+                        raise ProviderHttpError("Provider response exceeds the byte limit")
+                    chunks: list[bytes] = []
+                    size = 0
+                    for chunk in response.iter_content():
+                        size += len(chunk)
+                        if size > self.max_response_bytes:
+                            raise ProviderHttpError("Provider response exceeds the byte limit")
+                        chunks.append(chunk)
+                    content = b"".join(chunks)
+                    return httpx.Response(
+                        int(response.status_code),
+                        headers=dict(response.headers),
+                        content=content,
+                        request=httpx.Request("GET", url),
+                    )
+                finally:
+                    response.close()
+        except ProviderHttpError:
+            raise
+        except Exception as exc:
+            raise ProviderHttpError(
+                "Provider browser fallback request failed"
+            ) from exc
 
     def get(
         self,
@@ -201,6 +259,14 @@ class ProviderHttpClient:
                 raise ProviderHttpError("Provider request failed") from exc
 
             assert response is not None
+            current_host = (urlsplit(current).hostname or "").lower()
+            if (
+                response.status_code == 403
+                and current_host in self.browser_fallback_hosts
+            ):
+                response = self._browser_get_once(current)
+                content = response.content
+
             if response.status_code in {301, 302, 303, 307, 308}:
                 location = response.headers.get("location", "")
                 if not location or redirects >= MAX_DISCOVERY_REDIRECTS:
@@ -680,17 +746,27 @@ def production_rulebook_providers(
     min_interval_seconds: float = 1.0,
     rate_limiter: Callable[[str, float], None] | None = None,
 ) -> tuple[RulebookProvider, ...]:
-    def client() -> ProviderHttpClient:
+    def client(*, browser_fallback_hosts: Iterable[str] = ()) -> ProviderHttpClient:
         return ProviderHttpClient(
             timeout_seconds=timeout_seconds,
             max_response_bytes=max_response_bytes,
             max_attempts=max_attempts,
             min_interval_seconds=min_interval_seconds,
             rate_limiter=rate_limiter,
+            browser_fallback_hosts=browser_fallback_hosts,
         )
 
     return (
-        ReposProductionProvider(client()),
-        AsmodeeItaliaProvider(client()),
+        ReposProductionProvider(
+            client(browser_fallback_hosts=ReposProductionProvider._HOSTS)
+        ),
+        AsmodeeItaliaProvider(
+            client(
+                browser_fallback_hosts=(
+                    AsmodeeItaliaProvider._HOSTS
+                    | AsmodeeItaliaProvider._RULEBOOK_PAGE_HOSTS
+                )
+            )
+        ),
         RuleBookOrgProvider(client()),
     )
