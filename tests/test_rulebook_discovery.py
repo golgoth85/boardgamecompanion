@@ -579,6 +579,16 @@ def database(tmp_path: Path) -> Database:
     return db
 
 
+def test_discovery_query_keeps_edition_publisher_separate_from_bgg_evidence(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    service = RulebookDiscoveryService(db, ())
+    candidate_query = service._query(173346)
+    assert candidate_query.edition_publishers == ("Repos Production",)
+    assert candidate_query.publishers == ("Repos Production",)
+    assert candidate_query.verified_publishers == ()
+    assert candidate_query.bgg_identity_verified is False
+
+
 def discovery_providers() -> tuple[StaticProvider, ...]:
     return (
         StaticProvider("official", (
