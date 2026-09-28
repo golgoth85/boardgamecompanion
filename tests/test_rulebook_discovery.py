@@ -117,11 +117,11 @@ def test_repos_nested_pantheon_expansion_finds_official_it_rules_with_exact_iden
     assert [c.bgg_id for c in candidates] == [202976, 202976]
     assert all(c.game_title == "7 Wonders Duel: Pantheon" for c in candidates)
     assert all(
-        c.metadata["identity_evidence"]
-        == [
+        tuple(c.metadata["identity_evidence"])
+        == (
             "official_nested_expansion_path_and_heading",
             "bgg_api_exact_id_title_publisher_crosscheck",
-        ]
+        )
         for c in candidates
     )
     assert requested == [
@@ -195,10 +195,10 @@ def test_repos_nested_expansion_preserves_manual_review_without_verified_bgg_ide
     assert len(candidates) == 1
     assert candidates[0].bgg_id is None
     assert candidates[0].official is True
-    assert candidates[0].metadata["identity_evidence"] == [
+    assert tuple(candidates[0].metadata["identity_evidence"]) == (
         "official_nested_expansion_path_and_heading",
         "catalog_publisher_compatible",
-    ]
+    )
 
 
 def test_official_adapter_does_not_self_attest_bgg_identity_without_api_crosscheck() -> None:
