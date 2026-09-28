@@ -61,6 +61,7 @@ class ProviderHttpClient:
         rate_limiter: Callable[[str, float], None] | None = None,
         browser_fallback_hosts: Iterable[str] = (),
         browser_fetch: Callable[[str], httpx.Response] | None = None,
+        user_agent: str | None = None,
     ):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -84,6 +85,11 @@ class ProviderHttpClient:
             if str(host).strip()
         )
         self._browser_fetch = browser_fetch
+        self.user_agent = user_agent or (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/140.0.0.0 Safari/537.36"
+        )
         self._gate_lock = threading.Lock()
         self._last_request_at: float | None = None
 
@@ -181,6 +187,7 @@ class ProviderHttpClient:
         *,
         allowed_hosts: Iterable[str],
         accepted_statuses: frozenset[int] = frozenset({200}),
+        redirect_validator: Callable[[str], bool] | None = None,
     ) -> ProviderHttpResponse:
         hosts = frozenset(str(host).strip().lower() for host in allowed_hosts)
         if not hosts:
@@ -216,11 +223,7 @@ class ProviderHttpClient:
                             "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
                             "Accept-Encoding": "identity",
                             "Cache-Control": "no-cache",
-                            "User-Agent": (
-                                "Mozilla/5.0 (X11; Linux x86_64) "
-                                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                "Chrome/140.0.0.0 Safari/537.36"
-                            ),
+                            "User-Agent": self.user_agent,
                         },
                         timeout=self.timeout_seconds,
                         follow_redirects=False,
@@ -271,7 +274,10 @@ class ProviderHttpClient:
                 location = response.headers.get("location", "")
                 if not location or redirects >= MAX_DISCOVERY_REDIRECTS:
                     raise ProviderHttpError("Provider redirect is invalid or excessive")
-                current = self._validate_origin(urljoin(current, location), hosts)
+                next_url = self._validate_origin(urljoin(current, location), hosts)
+                if redirect_validator is not None and not redirect_validator(next_url):
+                    raise ProviderHttpError("Provider redirect is disallowed by site policy")
+                current = next_url
                 redirects += 1
                 attempt = 0
                 continue
@@ -349,8 +355,9 @@ def _verified_title_matches(query: RulebookQuery, observed: str | None) -> bool:
 
 
 class _OfficialPageParser(HTMLParser):
-    def __init__(self):
+    def __init__(self, *, link_limit: int = MAX_DISCOVERY_RESULTS):
         super().__init__(convert_charrefs=True)
+        self._link_limit = link_limit
         self._title_depth = 0
         self._anchor_href: str | None = None
         self._anchor_text: list[str] = []
@@ -361,7 +368,7 @@ class _OfficialPageParser(HTMLParser):
         attributes = dict(attrs)
         if tag.lower() == "h1":
             self._title_depth += 1
-        if tag.lower() == "a" and len(self.links) < MAX_DISCOVERY_RESULTS:
+        if tag.lower() == "a" and len(self.links) < self._link_limit:
             href = attributes.get("href")
             if href and len(href) <= 4096:
                 self._anchor_href = href
@@ -388,12 +395,14 @@ class _OfficialPageParser(HTMLParser):
         return " ".join(" ".join(self.title_parts).split())
 
 
-def _parse_official_page(content: bytes) -> _OfficialPageParser:
+def _parse_official_page(
+    content: bytes, *, link_limit: int = MAX_DISCOVERY_RESULTS
+) -> _OfficialPageParser:
     try:
         text = content.decode("utf-8", "strict")
     except UnicodeDecodeError as exc:
         raise RulebookProviderError("Provider HTML is not valid UTF-8") from exc
-    parser = _OfficialPageParser()
+    parser = _OfficialPageParser(link_limit=link_limit)
     try:
         parser.feed(text)
         parser.close()
@@ -670,8 +679,9 @@ class AsmodeeItaliaProvider:
 
 
 class _HeadingDownloadParser(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, *, link_limit: int = MAX_DISCOVERY_RESULTS) -> None:
         super().__init__(convert_charrefs=True)
+        self._link_limit = link_limit
         self._heading_depth = 0
         self._heading_parts: list[str] = []
         self._current_heading = ""
@@ -689,7 +699,7 @@ class _HeadingDownloadParser(HTMLParser):
         if name in {"h2", "h3"}:
             self._heading_depth += 1
             self._heading_parts = []
-        if name == "a" and len(self.entries) < MAX_DISCOVERY_RESULTS:
+        if name == "a" and len(self.entries) < self._link_limit:
             href = attributes.get("href")
             if href and len(href) <= 4096:
                 self._anchor_href = href
@@ -721,12 +731,14 @@ class _HeadingDownloadParser(HTMLParser):
             self._anchor_text.append(data)
 
 
-def _parse_heading_download_catalog(content: bytes) -> _HeadingDownloadParser:
+def _parse_heading_download_catalog(
+    content: bytes, *, link_limit: int = MAX_DISCOVERY_RESULTS
+) -> _HeadingDownloadParser:
     try:
         text = content.decode("utf-8", "strict")
     except UnicodeDecodeError as exc:
         raise RulebookProviderError("Provider HTML is not valid UTF-8") from exc
-    parser = _HeadingDownloadParser()
+    parser = _HeadingDownloadParser(link_limit=link_limit)
     try:
         parser.feed(text)
         parser.close()
@@ -1085,7 +1097,31 @@ def production_rulebook_providers(
             browser_fallback_hosts=browser_fallback_hosts,
         )
 
+    # Import after defining ProviderHttpClient to keep the generic engine
+    # separate from the publisher-specific compatibility adapters.
+    from boardgamecompanion.official_site_discovery import (
+        PublisherSiteProvider,
+        VERIFIED_PUBLISHER_SITES,
+        USER_AGENT as SITE_USER_AGENT,
+    )
+
+    generic_providers = tuple(
+        PublisherSiteProvider(
+            site,
+            ProviderHttpClient(
+                timeout_seconds=timeout_seconds,
+                max_response_bytes=max_response_bytes,
+                max_attempts=max_attempts,
+                min_interval_seconds=min_interval_seconds,
+                rate_limiter=rate_limiter,
+                user_agent=SITE_USER_AGENT,
+            ),
+        )
+        for site in VERIFIED_PUBLISHER_SITES
+    )
+
     return (
+        *generic_providers,
         ReposProductionProvider(
             client(browser_fallback_hosts=ReposProductionProvider._HOSTS)
         ),

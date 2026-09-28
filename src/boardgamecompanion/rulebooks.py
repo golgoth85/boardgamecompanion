@@ -402,6 +402,7 @@ class RulebookQuery:
     verified_publishers: tuple[str, ...] = ()
     verified_titles: tuple[str, ...] = ()
     bgg_identity_verified: bool = False
+    edition_publishers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         bgg_id = _normalize_positive_identifier(self.bgg_id, field_name="bgg_id")
@@ -439,6 +440,15 @@ class RulebookQuery:
                 text
                 for value in self.verified_titles
                 if (text := _clean_optional(value, max_length=500)) is not None
+            ),
+        )
+        object.__setattr__(
+            self,
+            "edition_publishers",
+            tuple(
+                value
+                for publisher in self.edition_publishers
+                if (value := _clean_optional(publisher, max_length=500)) is not None
             ),
         )
         if type(self.bgg_identity_verified) is not bool:

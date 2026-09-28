@@ -213,9 +213,21 @@ def test_browser_fallback_redirect_stays_inside_provider_origin_allowlist() -> N
 
 
 def test_production_provider_factory_limits_browser_fallback_to_official_hosts() -> None:
-    repos, asmodee, pendragon, ms_edizioni, community = production_rulebook_providers(
-        min_interval_seconds=0,
-    )
+    providers = {
+        item.name: item
+        for item in production_rulebook_providers(min_interval_seconds=0)
+    }
+    repos = providers["repos_production"]
+    asmodee = providers["asmodee_italia"]
+    pendragon = providers["pendragon_italia"]
+    ms_edizioni = providers["ms_edizioni"]
+    community = providers["rulebook_org"]
+    generic = [
+        value for name, value in providers.items()
+        if name.startswith("official_site_")
+    ]
+    assert len(generic) == 5
+    assert all(item.http.browser_fallback_hosts == frozenset() for item in generic)
 
     assert repos.http.browser_fallback_hosts == {"www.rprod.com", "rprod.com"}
     assert asmodee.http.browser_fallback_hosts == {
@@ -565,6 +577,16 @@ def database(tmp_path: Path) -> Database:
                VALUES (?,1,'Repos Production','{}',?,?)""", (game_id, now, now)
         )
     return db
+
+
+def test_discovery_query_keeps_edition_publisher_separate_from_bgg_evidence(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    service = RulebookDiscoveryService(db, ())
+    candidate_query = service._query(173346)
+    assert candidate_query.edition_publishers == ("Repos Production",)
+    assert candidate_query.publishers == ("Repos Production",)
+    assert candidate_query.verified_publishers == ()
+    assert candidate_query.bgg_identity_verified is False
 
 
 def discovery_providers() -> tuple[StaticProvider, ...]:
