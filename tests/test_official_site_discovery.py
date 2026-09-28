@@ -377,3 +377,29 @@ def test_generic_download_button_does_not_promote_promo_or_cover_pdf():
     items = provider(site("pendragon_italia"), handler).discover(case())
     assert len(items) == 1
     assert items[0].url.endswith("/it/rules-it.pdf")
+
+
+def test_bounded_catalog_scans_past_100_unrelated_items():
+    unrelated = "".join(
+        f"<h2>Other game {i} regole IT</h2><a href='/it/?ddownload={i}'>Download</a>"
+        for i in range(135)
+    )
+    html = (
+        unrelated
+        + "<h2>Last Aurora Acciaio Siderale regole IT</h2>"
+        + "<a href='/it/?ddownload=last-aurora-frozen'>Download</a>"
+    ).encode()
+
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404, request=req)
+        if req.url.path == "/it/download/":
+            return httpx.Response(
+                200, headers={"content-type": "text/html"},
+                content=html, request=req,
+            )
+        return httpx.Response(404, request=req)
+
+    result = provider(site("pendragon_italia"), handler).discover(case())
+    assert len(result) == 1
+    assert result[0].url.endswith("ddownload=last-aurora-frozen")
