@@ -184,6 +184,7 @@ class PublisherSiteProvider:
             normalized,
             allowed_hosts=self.site.hosts,
             accepted_statuses=frozenset({200, 404}),
+            redirect_validator=self._robots_allows,
         )
         if response.status_code == 404:
             return None
