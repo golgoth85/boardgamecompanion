@@ -354,3 +354,117 @@ def test_gemini_selected_without_api_key_is_explicit(monkeypatch, tmp_path) -> N
         get_answer_generation_service()
     assert generation_error.value.status_code == 503
     assert "BGC_GEMINI_API_KEY" in str(generation_error.value.detail)
+
+
+
+def test_gemini_generation_recovers_from_temporary_503_with_bounded_backoff(
+    monkeypatch,
+) -> None:
+    attempts = []
+    sleeps = []
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.random.uniform",
+        lambda low, high: 0.0,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.time.sleep",
+        sleeps.append,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        if len(attempts) <= 2:
+            return httpx.Response(503, json={"error": {"message": "busy"}})
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{
+                    "content": {
+                        "parts": [{"text": '{"status":"not_found","claims":[]}'}]
+                    },
+                }],
+            },
+        )
+
+    provider = GeminiGenerationProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-3.8-flash",
+        api_key="secret",
+        timeout_seconds=30,
+        verify_tls=True,
+        temperature=0.0,
+        client=httpx.Client(
+            base_url="https://generativelanguage.googleapis.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    result = provider.generate(
+        query="Question",
+        evidence=[{"evidence_id": "E1", "text": "Evidence."}],
+        descriptor=type("Descriptor", (), {"model": "gemini-3.8-flash"})(),
+        max_claims=4,
+    )
+    assert result == {"status": "not_found", "claims": []}
+    assert len(attempts) == 3
+    assert sleeps == [1.0, 2.0]
+    assert all(x.headers["x-goog-api-key"] == "secret" for x in attempts)
+
+
+def test_gemini_503_retries_end_after_fixed_budget(monkeypatch) -> None:
+    requests = []
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.random.uniform",
+        lambda low, high: 0.0,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.time.sleep",
+        lambda _: None,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503)
+
+    provider = GeminiGenerationProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-3.8-flash",
+        api_key="secret",
+        timeout_seconds=30,
+        verify_tls=True,
+        temperature=0.0,
+        client=httpx.Client(
+            base_url="https://generativelanguage.googleapis.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(AnswerProviderError, match="HTTP 503"):
+        provider.describe()
+    assert len(requests) == 4
+
+
+def test_gemini_401_is_not_retried(monkeypatch) -> None:
+    requests = []
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.time.sleep",
+        lambda _: pytest.fail("Authentication error must not back off"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(401)
+
+    provider = GeminiGenerationProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-3.8-flash",
+        api_key="secret",
+        timeout_seconds=30,
+        verify_tls=True,
+        temperature=0.0,
+        client=httpx.Client(
+            base_url="https://generativelanguage.googleapis.com",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    with pytest.raises(AnswerProviderError, match="HTTP 401"):
+        provider.describe()
+    assert len(requests) == 1
