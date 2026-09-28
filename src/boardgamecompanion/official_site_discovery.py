@@ -369,7 +369,7 @@ class PublisherSiteProvider:
         )
 
     def discover(self, query: RulebookQuery) -> tuple[RulebookCandidate, ...]:
-        if self.site not in PublisherSiteResolver().resolve(query):
+        if not PublisherSiteResolver((self.site,)).resolve(query):
             return ()
         titles = self._titles(query)
         if not titles:
