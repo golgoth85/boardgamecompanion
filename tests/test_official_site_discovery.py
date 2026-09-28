@@ -360,3 +360,20 @@ def test_generic_provider_identifies_it_language_without_imposing_it_on_en():
 
     items = provider(site("pendragon_italia"), handler).discover(case())
     assert items and all(item.language == "en" for item in items)
+
+
+def test_generic_download_button_does_not_promote_promo_or_cover_pdf():
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404, request=req)
+        return httpx.Response(
+            200, headers={"content-type": "text/html"},
+            content=b"""<h1>Last Aurora: Frozen Steel</h1>
+              <a href='/it/promo-card-it.pdf'>Download</a>
+              <a href='/it/box-art-it.pdf'>Scarica</a>
+              <a href='/it/rules-it.pdf'>Scarica il regolamento italiano</a>""",
+            request=req,
+        )
+    items = provider(site("pendragon_italia"), handler).discover(case())
+    assert len(items) == 1
+    assert items[0].url.endswith("/it/rules-it.pdf")
