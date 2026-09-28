@@ -1824,12 +1824,19 @@ async function renderDetail(bggId) {
             <span class="badge">${copyItems.length} ${copyItems.length === 1 ? "copia" : "copie"}</span>
           </div>
 
-          <section class="rulebook-discovery-panel">
-            <div>
-              <p class="eyebrow">Discovery regolamenti</p>
-              <p class="muted" id="gameDiscoveryStatus">Caricamento stato…</p>
+          <section class="rulebook-discovery-panel" aria-label="Ricerca e acquisizione regolamenti">
+            <div class="rulebook-discovery-info">
+              <p class="eyebrow">Fonti dei regolamenti · IT prima di EN</p>
+              <p class="muted">La ricerca controlla le fonti ufficiali e aggiorna i metadati BGG (compresa la copertina del catalogo).
+                <strong>Trovare un link non significa aver scaricato il PDF.</strong> I documenti approvati vengono acquisiti
+                separatamente; gli altri richiedono una revisione.</p>
+              <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">Caricamento stato…</p>
+              <p class="muted">Il risultato compare sotto «Manuali e documenti» solo dopo l’archiviazione.
+                Se manca il regolamento, usa «+ Aggiungi PDF».
+                <a class="external-link" href="/updates" data-nav>Stato download</a> ·
+                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>.</p>
             </div>
-            <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca regolamento ora</button>
+            <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca fonti per il regolamento</button>
           </section>
 
           <div class="fact-grid">
@@ -1973,27 +1980,41 @@ async function renderDetail(bggId) {
 async function setupGameDiscovery(bggId) {
   const status = document.querySelector("#gameDiscoveryStatus");
   const button = document.querySelector("#discoverRulebooksNow");
+  const gamePath = window.location.pathname;
   const refresh = async () => {
+    if (!status?.isConnected || window.location.pathname !== gamePath) return;
     try {
-      const item = await api(`/api/games/${bggId}/rulebook-discovery`);
-      const providers = (item.providers || []).map((value) => `${value.provider}: ${value.outcome}`).join(" · ");
-      status.textContent = `Stato ${item.status} · ultimo tentativo ${item.last_finished_at || "mai"} · ${item.candidates_found} candidate · ${item.provider_failures} errori${providers ? ` · ${providers}` : ""}`;
+      const [item, documents] = await Promise.all([
+        api(`/api/games/${bggId}/rulebook-discovery`),
+        api(`/api/games/${bggId}/documents`),
+      ]);
+      if (!status.isConnected || window.location.pathname !== gamePath) return;
+      const stored = (documents.items || []).filter((value) => value.document_type === "rulebook");
+      const italian = stored.filter((value) => String(value.language || "").split("-")[0] === "it");
+      const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
+      const candidates = Number(item.candidates_found || 0);
+      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti candidate: ${candidates} · Errori di ricerca: ${item.provider_failures || 0} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
     } catch (error) {
-      status.textContent = error.message;
+      if (status.isConnected) status.textContent = error.message;
     }
   };
   button?.addEventListener("click", async () => {
     button.disabled = true;
-    button.textContent = "Ricerca…";
+    button.textContent = "Ricerca delle fonti…";
     try {
-      await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
-      showToast("Discovery completata: controlla revisioni e aggiornamenti.");
+      const result = await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
+      const found = Number(result.candidates_found || 0);
+      const approved = (result.review_items || []).filter((value) => value.status === "approved").length;
+      const pending = (result.review_items || []).filter((value) => value.status === "pending").length;
+      showToast(found
+        ? `Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare. Il download dei PDF è separato dalla ricerca.`
+        : "Nessuna fonte trovata. Puoi aggiungere il regolamento con «+ Aggiungi PDF».");
       await refresh();
     } catch (error) {
       showToast(error.message, true);
     } finally {
       button.disabled = false;
-      button.textContent = "Cerca regolamento ora";
+      button.textContent = "Cerca fonti per il regolamento";
     }
   });
   await refresh();
