@@ -133,7 +133,7 @@ class PublisherSiteProvider:
         self.site = site
         self.name = f"official_site_{site.key}"
         self.http = http or ProviderHttpClient()
-        self._robots: robotparser.RobotFileParser | bool | None = None
+        self._robots: dict[str, robotparser.RobotFileParser | bool] = {}
 
     def _allowed_url(self, url: str, *, pdf: bool = False) -> str | None:
         try:
@@ -149,9 +149,9 @@ class PublisherSiteProvider:
             return None
 
     def _robots_allows(self, url: str) -> bool:
-        if self._robots is None:
+        host = (urlsplit(url).hostname or "").lower()
+        if host not in self._robots:
             # There is no default allow on an inaccessible robots policy.
-            host = (urlsplit(url).hostname or "").lower()
             robots_url = f"https://{host}/robots.txt"
             result = self.http.get(
                 robots_url,
@@ -159,19 +159,20 @@ class PublisherSiteProvider:
                 accepted_statuses=frozenset({200, 403, 404}),
             )
             if result.status_code == 403:
-                self._robots = False
+                self._robots[host] = False
             elif result.status_code == 404:
-                self._robots = True
+                self._robots[host] = True
             else:
                 parser = robotparser.RobotFileParser()
                 try:
                     parser.parse(result.content.decode("utf-8", "strict").splitlines())
                 except (UnicodeError, ValueError, RecursionError) as exc:
                     raise RulebookProviderError("Official robots policy cannot be parsed") from exc
-                self._robots = parser
-        if isinstance(self._robots, bool):
-            return self._robots
-        return self._robots.can_fetch(USER_AGENT, url)
+                self._robots[host] = parser
+        policy = self._robots[host]
+        if isinstance(policy, bool):
+            return policy
+        return policy.can_fetch(USER_AGENT, url)
 
     def _get(self, url: str):
         normalized = self._allowed_url(url)
@@ -276,6 +277,7 @@ class PublisherSiteProvider:
         label: str,
         bgg_ids: set[int],
         catalog: bool = False,
+        language_hint: str = "",
     ) -> RulebookCandidate | None:
         normalized = self._allowed_url(pdf_url, pdf=True)
         if normalized is None:
@@ -306,7 +308,7 @@ class PublisherSiteProvider:
         explicit_it = (
             _language_from_url(normalized, label).split("-", 1)[0] == "it"
             or bool(re.search(r"\b(?:italiano|italiana|italian|ita)\b", label, re.I))
-            or bool(re.search(r"\b(?:regole|regolamento)\s+it\b", title, re.I))
+            or bool(re.search(r"\b(?:regole|regolamento)\s+it\b", language_hint, re.I))
         )
         if explicit_it:
             language = "it"
@@ -395,7 +397,7 @@ class PublisherSiteProvider:
                     item = self._candidate(
                         query, page_url=response.url, title=title,
                         pdf_url=urljoin(response.url, href), label=label,
-                        bgg_ids=set(), catalog=True,
+                        bgg_ids=set(), catalog=True, language_hint=heading,
                     )
                     if item and item.url not in seen_pdf:
                         found.append(item)
