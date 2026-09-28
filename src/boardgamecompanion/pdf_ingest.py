@@ -151,7 +151,9 @@ class PdfIngestService:
 
     @property
     def parser_version(self) -> str:
-        return package_version("pypdf")
+        # Include extraction policy in durable identity: old layout-mode page
+        # caches must never masquerade as the new readable plain-mode pages.
+        return package_version("pypdf") + "+plain-v1"
 
     def _document(self, document_id: str) -> dict[str, Any]:
         document = DocumentStore(self.database, self.manuals_dir).get(document_id)
