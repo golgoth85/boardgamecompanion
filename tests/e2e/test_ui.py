@@ -1624,3 +1624,61 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
         )
     finally:
         context.close()
+
+
+
+def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pdf(
+    browser, live_server
+):
+    context, page = new_page(browser)
+    requests = []
+
+    def discovery_run(route):
+        requests.append(route.request.method)
+        route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({
+                "candidates_found": 2,
+                "review_items": [
+                    {"status": "approved"},
+                    {"status": "pending"},
+                ],
+            }),
+        )
+
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        panel = page.locator(".rulebook-discovery-panel")
+        expect(panel).to_contain_text("metadati BGG (compresa la copertina")
+        expect(panel).to_contain_text(
+            "Trovare un link non significa aver scaricato il PDF"
+        )
+        expect(panel).to_contain_text("PDF archiviati: 0")
+        expect(panel).to_contain_text("«+ Aggiungi PDF»")
+        expect(panel.get_by_role("link", name="Stato download")).to_be_visible()
+        expect(panel.get_by_role("link", name="Fonti da verificare")).to_be_visible()
+
+        page.route(
+            re.compile(r".*/api/games/\d+/rulebook-discovery/run$"),
+            discovery_run,
+        )
+        panel.get_by_role("button", name="Cerca fonti per il regolamento").click()
+        expect(page.locator("#toast")).to_contain_text(
+            "Trovate 2 fonti: 1 approvate, 1 da verificare"
+        )
+        expect(page.locator(".game-document-card")).to_have_count(0)
+        assert requests == ["POST"]
+    finally:
+        context.close()
+
+
+def test_rulebook_search_panel_is_readable_on_mobile(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        expect(page.get_by_role("button", name="Cerca fonti per il regolamento")).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+    finally:
+        context.close()

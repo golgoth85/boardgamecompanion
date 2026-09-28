@@ -435,7 +435,11 @@ a { color: inherit; text-decoration: none; }
 }
 .detail-cover .cover-initials { font-size: clamp(3rem, 10vw, 6rem); }
 .cover-image { width: 100%; height: 100%; object-fit: cover; display: block; }
-.rulebook-discovery-panel { display: flex; gap: 1rem; align-items: center; justify-content: space-between; padding: 1rem; margin: 1rem 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.rulebook-discovery-panel { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; padding: 1rem; margin: 1rem 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.rulebook-discovery-info { flex: 1 1 260px; min-width: 0; }
+.rulebook-discovery-info p { margin: 0 0 .55rem; line-height: 1.5; }
+.rulebook-discovery-info p:last-child { margin-bottom: 0; }
+.rulebook-discovery-panel .button { flex: 0 1 auto; max-width: 100%; white-space: normal; text-align: center; }
 .detail-main { padding: clamp(1.2rem, 3vw, 2rem); }
 .detail-main h1 { margin: .1rem 0 .45rem; font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -.04em; }
 .detail-subtitle { color: var(--muted); margin: 0 0 1.2rem; }

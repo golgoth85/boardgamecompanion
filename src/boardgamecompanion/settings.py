@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = Field(default=240, ge=0, le=5000)
     chunk_min_break_chars: int = Field(default=900, ge=100, le=10000)
     rulebook_fetch_max_bytes: int = Field(
-        default=32 * 1024 * 1024,
+        default=100 * 1024 * 1024,
         ge=1024,
         le=100 * 1024 * 1024,
     )

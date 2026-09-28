@@ -37,6 +37,12 @@ _DEFAULT_ALLOWED_CONTENT_TYPES = (
     "application/x-pdf",
     "application/octet-stream",
     "binary/octet-stream",
+    # Official publisher endpoints often send a binary attachment with a
+    # non-standard MIME; the PDF magic check below remains mandatory.
+    "application/download",
+    "application/x-download",
+    "application/force-download",
+    "text/plain",
 )
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
@@ -71,8 +77,9 @@ class RulebookFetchPolicy:
     connect_timeout_seconds: float = 5.0
     read_timeout_seconds: float = 15.0
     fetch_timeout_seconds: float = 300.0
-    max_bytes: int = 32 * 1024 * 1024
+    max_bytes: int = 100 * 1024 * 1024
     max_redirects: int = 5
+    max_http_retries: int = 2
     chunk_size: int = 64 * 1024
     allow_https_to_http_redirect: bool = False
     allowed_content_types: tuple[str, ...] = _DEFAULT_ALLOWED_CONTENT_TYPES
@@ -88,6 +95,8 @@ class RulebookFetchPolicy:
             raise ValueError("max_bytes must be positive")
         if self.max_redirects < 0:
             raise ValueError("max_redirects must not be negative")
+        if not 0 <= self.max_http_retries <= 3:
+            raise ValueError("max_http_retries must be between 0 and 3")
         if self.chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
         normalized = tuple(
@@ -611,6 +620,7 @@ class RulebookFetcher:
         redirects: list[RedirectHop] = []
         visited = {current_url}
         deadline = time.monotonic() + self.policy.fetch_timeout_seconds
+        http_retries = 0
 
         try:
             while True:
@@ -619,7 +629,7 @@ class RulebookFetcher:
                 response = self.transport.request(
                     target,
                     self._request_target(current_url),
-                    self._request_headers(target),
+                    self._request_headers(target, candidate=candidate),
                     connect_timeout=self.policy.connect_timeout_seconds,
                     read_timeout=self.policy.read_timeout_seconds,
                     deadline=deadline,
@@ -653,7 +663,23 @@ class RulebookFetcher:
                             )
                         visited.add(next_url)
                         current_url = next_url
+                        http_retries = 0
                         continue
+
+                    if (
+                        response.status in {408, 429, 500, 502, 503, 504}
+                        and http_retries < self.policy.max_http_retries
+                    ):
+                        # Never retry a streamed PDF body or a 403/401 gate.
+                        # The global deadline applies to every attempt and sleep.
+                        delay = self._retry_delay(
+                            response.headers.get("retry-after"), http_retries
+                        )
+                        remaining = deadline - time.monotonic()
+                        if remaining > delay:
+                            http_retries += 1
+                            time.sleep(delay)
+                            continue
 
                     if response.status != 200:
                         raise _FetchAbort(
@@ -951,14 +977,44 @@ class RulebookFetcher:
         return target
 
     @staticmethod
-    def _request_headers(target: ValidatedHTTPSTarget) -> Mapping[str, str]:
-        return {
+    def _retry_delay(retry_after: str | None, attempt: int) -> float:
+        if retry_after and retry_after.strip().isdigit():
+            return min(float(retry_after.strip()), 5.0)
+        return min(0.25 * (2 ** attempt), 1.0)
+
+    @staticmethod
+    def _request_headers(
+        target: ValidatedHTTPSTarget, *, candidate: RulebookCandidate | None = None
+    ) -> Mapping[str, str]:
+        headers: dict[str, str] = {
             "Host": target.host_header,
             "Accept": "application/pdf, application/octet-stream;q=0.8",
+            "Accept-Language": "it-IT,it;q=0.9,en;q=0.7",
             "Accept-Encoding": "identity",
-            "User-Agent": "BoardGameCompanion/0.1 guarded-rulebook-fetch",
+            "User-Agent": "BoardGameCompanion/0.2 guarded-rulebook-fetch",
             "Connection": "close",
         }
+        if candidate is not None and candidate.official:
+            source_page = candidate.metadata.get("official_page")
+            if isinstance(source_page, str) and len(source_page) <= 2000:
+                try:
+                    source_page = canonical_http_url(source_page)
+                    source = urlsplit(source_page)
+                    # A Referer hint helps first-party download plugins, but
+                    # never forward one across origins or to an untrusted host.
+                    if (
+                        source.scheme == "https"
+                        and source.hostname == target.hostname
+                        and source.port in (None, 443)
+                        and not source.username
+                        and not source.password
+                    ):
+                        headers["Referer"] = (
+                            f"https://{target.hostname}{source.path or '/'}"
+                        )
+                except ValueError:
+                    pass
+        return headers
 
     def _consume_pdf_response(
         self,
