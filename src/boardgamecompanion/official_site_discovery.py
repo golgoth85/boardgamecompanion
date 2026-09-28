@@ -387,8 +387,8 @@ class PublisherSiteProvider:
             page_count += 1
             if response is None:
                 continue
-            parser = _parse_official_page(response.content)
-            heading_parser = _parse_heading_download_catalog(response.content)
+            parser = _parse_official_page(response.content, link_limit=400)
+            heading_parser = _parse_heading_download_catalog(response.content, link_limit=400)
             bgg_ids = {
                 value for href, _label in parser.links
                 for value in (_bgg_id_from_url(urljoin(response.url, href)),)
@@ -425,7 +425,7 @@ class PublisherSiteProvider:
                             break
             # Follow only product-path links on the same pinned origin. Broad
             # link crawling is deliberately forbidden, even inside an issuer site.
-            for href, label in parser.links[:100]:
+            for href, label in parser.links[:400]:
                 absolute = self._allowed_url(urljoin(response.url, href))
                 if not absolute or absolute in seen_pages:
                     continue
