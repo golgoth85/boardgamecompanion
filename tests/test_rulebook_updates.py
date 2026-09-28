@@ -371,6 +371,89 @@ def test_due_claim_lease_prevents_duplicate_workers_and_expires(
     assert reclaimed[0]["id"] == first[0]["id"]
 
 
+def test_scheduler_prefers_official_italian_and_suppresses_english_after_success(
+    tmp_path: Path,
+) -> None:
+    db = database(tmp_path)
+    italian = approved_review(
+        db,
+        official_candidate(
+            url="https://publisher.example/rules-it.pdf",
+            language="it",
+            title="Regolamento ufficiale italiano",
+            edition="Retail IT",
+        ),
+    )
+    english = approved_review(
+        db,
+        official_candidate(
+            url="https://publisher.example/rules-en.pdf",
+            language="en",
+            title="Official English Rules",
+            edition="Retail EN",
+        ),
+    )
+    manuals = tmp_path / "manuals"
+    fetcher = SequenceFetcher(manuals, [PDF_A, PDF_B])
+    updates = service(db, manuals, fetcher)
+
+    batch = updates.run_due(limit=2, owner="worker", now=NOW)
+
+    assert batch["synchronized"]["created"] == 2
+    assert batch["claimed"] == 1
+    assert [item["review_item_id"] for item in batch["results"]] == [italian["id"]]
+    assert batch["results"][0]["outcome"] == "created"
+    assert fetcher.calls == 1
+
+    documents = DocumentStore(db, manuals).list_for_game(900001)
+    assert [item["language"] for item in documents] == ["it"]
+    assert updates.get_target(english["id"])["last_outcome"] is None
+
+
+def test_scheduler_uses_english_as_fallback_after_due_italian_fetch_fails(
+    tmp_path: Path,
+) -> None:
+    db = database(tmp_path)
+    italian = approved_review(
+        db,
+        official_candidate(
+            url="https://publisher.example/rules-it.pdf",
+            language="it",
+            title="Regolamento ufficiale italiano",
+            edition="Retail IT",
+        ),
+    )
+    english = approved_review(
+        db,
+        official_candidate(
+            url="https://publisher.example/rules-en.pdf",
+            language="en",
+            title="Official English Rules",
+            edition="Retail EN",
+        ),
+    )
+    manuals = tmp_path / "manuals"
+    fetcher = SequenceFetcher(
+        manuals,
+        [RulebookFetchFailureCode.NETWORK_TIMEOUT.value, PDF_B],
+    )
+    updates = service(db, manuals, fetcher)
+
+    batch = updates.run_due(limit=2, owner="worker", now=NOW)
+
+    assert batch["synchronized"]["created"] == 2
+    assert batch["claimed"] == 2
+    assert [item["review_item_id"] for item in batch["results"]] == [
+        italian["id"],
+        english["id"],
+    ]
+    assert [item["outcome"] for item in batch["results"]] == ["failed", "created"]
+    assert fetcher.calls == 2
+
+    documents = DocumentStore(db, manuals).list_for_game(900001)
+    assert [item["language"] for item in documents] == ["en"]
+
+
 def test_manual_run_refuses_active_lease(tmp_path: Path) -> None:
     db = database(tmp_path)
     review = approved_review(db)
