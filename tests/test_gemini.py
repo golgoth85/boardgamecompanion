@@ -733,9 +733,12 @@ def test_gemini_deadline_interrupts_slow_async_response_body(monkeypatch):
 
     class SlowTrickle(httpx.AsyncByteStream):
         async def __aiter__(self):
-            yield b'{"candidates":'
-            await asyncio.sleep(0.500)  # A slow-but-live response body.
-            yield b'[]}'
+            # Each chunk arrives before HTTPX's 50 ms per-read timeout;
+            # the entire transfer would otherwise take about 800 ms.
+            for _ in range(40):
+                await asyncio.sleep(0.020)
+                yield b" "
+            yield b'{"candidates":[]}'
 
         async def aclose(self):
             pass
@@ -767,7 +770,7 @@ def test_gemini_deadline_interrupts_slow_async_response_body(monkeypatch):
             "POST", "/v1beta/models/gemini-3.8-flash:generateContent",
             json={"contents": [{"parts": [{"text": "synthetic"}]}]},
         )
-    assert time.monotonic() - started < 0.400
+    assert time.monotonic() - started < 0.350
     assert len(opened) == 1
     assert opened[0].headers["x-goog-api-key"] == "private-test-key"
 
