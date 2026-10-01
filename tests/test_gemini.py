@@ -719,7 +719,10 @@ def test_gemini_deadline_rejects_slow_fallback_200(monkeypatch):
             descriptor=type("Descriptor", (), {"model": "gemini-3.8-flash"})(),
             max_claims=12,
         )
-    assert len(seen) == 5
+    # The 40 ms budget correctly stops structured retries before backoff.
+    # One structured 503 then one slow fallback 200 is sufficient for F1.
+    assert len(seen) == 2
+    assert "generationConfig" in seen[0]
     assert "generationConfig" not in seen[-1]
 
 
