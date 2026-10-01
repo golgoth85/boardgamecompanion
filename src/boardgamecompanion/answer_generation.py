@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import re
@@ -474,6 +475,31 @@ class GeminiGenerationProvider:
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError("Gemini generation temperature must be between 0 and 2")
 
+    async def _request_with_wall_clock_timeout(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str],
+        options: dict[str, Any],
+        remaining: float,
+    ) -> httpx.Response:
+        """Cancel an in-flight production HTTP transfer at the remaining deadline.
+
+        HTTPX's own timeouts are per network operation: a peer sending a trickle
+        of bytes could otherwise extend the entire response indefinitely.
+        The synchronous FastAPI endpoint calls this coroutine from its worker.
+        """
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=remaining,
+            verify=self.verify_tls,
+        ) as client:
+            return await asyncio.wait_for(
+                client.request(method, path, headers=headers, **options),
+                timeout=remaining,
+            )
+
     def _request(
         self, method: str, path: str, *, deadline: float | None = None, **kwargs: Any
     ) -> httpx.Response:
@@ -496,21 +522,30 @@ class GeminiGenerationProvider:
                 options = dict(kwargs)
                 options["timeout"] = remaining
                 if self._client is not None:
+                    # Injected clients preserve deterministic MockTransport tests.
+                    # An over-budget response is always rejected on return.
                     response = self._client.request(
                         method, path, headers=headers, **options
                     )
                 else:
-                    with httpx.Client(
-                        base_url=self.base_url,
-                        timeout=remaining,
-                        verify=self.verify_tls,
-                    ) as client:
-                        response = client.request(
-                            method, path, headers=headers, **options
+                    # Cancellation enforces the wall-clock budget DURING network
+                    # transfer, not only between HTTPX read/write operations.
+                    response = asyncio.run(
+                        self._request_with_wall_clock_timeout(
+                            method,
+                            path,
+                            headers=headers,
+                            options=options,
+                            remaining=remaining,
                         )
+                    )
+                # A late 200 (or 503) is never accepted, including from an
+                # injected client whose transport ignores per-operation timeouts.
+                if time.monotonic() >= deadline:
+                    raise AnswerProviderError("Gemini generation request timed out")
                 response.raise_for_status()
                 return response
-            except httpx.TimeoutException as exc:
+            except (httpx.TimeoutException, TimeoutError) as exc:
                 raise AnswerProviderError(
                     "Gemini generation request timed out"
                 ) from exc
@@ -693,7 +728,7 @@ def _validate_generation(
     if set(raw) != {"status", "claims"}:
         raise AnswerProtocolError("Generated answer has unexpected fields")
     status = raw.get("status")
-    if status not in {"answer", "not_found"}:
+    if not isinstance(status, str) or status not in {"answer", "not_found"}:
         raise AnswerProtocolError("Generated answer status is invalid")
     claims = raw.get("claims")
     if not isinstance(claims, list):
