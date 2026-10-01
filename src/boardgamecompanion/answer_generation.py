@@ -569,39 +569,71 @@ class GeminiGenerationProvider:
             "maximum_claims": max_claims,
             "evidence": evidence,
         }
-        response = self._request(
-            "POST",
-            f"/v1beta/models/{descriptor.model}:generateContent",
-            json={
-                "systemInstruction": {
-                    "parts": [{"text": SYSTEM_PROMPT}],
-                },
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": json.dumps(
-                                    user_payload,
-                                    ensure_ascii=False,
-                                    sort_keys=True,
-                                    separators=(",", ":"),
-                                )
-                            }
-                        ],
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": self.temperature,
-                    "responseFormat": {
-                        "text": {
-                            "mimeType": "APPLICATION_JSON",
-                            "schema": ANSWER_SCHEMA,
-                        }
-                    },
-                },
+        endpoint = f"/v1beta/models/{descriptor.model}:generateContent"
+        request_body = {
+            "systemInstruction": {
+                "parts": [{"text": SYSTEM_PROMPT}],
             },
-        )
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                user_payload,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            )
+                        }
+                    ],
+                }
+            ],
+        }
+        generation_config: dict[str, Any] = {
+            "responseFormat": {
+                "text": {
+                    "mimeType": "APPLICATION_JSON",
+                    "schema": ANSWER_SCHEMA,
+                }
+            },
+        }
+        # Gemini 3.8 Flash migration guidance deprecates sampling overrides.
+        if descriptor.model != "gemini-3.8-flash":
+            generation_config["temperature"] = self.temperature
+
+        try:
+            response = self._request(
+                "POST",
+                endpoint,
+                json={**request_body, "generationConfig": generation_config},
+            )
+        except AnswerProviderError as exc:
+            origin = exc.__cause__
+            if not (
+                descriptor.model == "gemini-3.8-flash"
+                and isinstance(origin, httpx.HTTPStatusError)
+                and origin.response.status_code == 503
+            ):
+                raise
+            # The live Gemini 3.8 endpoint has returned UNAVAILABLE even with
+            # a minimal responseFormat. Plain-text generation has succeeded.
+            # Never accept unstructured prose: ask for exactly the same schema,
+            # then let the caller validate every claim and verbatim citation.
+            fallback_prompt = (
+                SYSTEM_PROMPT
+                + "\nReturn ONLY a single JSON object conforming exactly to "
+                + "the following schema, without markdown fences or prose: "
+                + json.dumps(ANSWER_SCHEMA, sort_keys=True, separators=(",", ":"))
+            )
+            response = self._request(
+                "POST",
+                endpoint,
+                json={
+                    **request_body,
+                    "systemInstruction": {"parts": [{"text": fallback_prompt}]},
+                },
+            )
         try:
             payload = response.json()
         except ValueError as exc:
