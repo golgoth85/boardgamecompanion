@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import httpx
 import pytest
@@ -690,3 +692,100 @@ def test_gemini_38_double_503_fails_closed_and_preserves_retry_bounds(
     assert sum(
         "generationConfig" in json.loads(req.content) for req in attempts
     ) == 4
+
+
+
+def test_gemini_deadline_rejects_slow_fallback_200(monkeypatch):
+    """A late HTTP 200 must never defeat the shared generation deadline."""
+    genuine_sleep = time.sleep
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.time.sleep", lambda _: None
+    )
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        if "generationConfig" in seen[-1]:
+            return httpx.Response(503)
+        genuine_sleep(0.080)  # Simulates a transport ignoring HTTPX timeout.
+        return _gemini_text_response('{"status":"not_found","claims":[]}')
+
+    provider = _gemini_test_provider(handler)
+    provider.timeout_seconds = 0.040
+    with pytest.raises(AnswerProviderError, match="timed out"):
+        provider.generate(
+            query="Question",
+            evidence=[{"evidence_id": "E1", "text": "Evidence."}],
+            descriptor=type("Descriptor", (), {"model": "gemini-3.8-flash"})(),
+            max_claims=12,
+        )
+    assert len(seen) == 5
+    assert "generationConfig" not in seen[-1]
+
+
+def test_gemini_deadline_interrupts_slow_async_response_body(monkeypatch):
+    """HTTPX read timeout is per chunk; asyncio.wait_for bounds the WHOLE read."""
+    original_async_client = httpx.AsyncClient
+    opened = []
+
+    class SlowTrickle(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"candidates":'
+            await asyncio.sleep(0.500)  # A slow-but-live response body.
+            yield b'[]}'
+
+        async def aclose(self):
+            pass
+
+    async def handler(request):
+        opened.append(request)
+        return httpx.Response(200, stream=SlowTrickle())
+
+    def offline_async_client(*args, **kwargs):
+        return original_async_client(
+            *args, **kwargs, transport=httpx.MockTransport(handler)
+        )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.answer_generation.httpx.AsyncClient",
+        offline_async_client,
+    )
+    provider = GeminiGenerationProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-3.8-flash",
+        api_key="private-test-key",
+        timeout_seconds=0.050,
+        verify_tls=True,
+        temperature=0.0,
+    )
+    started = time.monotonic()
+    with pytest.raises(AnswerProviderError, match="timed out"):
+        provider._request(
+            "POST", "/v1beta/models/gemini-3.8-flash:generateContent",
+            json={"contents": [{"parts": [{"text": "synthetic"}]}]},
+        )
+    assert time.monotonic() - started < 0.400
+    assert len(opened) == 1
+    assert opened[0].headers["x-goog-api-key"] == "private-test-key"
+
+
+def test_gemini_deadline_rejects_slow_primary_200(monkeypatch):
+    """A late first-strategy success must be rejected without fallback."""
+    genuine_sleep = time.sleep
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        genuine_sleep(0.080)
+        return _gemini_text_response('{"status":"not_found","claims":[]}')
+
+    provider = _gemini_test_provider(handler)
+    provider.timeout_seconds = 0.040
+    with pytest.raises(AnswerProviderError, match="timed out"):
+        provider.generate(
+            query="Question",
+            evidence=[],
+            descriptor=type("Descriptor", (), {"model": "gemini-3.8-flash"})(),
+            max_claims=12,
+        )
+    assert len(seen) == 1  # Never trigger fallback on an expired 200.
