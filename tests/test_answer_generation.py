@@ -166,6 +166,53 @@ def _service(payload: dict, provider: FakeProvider, **kwargs):
         max_evidence_chars=kwargs.get("max_evidence_chars", 30000),
         max_claims=kwargs.get("max_claims", 12),
     )
+@pytest.mark.parametrize(
+    "invalid_status",
+    [[], {}, None, False, True, 0, 1, 1.5, "unsupported"],
+)
+def test_generation_rejects_nonconforming_json_status_with_protocol_error(
+    invalid_status,
+) -> None:
+    provider = FakeProvider({"status": invalid_status, "claims": []})
+    service = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text="Evidence.")]),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="status is invalid"):
+        service.answer(
+            bgg_id=900001,
+            query="Come si prepara?",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+
+@pytest.mark.parametrize("invalid_status", [[], {}, None, False, 0])
+def test_generation_invalid_status_maps_to_http_502(
+    monkeypatch, invalid_status,
+) -> None:
+    provider = FakeProvider({"status": invalid_status, "claims": []})
+    service = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text="Evidence.")]),
+        provider,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main.get_answer_generation_service",
+        lambda: service,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/games/900001/answer",
+            json={"query": "Come si prepara?", "language": "it"},
+        )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Generated answer status is invalid"
+
+
 def test_answer_builds_server_owned_page_citations_and_surfaces_conflict() -> None:
     first = _result(chunk_id="chunk-1", text="Setup uses five cards.")
     second = _result(chunk_id="chunk-2", text="Then place two tokens.")
