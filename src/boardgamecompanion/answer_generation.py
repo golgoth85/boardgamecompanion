@@ -474,7 +474,9 @@ class GeminiGenerationProvider:
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError("Gemini generation temperature must be between 0 and 2")
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def _request(
+        self, method: str, path: str, *, deadline: float | None = None, **kwargs: Any
+    ) -> httpx.Response:
         """Retry only transient Gemini failures within one request deadline.
 
         Non-transient 4xx responses never retry. Bounded backoff follows
@@ -483,7 +485,8 @@ class GeminiGenerationProvider:
         """
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
-        deadline = time.monotonic() + self.timeout_seconds
+        if deadline is None:
+            deadline = time.monotonic() + self.timeout_seconds
         max_attempts = 4
         for attempt in range(max_attempts):
             remaining = deadline - time.monotonic()
@@ -590,6 +593,9 @@ class GeminiGenerationProvider:
                 }
             ],
         }
+        # Primary structured response and any plain-JSON fallback share one
+        # deadline; retrying both modes must never double the API time budget.
+        deadline = time.monotonic() + self.timeout_seconds
         generation_config: dict[str, Any] = {
             "responseFormat": {
                 "text": {
@@ -606,6 +612,7 @@ class GeminiGenerationProvider:
             response = self._request(
                 "POST",
                 endpoint,
+                deadline=deadline,
                 json={**request_body, "generationConfig": generation_config},
             )
         except AnswerProviderError as exc:
@@ -629,6 +636,7 @@ class GeminiGenerationProvider:
             response = self._request(
                 "POST",
                 endpoint,
+                deadline=deadline,
                 json={
                     **request_body,
                     "systemInstruction": {"parts": [{"text": fallback_prompt}]},
