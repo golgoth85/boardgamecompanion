@@ -134,8 +134,16 @@ function escapeHtml(value) {
 
 // Human-reviewed web search: no Google API, scraping, or automatic PDF trust.
 function googleRulebookSearchUrl(title) {
-  const gameTitle = String(title || "").trim();
-  const query = `"${gameTitle}" regolamento italiano pdf`;
+  // URL encoding protects the href; this separately keeps untrusted game names
+  // inside one quoted Google phrase (including names containing site: or quotes).
+  const gameTitle = String(title ?? "")
+    .normalize("NFC")
+    .replace(/["\\\u201C\u201D\u201E\u201F\uFF02\u0000-\u001F\u007F-\u009F\u2028\u2029]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const query = gameTitle
+    ? `"${gameTitle}" regolamento italiano pdf`
+    : "regolamento italiano pdf";
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
