@@ -1634,7 +1634,7 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
         ('Game" site:example.invalid "manual', "Game site:example.invalid manual"),
         ('Game\\" site:example.invalid "manual', "Game site:example.invalid manual"),
         ('“Game” site:example.invalid „manual‟', "Game site:example.invalid manual"),
-        ('My <img src=x onerror="alert(1)">', "My <img src=x onerror= alert(1)>"),
+        ('My <img src=x onerror="alert(1)">', "My <img src=x onerror= alert(1) >"),
         ("L'isola del tesoro", "L'isola del tesoro"),
         ("天空の城ラピュタ – Café 🔥", "天空の城ラピュタ – Café 🔥"),
         ("Cafe\u0301 et l'Île", "Café et l'Île"),
