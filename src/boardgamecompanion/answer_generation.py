@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import re
@@ -474,7 +475,34 @@ class GeminiGenerationProvider:
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError("Gemini generation temperature must be between 0 and 2")
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _request_with_wall_clock_timeout(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str],
+        options: dict[str, Any],
+        remaining: float,
+    ) -> httpx.Response:
+        """Cancel an in-flight production HTTP transfer at the remaining deadline.
+
+        HTTPX's own timeouts are per network operation: a peer sending a trickle
+        of bytes could otherwise extend the entire response indefinitely.
+        The synchronous FastAPI endpoint calls this coroutine from its worker.
+        """
+        async with httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=remaining,
+            verify=self.verify_tls,
+        ) as client:
+            return await asyncio.wait_for(
+                client.request(method, path, headers=headers, **options),
+                timeout=remaining,
+            )
+
+    def _request(
+        self, method: str, path: str, *, deadline: float | None = None, **kwargs: Any
+    ) -> httpx.Response:
         """Retry only transient Gemini failures within one request deadline.
 
         Non-transient 4xx responses never retry. Bounded backoff follows
@@ -483,7 +511,8 @@ class GeminiGenerationProvider:
         """
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
-        deadline = time.monotonic() + self.timeout_seconds
+        if deadline is None:
+            deadline = time.monotonic() + self.timeout_seconds
         max_attempts = 4
         for attempt in range(max_attempts):
             remaining = deadline - time.monotonic()
@@ -493,21 +522,30 @@ class GeminiGenerationProvider:
                 options = dict(kwargs)
                 options["timeout"] = remaining
                 if self._client is not None:
+                    # Injected clients preserve deterministic MockTransport tests.
+                    # An over-budget response is always rejected on return.
                     response = self._client.request(
                         method, path, headers=headers, **options
                     )
                 else:
-                    with httpx.Client(
-                        base_url=self.base_url,
-                        timeout=remaining,
-                        verify=self.verify_tls,
-                    ) as client:
-                        response = client.request(
-                            method, path, headers=headers, **options
+                    # Cancellation enforces the wall-clock budget DURING network
+                    # transfer, not only between HTTPX read/write operations.
+                    response = asyncio.run(
+                        self._request_with_wall_clock_timeout(
+                            method,
+                            path,
+                            headers=headers,
+                            options=options,
+                            remaining=remaining,
                         )
+                    )
+                # A late 200 (or 503) is never accepted, including from an
+                # injected client whose transport ignores per-operation timeouts.
+                if time.monotonic() >= deadline:
+                    raise AnswerProviderError("Gemini generation request timed out")
                 response.raise_for_status()
                 return response
-            except httpx.TimeoutException as exc:
+            except (httpx.TimeoutException, TimeoutError) as exc:
                 raise AnswerProviderError(
                     "Gemini generation request timed out"
                 ) from exc
@@ -569,39 +607,76 @@ class GeminiGenerationProvider:
             "maximum_claims": max_claims,
             "evidence": evidence,
         }
-        response = self._request(
-            "POST",
-            f"/v1beta/models/{descriptor.model}:generateContent",
-            json={
-                "systemInstruction": {
-                    "parts": [{"text": SYSTEM_PROMPT}],
-                },
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": json.dumps(
-                                    user_payload,
-                                    ensure_ascii=False,
-                                    sort_keys=True,
-                                    separators=(",", ":"),
-                                )
-                            }
-                        ],
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": self.temperature,
-                    "responseFormat": {
-                        "text": {
-                            "mimeType": "APPLICATION_JSON",
-                            "schema": ANSWER_SCHEMA,
-                        }
-                    },
-                },
+        endpoint = f"/v1beta/models/{descriptor.model}:generateContent"
+        request_body = {
+            "systemInstruction": {
+                "parts": [{"text": SYSTEM_PROMPT}],
             },
-        )
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": json.dumps(
+                                user_payload,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            )
+                        }
+                    ],
+                }
+            ],
+        }
+        # Primary structured response and any plain-JSON fallback share one
+        # deadline; retrying both modes must never double the API time budget.
+        deadline = time.monotonic() + self.timeout_seconds
+        generation_config: dict[str, Any] = {
+            "responseFormat": {
+                "text": {
+                    "mimeType": "APPLICATION_JSON",
+                    "schema": ANSWER_SCHEMA,
+                }
+            },
+        }
+        # Gemini 3.8 Flash migration guidance deprecates sampling overrides.
+        if descriptor.model != "gemini-3.8-flash":
+            generation_config["temperature"] = self.temperature
+
+        try:
+            response = self._request(
+                "POST",
+                endpoint,
+                deadline=deadline,
+                json={**request_body, "generationConfig": generation_config},
+            )
+        except AnswerProviderError as exc:
+            origin = exc.__cause__
+            if not (
+                descriptor.model == "gemini-3.8-flash"
+                and isinstance(origin, httpx.HTTPStatusError)
+                and origin.response.status_code == 503
+            ):
+                raise
+            # The live Gemini 3.8 endpoint has returned UNAVAILABLE even with
+            # a minimal responseFormat. Plain-text generation has succeeded.
+            # Never accept unstructured prose: ask for exactly the same schema,
+            # then let the caller validate every claim and verbatim citation.
+            fallback_prompt = (
+                SYSTEM_PROMPT
+                + "\nReturn ONLY a single JSON object conforming exactly to "
+                + "the following schema, without markdown fences or prose: "
+                + json.dumps(ANSWER_SCHEMA, sort_keys=True, separators=(",", ":"))
+            )
+            response = self._request(
+                "POST",
+                endpoint,
+                deadline=deadline,
+                json={
+                    **request_body,
+                    "systemInstruction": {"parts": [{"text": fallback_prompt}]},
+                },
+            )
         try:
             payload = response.json()
         except ValueError as exc:
@@ -653,7 +728,7 @@ def _validate_generation(
     if set(raw) != {"status", "claims"}:
         raise AnswerProtocolError("Generated answer has unexpected fields")
     status = raw.get("status")
-    if status not in {"answer", "not_found"}:
+    if not isinstance(status, str) or status not in {"answer", "not_found"}:
         raise AnswerProtocolError("Generated answer status is invalid")
     claims = raw.get("claims")
     if not isinstance(claims, list):
