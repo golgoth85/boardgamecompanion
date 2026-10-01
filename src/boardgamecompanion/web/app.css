@@ -440,6 +440,8 @@ a { color: inherit; text-decoration: none; }
 .rulebook-discovery-info p { margin: 0 0 .55rem; line-height: 1.5; }
 .rulebook-discovery-info p:last-child { margin-bottom: 0; }
 .rulebook-discovery-panel .button { flex: 0 1 auto; max-width: 100%; white-space: normal; text-align: center; }
+.rulebook-discovery-actions { display: flex; flex: 0 1 250px; flex-direction: column; align-items: stretch; gap: .55rem; min-width: 0; max-width: 100%; }
+.rulebook-discovery-actions .button { width: 100%; }
 .detail-main { padding: clamp(1.2rem, 3vw, 2rem); }
 .detail-main h1 { margin: .1rem 0 .45rem; font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -.04em; }
 .detail-subtitle { color: var(--muted); margin: 0 0 1.2rem; }

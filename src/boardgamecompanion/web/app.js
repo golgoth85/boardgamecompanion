@@ -132,6 +132,21 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+// Human-reviewed web search: no Google API, scraping, or automatic PDF trust.
+function googleRulebookSearchUrl(title) {
+  // URL encoding protects the href; this separately keeps untrusted game names
+  // inside one quoted Google phrase (including names containing site: or quotes).
+  const gameTitle = String(title ?? "")
+    .normalize("NFC")
+    .replace(/["\\\u201C\u201D\u201E\u201F\uFF02\u0000-\u001F\u007F-\u009F\u2028\u2029]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const query = gameTitle
+    ? `"${gameTitle}" regolamento italiano pdf`
+    : "regolamento italiano pdf";
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+}
+
 function initials(title) {
   const words = String(title || "?").trim().split(/\s+/).filter(Boolean);
   if (!words.length) return "?";
@@ -1832,11 +1847,17 @@ async function renderDetail(bggId) {
                 separatamente; gli altri richiedono una revisione.</p>
               <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">Caricamento stato…</p>
               <p class="muted">Il risultato compare sotto «Manuali e documenti» solo dopo l’archiviazione.
-                Se manca il regolamento, usa «+ Aggiungi PDF».
+                Se manca il regolamento, usa «Cerca PDF su Google», scarica il manuale verificato
+                e caricalo con «+ Aggiungi PDF». La ricerca web non importa né approva alcun documento.
                 <a class="external-link" href="/updates" data-nav>Stato download</a> ·
                 <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>.</p>
             </div>
-            <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca fonti per il regolamento</button>
+            <div class="rulebook-discovery-actions">
+              <a class="button button-ghost" id="googleRulebookSearch"
+                 href="${escapeHtml(googleRulebookSearchUrl(game.title))}"
+                 target="_blank" rel="noopener noreferrer">Cerca PDF su Google ↗</a>
+              <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca fonti per il regolamento</button>
+            </div>
           </section>
 
           <div class="fact-grid">

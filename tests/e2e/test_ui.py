@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 from pathlib import Path
 
 import pytest
@@ -1627,6 +1628,89 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
 
 
 
+@pytest.mark.parametrize(
+    ("title", "expected_phrase"),
+    [
+        ('Game" site:example.invalid "manual', "Game site:example.invalid manual"),
+        ('Game\\" site:example.invalid "manual', "Game site:example.invalid manual"),
+        ('“Game” site:example.invalid „manual‟', "Game site:example.invalid manual"),
+        ('My <img src=x onerror="alert(1)">', "My <img src=x onerror= alert(1) >"),
+        ("L'isola del tesoro", "L'isola del tesoro"),
+        ("天空の城ラピュタ – Café 🔥", "天空の城ラピュタ – Café 🔥"),
+        ("Cafe\u0301 et l'Île", "Café et l'Île"),
+        ("Alpha\u0001\tBeta\u2028Gamma\\", "Alpha Beta Gamma"),
+    ],
+)
+def test_google_rulebook_query_treats_title_as_literal_phrase(
+    browser, live_server, title, expected_phrase
+):
+    context, page = new_page(browser)
+    try:
+        page.goto(live_server)
+        # Exercise the shipped JavaScript, not a second implementation in Python.
+        href = page.evaluate("(value) => googleRulebookSearchUrl(value)", title)
+        parsed = urlsplit(href)
+        assert (parsed.scheme, parsed.netloc, parsed.path) == (
+            "https", "www.google.com", "/search"
+        )
+        query = parse_qs(parsed.query)["q"][0]
+        assert query == f'"{expected_phrase}" regolamento italiano pdf'
+        assert query.count('"') == 2
+    finally:
+        context.close()
+
+
+def test_google_rulebook_query_control_only_title_uses_safe_fallback(
+    browser, live_server
+):
+    context, page = new_page(browser)
+    try:
+        page.goto(live_server)
+        href = page.evaluate(
+            "(value) => googleRulebookSearchUrl(value)", '\u0001"\\\u2028'
+        )
+        assert parse_qs(urlsplit(href).query)["q"] == ["regolamento italiano pdf"]
+    finally:
+        context.close()
+
+
+def test_google_rulebook_query_injection_from_imported_csv(browser, live_server, tmp_path):
+    malicious_title = 'Game" site:example.invalid "manual'
+    with SAMPLE.open("r", encoding="utf-8", newline="") as source:
+        reader = csv.DictReader(source)
+        fieldnames = reader.fieldnames
+        rows = list(reader)
+    rows[0]["objectname"] = malicious_title
+    rows[0]["originalname"] = malicious_title
+    fixture = tmp_path / "untrusted_title.csv"
+    with fixture.open("w", encoding="utf-8", newline="") as target:
+        writer = csv.DictWriter(target, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    context, page = new_page(browser)
+    google_requests = []
+    context.on(
+        "request",
+        lambda request: google_requests.append(request.url)
+        if request.url.startswith("https://www.google.com/")
+        else None,
+    )
+    try:
+        import_csv(page, live_server, fixture)
+        page.goto(f"{live_server}/games/900001")
+        expect(page.locator(".detail-main h1")).to_have_text(malicious_title)
+        link = page.get_by_role("link", name="Cerca PDF su Google")
+        expect(link).to_be_visible()
+        query = parse_qs(urlsplit(link.get_attribute("href")).query)["q"][0]
+        assert query == '"Game site:example.invalid manual" regolamento italiano pdf'
+        assert google_requests == []  # Rendering a link must not visit Google.
+        expect(page.get_by_role("button", name="+ Aggiungi PDF")).to_be_visible()
+        expect(page.get_by_role("button", name="Cerca fonti per il regolamento")).to_be_visible()
+    finally:
+        context.close()
+
+
 def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pdf(
     browser, live_server
 ):
@@ -1658,6 +1742,17 @@ def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pd
         expect(panel).to_contain_text("«+ Aggiungi PDF»")
         expect(panel.get_by_role("link", name="Stato download")).to_be_visible()
         expect(panel.get_by_role("link", name="Fonti da verificare")).to_be_visible()
+        google = panel.get_by_role("link", name="Cerca PDF su Google")
+        expect(google).to_be_visible()
+        search_url = urlsplit(google.get_attribute("href"))
+        assert (search_url.scheme, search_url.netloc, search_url.path) == (
+            "https", "www.google.com", "/search"
+        )
+        assert parse_qs(search_url.query)["q"] == [
+            '"Synthetic Alpha" regolamento italiano pdf'
+        ]
+        assert google.get_attribute("target") == "_blank"
+        assert {"noopener", "noreferrer"} <= set(google.get_attribute("rel").split())
 
         page.route(
             re.compile(r".*/api/games/\d+/rulebook-discovery/run$"),
@@ -1679,6 +1774,13 @@ def test_rulebook_search_panel_is_readable_on_mobile(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.get_by_role("button", name="Cerca fonti per il regolamento")).to_be_visible()
+        google = page.get_by_role("link", name="Cerca PDF su Google")
+        expect(google).to_be_visible()
+        google.click(trial=True)  # Verify it is actually clickable at 390 px, without navigation.
+        rect = google.bounding_box()
+        assert rect is not None
+        assert rect["width"] >= 44 and rect["height"] >= 24
+        assert rect["x"] >= 0 and rect["x"] + rect["width"] <= 391
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
     finally:
         context.close()
