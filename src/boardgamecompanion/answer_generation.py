@@ -719,6 +719,32 @@ def _bounded_text(value: Any, *, label: str, max_chars: int) -> str:
     return text
 
 
+def _canonical_source_quote(source_text: str, quote: str) -> str:
+    """Return an exact source substring for a conservatively equivalent quote.
+
+    Exact matches are preferred. For Gemini's prompt-only JSON fallback, allow
+    only whitespace-run differences (for example PDF newlines vs spaces).
+    Punctuation, case, Unicode characters and word order must still match.
+    If whitespace normalization makes more than one source span possible, fail
+    closed rather than choosing an ambiguous citation.
+    """
+    if quote in source_text:
+        return quote
+    tokens = quote.split()
+    if not tokens:
+        raise AnswerProtocolError(
+            "Generated support quote is not present in cited evidence"
+        )
+    pattern = re.compile(r"\s+".join(re.escape(token) for token in tokens))
+    matches = list(pattern.finditer(source_text))
+    if len(matches) != 1:
+        raise AnswerProtocolError(
+            "Generated support quote is not present in cited evidence"
+        )
+    match = matches[0]
+    return source_text[match.start() : match.end()]
+
+
 def _validate_generation(
     raw: dict[str, Any],
     *,
@@ -786,14 +812,17 @@ def _validate_generation(
                 max_chars=1000,
             )
             source_text = source.get("text")
-            if not isinstance(source_text, str) or quote not in source_text:
+            if not isinstance(source_text, str):
                 raise AnswerProtocolError(
                     "Generated support quote is not present in cited evidence"
                 )
-            key = (evidence_id, quote)
+            canonical_quote = _canonical_source_quote(source_text, quote)
+            key = (evidence_id, canonical_quote)
             if key not in seen:
                 seen.add(key)
-                supports.append({"evidence_id": evidence_id, "quote": quote})
+                supports.append(
+                    {"evidence_id": evidence_id, "quote": canonical_quote}
+                )
         validated.append({"text": text, "supports": supports})
     return status, validated
 
