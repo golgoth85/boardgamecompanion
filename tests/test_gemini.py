@@ -534,6 +534,14 @@ def test_gemini_38_503_fallback_uses_plain_generation_and_strict_shape(monkeypat
 
     provider = _gemini_test_provider(handler)
     descriptor = provider.describe()
+    recorded_deadlines = []
+    genuine_request = provider._request
+
+    def observe_request(method, path, **kwargs):
+        recorded_deadlines.append(kwargs.get("deadline"))
+        return genuine_request(method, path, **kwargs)
+
+    provider._request = observe_request
     raw = provider.generate(
         query="Question",
         evidence=[{"evidence_id": "E1", "text": "Evidence."}],
@@ -548,6 +556,9 @@ def test_gemini_38_503_fallback_uses_plain_generation_and_strict_shape(monkeypat
     assert len(posts) == 5
     assert all("generationConfig" in json.loads(req.content) for req in posts[:4])
     assert "generationConfig" not in json.loads(posts[-1].content)
+    assert len(recorded_deadlines) == 2
+    assert recorded_deadlines[0] is not None
+    assert recorded_deadlines[0] == recorded_deadlines[1]
     assert "private-test-key" not in repr(raw)
 
 
