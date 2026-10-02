@@ -2,6 +2,24 @@
 
 This roadmap is based on the repository state after P6B, not on historical chat state.
 
+## Current status — pre-UI-redesign freeze
+
+The P3B, direct BGG metadata, provider discovery, guarded rulebook lifecycle and
+P7 ingest/retrieval/RAG work described below are implemented on current `main`.
+They are retained here as architectural history and regression boundaries, not as
+an ordered list of unfinished milestones.
+
+The next major product phase is a full information-architecture/UI redesign.
+Before that redesign, the consolidation change tracked in PR #54 reduces the
+game-detail rulebook workflow to one known-source-first action with Google as a
+second-click human-reviewed fallback after a completed zero-candidate search.
+See `docs/PRE_UI_REDESIGN_READINESS.md`.
+
+Known-provider coverage is intentionally not treated as universal: live
+pre-redesign sampling demonstrated that some publisher sites fail or expose no
+usable candidate. Those cases are a normal reason to enter the Google/manual
+upload fallback rather than a reason to add publisher-specific UI controls.
+
 ## Architectural boundary: standalone BGC
 
 BoardGameCompanion owns the complete board-game workflow: catalog import, physical
