@@ -183,7 +183,7 @@ Provider-specific discovery and replacement-URL search are intentionally not par
 
 ## Rulebook discovery and automatic indexing
 
-`/discovery` exposes persistent per-game discovery state and a bounded batch control. The game detail page provides **Cerca regolamento ora**. Concrete adapters remain isolated from the resolver:
+`/discovery` exposes persistent per-game discovery state and a bounded batch control. The game detail page exposes one **Cerca regolamento** action: the first click searches the known providers through the normal trust policy; after any completed search with zero candidates, the same control becomes **Cerca PDF su Google** on the next click, even if one of the known providers failed. The Google fallback is human-reviewed only and never imports or approves a document. Concrete adapters remain isolated from the resolver:
 
 - Repos Production official game pages, restricted to its official Asmodee CDN and IT/EN rulebooks;
 - Asmodee Italia official product pages and Italian rulebooks, restricted to its official CDN;
@@ -224,6 +224,8 @@ GET /api/games/{bgg_id}
 - `sort` — `title`, `year_desc`, `rating_desc`, `rank_asc`, `weight_desc`
 - `limit`
 - `offset`
+
+The stable backend/workflow contract for the upcoming UI redesign is documented in `docs/PRE_UI_REDESIGN_READINESS.md`.
 
 ## Development
 
