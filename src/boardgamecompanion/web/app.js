@@ -1848,7 +1848,7 @@ async function renderDetail(bggId) {
             </div>
             <div class="rulebook-discovery-actions">
               <button class="button button-primary" id="discoverRulebooksNow" type="button"
-                      data-google-url="\${escapeHtml(googleRulebookSearchUrl(game.title))}">Cerca regolamento</button>
+                      data-google-url="${escapeHtml(googleRulebookSearchUrl(game.title))}">Cerca regolamento</button>
             </div>
           </section>
 
@@ -2014,16 +2014,16 @@ async function setupGameDiscovery(bggId) {
     if (!status?.isConnected || window.location.pathname !== gamePath) return;
     try {
       const [item, documents] = await Promise.all([
-        api(\`/api/games/\${bggId}/rulebook-discovery\`),
-        api(\`/api/games/\${bggId}/documents\`),
+        api(`/api/games/${bggId}/rulebook-discovery`),
+        api(`/api/games/${bggId}/documents`),
       ]);
       if (!status.isConnected || window.location.pathname !== gamePath) return;
       const stored = (documents.items || []).filter((value) => value.document_type === "rulebook");
       const italian = stored.filter((value) => String(value.language || "").split("-")[0] === "it");
       const candidates = Number(item.candidates_found || 0);
       status.textContent = stored.length
-        ? \`Regolamenti archiviati: \${stored.length} (\${italian.length} IT) · Fonti candidate: \${candidates}.\`
-        : \`Nessun regolamento archiviato · Fonti candidate: \${candidates} · Ultima ricerca: \${item.last_finished_at || "mai"}.\`;
+        ? `Regolamenti archiviati: ${stored.length} (${italian.length} IT) · Fonti candidate: ${candidates}.`
+        : `Nessun regolamento archiviato · Fonti candidate: ${candidates} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
     }
@@ -2041,13 +2041,13 @@ async function setupGameDiscovery(bggId) {
     button.disabled = true;
     button.textContent = "Cerco nelle fonti note…";
     try {
-      const result = await api(\`/api/games/\${bggId}/rulebook-discovery/run\`, {method: "POST"});
+      const result = await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
       const found = Number(result.candidates_found || 0);
       const approved = (result.review_items || []).filter((value) => value.status === "approved").length;
       const pending = (result.review_items || []).filter((value) => value.status === "pending").length;
 
       if (found > 0) {
-        showToast(\`Trovate \${found} fonti: \${approved} approvate, \${pending} da verificare.\`);
+        showToast(`Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare.`);
         resetPrimaryAction();
       } else {
         showToast("Nessuna fonte nota trovata. Riclicca per cercare il PDF su Google.");
