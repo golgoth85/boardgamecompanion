@@ -183,7 +183,7 @@ Provider-specific discovery and replacement-URL search are intentionally not par
 
 ## Rulebook discovery and automatic indexing
 
-`/discovery` exposes persistent per-game discovery state and a bounded batch control. The game detail page provides **Cerca regolamento ora**. Concrete adapters remain isolated from the resolver:
+`/discovery` exposes persistent per-game discovery state and a bounded batch control. The game detail page exposes a single staged **Cerca regolamento** action: the first click runs the known-source discovery pipeline (Italian before English); if that run returns no candidates, the same action becomes **Cerca PDF su Google** and opens a human-reviewed web search on the next click. Google results are never downloaded, imported or approved automatically. Concrete adapters remain isolated from the resolver:
 
 - Repos Production official game pages, restricted to its official Asmodee CDN and IT/EN rulebooks;
 - Asmodee Italia official product pages and Italian rulebooks, restricted to its official CDN;
