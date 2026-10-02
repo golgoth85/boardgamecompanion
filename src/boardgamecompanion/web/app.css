@@ -1760,3 +1760,360 @@ a { color: inherit; text-decoration: none; }
     align-items: flex-start;
   }
 }
+
+
+/* UI redesign P2 — game detail information architecture */
+.game-page {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 1.15rem;
+  align-items: start;
+}
+
+.game-page-loading .skeleton {
+  min-height: 18rem;
+}
+
+.game-summary-rail {
+  position: sticky;
+  top: 1.25rem;
+  display: grid;
+  gap: .8rem;
+  min-width: 0;
+}
+
+.game-summary-cover .detail-cover {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 3 / 4;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.game-summary-card {
+  padding: .9rem;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(18, 24, 38, .68);
+}
+
+.game-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-bottom: .8rem;
+}
+
+.game-summary-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.game-summary-list > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .8rem;
+  padding: .58rem 0;
+  border-top: 1px solid rgba(41, 52, 76, .62);
+}
+
+.game-summary-list dt {
+  color: var(--muted);
+  font-size: .75rem;
+}
+
+.game-summary-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: .8rem;
+  font-weight: 750;
+  text-align: right;
+}
+
+.game-bgg-link {
+  display: inline-block;
+  margin-top: .8rem;
+  font-size: .78rem;
+}
+
+.game-main {
+  min-width: 0;
+}
+
+.game-header {
+  padding: .3rem .1rem 1rem;
+}
+
+.game-header h1 {
+  margin: 0;
+  max-width: 24ch;
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: .98;
+  letter-spacing: -.05em;
+}
+
+.game-original-title {
+  margin: .55rem 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.game-header-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .5rem;
+  margin-top: .85rem;
+  color: #9aa7bb;
+  font-size: .78rem;
+}
+
+.game-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(18, 24, 38, .66);
+}
+
+.game-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .9rem;
+}
+
+.game-section-head h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -.02em;
+}
+
+.game-section-head .section-subtitle {
+  margin: .3rem 0 0;
+  max-width: 68ch;
+}
+
+.rulebook-search-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .9rem 1rem;
+  align-items: center;
+  margin: 0;
+  padding: .9rem;
+  border: 1px solid rgba(245, 158, 11, .2);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, .055);
+}
+
+.rulebook-search-copy strong {
+  display: block;
+  font-size: .94rem;
+}
+
+.rulebook-search-copy p {
+  margin: .35rem 0 0;
+  max-width: 72ch;
+  color: #aeb8c9;
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.rulebook-search-card .rulebook-discovery-actions {
+  align-self: center;
+}
+
+.rulebook-search-details {
+  grid-column: 1 / -1;
+  padding-top: .65rem;
+  border-top: 1px solid rgba(41, 52, 76, .68);
+}
+
+.technical-disclosure > summary,
+.technical-game-details > summary {
+  cursor: pointer;
+  color: #aeb8c9;
+  font-size: .8rem;
+  font-weight: 750;
+}
+
+.rulebook-search-details > .muted {
+  margin: .65rem 0 0;
+  font-size: .76rem;
+  line-height: 1.45;
+}
+
+.game-subsection {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(41, 52, 76, .72);
+}
+
+.documents-subsection .section-title {
+  margin: 0;
+}
+
+.rules-workspace .game-document-list {
+  margin-top: .7rem;
+}
+
+.rules-workspace .rag-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(11, 15, 23, .36);
+}
+
+.copies-workspace .physical-copy-list {
+  margin-top: .25rem;
+}
+
+.technical-game-details {
+  padding: 0;
+  overflow: hidden;
+}
+
+.technical-game-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.2rem;
+  padding: 1rem;
+  list-style-position: inside;
+}
+
+.technical-game-details > summary span {
+  display: inline-grid;
+  gap: .2rem;
+}
+
+.technical-game-details > summary strong {
+  color: var(--text);
+}
+
+.technical-game-details > summary small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.technical-game-content {
+  padding: 0 1rem 1rem;
+}
+
+.technical-game-details:not([open]) {
+  background: rgba(18, 24, 38, .42);
+}
+
+@media (max-width: 980px) {
+  .game-page {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .game-summary-list > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .15rem;
+  }
+
+  .game-summary-list dd {
+    text-align: left;
+  }
+}
+
+@media (max-width: 760px) {
+  .game-page {
+    grid-template-columns: 1fr;
+  }
+
+  .game-summary-rail {
+    position: static;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: .75rem;
+  }
+
+  .game-summary-cover .detail-cover {
+    height: auto;
+    aspect-ratio: 3 / 4;
+  }
+
+  .game-summary-card {
+    align-self: stretch;
+  }
+
+  .game-summary-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: .8rem;
+  }
+
+  .game-summary-list > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .12rem;
+  }
+
+  .game-bgg-link {
+    margin-top: .6rem;
+  }
+
+  .game-header h1 {
+    font-size: clamp(2rem, 10vw, 3rem);
+  }
+}
+
+@media (max-width: 580px) {
+  .game-summary-rail {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .game-summary-card {
+    padding: .72rem;
+  }
+
+  .game-summary-list {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .game-summary-list > div {
+    padding: .4rem 0;
+  }
+
+  .game-section {
+    margin-top: .75rem;
+    padding: .8rem;
+  }
+
+  .game-section-head,
+  .rulebook-search-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .game-section-head {
+    flex-direction: column;
+  }
+
+  .game-section-head .button,
+  .rulebook-search-card .button {
+    width: 100%;
+  }
+
+  .rulebook-search-details {
+    grid-column: auto;
+  }
+
+  .rules-workspace .rag-panel {
+    padding: .8rem;
+  }
+
+  .game-header-status {
+    gap: .3rem .42rem;
+  }
+
+  .technical-game-details > summary {
+    min-height: 3.8rem;
+    padding: .85rem;
+  }
+}
