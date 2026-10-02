@@ -38,8 +38,8 @@ A game detail page exposes exactly one primary rulebook-search action.
 6. A manually downloaded PDF still enters through **+ Aggiungi PDF** and the
    normal archive/index/provenance path.
 
-The clean-miss state is derived from persisted discovery state, so a reload does
-not re-expose Google before the known-source attempt has completed.
+The zero-candidate fallback state is derived from persisted discovery state, so
+a reload does not expose Google before the known-source attempt has completed.
 
 ## Backend trust boundaries the redesign must not weaken
 
