@@ -360,10 +360,10 @@ def test_sidebar_separates_daily_and_admin_navigation(browser, live_server):
         expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
             "aria-current", "page"
         )
-        expect(sidebar.get_by_role("link", name="Revisioni fonti")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Aggiornamenti")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Discovery")).to_be_visible()
-        expect(sidebar.get_by_role("button", name="Impostazioni provider")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Aggiornamenti regolamenti")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Ricerca regolamenti")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Provider e AI")).to_be_visible()
     finally:
         context.close()
 
@@ -797,9 +797,9 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
 
         page.goto(live_server)
-        page.get_by_role("link", name="Revisioni").click()
+        page.get_by_role("link", name="Fonti da verificare").click()
         expect(page).to_have_url(f"{live_server}/reviews")
-        expect(page.get_by_role("heading", name="Coda di revisione")).to_be_visible()
+        expect(page.get_by_role("heading", name="Fonti da verificare")).to_be_visible()
         expect(page.locator(".review-card")).to_have_count(1)
         expect(page.locator(".review-card")).to_contain_text("Synthetic Alpha")
         expect(page.locator(".review-card")).to_contain_text("community")
@@ -890,7 +890,7 @@ def test_review_queue_ui_paginates_all_pending_items(browser, live_server):
         )
 
         page.goto(f"{live_server}/reviews")
-        expect(page.locator(".review-counter")).to_have_text("101 pending")
+        expect(page.locator(".review-counter")).to_have_text("101 da verificare")
         expect(page.locator(".review-card")).to_have_count(50)
         expect(page.locator(".review-pagination")).to_contain_text("1–50 di 101")
 
@@ -1097,7 +1097,7 @@ def test_rulebook_updates_ui_schedule_and_run_controls(browser, live_server):
         page.get_by_role("link", name="Aggiornamenti").click()
         expect(page).to_have_url(f"{live_server}/updates")
         expect(
-            page.get_by_role("heading", name="Aggiornamenti automatici")
+            page.get_by_role("heading", name="Aggiornamenti regolamenti")
         ).to_be_visible()
         expect(page.locator(".update-card")).to_have_count(1)
         expect(page.locator(".update-card")).to_contain_text("Synthetic Alpha")
