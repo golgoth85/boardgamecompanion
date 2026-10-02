@@ -1775,6 +1775,14 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
         assert discovery_requests == ["POST"]
         assert google_requests == []
 
+        # The second-click Google state is derived from persisted discovery state,
+        # not a transient browser flag.
+        page.reload()
+        panel = page.locator(".rulebook-discovery-panel")
+        action = panel.get_by_role("button", name="Cerca PDF su Google")
+        expect(action).to_be_visible()
+        assert google_requests == []
+
         page.evaluate(
             """() => {
               window.open = (url, target, features) => {
