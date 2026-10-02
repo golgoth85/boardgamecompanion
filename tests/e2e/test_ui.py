@@ -445,6 +445,62 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         context.close()
 
 
+def test_mobile_settings_and_drawer_accessibility(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        page.goto(live_server)
+        menu = page.get_by_role("button", name="Apri navigazione")
+        expect(menu).to_have_attribute("aria-expanded", "false")
+
+        menu.click()
+        expect(page.get_by_role("button", name="Chiudi navigazione")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(page.get_by_role("button", name="Provider e AI")).to_be_visible()
+        page.get_by_role("button", name="Provider e AI").click()
+
+        expect(page.locator("#settingsDialog")).to_be_visible()
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
+        expect(page.locator("#bggSettings")).to_have_attribute("open", "")
+        expect(page.locator("#ollamaSettings")).not_to_have_attribute("open", "")
+        expect(page.locator("#lmstudioSettings")).not_to_have_attribute("open", "")
+        expect(page.locator("#geminiSettings")).not_to_have_attribute("open", "")
+        box = page.locator("#settingsDialog").bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= 391
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+
+        page.get_by_role("button", name="Chiudi impostazioni").click()
+        menu = page.get_by_role("button", name="Apri navigazione")
+        menu.click()
+        expect(page.get_by_role("button", name="Chiudi navigazione")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(page.get_by_role("button", name="Apri navigazione")).to_have_attribute(
+            "aria-expanded", "false"
+        )
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
+    finally:
+        context.close()
+
+
+def test_mobile_admin_surfaces_do_not_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        for path, heading in (
+            ("/reviews", "Fonti da verificare"),
+            ("/discovery", "Ricerca regolamenti"),
+            ("/updates", "Aggiornamenti regolamenti"),
+        ):
+            page.goto(f"{live_server}{path}")
+            expect(page.get_by_role("heading", name=heading)).to_be_visible()
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= window.innerWidth + 1"
+            )
+    finally:
+        context.close()
+
+
 def test_game_detail_prioritizes_rules_and_progressive_disclosure(browser, live_server):
     context, page = new_page(browser)
     try:
