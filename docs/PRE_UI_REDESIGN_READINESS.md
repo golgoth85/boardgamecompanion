@@ -55,6 +55,43 @@ a reload does not expose Google before the known-source attempt has completed.
 - BGG metadata is cacheable enrichment, not a replacement for local catalog
   identity or physical-copy data.
 
+## Live acceptance snapshot — 2026-10-02
+
+Production catalog inventory contains 144 games. A real-collection survey included
+base/expansion pairs such as 7 Wonders Duel / Pantheon, Black Rose Wars / Crono,
+The 7th Continent / What Goes Up, Must Come Down, and Tiny Epic Dungeons / Stories.
+Only 7 Wonders Duel had an archived official Italian rulebook at survey time.
+
+The known-source acceptance sample exercised four base games and four expansions.
+No required official Italian candidate was found in that live sample. Failures were
+dominated by upstream HTTP/browser-fallback failures across Repos/Asmodee/Pendragon
+style sources. A separate real-collection inspection of 7 Wonders Duel: Pantheon
+failed in the Repos browser fallback before an official Italian candidate could be
+established.
+
+This is an accepted product constraint, not a reason to add more publisher-specific
+UI or game-specific scraping. It is the concrete reason the stable game-page contract
+uses known-source discovery first and then exposes the human-reviewed Google/manual
+path after a completed zero-candidate search.
+
+The existing official Italian 7 Wonders Duel document has separately passed live
+end-to-end RAG acceptance through parsing, chunking, Gemini embeddings, retrieval,
+Gemini 3.8 Flash generation, strict JSON/provenance validation and exact page citation.
+The accepted live answer identified the game as two-player and verified its support
+quote against page 2 of the archived PDF.
+
+The production rulebook-update endpoint returns HTTP 200; its persistent worker is
+enabled with a 60-second poll and batch size 5. There were zero approved update targets
+at this snapshot, so no synthetic target was created merely to exercise the scheduler.
+
+The bundled local ZXing browser asset is served by production with HTTP 200. Chromium
+CI exercises camera/scanner control paths without physical camera hardware; a real-phone
+camera check remains UX acceptance rather than a backend redesign gate.
+
+The legacy Floppy metadata PR is closed as obsolete. Direct BGG XML API2 enrichment is
+the current boundary. Persistent Italian synopsis translation is intentionally deferred
+until after the information-architecture redesign.
+
 ## Acceptance before visual redesign
 
 The pre-redesign cleanup uses three complementary acceptance layers:
