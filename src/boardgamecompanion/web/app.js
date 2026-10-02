@@ -1843,8 +1843,8 @@ async function renderDetail(bggId) {
             <div class="rulebook-discovery-info">
               <p class="eyebrow">Ricerca regolamento · IT prima di EN</p>
               <p class="muted">Un solo flusso: il primo clic controlla le fonti note e la relativa trust policy.
-                Se una ricerca completata non trova alcuna fonte e non registra errori provider, lo stesso pulsante
-                passa alla ricerca Google al clic successivo. Google non importa né approva documenti.</p>
+                Se una ricerca completata non trova alcuna fonte, lo stesso pulsante passa alla ricerca Google
+                al clic successivo, anche se una fonte nota non ha risposto. Google non importa né approva documenti.</p>
               <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">Caricamento stato…</p>
               <p class="muted">I PDF compaiono sotto «Manuali e documenti» solo dopo l’archiviazione.
                 Un PDF trovato sul web resta una scelta manuale: scaricalo dopo verifica e caricalo con «+ Aggiungi PDF».
@@ -2005,10 +2005,10 @@ async function setupGameDiscovery(bggId, gameTitle) {
     const candidates = Number(item?.candidates_found || 0);
     const failures = Number(item?.provider_failures || 0);
     const completed = Boolean(item?.last_finished_at);
-    const cleanMiss = completed && candidates === 0 && failures === 0;
-    button.dataset.mode = cleanMiss ? "google" : "discovery";
+    const knownSourceMiss = completed && candidates === 0;
+    button.dataset.mode = knownSourceMiss ? "google" : "discovery";
     button.dataset.googleUrl = googleUrl;
-    if (cleanMiss) {
+    if (knownSourceMiss) {
       button.textContent = "Cerca PDF su Google ↗";
     } else if (failures > 0) {
       button.textContent = "Riprova ricerca regolamento";
@@ -2062,7 +2062,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
       if (found) {
         showToast(`Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare. Il download dei PDF è separato dalla ricerca.`);
       } else if (failures) {
-        showToast("Nessuna fonte trovata, ma una o più fonti note non hanno risposto. Riprova la ricerca.", true);
+        showToast("Nessuna fonte trovata; alcune fonti note non hanno risposto. Premi di nuovo per cercare il PDF su Google.");
       } else {
         showToast("Nessuna fonte nota trovata. Premi di nuovo per cercare il PDF su Google.");
       }
