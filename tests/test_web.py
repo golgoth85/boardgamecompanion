@@ -21,7 +21,7 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert "BoardGameCompanion" in response.text
     assert "Importa barcode" in response.text
     assert 'id="settingsDialogTitle">Provider e AI<' in response.text
-    assert "RAG — priorità provider" in response.text
+    assert "Priorità provider" in response.text
     assert 'id="bggApplicationToken"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
