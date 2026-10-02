@@ -735,14 +735,18 @@ def _canonical_source_quote(source_text: str, quote: str) -> str:
         raise AnswerProtocolError(
             "Generated support quote is not present in cited evidence"
         )
-    pattern = re.compile(r"\s+".join(re.escape(token) for token in tokens))
+    body = r"\s+".join(re.escape(token) for token in tokens)
+    # Zero-width lookahead lets us enumerate *overlapping* candidate spans.
+    # Example: source "foo\nfoo\tfoo", quote "foo foo" has two valid
+    # whitespace-only spans sharing the middle token and must fail closed.
+    pattern = re.compile(r"(?=(" + body + r"))")
     matches = list(pattern.finditer(source_text))
     if len(matches) != 1:
         raise AnswerProtocolError(
             "Generated support quote is not present in cited evidence"
         )
-    match = matches[0]
-    return source_text[match.start() : match.end()]
+    start, end = matches[0].span(1)
+    return source_text[start:end]
 
 
 def _validate_generation(
