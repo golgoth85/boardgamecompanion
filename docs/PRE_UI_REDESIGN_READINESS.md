@@ -30,12 +30,12 @@ A game detail page exposes exactly one primary rulebook-search action.
    Italian then English and preserving the current trust/review policy.
 2. If that completed run finds candidates, the same control remains a
    known-source refresh action.
-3. If providers fail, the same control remains a known-source retry action.
-4. Only after a completed run returns zero candidates and zero provider failures
-   does the same control switch to **Cerca PDF su Google**.
-5. The Google click opens the already-hardened literal-title search in a new
+3. If a completed run returns zero candidates, the same control switches to
+   **Cerca PDF su Google** on the next click, including when one or more known
+   providers reported a failure. Provider failures remain visible in status.
+4. The Google click opens the already-hardened literal-title search in a new
    tab. It never imports, downloads, trusts or approves a document.
-6. A manually downloaded PDF still enters through **+ Aggiungi PDF** and the
+5. A manually downloaded PDF still enters through **+ Aggiungi PDF** and the
    normal archive/index/provenance path.
 
 The zero-candidate fallback state is derived from persisted discovery state, so
