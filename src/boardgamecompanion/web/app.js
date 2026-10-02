@@ -6,9 +6,9 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 
 const shellSectionLabels = {
   catalog: "Ludoteca",
-  reviews: "Revisioni fonti",
-  updates: "Aggiornamenti",
-  discovery: "Discovery",
+  reviews: "Fonti da verificare",
+  updates: "Aggiornamenti regolamenti",
+  discovery: "Ricerca regolamenti",
 };
 
 function shellRouteKey(pathname = window.location.pathname) {
@@ -1959,7 +1959,7 @@ async function renderDetail(bggId) {
                   Caricamento stato…
                 </p>
                 <p class="muted">
-                  <a class="external-link" href="/updates" data-nav>Aggiornamenti automatici</a>
+                  <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
                   ·
                   <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
                 </p>
@@ -2203,11 +2203,11 @@ async function renderDiscovery() {
   try {
     const data = await api("/api/rulebook-discovery?limit=500");
     app.innerHTML = `
-      <section class="review-page">
-        <div class="review-page-head">
-          <div><p class="eyebrow">P5 · Provider discovery</p><h1>Discovery regolamenti</h1>
-          <p class="muted">Ricerca incrementale IT/EN. I risultati attraversano sempre la trust policy P6A.</p></div>
-          <button class="button button-primary" id="runDiscoveryBatch" type="button">Avvia batch bounded</button>
+      <section class="admin-page review-page">
+        <div class="review-page-head admin-page-head">
+          <div><p class="eyebrow">Regolamenti</p><h1>Ricerca regolamenti</h1>
+          <p class="muted">Controlla la copertura delle fonti note per il catalogo. Italiano prima di inglese; ogni candidato continua a passare dalla policy di fiducia.</p></div>
+          <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
           ${data.items.map((item) => `<article class="update-card">
@@ -2230,7 +2230,7 @@ async function renderDiscovery() {
         event.currentTarget.disabled = false;
       }
     });
-    document.title = "Discovery · BoardGameCompanion";
+    document.title = "Ricerca regolamenti · BoardGameCompanion";
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare la discovery: ${escapeHtml(error.message)}</div>`;
   }
@@ -2360,21 +2360,21 @@ async function renderReviews({reset = false} = {}) {
       : "";
 
     app.innerHTML = `
-      <section class="review-page">
-        <div class="review-page-head">
+      <section class="admin-page review-page">
+        <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">P6 · Rulebook review</p>
-            <h1>Coda di revisione</h1>
+            <p class="eyebrow">Regolamenti</p>
+            <h1>Fonti da verificare</h1>
             <p class="muted">
-              I candidati non idonei al download unattended richiedono una decisione esplicita.
+              Decidi esplicitamente sulle fonti che non possono essere considerate attendibili in automatico.
             </p>
           </div>
-          <span class="review-counter">${pendingData.total} pending</span>
+          <span class="review-counter">${pendingData.total} da verificare</span>
         </div>
 
         ${corruptWarning}
 
-        <h2 class="section-title">Da revisionare</h2>
+        <h2 class="section-title">In attesa di decisione</h2>
         <div class="review-list">
           ${pendingData.items.length ? pendingData.items.map(reviewCard).join("") : '<div class="empty">Nessun candidato in attesa.</div>'}
         </div>
@@ -2404,7 +2404,7 @@ async function renderReviews({reset = false} = {}) {
         void renderReviews();
       });
     });
-    document.title = "Revisioni · BoardGameCompanion";
+    document.title = "Fonti da verificare · BoardGameCompanion";
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare la coda: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
@@ -2599,7 +2599,7 @@ async function toggleUpdate(reviewId, enabled) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({enabled: !enabled}),
     });
-    showToast(enabled ? "Aggiornamenti automatici in pausa." : "Aggiornamenti automatici riattivati.");
+    showToast(enabled ? "Aggiornamenti regolamenti in pausa." : "Aggiornamenti regolamenti riattivati.");
     await renderUpdates();
   } catch (error) {
     showToast(error.message, true);
@@ -2640,24 +2640,24 @@ async function renderUpdates({reset = false} = {}) {
 
     const worker = data.worker || {};
     const workerLabel = worker.enabled
-      ? `Scheduler attivo · scansione coda ogni ${escapeHtml(formatUpdateInterval(worker.poll_seconds || 60))}`
-      : "Scheduler automatico disattivato";
+      ? `Controllo automatico attivo · coda ogni ${escapeHtml(formatUpdateInterval(worker.poll_seconds || 60))}`
+      : "Controllo automatico disattivato";
     const corruptWarning = data.corrupt_count
       ? `<div class="review-warning">${data.corrupt_count} target collegati a review corrotte sono stati esclusi da questa pagina.</div>`
       : "";
 
     app.innerHTML = `
-      <section class="update-page">
-        <div class="review-page-head">
+      <section class="admin-page update-page">
+        <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">P6B · Rulebook updates</p>
-            <h1>Aggiornamenti automatici</h1>
+            <p class="eyebrow">Regolamenti</p>
+            <h1>Aggiornamenti regolamenti</h1>
             <p class="muted">
-              I candidati approvati vengono ricontrollati con il guarded fetch.
-              Una nuova versione viene archiviata solo quando cambia il contenuto.
+              Le fonti già approvate vengono ricontrollate in sicurezza.
+              Una nuova versione viene archiviata solo quando cambia davvero il PDF.
             </p>
           </div>
-          <span class="review-counter">${data.total} target</span>
+          <span class="review-counter">${data.total} monitorati</span>
         </div>
         <div class="update-worker-state ${worker.enabled ? "" : "disabled"}">
           ${workerLabel}
@@ -2696,7 +2696,7 @@ async function renderUpdates({reset = false} = {}) {
         void renderUpdates();
       });
     });
-    document.title = "Aggiornamenti · BoardGameCompanion";
+    document.title = "Aggiornamenti regolamenti · BoardGameCompanion";
     scheduleUpdateRefresh();
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare gli aggiornamenti: ${escapeHtml(error.message)}</div>`;
