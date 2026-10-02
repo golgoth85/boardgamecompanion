@@ -441,6 +441,33 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         context.close()
 
 
+def test_game_detail_prioritizes_rules_and_progressive_disclosure(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.locator(".game-summary-rail")).to_be_visible()
+        expect(page.get_by_role("heading", name="Regolamento e assistente")).to_be_visible()
+        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
+        expect(page.get_by_role("heading", name="Copie fisiche")).to_be_visible()
+
+        technical = page.locator(".technical-game-details")
+        expect(technical).not_to_have_attribute("open", "")
+        expect(page.get_by_text("Best players", exact=True)).not_to_be_visible()
+        technical.locator("summary").click()
+        expect(page.get_by_text("Best players", exact=True)).to_be_visible()
+
+        discovery_details = page.locator(".rulebook-search-details")
+        expect(discovery_details).not_to_have_attribute("open", "")
+        expect(page.locator("#gameDiscoveryStatus")).not_to_be_visible()
+        discovery_details.locator("summary").click()
+        expect(page.locator("#gameDiscoveryStatus")).to_be_visible()
+    finally:
+        context.close()
+
+
 def test_physical_copy_detail_and_edit_flow(browser, live_server):
     context, page = new_page(browser)
     try:
