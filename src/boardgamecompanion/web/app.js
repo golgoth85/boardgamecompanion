@@ -22,6 +22,10 @@ function setSidebarOpen(open) {
   const expanded = Boolean(open);
   document.body.classList.toggle("sidebar-open", expanded);
   sidebarToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  sidebarToggle?.setAttribute(
+    "aria-label",
+    expanded ? "Chiudi navigazione" : "Apri navigazione",
+  );
   if (sidebarBackdrop) sidebarBackdrop.hidden = !expanded;
 }
 
@@ -2638,6 +2642,7 @@ async function renderUpdates({reset = false} = {}) {
 
 
 async function route() {
+  closeSidebar();
   updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
     clearUpdateRefresh();
