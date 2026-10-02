@@ -2180,3 +2180,139 @@ a { color: inherit; text-decoration: none; }
     align-self: flex-start;
   }
 }
+
+
+/* UI redesign P4 — provider settings progressive disclosure */
+.settings-dialog {
+  width: min(920px, calc(100% - 1.4rem));
+  max-height: min(92vh, 940px);
+}
+
+.settings-dialog-head {
+  align-items: flex-start;
+  padding-bottom: .9rem;
+  border-bottom: 1px solid rgba(41, 52, 76, .72);
+}
+
+.settings-dialog-intro {
+  max-width: 68ch;
+  margin: .35rem 0 0;
+  line-height: 1.5;
+}
+
+.settings-core-card {
+  margin-top: 1rem;
+  padding: .9rem;
+  border: 1px solid rgba(245, 158, 11, .2);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, .055);
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-bottom: .35rem;
+}
+
+.settings-section-head h3 {
+  margin: 0;
+}
+
+.settings-core-card > .muted {
+  margin: .25rem 0 .8rem;
+  line-height: 1.5;
+}
+
+.settings-provider-stack {
+  display: grid;
+  gap: .65rem;
+  margin-top: .8rem;
+}
+
+.settings-provider {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(11, 15, 23, .28);
+}
+
+.settings-provider > summary {
+  display: flex;
+  min-height: 3.6rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  padding: .75rem .85rem;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.settings-provider > summary > span:first-child {
+  display: inline-grid;
+  gap: .15rem;
+}
+
+.settings-provider > summary strong {
+  color: var(--text);
+  font-size: .88rem;
+}
+
+.settings-provider > summary small {
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.settings-provider-state {
+  color: #8e9ab0;
+  font-size: .7rem;
+  font-weight: 750;
+}
+
+.settings-provider[open] > summary {
+  border-bottom: 1px solid rgba(41, 52, 76, .72);
+  background: rgba(24, 32, 51, .48);
+}
+
+.settings-provider[open] .settings-provider-state {
+  color: var(--accent-2);
+}
+
+.settings-provider-body {
+  padding: .85rem;
+}
+
+.settings-provider-body > .muted {
+  margin: 0 0 .75rem;
+  line-height: 1.5;
+}
+
+.settings-result {
+  margin-top: .85rem;
+}
+
+.settings-actions {
+  position: sticky;
+  bottom: -.05rem;
+  z-index: 2;
+  margin: .9rem -.1rem -.1rem;
+  padding: .8rem .1rem .1rem;
+  background: linear-gradient(180deg, transparent, var(--surface) 30%);
+}
+
+@media (max-width: 580px) {
+  .settings-section-head {
+    flex-direction: column;
+  }
+
+  .settings-core-card,
+  .settings-provider-body {
+    padding: .75rem;
+  }
+
+  .settings-provider > summary {
+    min-height: 3.4rem;
+    padding: .7rem .75rem;
+  }
+}
