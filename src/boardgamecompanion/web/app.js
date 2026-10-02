@@ -1839,24 +1839,16 @@ async function renderDetail(bggId) {
             <span class="badge">${copyItems.length} ${copyItems.length === 1 ? "copia" : "copie"}</span>
           </div>
 
-          <section class="rulebook-discovery-panel" aria-label="Ricerca e acquisizione regolamenti">
+          <section class="rulebook-discovery-panel" aria-label="Ricerca regolamento">
             <div class="rulebook-discovery-info">
-              <p class="eyebrow">Fonti dei regolamenti · IT prima di EN</p>
-              <p class="muted">La ricerca controlla le fonti ufficiali e aggiorna i metadati BGG (compresa la copertina del catalogo).
-                <strong>Trovare un link non significa aver scaricato il PDF.</strong> I documenti approvati vengono acquisiti
-                separatamente; gli altri richiedono una revisione.</p>
+              <p class="eyebrow">Regolamento · IT prima di EN</p>
+              <p class="muted">Prima controlla automaticamente le fonti note. Se non trova nulla,
+                lo stesso pulsante passa alla ricerca PDF su Google; il download e l'upload restano manuali.</p>
               <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">Caricamento stato…</p>
-              <p class="muted">Il risultato compare sotto «Manuali e documenti» solo dopo l’archiviazione.
-                Se manca il regolamento, usa «Cerca PDF su Google», scarica il manuale verificato
-                e caricalo con «+ Aggiungi PDF». La ricerca web non importa né approva alcun documento.
-                <a class="external-link" href="/updates" data-nav>Stato download</a> ·
-                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>.</p>
             </div>
             <div class="rulebook-discovery-actions">
-              <a class="button button-ghost" id="googleRulebookSearch"
-                 href="${escapeHtml(googleRulebookSearchUrl(game.title))}"
-                 target="_blank" rel="noopener noreferrer">Cerca PDF su Google ↗</a>
-              <button class="button button-primary" id="discoverRulebooksNow" type="button">Cerca fonti per il regolamento</button>
+              <button class="button button-primary" id="discoverRulebooksNow" type="button"
+                      data-google-url="\${escapeHtml(googleRulebookSearchUrl(game.title))}">Cerca regolamento</button>
             </div>
           </section>
 
@@ -2002,42 +1994,77 @@ async function setupGameDiscovery(bggId) {
   const status = document.querySelector("#gameDiscoveryStatus");
   const button = document.querySelector("#discoverRulebooksNow");
   const gamePath = window.location.pathname;
+  let googleFallbackReady = false;
+
+  const resetPrimaryAction = () => {
+    googleFallbackReady = false;
+    if (!button?.isConnected) return;
+    button.textContent = "Cerca regolamento";
+    button.dataset.mode = "providers";
+  };
+
+  const enableGoogleFallback = () => {
+    googleFallbackReady = true;
+    if (!button?.isConnected) return;
+    button.textContent = "Cerca PDF su Google ↗";
+    button.dataset.mode = "google";
+  };
+
   const refresh = async () => {
     if (!status?.isConnected || window.location.pathname !== gamePath) return;
     try {
       const [item, documents] = await Promise.all([
-        api(`/api/games/${bggId}/rulebook-discovery`),
-        api(`/api/games/${bggId}/documents`),
+        api(\`/api/games/\${bggId}/rulebook-discovery\`),
+        api(\`/api/games/\${bggId}/documents\`),
       ]);
       if (!status.isConnected || window.location.pathname !== gamePath) return;
       const stored = (documents.items || []).filter((value) => value.document_type === "rulebook");
       const italian = stored.filter((value) => String(value.language || "").split("-")[0] === "it");
-      const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
       const candidates = Number(item.candidates_found || 0);
-      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti candidate: ${candidates} · Errori di ricerca: ${item.provider_failures || 0} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
+      status.textContent = stored.length
+        ? \`Regolamenti archiviati: \${stored.length} (\${italian.length} IT) · Fonti candidate: \${candidates}.\`
+        : \`Nessun regolamento archiviato · Fonti candidate: \${candidates} · Ultima ricerca: \${item.last_finished_at || "mai"}.\`;
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
     }
   };
+
   button?.addEventListener("click", async () => {
+    if (googleFallbackReady) {
+      const target = button.dataset.googleUrl;
+      if (target) {
+        window.open(target, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+
     button.disabled = true;
-    button.textContent = "Ricerca delle fonti…";
+    button.textContent = "Cerco nelle fonti note…";
     try {
-      const result = await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
+      const result = await api(\`/api/games/\${bggId}/rulebook-discovery/run\`, {method: "POST"});
       const found = Number(result.candidates_found || 0);
       const approved = (result.review_items || []).filter((value) => value.status === "approved").length;
       const pending = (result.review_items || []).filter((value) => value.status === "pending").length;
-      showToast(found
-        ? `Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare. Il download dei PDF è separato dalla ricerca.`
-        : "Nessuna fonte trovata. Puoi aggiungere il regolamento con «+ Aggiungi PDF».");
+
+      if (found > 0) {
+        showToast(\`Trovate \${found} fonti: \${approved} approvate, \${pending} da verificare.\`);
+        resetPrimaryAction();
+      } else {
+        showToast("Nessuna fonte nota trovata. Riclicca per cercare il PDF su Google.");
+        enableGoogleFallback();
+      }
       await refresh();
     } catch (error) {
       showToast(error.message, true);
+      resetPrimaryAction();
     } finally {
       button.disabled = false;
-      button.textContent = "Cerca fonti per il regolamento";
+      if (!googleFallbackReady && button.isConnected) {
+        button.textContent = "Cerca regolamento";
+      }
     }
   });
+  resetPrimaryAction();
   await refresh();
 }
 
