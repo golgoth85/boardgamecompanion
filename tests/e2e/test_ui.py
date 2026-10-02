@@ -1772,6 +1772,38 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_empty_result(
         context.close()
 
 
+def test_rulebook_search_exposes_google_fallback_after_provider_failure(
+    browser, live_server
+):
+    context, page = new_page(browser)
+    requests = []
+
+    def discovery_failure(route):
+        requests.append(route.request.method)
+        route.fulfill(
+            status=502,
+            content_type="application/json",
+            body=json.dumps({"detail": "provider unavailable"}),
+        )
+
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        panel = page.locator(".rulebook-discovery-panel")
+        page.route(
+            re.compile(r".*/api/games/\\d+/rulebook-discovery/run$"),
+            discovery_failure,
+        )
+        panel.get_by_role("button", name="Cerca regolamento").click()
+        expect(page.locator("#toast")).to_contain_text(
+            "Ricerca automatica non riuscita. Riclicca per cercare il PDF su Google."
+        )
+        expect(panel.get_by_role("button", name="Cerca PDF su Google")).to_be_visible()
+        assert requests == ["POST"]
+    finally:
+        context.close()
+
+
 def test_rulebook_search_keeps_single_provider_action_when_candidates_are_found(
     browser, live_server
 ):
