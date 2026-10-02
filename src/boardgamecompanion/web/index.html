@@ -10,37 +10,82 @@
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <header class="topbar">
-    <a class="brand" href="/" data-nav>
-      <span class="brand-mark" aria-hidden="true">BGC</span>
-      <span>
-        <strong>BoardGameCompanion</strong>
-        <small>La tua ludoteca, in locale.</small>
-      </span>
-    </a>
-    <div class="topbar-actions">
-      <a class="button button-ghost" href="/reviews" data-nav>
-        Revisioni
+  <div class="app-frame">
+    <aside class="sidebar" id="appSidebar" aria-label="Navigazione principale">
+      <a class="brand sidebar-brand" href="/" data-nav data-route="catalog">
+        <span class="brand-mark" aria-hidden="true">BGC</span>
+        <span>
+          <strong>BoardGameCompanion</strong>
+          <small>La tua ludoteca, in locale.</small>
+        </span>
       </a>
-      <a class="button button-ghost" href="/updates" data-nav>
-        Aggiornamenti
-      </a>
-      <a class="button button-ghost" href="/discovery" data-nav>
-        Discovery
-      </a>
-      <button class="button button-ghost" id="scannerButton" type="button">
-        Importa barcode
-      </button>
-      <button class="button button-ghost" id="settingsButton" type="button">
-        Impostazioni
-      </button>
-      <button class="button button-primary" id="importButton" type="button">
-        Importa BGG CSV
-      </button>
-    </div>
-  </header>
 
-  <main id="app" class="shell" aria-live="polite"></main>
+      <nav class="sidebar-nav" aria-label="Sezioni">
+        <section class="nav-group" aria-labelledby="navLibraryLabel">
+          <p class="nav-group-label" id="navLibraryLabel">Ludoteca</p>
+          <a class="nav-item" href="/" data-nav data-route="catalog">
+            <span class="nav-icon" aria-hidden="true">▦</span>
+            <span>Catalogo</span>
+          </a>
+          <button class="nav-item nav-button" id="scannerButton" type="button">
+            <span class="nav-icon" aria-hidden="true">⌁</span>
+            <span>Scansiona barcode</span>
+          </button>
+        </section>
+
+        <section class="nav-group" aria-labelledby="navCollectionLabel">
+          <p class="nav-group-label" id="navCollectionLabel">Collezione</p>
+          <button class="nav-item nav-button" id="importButton" type="button">
+            <span class="nav-icon" aria-hidden="true">⇩</span>
+            <span>Importa BGG CSV</span>
+          </button>
+        </section>
+
+        <section class="nav-group nav-group-admin" aria-labelledby="navAdminLabel">
+          <p class="nav-group-label" id="navAdminLabel">Amministrazione</p>
+          <a class="nav-item" href="/reviews" data-nav data-route="reviews">
+            <span class="nav-icon" aria-hidden="true">✓</span>
+            <span>Revisioni fonti</span>
+          </a>
+          <a class="nav-item" href="/updates" data-nav data-route="updates">
+            <span class="nav-icon" aria-hidden="true">↻</span>
+            <span>Aggiornamenti</span>
+          </a>
+          <a class="nav-item" href="/discovery" data-nav data-route="discovery">
+            <span class="nav-icon" aria-hidden="true">⌕</span>
+            <span>Discovery</span>
+          </a>
+          <button class="nav-item nav-button" id="settingsButton" type="button">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            <span>Impostazioni provider</span>
+          </button>
+        </section>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Backend locale</span>
+      </div>
+    </aside>
+
+    <button class="sidebar-backdrop" id="sidebarBackdrop" type="button"
+            aria-label="Chiudi navigazione" hidden></button>
+
+    <div class="app-workspace">
+      <header class="mobile-topbar">
+        <button class="icon-button mobile-menu-button" id="sidebarToggle" type="button"
+                aria-controls="appSidebar" aria-expanded="false" aria-label="Apri navigazione">
+          ☰
+        </button>
+        <div class="mobile-brand">
+          <strong>BoardGameCompanion</strong>
+          <span id="mobileSectionTitle">Ludoteca</span>
+        </div>
+      </header>
+
+      <main id="app" class="shell" aria-live="polite"></main>
+    </div>
+  </div>
 
   <dialog id="importDialog" class="dialog" aria-labelledby="importDialogTitle">
     <form id="importForm">
