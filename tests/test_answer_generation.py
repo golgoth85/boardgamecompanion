@@ -557,6 +557,68 @@ def test_generation_rejects_ambiguous_whitespace_normalized_quote() -> None:
         )
 
 
+
+
+def test_generation_rejects_overlapping_whitespace_normalized_quotes() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "foo foo"}],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="foo\nfoo\tfoo")]
+        ),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="not present in cited evidence"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+
+def test_generation_exact_quote_still_wins_before_ambiguity_scan() -> None:
+    source_text = "foo foo\nfoo"
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "foo foo"}],
+                }
+            ],
+        }
+    )
+    result = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text=source_text)]),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Question",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["claims"][0]["supports"][0]["quote"] == "foo foo"
+
+
 def test_generation_model_digest_change_aborts_answer() -> None:
     provider = ChangingProvider(
         {
