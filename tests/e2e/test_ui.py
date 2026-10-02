@@ -133,7 +133,10 @@ def new_page(browser, *, mobile: bool = False):
 
 def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.goto(base_url)
-    page.get_by_role("button", name="Importa BGG CSV").click()
+    import_button = page.get_by_role("button", name="Importa BGG CSV")
+    if not import_button.is_visible():
+        page.get_by_role("button", name="Apri navigazione").click()
+    import_button.click()
     page.locator("#csvFile").set_input_files(str(path))
     page.get_by_role("button", name="Importa", exact=True).click()
     expect(page.locator("#importResult")).to_contain_text("Import completato.")
@@ -318,13 +321,15 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
     try:
         import_csv(page, live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
+        expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
         expect(page.locator(".game-card")).to_have_count(2)
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator(".detail-main h1")).to_have_text("Synthetic Alpha")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
 
+        page.get_by_role("button", name="Apri navigazione").click()
+        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
         page.get_by_role("button", name="Importa BGG CSV").click()
         expect(page.locator("#importDialog")).to_be_visible()
         box = page.locator("#importDialog").bounding_box()
@@ -332,6 +337,26 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         assert box["x"] >= 0
         assert box["x"] + box["width"] <= 391
         page.get_by_role("button", name="Chiudi").click()
+    finally:
+        context.close()
+
+
+def test_sidebar_separates_daily_and_admin_navigation(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        page.goto(live_server)
+        sidebar = page.locator("#appSidebar")
+        expect(sidebar).to_be_visible()
+        expect(sidebar.get_by_text("Ludoteca", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Collezione", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Amministrazione", exact=True)).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
+            "aria-current", "page"
+        )
+        expect(sidebar.get_by_role("link", name="Revisioni fonti")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Aggiornamenti")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Discovery")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Impostazioni provider")).to_be_visible()
     finally:
         context.close()
 
@@ -496,15 +521,24 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
         context.close()
 
 
-def test_mobile_topbar_and_scanner_dialog_do_not_overflow(browser, live_server):
+def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server):
     context, page = new_page(browser, mobile=True)
     try:
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
+        expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
+        expect(page.get_by_role("button", name="Scansiona barcode")).not_to_be_visible()
 
-        page.get_by_role("button", name="Importa barcode").click()
+        page.get_by_role("button", name="Apri navigazione").click()
+        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
+        sidebar_box = page.locator("#appSidebar").bounding_box()
+        assert sidebar_box is not None
+        assert sidebar_box["x"] >= 0
+        assert sidebar_box["x"] + sidebar_box["width"] <= 390
+
+        page.get_by_role("button", name="Scansiona barcode").click()
         expect(page.locator("#scannerDialog")).to_be_visible()
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
         box = page.locator("#scannerDialog").bounding_box()
         assert box is not None
         assert box["x"] >= 0
