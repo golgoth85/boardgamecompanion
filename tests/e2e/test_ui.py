@@ -453,7 +453,7 @@ def test_mobile_settings_and_drawer_accessibility(browser, live_server):
         expect(menu).to_have_attribute("aria-expanded", "false")
 
         menu.click()
-        expect(page.get_by_role("button", name="Chiudi navigazione")).to_have_attribute(
+        expect(page.locator("#sidebarToggle")).to_have_attribute(
             "aria-expanded", "true"
         )
         expect(page.get_by_role("button", name="Provider e AI")).to_be_visible()
@@ -474,7 +474,7 @@ def test_mobile_settings_and_drawer_accessibility(browser, live_server):
         page.get_by_role("button", name="Chiudi impostazioni").click()
         menu = page.get_by_role("button", name="Apri navigazione")
         menu.click()
-        expect(page.get_by_role("button", name="Chiudi navigazione")).to_be_visible()
+        expect(page.locator("#sidebarToggle")).to_have_attribute("aria-label", "Chiudi navigazione")
         page.keyboard.press("Escape")
         expect(page.get_by_role("button", name="Apri navigazione")).to_have_attribute(
             "aria-expanded", "false"
