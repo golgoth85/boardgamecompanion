@@ -1700,18 +1700,79 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         import_csv(page, live_server, fixture)
         page.goto(f"{live_server}/games/900001")
         expect(page.locator(".detail-main h1")).to_have_text(malicious_title)
-        link = page.get_by_role("link", name="Cerca PDF su Google")
-        expect(link).to_be_visible()
-        query = parse_qs(urlsplit(link.get_attribute("href")).query)["q"][0]
+        button = page.get_by_role("button", name="Cerca regolamento")
+        expect(button).to_be_visible()
+        query = parse_qs(urlsplit(button.get_attribute("data-google-url")).query)["q"][0]
         assert query == '"Game site:example.invalid manual" regolamento italiano pdf'
-        assert google_requests == []  # Rendering a link must not visit Google.
+        assert google_requests == []
         expect(page.get_by_role("button", name="+ Aggiungi PDF")).to_be_visible()
-        expect(page.get_by_role("button", name="Cerca fonti per il regolamento")).to_be_visible()
+        expect(page.locator(".rulebook-discovery-actions .button")).to_have_count(1)
     finally:
         context.close()
 
 
-def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pdf(
+def test_rulebook_search_uses_known_sources_then_google_only_after_empty_result(
+    browser, live_server
+):
+    context, page = new_page(browser)
+    requests = []
+
+    def discovery_run(route):
+        requests.append(route.request.method)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"candidates_found": 0, "review_items": []}),
+        )
+
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+        panel = page.locator(".rulebook-discovery-panel")
+        button = panel.get_by_role("button", name="Cerca regolamento")
+        expect(panel.locator(".button")).to_have_count(1)
+        expect(panel).to_contain_text("Prima controlla automaticamente le fonti note")
+
+        page.route(
+            re.compile(r".*/api/games/\d+/rulebook-discovery/run$"),
+            discovery_run,
+        )
+        page.evaluate(
+            """() => {
+                window.__openedRulebookUrls = [];
+                window.open = (url, target, features) => {
+                    window.__openedRulebookUrls.push({url, target, features});
+                    return null;
+                };
+            }"""
+        )
+
+        button.click()
+        expect(page.locator("#toast")).to_contain_text(
+            "Nessuna fonte nota trovata. Riclicca per cercare il PDF su Google."
+        )
+        expect(panel.get_by_role("button", name="Cerca PDF su Google")).to_be_visible()
+        assert requests == ["POST"]
+
+        panel.get_by_role("button", name="Cerca PDF su Google").click()
+        opened = page.evaluate("window.__openedRulebookUrls")
+        assert len(opened) == 1
+        search_url = urlsplit(opened[0]["url"])
+        assert (search_url.scheme, search_url.netloc, search_url.path) == (
+            "https", "www.google.com", "/search"
+        )
+        assert parse_qs(search_url.query)["q"] == [
+            '"Synthetic Alpha" regolamento italiano pdf'
+        ]
+        assert opened[0]["target"] == "_blank"
+        assert "noopener" in opened[0]["features"]
+        assert "noreferrer" in opened[0]["features"]
+        assert requests == ["POST"]
+    finally:
+        context.close()
+
+
+def test_rulebook_search_keeps_single_provider_action_when_candidates_are_found(
     browser, live_server
 ):
     context, page = new_page(browser)
@@ -1734,34 +1795,16 @@ def test_rulebook_search_distinguishes_cover_metadata_candidates_and_archived_pd
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         panel = page.locator(".rulebook-discovery-panel")
-        expect(panel).to_contain_text("metadati BGG (compresa la copertina")
-        expect(panel).to_contain_text(
-            "Trovare un link non significa aver scaricato il PDF"
-        )
-        expect(panel).to_contain_text("PDF archiviati: 0")
-        expect(panel).to_contain_text("«+ Aggiungi PDF»")
-        expect(panel.get_by_role("link", name="Stato download")).to_be_visible()
-        expect(panel.get_by_role("link", name="Fonti da verificare")).to_be_visible()
-        google = panel.get_by_role("link", name="Cerca PDF su Google")
-        expect(google).to_be_visible()
-        search_url = urlsplit(google.get_attribute("href"))
-        assert (search_url.scheme, search_url.netloc, search_url.path) == (
-            "https", "www.google.com", "/search"
-        )
-        assert parse_qs(search_url.query)["q"] == [
-            '"Synthetic Alpha" regolamento italiano pdf'
-        ]
-        assert google.get_attribute("target") == "_blank"
-        assert {"noopener", "noreferrer"} <= set(google.get_attribute("rel").split())
-
         page.route(
             re.compile(r".*/api/games/\d+/rulebook-discovery/run$"),
             discovery_run,
         )
-        panel.get_by_role("button", name="Cerca fonti per il regolamento").click()
+        panel.get_by_role("button", name="Cerca regolamento").click()
         expect(page.locator("#toast")).to_contain_text(
             "Trovate 2 fonti: 1 approvate, 1 da verificare"
         )
+        expect(panel.get_by_role("button", name="Cerca regolamento")).to_be_visible()
+        expect(panel.locator(".button")).to_have_count(1)
         expect(page.locator(".game-document-card")).to_have_count(0)
         assert requests == ["POST"]
     finally:
@@ -1773,14 +1816,15 @@ def test_rulebook_search_panel_is_readable_on_mobile(browser, live_server):
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        expect(page.get_by_role("button", name="Cerca fonti per il regolamento")).to_be_visible()
-        google = page.get_by_role("link", name="Cerca PDF su Google")
-        expect(google).to_be_visible()
-        google.click(trial=True)  # Verify it is actually clickable at 390 px, without navigation.
-        rect = google.bounding_box()
+        button = page.get_by_role("button", name="Cerca regolamento")
+        expect(button).to_be_visible()
+        button.click(trial=True)
+        rect = button.bounding_box()
         assert rect is not None
         assert rect["width"] >= 44 and rect["height"] >= 24
         assert rect["x"] >= 0 and rect["x"] + rect["width"] <= 391
+        assert page.locator(".rulebook-discovery-actions .button").count() == 1
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
     finally:
         context.close()
+
