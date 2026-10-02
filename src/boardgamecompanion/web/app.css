@@ -1843,6 +1843,10 @@ a { color: inherit; text-decoration: none; }
   min-width: 0;
 }
 
+.game-main.detail-main {
+  padding: 0;
+}
+
 .game-header {
   padding: .3rem .1rem 1rem;
 }
