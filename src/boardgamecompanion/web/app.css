@@ -2121,3 +2121,62 @@ a { color: inherit; text-decoration: none; }
     padding: .85rem;
   }
 }
+
+
+/* UI redesign P3 — administrative hierarchy */
+.nav-subgroup-label {
+  margin: .22rem 0 0;
+  padding: .18rem .68rem .12rem;
+  color: #8d99ae;
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.nav-subgroup-system {
+  margin-top: .65rem;
+}
+
+.admin-page {
+  gap: .85rem;
+}
+
+.admin-page-head {
+  padding: .2rem .1rem 1rem;
+  border: 0;
+  border-bottom: 1px solid rgba(41, 52, 76, .72);
+  border-radius: 0;
+  background: transparent;
+}
+
+.admin-page-head h1 {
+  margin: .08rem 0 .38rem;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1;
+  letter-spacing: -.04em;
+}
+
+.admin-page-head .muted {
+  max-width: 70ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.admin-page .section-title {
+  margin-top: .7rem;
+}
+
+.admin-page .review-card,
+.admin-page .update-card {
+  background: rgba(18, 24, 38, .66);
+}
+
+@media (max-width: 580px) {
+  .admin-page-head {
+    padding-top: 0;
+  }
+
+  .admin-page-head .review-counter,
+  .admin-page-head .button {
+    align-self: flex-start;
+  }
+}
