@@ -390,13 +390,15 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("button", name="Provider e AI").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
-        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni")
+        expect(page.locator("#settingsDialogTitle")).to_have_text("Provider e AI")
 
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
         page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
         page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
+        page.locator("#lmstudioSettings summary").click()
+        page.locator("#geminiSettings summary").click()
         page.locator("#lmstudioUrl").fill("http://lmstudio.test:1234")
         page.locator("#lmstudioEmbeddingModel").fill("embed-test")
         page.locator("#lmstudioGenerationModel").fill("qwen3-14b")
@@ -426,7 +428,9 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         assert "browser-secret-gemini-key" not in rag_response.text()
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
-        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("button", name="Provider e AI").click()
+        page.locator("#lmstudioSettings summary").click()
+        page.locator("#geminiSettings summary").click()
 
         expect(page.locator("#bggApplicationToken")).to_have_value("")
         expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
