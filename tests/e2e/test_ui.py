@@ -527,16 +527,16 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
         expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
-        expect(page.get_by_role("button", name="Scansiona barcode")).not_to_be_visible()
+        expect(page.get_by_role("button", name="Importa barcode")).not_to_be_visible()
 
         page.get_by_role("button", name="Apri navigazione").click()
-        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
+        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
         sidebar_box = page.locator("#appSidebar").bounding_box()
         assert sidebar_box is not None
         assert sidebar_box["x"] >= 0
         assert sidebar_box["x"] + sidebar_box["width"] <= 390
 
-        page.get_by_role("button", name="Scansiona barcode").click()
+        page.get_by_role("button", name="Importa barcode").click()
         expect(page.locator("#scannerDialog")).to_be_visible()
         expect(page.locator("#appSidebar")).not_to_be_in_viewport()
         box = page.locator("#scannerDialog").bounding_box()
