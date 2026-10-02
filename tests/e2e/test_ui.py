@@ -1801,14 +1801,14 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
         context.close()
 
 
-def test_rulebook_search_does_not_fall_back_to_google_after_provider_failure(
+def test_rulebook_search_allows_google_after_completed_miss_with_provider_failure(
     browser, live_server
 ):
     context, page = new_page(browser)
     state = {
         "candidates_found": 0,
-        "provider_failures": 1,
-        "last_finished_at": "2026-10-02T08:00:00+00:00",
+        "provider_failures": 0,
+        "last_finished_at": None,
     }
     requests = []
 
@@ -1821,6 +1821,11 @@ def test_rulebook_search_does_not_fall_back_to_google_after_provider_failure(
 
     def discovery_run(route):
         requests.append(route.request.method)
+        state.update({
+            "candidates_found": 0,
+            "provider_failures": 1,
+            "last_finished_at": "2026-10-02T08:00:00+00:00",
+        })
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -1838,13 +1843,13 @@ def test_rulebook_search_does_not_fall_back_to_google_after_provider_failure(
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        button = page.get_by_role("button", name="Riprova ricerca regolamento")
+        button = page.get_by_role("button", name="Cerca regolamento")
         expect(button).to_be_visible()
-        expect(page.get_by_role("button", name="Cerca PDF su Google")).to_have_count(0)
         button.click()
         expect(page.locator("#toast")).to_contain_text(
-            "una o più fonti note non hanno risposto"
+            "alcune fonti note non hanno risposto"
         )
+        expect(page.get_by_role("button", name="Cerca PDF su Google")).to_be_visible()
         assert requests == ["POST"]
     finally:
         context.close()
