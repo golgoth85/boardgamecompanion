@@ -63,11 +63,13 @@ The 7th Continent / What Goes Up, Must Come Down, and Tiny Epic Dungeons / Stori
 Only 7 Wonders Duel had an archived official Italian rulebook at survey time.
 
 The known-source acceptance sample exercised four base games and four expansions.
-No required official Italian candidate was found in that live sample. Failures were
-dominated by upstream HTTP/browser-fallback failures across Repos/Asmodee/Pendragon
-style sources. A separate real-collection inspection of 7 Wonders Duel: Pantheon
-failed in the Repos browser fallback before an official Italian candidate could be
-established.
+Two repeated live runs demonstrated that provider coverage is unstable rather than
+universally absent: one run found exact official Italian candidates for Last Aurora
+and Last Aurora: Frozen Steel (2 of 6 cases that require an official Italian source),
+while a later retry found 0 of 6. The remaining cases were dominated by upstream
+HTTP/browser-fallback failures across Repos/Asmodee/Pendragon-style sources. A separate
+real-collection inspection of 7 Wonders Duel: Pantheon failed in the Repos browser
+fallback before an official Italian candidate could be established.
 
 This is an accepted product constraint, not a reason to add more publisher-specific
 UI or game-specific scraping. It is the concrete reason the stable game-page contract
