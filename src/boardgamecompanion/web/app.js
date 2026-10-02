@@ -2055,8 +2055,11 @@ async function setupGameDiscovery(bggId) {
       }
       await refresh();
     } catch (error) {
-      showToast(error.message, true);
-      resetPrimaryAction();
+      showToast(
+        "Ricerca automatica non riuscita. Riclicca per cercare il PDF su Google.",
+        true,
+      );
+      enableGoogleFallback();
     } finally {
       button.disabled = false;
       if (!googleFallbackReady && button.isConnected) {
