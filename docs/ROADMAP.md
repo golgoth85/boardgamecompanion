@@ -1,5 +1,19 @@
 # BoardGameCompanion roadmap after P7, P5 remediation and standalone consolidation
 
+## Pre-redesign backend freeze
+
+The backend feature set is considered frozen for the upcoming UI information-architecture redesign, apart from defect remediation discovered by acceptance testing.
+
+Pre-redesign invariants:
+- catalog, copies, barcode, BGG metadata, rulebook lifecycle, indexing and cited RAG remain standalone inside BGC;
+- game-level rulebook acquisition exposes one staged action: known sources first, then Google PDF search only after an empty discovery run;
+- Google remains a human-reviewed fallback and never auto-downloads, imports or approves documents;
+- the real acceptance matrix covers a stratified 4-base/4-expansion provider sample plus real-collection end-to-end cases;
+- optional persistent Italian synopsis translation remains deferred until after the UI redesign, rather than adding another cache/provider/presentation surface now;
+- no new publisher-specific UI surface is added solely to work around a difficult site: manual upload remains the explicit fallback.
+
+The next planned major work item after these gates is the UI redesign itself.
+
 This roadmap is based on the repository state after P6B, not on historical chat state.
 
 ## Architectural boundary: standalone BGC
