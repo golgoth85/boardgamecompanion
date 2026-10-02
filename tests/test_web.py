@@ -43,7 +43,7 @@ def test_web_reviews_route_is_spa_entrypoint(tmp_path: Path) -> None:
         response = client.get("/reviews")
 
     assert response.status_code == 200
-    assert "Revisioni" in response.text
+    assert "Fonti da verificare" in response.text
 
 
 def test_web_updates_route_is_spa_entrypoint(tmp_path: Path) -> None:
@@ -61,7 +61,7 @@ def test_web_discovery_route_is_spa_entrypoint(tmp_path: Path) -> None:
         response = client.get("/discovery")
 
     assert response.status_code == 200
-    assert "Discovery" in response.text
+    assert "Ricerca regolamenti" in response.text
 
 
 def test_static_assets_are_served(tmp_path: Path) -> None:
