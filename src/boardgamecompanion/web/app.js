@@ -362,6 +362,9 @@ function parseProviderOrder(value, label) {
 }
 
 async function openSettingsDialog() {
+  settingsDialog.querySelectorAll(".settings-provider").forEach((section) => {
+    section.open = section.id === "bggSettings";
+  });
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   setSettingsBusy(true);
