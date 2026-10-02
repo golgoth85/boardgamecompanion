@@ -1,4 +1,46 @@
 const app = document.querySelector("#app");
+const appSidebar = document.querySelector("#appSidebar");
+const sidebarToggle = document.querySelector("#sidebarToggle");
+const sidebarBackdrop = document.querySelector("#sidebarBackdrop");
+const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
+
+const shellSectionLabels = {
+  catalog: "Ludoteca",
+  reviews: "Revisioni fonti",
+  updates: "Aggiornamenti",
+  discovery: "Discovery",
+};
+
+function shellRouteKey(pathname = window.location.pathname) {
+  if (/^\/reviews\/?$/.test(pathname)) return "reviews";
+  if (/^\/updates\/?$/.test(pathname)) return "updates";
+  if (/^\/discovery\/?$/.test(pathname)) return "discovery";
+  return "catalog";
+}
+
+function setSidebarOpen(open) {
+  const expanded = Boolean(open);
+  document.body.classList.toggle("sidebar-open", expanded);
+  sidebarToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (sidebarBackdrop) sidebarBackdrop.hidden = !expanded;
+}
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
+function updateShellNavigation() {
+  const routeKey = shellRouteKey();
+  document.querySelectorAll("[data-route]").forEach((item) => {
+    const active = item.dataset.route === routeKey;
+    item.classList.toggle("is-active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  if (mobileSectionTitle) {
+    mobileSectionTitle.textContent = shellSectionLabels[routeKey] || "Ludoteca";
+  }
+}
 const importDialog = document.querySelector("#importDialog");
 const importButton = document.querySelector("#importButton");
 const importForm = document.querySelector("#importForm");
@@ -1174,60 +1216,71 @@ function skeletons() {
 
 async function renderCatalog() {
   app.innerHTML = `
-    <section class="hero">
-      <article class="hero-card">
-        <p class="eyebrow">Catalogo locale</p>
-        <h1>La tua ludoteca, ordinata.</h1>
-        <p class="lead">
-          Cerca giochi ed espansioni, consulta il catalogo locale e arricchiscilo
-          opzionalmente tramite l'API ufficiale BoardGameGeek.
+    <section class="page-header catalog-page-header">
+      <div class="page-header-copy">
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Catalogo</h1>
+        <p class="page-lead">
+          Giochi ed espansioni della collezione, con ricerca e filtri in primo piano.
+          Le funzioni di importazione e amministrazione restano nel menu laterale.
         </p>
-        <p class="muted"><a class="external-link" href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">Powered by BoardGameGeek</a></p>
-      </article>
-      <section class="stats-panel" id="statsPanel" aria-label="Statistiche catalogo">
-        <div class="stat"><strong>—</strong><span>Totale</span></div>
-        <div class="stat"><strong>—</strong><span>Giochi base</span></div>
-        <div class="stat"><strong>—</strong><span>Espansioni</span></div>
-        <div class="stat"><strong>—</strong><span>Posseduti</span></div>
+      </div>
+      <div class="page-header-meta">
+        <span class="quiet-pill">Catalogo locale</span>
+        <a class="external-link" href="https://boardgamegeek.com" target="_blank"
+           rel="noopener noreferrer">BoardGameGeek ↗</a>
+      </div>
+    </section>
+
+    <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Statistiche catalogo">
+      <div class="stat"><strong>—</strong><span>Totale</span></div>
+      <div class="stat"><strong>—</strong><span>Giochi base</span></div>
+      <div class="stat"><strong>—</strong><span>Espansioni</span></div>
+      <div class="stat"><strong>—</strong><span>Posseduti</span></div>
+    </section>
+
+    <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
+      <div class="catalog-head catalog-workspace-head">
+        <div>
+          <h2 id="catalogGamesHeading">Giochi</h2>
+          <p class="section-subtitle">Trova rapidamente un titolo oppure restringi il catalogo.</p>
+        </div>
+        <span class="muted" id="resultCount">Caricamento…</span>
+      </div>
+
+      <section class="toolbar" aria-label="Filtri catalogo">
+        <label class="field search-field">
+          <input id="searchInput" type="search" aria-label="Cerca per titolo"
+                 placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
+        </label>
+        <label class="field">
+          <select id="typeFilter" aria-label="Tipo">
+            <option value="">Tutti i tipi</option>
+            <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
+            <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
+          </select>
+        </label>
+        <label class="field">
+          <select id="ownedFilter" aria-label="Stato collezione">
+            <option value="">Tutti gli stati</option>
+            <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
+            <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
+          </select>
+        </label>
+        <label class="field">
+          <select id="sortFilter" aria-label="Ordina">
+            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
+            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
+            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
+          </select>
+        </label>
       </section>
+
+      <section class="grid" id="catalogGrid">${skeletons()}</section>
+      <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
-
-    <section class="toolbar" aria-label="Filtri catalogo">
-      <label class="field search-field">
-        <input id="searchInput" type="search" aria-label="Cerca per titolo" placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
-      </label>
-      <label class="field">
-        <select id="typeFilter" aria-label="Tipo">
-          <option value="">Tutti i tipi</option>
-          <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
-          <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
-        </select>
-      </label>
-      <label class="field">
-        <select id="ownedFilter" aria-label="Stato collezione">
-          <option value="">Tutti gli stati</option>
-          <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
-          <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
-        </select>
-      </label>
-      <label class="field">
-        <select id="sortFilter" aria-label="Ordina">
-          <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-          <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
-          <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-          <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
-          <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
-        </select>
-      </label>
-    </section>
-
-    <div class="catalog-head">
-      <h2>Catalogo</h2>
-      <span class="muted" id="resultCount">Caricamento…</span>
-    </div>
-
-    <section class="grid" id="catalogGrid">${skeletons()}</section>
-    <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
   `;
 
   bindCatalogControls();
@@ -2585,6 +2638,7 @@ async function renderUpdates({reset = false} = {}) {
 
 
 async function route() {
+  updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
     clearUpdateRefresh();
   }
@@ -2617,13 +2671,30 @@ document.addEventListener("click", (event) => {
   if (url.origin !== window.location.origin) return;
   event.preventDefault();
   history.pushState({}, "", url.pathname);
+  closeSidebar();
   route();
   window.scrollTo({top: 0});
 });
 
 window.addEventListener("popstate", route);
 
-scannerButton.addEventListener("click", openScannerDialog);
+sidebarToggle?.addEventListener("click", () => {
+  setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+});
+sidebarBackdrop?.addEventListener("click", closeSidebar);
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 1040) closeSidebar();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
+    closeSidebar();
+  }
+});
+
+scannerButton.addEventListener("click", () => {
+  closeSidebar();
+  openScannerDialog();
+});
 closeScanner.addEventListener("click", closeScannerDialog);
 scannerDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
@@ -2679,6 +2750,7 @@ documentFile.addEventListener("change", () => {
 });
 
 settingsButton.addEventListener("click", () => {
+  closeSidebar();
   void openSettingsDialog();
 });
 
@@ -2725,6 +2797,7 @@ geminiClearApiKey.addEventListener("change", () => {
 });
 
 importButton.addEventListener("click", () => {
+  closeSidebar();
   resetImportDialog();
   importDialog.showModal();
 });
