@@ -145,6 +145,13 @@ def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     expect(page.locator("#importDialog")).not_to_be_visible()
 
 
+def open_barcode_scanner(page) -> None:
+    scanner_button = page.get_by_role("button", name="Importa barcode")
+    if not scanner_button.is_visible():
+        page.get_by_role("button", name="Apri navigazione").click()
+    scanner_button.click()
+
+
 def make_many_games_csv(path: Path, count: int = 30) -> Path:
     with SAMPLE.open("r", encoding="utf-8", newline="") as source:
         reader = csv.DictReader(source)
@@ -476,7 +483,7 @@ def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
         page.locator("#scannerBarcode").fill("1234-5678-90123")
         page.get_by_role("button", name="Cerca", exact=True).click()
@@ -494,7 +501,7 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.locator("#scannerBarcode").fill("222-222-222")
         page.get_by_role("button", name="Cerca", exact=True).click()
 
@@ -536,7 +543,7 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         assert sidebar_box["x"] >= 0
         assert sidebar_box["x"] + sidebar_box["width"] <= 390
 
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
         expect(page.locator("#appSidebar")).not_to_be_in_viewport()
         box = page.locator("#scannerDialog").bounding_box()
@@ -1194,7 +1201,7 @@ def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, 
     _install_camera_stub(page, native_code="8001234567890")
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
 
         expect(page.locator("#scannerDialog")).to_be_visible()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
@@ -1245,7 +1252,7 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
 
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
         expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
         assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
@@ -1276,7 +1283,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.wait_for_function("window.__bgcResolveDetection !== undefined")
 
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
@@ -1318,7 +1325,7 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.wait_for_function("typeof window.__bgcResolveCamera === 'function'")
 
         page.get_by_role("button", name="Chiudi scanner").click()
