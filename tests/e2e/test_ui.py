@@ -538,6 +538,9 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
 
         page.get_by_role("button", name="Apri navigazione").click()
         expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
+        page.wait_for_function(
+            "document.querySelector('#appSidebar').getBoundingClientRect().x >= 0"
+        )
         sidebar_box = page.locator("#appSidebar").bounding_box()
         assert sidebar_box is not None
         assert sidebar_box["x"] >= 0
