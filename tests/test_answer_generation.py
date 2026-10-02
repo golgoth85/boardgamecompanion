@@ -440,6 +440,185 @@ def test_generation_protocol_rejects_untrusted_citation_output(output, match) ->
             top_k=8,
             min_score=0.0,
         )
+
+
+def test_generation_accepts_whitespace_only_quote_drift_and_returns_exact_source() -> None:
+    source_text = (
+        "7 Wonders Duel è un gioco per\n"
+        "2 giocatori ambientato nel mondo del rinomato gioco da tavolo."
+    )
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Il gioco è previsto per 2 giocatori.",
+                    "supports": [
+                        {
+                            "evidence_id": "E1",
+                            "quote": (
+                                "7 Wonders Duel è un gioco per "
+                                "2 giocatori ambientato nel mondo del rinomato gioco da tavolo."
+                            ),
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    result = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text=source_text)]
+        ),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Per quanti giocatori è previsto?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["status"] == "answer"
+    assert result["claims"][0]["supports"][0]["quote"] == source_text
+    assert result["citations"][0]["page"]["number"] == 1
+
+
+@pytest.mark.parametrize(
+    ("source_text", "quote"),
+    [
+        ("Il gioco è per 2 giocatori.", "Il gioco è per due giocatori."),
+        ("Il gioco è per 2 giocatori.", "il gioco è per 2 giocatori."),
+        ("Il gioco è per 2 giocatori.", "Il gioco è per 2 giocatori!"),
+        ("L’avversario gioca.", "L'avversario gioca."),
+    ],
+)
+def test_generation_whitespace_canonicalization_never_changes_words_or_punctuation(
+    source_text, quote
+) -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": quote}],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text=source_text)]),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="not present in cited evidence"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+
+def test_generation_rejects_ambiguous_whitespace_normalized_quote() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "foo bar"}],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="foo\nbar xxx foo\tbar")]
+        ),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="not present in cited evidence"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+
+
+
+def test_generation_rejects_overlapping_whitespace_normalized_quotes() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "foo foo"}],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="foo\nfoo\tfoo")]
+        ),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="not present in cited evidence"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+
+
+def test_generation_exact_quote_still_wins_before_ambiguity_scan() -> None:
+    source_text = "foo foo\nfoo"
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "foo foo"}],
+                }
+            ],
+        }
+    )
+    result = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text=source_text)]),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Question",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["claims"][0]["supports"][0]["quote"] == "foo foo"
+
+
 def test_generation_model_digest_change_aborts_answer() -> None:
     provider = ChangingProvider(
         {
