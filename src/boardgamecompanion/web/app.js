@@ -2157,7 +2157,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
       const candidates = Number(item.candidates_found || 0);
       const failures = Number(item.provider_failures || 0);
-      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti candidate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
+      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti trovate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
       setButtonState(item);
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
@@ -2215,7 +2215,7 @@ async function renderDiscovery() {
         <div class="update-list">
           ${data.items.map((item) => `<article class="update-card">
             <div><strong>${escapeHtml(item.title)}</strong> <span class="badge">BGG #${item.bgg_id}</span></div>
-            <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · candidate: ${item.candidates_found} · nuove review: ${item.review_items_created}</p>
+            <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · fonti trovate: ${item.candidates_found} · da verificare: ${item.review_items_created}</p>
             <p class="muted">${(item.providers || []).map((value) => `${escapeHtml(value.provider)}: ${escapeHtml(value.outcome)} (${value.candidate_count})`).join(" · ") || "Nessun provider ancora interrogato"}</p>
             ${item.last_error ? `<p class="integration-error">${escapeHtml(item.last_error)}</p>` : ""}
             <a class="external-link" href="/games/${item.bgg_id}" data-nav>Apri gioco →</a>
@@ -2226,7 +2226,7 @@ async function renderDiscovery() {
       event.currentTarget.disabled = true;
       try {
         const result = await api("/api/rulebook-discovery/run?limit=5", {method: "POST"});
-        showToast(`Discovery completata per ${result.attempted} giochi.`);
+        showToast(`Ricerca completata per ${result.attempted} giochi.`);
         await renderDiscovery();
       } catch (error) {
         showToast(error.message, true);
@@ -2235,7 +2235,7 @@ async function renderDiscovery() {
     });
     document.title = "Ricerca regolamenti · BoardGameCompanion";
   } catch (error) {
-    app.innerHTML = `<div class="empty">Impossibile caricare la discovery: ${escapeHtml(error.message)}</div>`;
+    app.innerHTML = `<div class="empty">Impossibile caricare la ricerca regolamenti: ${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -2274,7 +2274,7 @@ function reviewCard(item) {
   const pending = item.status === "pending";
   const statusLabel = item.status === "approved"
     ? (item.decision_source === "policy" ? "Auto-approvato" : "Approvato")
-    : item.status === "rejected" ? "Rifiutato" : "Da revisionare";
+    : item.status === "rejected" ? "Rifiutato" : "Da verificare";
   const source = String(candidate.source_kind || "unknown").replaceAll("_", " ");
   const reasons = (item.policy_reasons || [])
     .map((reason) => `<span class="review-reason">${escapeHtml(reason)}</span>`)
@@ -2337,7 +2337,7 @@ async function renderReviews({reset = false} = {}) {
     reviewPendingOffset = 0;
     reviewDecidedOffset = 0;
   }
-  app.innerHTML = '<div class="empty">Caricamento coda di revisione…</div>';
+  app.innerHTML = '<div class="empty">Caricamento fonti da verificare…</div>';
   try {
     const [pendingData, decidedData] = await Promise.all([
       api(`/api/rulebook-reviews?status=pending&limit=${REVIEW_PAGE_SIZE}&offset=${reviewPendingOffset}`),
