@@ -1474,7 +1474,7 @@ def refresh_missing_bgg_metadata(
     database = get_database()
     database.initialize()
     catalog = Catalog(database)
-    identifiers = catalog.missing_metadata_ids(limit=limit)
+    identifiers = catalog.refreshable_metadata_ids(limit=limit)
     if not identifiers:
         return {"attempted": 0, "updated": 0, "remaining": 0, "items": []}
     try:
@@ -1493,7 +1493,7 @@ def refresh_missing_bgg_metadata(
     return {
         "attempted": len(identifiers),
         "updated": len(items),
-        "remaining": catalog.missing_metadata_count(),
+        "remaining": len(catalog.refreshable_metadata_ids(limit=20)),
         "items": items,
     }
 
