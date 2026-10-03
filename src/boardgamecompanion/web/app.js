@@ -284,7 +284,7 @@ async function api(url, options) {
 
 function setSettingsBusy(busy) {
   settingsBusy = busy;
-  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
+  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings, bggSyncSettingsNow]) {
     if (control) control.disabled = busy;
   }
   saveSettings.textContent = busy ? "Salvataggio…" : "Salva";
@@ -1468,11 +1468,17 @@ async function renderCatalog() {
         <h1>I tuoi giochi</h1>
         <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
       </div>
-      <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
-        <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
-        <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+      <div class="page-header-meta catalog-header-actions">
+        <div class="catalog-sync-control">
+          <button class="button button-ghost" id="catalogBggSync" type="button">↻ Sincronizza BGG</button>
+          <small class="muted" id="catalogBggSyncStatus"></small>
+        </div>
+        <div class="catalog-view-switch" aria-label="Vista catalogo">
+          <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+          <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+        </div>
       </div>
     </section>
 
@@ -1568,6 +1574,7 @@ async function renderCatalog() {
     renderStats(stats);
     renderCatalogData(catalog);
     backfillMissingMetadata();
+    checkBggCollectionSyncOnOpen();
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
       `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
@@ -1607,6 +1614,10 @@ function bindCatalogControls() {
     renderCatalog();
   });
 
+  document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
+    void runCatalogBggSync();
+  });
+
   document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
@@ -1626,6 +1637,98 @@ function bindCatalogControls() {
     window.localStorage.setItem("bgc.catalogView", "list");
     renderCatalog();
   });
+}
+
+function renderCatalogBggSyncStatus(data) {
+  const button = document.querySelector("#catalogBggSync");
+  const status = document.querySelector("#catalogBggSyncStatus");
+  if (!button || !status) return;
+  button.disabled = Boolean(data?.running);
+  if (!data?.configured) {
+    status.textContent = "Configura BGG";
+    return;
+  }
+  if (data.running) {
+    status.textContent = "Sincronizzazione…";
+    return;
+  }
+  if (data.last_error) {
+    status.textContent = "Ultima sync non riuscita";
+    return;
+  }
+  status.textContent = data.last_success_at
+    ? `Ultima: ${formatBggSyncTime(data.last_success_at)}`
+    : "Mai sincronizzato";
+}
+
+async function runCatalogBggSync() {
+  const button = document.querySelector("#catalogBggSync");
+  if (!button) return;
+  button.disabled = true;
+  renderCatalogBggSyncStatus({configured: true, running: true});
+  try {
+    const result = await api("/api/bgg-collection-sync/run", {method: "POST"});
+    const summary = result.result;
+    renderCatalogBggSyncStatus(result);
+    if (summary) {
+      showToast(
+        `BGG sincronizzato: ${summary.created_count} nuovi, ${summary.updated_count} aggiornati.`,
+      );
+    }
+    const stats = await api("/api/catalog/stats");
+    renderStats(stats);
+    state.offset = 0;
+    await refreshCatalog();
+  } catch (error) {
+    if (error.status === 409) {
+      showToast("Configura username e token BGG nelle impostazioni.", true);
+      void openSettingsDialog();
+    } else {
+      showToast(error.message, true);
+    }
+    try {
+      renderCatalogBggSyncStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {}
+  } finally {
+    if (document.querySelector("#catalogBggSync")) {
+      document.querySelector("#catalogBggSync").disabled = false;
+    }
+  }
+}
+
+async function checkBggCollectionSyncOnOpen() {
+  if (navigator.webdriver || window.location.pathname !== "/") return;
+  try {
+    const before = await api("/api/bgg-collection-sync");
+    renderCatalogBggSyncStatus(before);
+    if (!before.configured) return;
+
+    const check = await api("/api/bgg-collection-sync/check", {method: "POST"});
+    renderCatalogBggSyncStatus({...check, running: check.scheduled});
+    if (!check.scheduled) return;
+
+    const previousSuccess = before.last_success_at;
+    for (let attempt = 0; attempt < 12 && window.location.pathname === "/"; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      const current = await api("/api/bgg-collection-sync");
+      const finished =
+        current.last_success_at &&
+        current.last_success_at !== previousSuccess &&
+        !current.due;
+      renderCatalogBggSyncStatus({...current, running: !finished});
+      if (finished) {
+        const stats = await api("/api/catalog/stats");
+        renderStats(stats);
+        state.offset = 0;
+        await refreshCatalog();
+        showToast("Collezione BGG aggiornata automaticamente.");
+        break;
+      }
+      if (current.last_error) break;
+    }
+  } catch (_) {
+    // Automatic collection sync is opportunistic and must never block browsing.
+  }
 }
 
 async function loadCatalogData(signal) {
@@ -3144,6 +3247,10 @@ settingsForm.addEventListener("submit", (event) => {
 
 saveTestSettings.addEventListener("click", () => {
   void persistSettings({verifyAfter: true});
+});
+
+bggSyncSettingsNow.addEventListener("click", () => {
+  void runManualBggSync();
 });
 
 bggClearToken.addEventListener("change", () => {
