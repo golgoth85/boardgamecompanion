@@ -1353,13 +1353,27 @@ function groupCatalogItems(items) {
     return items.map((game) => ({game, expansions: []}));
   }
   const standaloneGames = items.filter((game) => game.item_type !== "expansion");
-  const byId = new Map(standaloneGames.map((game) => [game.bgg_id, {game, expansions: []}]));
+  const byId = new Map(
+    standaloneGames.map((game) => [Number(game.bgg_id), {game, expansions: []}]),
+  );
   const orphanIds = new Set();
 
   for (const game of items) {
     if (game.item_type !== "expansion") continue;
+
+    // The explicit BGG relationship is authoritative. If the base game is not
+    // in this sorted/page slice, keep the expansion collapsed instead of
+    // promoting it to a top-level card.
+    const explicitParent = Number(game.parent_bgg_id || 0);
+    if (explicitParent) {
+      const group = byId.get(explicitParent);
+      if (group) group.expansions.push(game);
+      continue;
+    }
+
+    // Legacy metadata can still fall back to the conservative title matcher.
     const parent = inferExpansionParent(game, standaloneGames);
-    if (parent) byId.get(parent.bgg_id).expansions.push(game);
+    if (parent) byId.get(Number(parent.bgg_id)).expansions.push(game);
     else orphanIds.add(game.bgg_id);
   }
 
@@ -1372,7 +1386,7 @@ function groupCatalogItems(items) {
       continue;
     }
     if (!emitted.has(game.bgg_id)) {
-      groups.push(byId.get(game.bgg_id));
+      groups.push(byId.get(Number(game.bgg_id)));
       emitted.add(game.bgg_id);
     }
   }
@@ -1785,6 +1799,8 @@ async function loadCatalogData(signal) {
   if (state.weight) params.set("weight", state.weight);
   if (state.maxMinutes) params.set("max_minutes", state.maxMinutes);
   if (state.minRating) params.set("min_rating", state.minRating);
+  if (state.category) params.set("category", state.category);
+  if (state.mechanic) params.set("mechanic", state.mechanic);
   return api(`/api/games?${params}`, signal ? {signal} : undefined);
 }
 
