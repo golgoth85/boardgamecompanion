@@ -3414,6 +3414,158 @@ async function renderFacetBrowser(kind) {
   }
 }
 
+
+function openCatalogAssistant() {
+  catalogAssistantResult.innerHTML =
+    '<p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>';
+  catalogAssistantQuestion.value = "";
+  catalogAssistantDialog.showModal();
+  window.setTimeout(() => catalogAssistantQuestion.focus(), 0);
+}
+
+function closeCatalogAssistantDialog() {
+  if (!askCatalogAssistant.disabled && catalogAssistantDialog.open) {
+    catalogAssistantDialog.close();
+  }
+}
+
+function renderCatalogAssistantResult(payload) {
+  const recommendations = payload.recommendations || [];
+  catalogAssistantResult.innerHTML = `
+    <div class="assistant-answer">
+      <p>${escapeHtml(payload.answer || "")}</p>
+    </div>
+    ${recommendations.length ? `
+      <div class="assistant-recommendations">
+        ${recommendations.map((item) => `
+          <a class="assistant-game-card" href="/games/${encodeURIComponent(item.bgg_id)}" data-nav>
+            <span class="assistant-game-title">
+              <strong>${escapeHtml(item.title)}</strong>
+              <small>${item.best_players ? `Ideale: ${escapeHtml(item.best_players)}` : "Gioco posseduto"}</small>
+            </span>
+            <span class="assistant-game-reason">${escapeHtml(item.reason)}</span>
+            <span class="assistant-game-meta">
+              ${item.rating ? `★ ${formatNumber(item.rating, 1)}` : ""}
+              ${item.weight ? ` · peso ${formatNumber(item.weight, 1)}` : ""}
+            </span>
+          </a>
+        `).join("")}
+      </div>
+    ` : '<p class="muted">Nessun titolo del catalogo soddisfa abbastanza bene la richiesta.</p>'}
+    <small class="assistant-provider">Provider: ${escapeHtml(payload.provider || "AI")} · ${escapeHtml(payload.model || "")}</small>
+  `;
+}
+
+async function submitCatalogAssistant() {
+  const query = catalogAssistantQuestion.value.trim();
+  if (!query || askCatalogAssistant.disabled) return;
+  askCatalogAssistant.disabled = true;
+  askCatalogAssistant.textContent = "Sto scegliendo…";
+  catalogAssistantResult.innerHTML = '<div class="assistant-thinking">Analizzo la tua ludoteca…</div>';
+  try {
+    const payload = await api("/api/catalog/assistant", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query}),
+    });
+    renderCatalogAssistantResult(payload);
+  } catch (error) {
+    catalogAssistantResult.innerHTML =
+      `<div class="integration-error">${escapeHtml(error.message)}</div>`;
+  } finally {
+    askCatalogAssistant.disabled = false;
+    askCatalogAssistant.textContent = "Chiedi all'AI";
+  }
+}
+
+function browseGameRow(game, index) {
+  const rank = game.bgg?.rank && Number(game.bgg.rank) > 0 ? `#${formatNumber(game.bgg.rank, 0)}` : "—";
+  return `
+    <a class="browse-game-row" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+      <span class="browse-rank">${index !== null ? index : rank}</span>
+      <span class="browse-cover">
+        ${game.bgg_metadata?.cover_url
+          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span>${escapeHtml(initials(game.title))}</span>`}
+      </span>
+      <span class="browse-game-title">
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
+      </span>
+      <span class="browse-score">${game.bgg?.average ? `★ ${formatNumber(game.bgg.average, 1)}` : "—"}</span>
+    </a>
+  `;
+}
+
+async function renderRankings() {
+  app.innerHTML = `
+    <section class="page-header browse-header">
+      <div>
+        <p class="eyebrow">Esplora</p>
+        <h1>Classifiche</h1>
+        <p class="page-lead">I giochi posseduti ordinati secondo la classifica generale BoardGameGeek.</p>
+      </div>
+    </section>
+    <section class="browse-panel" id="browseContent">${skeletons()}</section>
+  `;
+  try {
+    const params = new URLSearchParams({owned: "true", item_type: "standalone", sort: "rank_asc", limit: "100", offset: "0"});
+    const catalog = await api(`/api/games?${params}`);
+    document.querySelector("#browseContent").innerHTML = catalog.items.length
+      ? `<div class="browse-game-list">${catalog.items.map((game, index) => browseGameRow(game, index + 1)).join("")}</div>`
+      : '<div class="empty">Nessun gioco classificato.</div>';
+    document.title = "Classifiche · BoardGameCompanion";
+  } catch (error) {
+    document.querySelector("#browseContent").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function facetCard(item, kind) {
+  const icon = kind === "category" ? "◫" : "⌘";
+  return `
+    <button class="facet-card" type="button" data-facet-kind="${kind}" data-facet-name="${escapeHtml(item.name)}">
+      <span class="facet-icon" aria-hidden="true">${icon}</span>
+      <span><strong>${escapeHtml(item.name)}</strong><small>${formatNumber(item.count, 0)} giochi</small></span>
+      <span aria-hidden="true">→</span>
+    </button>
+  `;
+}
+
+async function renderFacets(kind) {
+  const isCategory = kind === "category";
+  app.innerHTML = `
+    <section class="page-header browse-header">
+      <div>
+        <p class="eyebrow">Esplora</p>
+        <h1>${isCategory ? "Generi" : "Meccaniche"}</h1>
+        <p class="page-lead">${isCategory
+          ? "Sfoglia la ludoteca per genere e ambientazione."
+          : "Parti dalla meccanica che vuoi portare al tavolo."}</p>
+      </div>
+    </section>
+    <section class="browse-panel" id="browseContent">${skeletons()}</section>
+  `;
+  try {
+    const facets = await api("/api/catalog/facets?limit=100");
+    const items = isCategory ? facets.categories : facets.mechanics;
+    document.querySelector("#browseContent").innerHTML = items.length
+      ? `<div class="facet-grid">${items.map((item) => facetCard(item, kind)).join("")}</div>`
+      : '<div class="empty">Metadati non ancora disponibili.</div>';
+    document.querySelectorAll("[data-facet-kind]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.category = button.dataset.facetKind === "category" ? button.dataset.facetName : "";
+        state.mechanic = button.dataset.facetKind === "mechanic" ? button.dataset.facetName : "";
+        state.offset = 0;
+        history.pushState({}, "", "/");
+        route();
+      });
+    });
+    document.title = `${isCategory ? "Generi" : "Meccaniche"} · BoardGameCompanion`;
+  } catch (error) {
+    document.querySelector("#browseContent").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function route() {
   closeSidebar();
   updateShellNavigation();
@@ -3507,6 +3659,10 @@ scannerPhoto?.addEventListener("change", () => {
   const file = scannerPhoto.files?.[0];
   if (file) void decodeScannerPhoto(file);
 });
+scannerPhoto?.addEventListener("change", () => {
+  const file = scannerPhoto.files?.[0];
+  if (file) void decodeScannerPhoto(file);
+});
 
 copyForm.addEventListener("submit", (event) => {
   void saveCopyEditor(event);
@@ -3543,6 +3699,26 @@ documentDialog.addEventListener("cancel", (event) => {
 documentDialog.addEventListener("close", resetDocumentDialog);
 documentFile.addEventListener("change", () => {
   documentFileName.textContent = documentFile.files?.[0]?.name || "Nessun file selezionato";
+});
+
+catalogAssistantButton?.addEventListener("click", () => {
+  closeSidebar();
+  openCatalogAssistant();
+});
+catalogAssistantForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitCatalogAssistant();
+});
+closeCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+cancelCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+catalogAssistantDialog?.addEventListener("cancel", (event) => {
+  if (askCatalogAssistant.disabled) event.preventDefault();
+});
+catalogAssistantDialog?.querySelectorAll("[data-assistant-example]").forEach((button) => {
+  button.addEventListener("click", () => {
+    catalogAssistantQuestion.value = button.dataset.assistantExample || "";
+    catalogAssistantQuestion.focus();
+  });
 });
 
 settingsButton.addEventListener("click", () => {
