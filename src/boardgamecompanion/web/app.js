@@ -1514,17 +1514,36 @@ function skeletons() {
 }
 
 async function renderCatalog() {
+  const activeFacet = state.category
+    ? `Genere: ${state.category}`
+    : state.mechanic
+    ? `Meccanica: ${state.mechanic}`
+    : "";
+
   app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
         <h1>I tuoi giochi</h1>
-        <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
+        <p class="page-lead">Trova rapidamente il gioco giusto per persone, tempo e serata.</p>
+        <div class="catalog-hero-actions">
+          <button class="assistant-home-button" id="catalogAssistantHome" type="button">
+            <span aria-hidden="true">✦</span>
+            <span><strong>Chiedi alla tua ludoteca</strong><small>Consigli su misura con l'AI</small></span>
+          </button>
+          ${activeFacet ? `
+            <button class="active-facet-chip" id="clearFacet" type="button">
+              ${escapeHtml(activeFacet)} <span aria-hidden="true">×</span>
+            </button>
+          ` : ""}
+        </div>
       </div>
       <div class="page-header-meta catalog-header-actions">
-        <div class="catalog-sync-control">
-          <button class="button button-ghost" id="catalogBggSync" type="button">↻ Sincronizza BGG</button>
-          <small class="muted" id="catalogBggSyncStatus"></small>
+        <div class="catalog-sync-inline" title="Sincronizzazione automatica BoardGameGeek">
+          <span class="status-dot" id="catalogBggSyncDot" aria-hidden="true"></span>
+          <span id="catalogBggSyncStatus">BGG</span>
+          <button class="sync-icon-button" id="catalogBggSync" type="button"
+                  aria-label="Sincronizza ora con BoardGameGeek" title="Sincronizza ora">↻</button>
         </div>
         <div class="catalog-view-switch" aria-label="Vista catalogo">
           <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
@@ -1546,7 +1565,7 @@ async function renderCatalog() {
       <div class="catalog-head catalog-workspace-head">
         <div>
           <h2 id="catalogGamesHeading">Collezione</h2>
-          <p class="section-subtitle">Ricerca semplice sempre visibile; i filtri avanzati restano a un clic.</p>
+          <p class="section-subtitle">Ricerca libera o filtri avanzati per trovare il tavolo giusto.</p>
         </div>
         <div class="catalog-head-actions">
           <label class="collapse-expansions-toggle">
@@ -1580,6 +1599,7 @@ async function renderCatalog() {
           <select id="sortFilter" aria-label="Ordina">
             <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
             <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Classifica BGG</option>
             <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
             <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
           </select>
@@ -1604,7 +1624,7 @@ async function renderCatalog() {
           <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(state.minRating)}"></label>
         </div>
         <div class="advanced-search-actions">
-          <p>“Età del giocatore” mostra i titoli con età consigliata BGG uguale o inferiore.</p>
+          <p>“Età del giocatore” usa l'età minima ufficiale indicata su BGG.</p>
           <button class="button button-ghost" id="resetAdvancedSearch" type="button">Azzera filtri avanzati</button>
         </div>
       </details>
@@ -1642,13 +1662,13 @@ function bindCatalogControls() {
     refreshCatalog();
   };
 
-  document.querySelector("#searchInput").addEventListener("input", (event) => {
+  document.querySelector("#searchInput")?.addEventListener("input", (event) => {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => refreshFrom("q", event.target.value), 260);
   });
-  document.querySelector("#typeFilter").addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
-  document.querySelector("#ownedFilter").addEventListener("change", (event) => refreshFrom("owned", event.target.value));
-  document.querySelector("#sortFilter").addEventListener("change", (event) => refreshFrom("sort", event.target.value));
+  document.querySelector("#typeFilter")?.addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
+  document.querySelector("#ownedFilter")?.addEventListener("change", (event) => refreshFrom("owned", event.target.value));
+  document.querySelector("#sortFilter")?.addEventListener("change", (event) => refreshFrom("sort", event.target.value));
 
   for (const [id, key] of [
     ["supportsPlayers", "supportsPlayers"],
@@ -1667,24 +1687,35 @@ function bindCatalogControls() {
     renderCatalog();
   });
 
+  document.querySelector("#clearFacet")?.addEventListener("click", () => {
+    state.category = "";
+    state.mechanic = "";
+    state.offset = 0;
+    renderCatalog();
+  });
+
+  document.querySelector("#catalogAssistantHome")?.addEventListener("click", () => {
+    openCatalogAssistant();
+  });
+
   document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
     void runCatalogBggSync();
   });
 
-  document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
+  document.querySelector("#collapseExpansions")?.addEventListener("change", (event) => {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
     window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
     refreshCatalog();
   });
 
-  document.querySelector("#cardViewButton").addEventListener("click", () => {
+  document.querySelector("#cardViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "cards") return;
     state.catalogView = "cards";
     window.localStorage.setItem("bgc.catalogView", "cards");
     renderCatalog();
   });
-  document.querySelector("#listViewButton").addEventListener("click", () => {
+  document.querySelector("#listViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "list") return;
     state.catalogView = "list";
     window.localStorage.setItem("bgc.catalogView", "list");
@@ -1695,23 +1726,28 @@ function bindCatalogControls() {
 function renderCatalogBggSyncStatus(data) {
   const button = document.querySelector("#catalogBggSync");
   const status = document.querySelector("#catalogBggSyncStatus");
+  const dot = document.querySelector("#catalogBggSyncDot");
   if (!button || !status) return;
   button.disabled = Boolean(data?.running);
+  dot?.classList.remove("is-running", "is-error");
   if (!data?.configured) {
-    status.textContent = "Configura BGG";
+    status.textContent = "BGG non configurato";
+    dot?.classList.add("is-error");
     return;
   }
   if (data.running) {
-    status.textContent = "Sincronizzazione…";
+    status.textContent = "BGG · sync…";
+    dot?.classList.add("is-running");
     return;
   }
   if (data.last_error) {
-    status.textContent = "Ultima sync non riuscita";
+    status.textContent = "BGG · errore";
+    dot?.classList.add("is-error");
     return;
   }
   status.textContent = data.last_success_at
-    ? `Ultima: ${formatBggSyncTime(data.last_success_at)}`
-    : "Mai sincronizzato";
+    ? `BGG · ${formatBggSyncTime(data.last_success_at)}`
+    : "BGG · mai";
 }
 
 async function runCatalogBggSync() {
