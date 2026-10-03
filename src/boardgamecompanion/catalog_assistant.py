@@ -163,6 +163,47 @@ class CatalogAssistantService:
         if not rag.gemini_api_key:
             raise CatalogAssistantError("Gemini generation non è configurato")
         model = rag.gemini_generation_model
+        user_text = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        system_prompt = SYSTEM_PROMPT
+        request_body: dict[str, Any] = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_text}],
+                }
+            ],
+        }
+
+        if model == "gemini-3.8-flash":
+            # Live production diagnostics showed that Gemini 3.8 Flash returns
+            # HTTP 503 for structured-output requests while the same request in
+            # plain generation mode succeeds. Keep fail-closed JSON parsing and
+            # make the schema part of the trusted instruction instead.
+            system_prompt = (
+                SYSTEM_PROMPT
+                + "\nRestituisci SOLO un singolo oggetto JSON conforme esattamente "
+                + "al seguente schema, senza markdown o testo aggiuntivo: "
+                + json.dumps(ASSISTANT_SCHEMA, sort_keys=True, separators=(",", ":"))
+            )
+            request_body["systemInstruction"] = {
+                "parts": [{"text": system_prompt}]
+            }
+        else:
+            request_body["generationConfig"] = {
+                "temperature": 0.2,
+                "responseFormat": {
+                    "text": {
+                        "mimeType": "APPLICATION_JSON",
+                        "schema": ASSISTANT_SCHEMA,
+                    }
+                },
+            }
+
         try:
             with httpx.Client(
                 base_url=rag.gemini_url.rstrip("/"),
@@ -173,28 +214,7 @@ class CatalogAssistantService:
                 response = client.post(
                     f"/v1beta/models/{model}:generateContent",
                     headers={"x-goog-api-key": rag.gemini_api_key},
-                    json={
-                        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                        "contents": [
-                            {
-                                "role": "user",
-                                "parts": [
-                                    {
-                                        "text": json.dumps(
-                                            payload,
-                                            ensure_ascii=False,
-                                            separators=(",", ":"),
-                                        )
-                                    }
-                                ],
-                            }
-                        ],
-                        "generationConfig": {
-                            "temperature": 0.2,
-                            "responseMimeType": "application/json",
-                            "responseSchema": ASSISTANT_SCHEMA,
-                        },
-                    },
+                    json=request_body,
                 )
                 response.raise_for_status()
                 body = response.json()
