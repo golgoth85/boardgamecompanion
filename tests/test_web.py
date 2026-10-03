@@ -19,8 +19,8 @@ def test_web_home_is_served(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "BoardGameCompanion" in response.text
-    assert "Importa barcode" in response.text
-    assert 'id="settingsDialogTitle">Provider e AI<' in response.text
+    assert "Scansiona barcode" in response.text
+    assert 'id="settingsDialogTitle">Impostazioni<' in response.text
     assert "Priorità provider" in response.text
     assert 'id="bggApplicationToken"' in response.text
     assert "Floppy" not in response.text
@@ -34,7 +34,7 @@ def test_web_game_route_is_spa_entrypoint(tmp_path: Path) -> None:
         response = client.get("/games/900001")
 
     assert response.status_code == 200
-    assert "Importa BGG CSV" in response.text
+    assert "Importa CSV BGG" in response.text
 
 
 def test_web_reviews_route_is_spa_entrypoint(tmp_path: Path) -> None:
@@ -68,11 +68,14 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     _configure(tmp_path)
     with TestClient(app) as client:
         css = client.get("/static/app.css")
+        extra_css = client.get("/static/game-centric.css")
         js = client.get("/static/app.js")
         zxing = client.get("/static/zxing-browser-0.2.1.min.js")
 
     assert css.status_code == 200
     assert "--accent:" in css.text
+    assert extra_css.status_code == 200
+    assert ".assistant-dialog" in extra_css.text
     assert js.status_code == 200
     assert "renderCatalog" in js.text
     assert "renderReviews" in js.text

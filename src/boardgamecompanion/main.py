@@ -39,6 +39,10 @@ from boardgamecompanion.bgg_metadata import (
     BggMetadataStore,
 )
 from boardgamecompanion.catalog import SORT_SQL, Catalog
+from boardgamecompanion.catalog_assistant import (
+    CatalogAssistantError,
+    CatalogAssistantService,
+)
 from boardgamecompanion.chunk_index import (
     ChunkIndexConflict,
     ChunkIndexCorruptSource,
@@ -243,6 +247,10 @@ class BarcodeLookupRequest(BaseModel):
     barcode: str = Field(min_length=1, max_length=128)
 
 
+class CatalogAssistantPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+
+
 class BggSettingsUpdate(BaseModel):
     application_token: str | None = Field(default=None, max_length=4096)
     clear_application_token: bool = False
@@ -412,7 +420,7 @@ async def _bgg_metadata_backfill_once(stop_event: asyncio.Event) -> None:
     for _ in range(10):
         if stop_event.is_set():
             return
-        identifiers = await asyncio.to_thread(catalog.missing_metadata_ids, limit=20)
+        identifiers = await asyncio.to_thread(catalog.refreshable_metadata_ids, limit=20)
         if not identifiers:
             return
         try:
@@ -511,6 +519,21 @@ def web_discovery() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/rankings", include_in_schema=False)
+def web_rankings() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/categories", include_in_schema=False)
+def web_categories() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/mechanics", include_in_schema=False)
+def web_mechanics() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/health", tags=["system"])
 def health() -> dict[str, object]:
     return {
@@ -565,6 +588,8 @@ def list_games(
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     min_rating: float | None = Query(default=None, ge=0, le=10),
+    category: str | None = Query(default=None, min_length=1, max_length=500),
+    mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0),
@@ -581,10 +606,33 @@ def list_games(
         weight=weight,
         max_minutes=max_minutes,
         min_rating=min_rating,
+        category=category,
+        mechanic=mechanic,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
     )
+
+
+@app.get("/api/catalog/facets", tags=["catalog"])
+def get_catalog_facets(
+    limit: int = Query(default=40, ge=1, le=100),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return Catalog(database).facets(owned_only=True, limit=limit)
+
+
+@app.post("/api/catalog/assistant", tags=["catalog"])
+def ask_catalog_assistant(payload: CatalogAssistantPayload) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return CatalogAssistantService(database).ask(payload.query)
+    except CatalogAssistantError as exc:
+        detail = str(exc)
+        code = 503 if "configurato" in detail or "restituito" in detail else 400
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @app.get("/api/games/{bgg_id}", tags=["catalog"])
@@ -689,6 +737,7 @@ def list_game_documents(bgg_id: int) -> dict[str, object]:
     return {"bgg_id": bgg_id, "count": len(documents), "items": documents}
 
 
+
 @app.post("/api/games/{bgg_id}/documents", tags=["documents"])
 def upload_game_document(
     bgg_id: int,
@@ -729,11 +778,14 @@ def upload_game_document(
     except (InvalidPdf, DocumentError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if created:
-        with database.transaction(immediate=True) as connection:
-            enqueue_document_index(connection, str(document["id"]))
+    with database.transaction(immediate=True) as connection:
+        enqueue_document_index(connection, str(document["id"]))
 
-    return {"created": created, "document": document}
+    return {
+        "created": created,
+        "document": document,
+        "indexing": "queued",
+    }
 
 
 @app.get("/api/documents/{document_id}", tags=["documents"])

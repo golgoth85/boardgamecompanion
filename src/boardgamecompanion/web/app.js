@@ -6,12 +6,18 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 
 const shellSectionLabels = {
   catalog: "Ludoteca",
+  rankings: "Classifiche",
+  categories: "Generi",
+  mechanics: "Meccaniche",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
 };
 
 function shellRouteKey(pathname = window.location.pathname) {
+  if (/^\/rankings\/?$/.test(pathname)) return "rankings";
+  if (/^\/categories\/?$/.test(pathname)) return "categories";
+  if (/^\/mechanics\/?$/.test(pathname)) return "mechanics";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
   if (/^\/updates\/?$/.test(pathname)) return "updates";
   if (/^\/discovery\/?$/.test(pathname)) return "discovery";
@@ -47,6 +53,7 @@ function updateShellNavigation() {
 }
 const importDialog = document.querySelector("#importDialog");
 const importButton = document.querySelector("#importButton");
+const importSidebarButton = document.querySelector("#importSidebarButton");
 const importForm = document.querySelector("#importForm");
 const csvFile = document.querySelector("#csvFile");
 const fileName = document.querySelector("#fileName");
@@ -86,6 +93,8 @@ const cameraSection = document.querySelector("#cameraSection");
 const scannerVideo = document.querySelector("#scannerVideo");
 const toggleCamera = document.querySelector("#toggleCamera");
 const cameraHint = document.querySelector("#cameraHint");
+const scannerPhoto = document.querySelector("#scannerPhoto");
+const scannerPhotoButton = document.querySelector("#scannerPhotoButton");
 const settingsDialog = document.querySelector("#settingsDialog");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsForm = document.querySelector("#settingsForm");
@@ -93,6 +102,8 @@ const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
 const saveTestSettings = document.querySelector("#saveTestSettings");
+const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
+const settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
 const bggUsername = document.querySelector("#bggUsername");
 const bggApplicationToken = document.querySelector("#bggApplicationToken");
 const bggClearToken = document.querySelector("#bggClearToken");
@@ -139,6 +150,14 @@ const documentEdition = document.querySelector("#documentEdition");
 const documentSourceUrl = document.querySelector("#documentSourceUrl");
 const documentOfficial = document.querySelector("#documentOfficial");
 const documentResult = document.querySelector("#documentResult");
+const catalogAssistantButton = document.querySelector("#catalogAssistantButton");
+const catalogAssistantDialog = document.querySelector("#catalogAssistantDialog");
+const catalogAssistantForm = document.querySelector("#catalogAssistantForm");
+const catalogAssistantQuestion = document.querySelector("#catalogAssistantQuestion");
+const catalogAssistantResult = document.querySelector("#catalogAssistantResult");
+const closeCatalogAssistant = document.querySelector("#closeCatalogAssistant");
+const cancelCatalogAssistant = document.querySelector("#cancelCatalogAssistant");
+const askCatalogAssistant = document.querySelector("#askCatalogAssistant");
 const toast = document.querySelector("#toast");
 
 const state = {
@@ -158,6 +177,8 @@ const state = {
   weight: "",
   maxMinutes: "",
   minRating: "",
+  category: "",
+  mechanic: "",
 };
 
 let searchTimer;
@@ -301,6 +322,20 @@ function closeSettingsDialog() {
   }
 }
 
+function setSettingsTab(name = "general") {
+  const active = ["general", "rulebooks", "providers"].includes(name) ? name : "general";
+  settingsTabs.forEach((tab) => {
+    const selected = tab.dataset.settingsTab === active;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+  settingsPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== active;
+  });
+  if (saveSettings) saveSettings.hidden = active === "rulebooks";
+  if (saveTestSettings) saveTestSettings.hidden = active !== "general";
+}
+
 function applyBggSettingsToForm(data) {
   currentBggSettings = data;
   bggUsername.value = data.username || "";
@@ -347,7 +382,7 @@ function renderBggSyncSettingsStatus(data) {
   const everyHours = Math.round((data.interval_seconds || 21600) / 3600);
   const last = formatBggSyncTime(data.last_success_at);
   bggSyncSettingsStatus.textContent = data.last_error
-    ? `Ultimo tentativo con errore · ${escapeHtml(data.last_error)}`
+    ? `Ultimo tentativo con errore · ${String(data.last_error).slice(0, 160)}`
     : `Automatica ogni ${everyHours} h · ultima riuscita: ${last}`;
 }
 
@@ -438,10 +473,11 @@ function parseProviderOrder(value, label) {
   return result;
 }
 
-async function openSettingsDialog() {
+async function openSettingsDialog(initialTab = "general") {
   settingsDialog.querySelectorAll(".settings-provider").forEach((section) => {
-    section.open = section.id === "bggSettings";
+    section.open = false;
   });
+  setSettingsTab(initialTab);
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   setSettingsBusy(true);
@@ -706,7 +742,7 @@ async function saveDocumentUpload(event) {
     });
     const created = result.created === true;
     documentDialog.close();
-    showToast(created ? "Documento caricato." : "Documento già presente: nessun duplicato creato.");
+    showToast(created ? "Documento caricato. Indicizzazione automatica avviata." : "Documento già presente. Indicizzazione verificata.");
     if (window.location.pathname === `/games/${bggId}`) {
       await renderDetail(bggId);
     }
@@ -803,6 +839,36 @@ function configureZxingFormats(reader) {
     formats.UPC_A,
     formats.UPC_E,
   ].filter((value) => value !== undefined);
+}
+
+
+async function decodeScannerPhoto(file) {
+  if (!file || scannerBusy) return;
+  const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
+  if (!Reader) {
+    cameraHint.textContent = "Lettore barcode non disponibile.";
+    scannerManualFallback.open = true;
+    return;
+  }
+  const objectUrl = URL.createObjectURL(file);
+  scannerPhotoButton?.classList.add("is-busy");
+  cameraHint.textContent = "Leggo il barcode dalla foto…";
+  try {
+    const reader = new Reader();
+    configureZxingFormats(reader);
+    const result = await reader.decodeFromImageUrl(objectUrl);
+    const text = result?.getText?.() ?? result?.text;
+    if (!text) throw new Error("Barcode non trovato");
+    acceptScannerDetection(text);
+  } catch (_) {
+    cameraHint.textContent =
+      "Non riesco a leggere il barcode dalla foto. Riprova più vicino oppure inseriscilo manualmente.";
+    scannerManualFallback.open = true;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    if (scannerPhoto) scannerPhoto.value = "";
+    scannerPhotoButton?.classList.remove("is-busy");
+  }
 }
 
 async function startZxingScanner(existingStream = null, startId = scannerStartId) {
@@ -903,7 +969,7 @@ async function scanCameraFrame() {
 
 function scannerCameraErrorMessage(error) {
   if (!window.isSecureContext) {
-    return "La fotocamera richiede HTTPS (oppure localhost). Usa l’inserimento manuale.";
+    return "Il browser blocca la fotocamera live su HTTP. Usa “Scatta foto”: funziona anche nella LAN.";
   }
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
     return "Permesso fotocamera negato. Abilitalo nel browser oppure usa l’inserimento manuale.";
@@ -978,16 +1044,17 @@ function resetScanner() {
   scannerDetectionLocked = false;
   scannerImportCount = 0;
   scannerForm.reset();
+  if (scannerPhoto) scannerPhoto.value = "";
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inquadra il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
+    '<p class="muted">Inquadra o fotografa il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
   cameraSection.hidden = false;
   const cameraUsable = scannerCameraUsable();
   toggleCamera.disabled = !cameraUsable;
-  scannerManualFallback.open = !cameraUsable;
+  scannerManualFallback.open = false;
   cameraHint.textContent = cameraUsable
-    ? "La fotocamera partirà automaticamente."
+    ? "La fotocamera live partirà automaticamente; puoi anche scattare una foto."
     : scannerCameraErrorMessage();
 }
 
@@ -996,18 +1063,17 @@ function beginNextScannerImport() {
   scannerBusy = false;
   scannerDetectionLocked = false;
   scannerBarcode.value = "";
+  if (scannerPhoto) scannerPhoto.value = "";
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra il prossimo codice.</p>`;
+    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra o fotografa il prossimo codice.</p>`;
   cameraSection.hidden = false;
   if (scannerCameraUsable()) {
     cameraHint.textContent = "Fotocamera pronta per il prossimo barcode.";
     void startScannerCamera();
   } else {
-    scannerManualFallback.open = true;
     cameraHint.textContent = scannerCameraErrorMessage();
-    window.setTimeout(() => scannerBarcode.focus(), 0);
   }
 }
 
@@ -1034,7 +1100,7 @@ function openScannerDialog() {
   if (scannerCameraUsable()) {
     void startScannerCamera();
   } else {
-    window.setTimeout(() => scannerBarcode.focus(), 0);
+    cameraHint.textContent = scannerCameraErrorMessage();
   }
 }
 
@@ -1318,13 +1384,27 @@ function groupCatalogItems(items) {
     return items.map((game) => ({game, expansions: []}));
   }
   const standaloneGames = items.filter((game) => game.item_type !== "expansion");
-  const byId = new Map(standaloneGames.map((game) => [game.bgg_id, {game, expansions: []}]));
+  const byId = new Map(
+    standaloneGames.map((game) => [Number(game.bgg_id), {game, expansions: []}]),
+  );
   const orphanIds = new Set();
 
   for (const game of items) {
     if (game.item_type !== "expansion") continue;
+
+    // The explicit BGG relationship is authoritative. If the base game is not
+    // in this sorted/page slice, keep the expansion collapsed instead of
+    // promoting it to a top-level card.
+    const explicitParent = Number(game.parent_bgg_id || 0);
+    if (explicitParent) {
+      const group = byId.get(explicitParent);
+      if (group) group.expansions.push(game);
+      continue;
+    }
+
+    // Legacy metadata can still fall back to the conservative title matcher.
     const parent = inferExpansionParent(game, standaloneGames);
-    if (parent) byId.get(parent.bgg_id).expansions.push(game);
+    if (parent) byId.get(Number(parent.bgg_id)).expansions.push(game);
     else orphanIds.add(game.bgg_id);
   }
 
@@ -1337,7 +1417,7 @@ function groupCatalogItems(items) {
       continue;
     }
     if (!emitted.has(game.bgg_id)) {
-      groups.push(byId.get(game.bgg_id));
+      groups.push(byId.get(Number(game.bgg_id)));
       emitted.add(game.bgg_id);
     }
   }
@@ -1465,17 +1545,36 @@ function skeletons() {
 }
 
 async function renderCatalog() {
+  const activeFacet = state.category
+    ? `Genere: ${state.category}`
+    : state.mechanic
+    ? `Meccanica: ${state.mechanic}`
+    : "";
+
   app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
         <h1>I tuoi giochi</h1>
-        <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
+        <p class="page-lead">Trova rapidamente il gioco giusto per persone, tempo e serata.</p>
+        <div class="catalog-hero-actions">
+          <button class="assistant-home-button" id="catalogAssistantHome" type="button">
+            <span aria-hidden="true">✦</span>
+            <span><strong>Chiedi alla tua ludoteca</strong><small>Consigli su misura con l'AI</small></span>
+          </button>
+          ${activeFacet ? `
+            <button class="active-facet-chip" id="clearFacet" type="button">
+              ${escapeHtml(activeFacet)} <span aria-hidden="true">×</span>
+            </button>
+          ` : ""}
+        </div>
       </div>
       <div class="page-header-meta catalog-header-actions">
-        <div class="catalog-sync-control">
-          <button class="button button-ghost" id="catalogBggSync" type="button">↻ Sincronizza BGG</button>
-          <small class="muted" id="catalogBggSyncStatus"></small>
+        <div class="catalog-sync-inline" title="Sincronizzazione automatica BoardGameGeek">
+          <span class="status-dot" id="catalogBggSyncDot" aria-hidden="true"></span>
+          <span id="catalogBggSyncStatus">BGG</span>
+          <button class="sync-icon-button" id="catalogBggSync" type="button"
+                  aria-label="Sincronizza ora con BoardGameGeek" title="Sincronizza ora">↻</button>
         </div>
         <div class="catalog-view-switch" aria-label="Vista catalogo">
           <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
@@ -1497,7 +1596,7 @@ async function renderCatalog() {
       <div class="catalog-head catalog-workspace-head">
         <div>
           <h2 id="catalogGamesHeading">Collezione</h2>
-          <p class="section-subtitle">Ricerca semplice sempre visibile; i filtri avanzati restano a un clic.</p>
+          <p class="section-subtitle">Ricerca libera o filtri avanzati per trovare il tavolo giusto.</p>
         </div>
         <div class="catalog-head-actions">
           <label class="collapse-expansions-toggle">
@@ -1531,6 +1630,7 @@ async function renderCatalog() {
           <select id="sortFilter" aria-label="Ordina">
             <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
             <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Classifica BGG</option>
             <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
             <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
           </select>
@@ -1555,7 +1655,7 @@ async function renderCatalog() {
           <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(state.minRating)}"></label>
         </div>
         <div class="advanced-search-actions">
-          <p>“Età del giocatore” mostra i titoli con età consigliata BGG uguale o inferiore.</p>
+          <p>“Età del giocatore” usa l'età minima ufficiale indicata su BGG.</p>
           <button class="button button-ghost" id="resetAdvancedSearch" type="button">Azzera filtri avanzati</button>
         </div>
       </details>
@@ -1593,13 +1693,13 @@ function bindCatalogControls() {
     refreshCatalog();
   };
 
-  document.querySelector("#searchInput").addEventListener("input", (event) => {
+  document.querySelector("#searchInput")?.addEventListener("input", (event) => {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => refreshFrom("q", event.target.value), 260);
   });
-  document.querySelector("#typeFilter").addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
-  document.querySelector("#ownedFilter").addEventListener("change", (event) => refreshFrom("owned", event.target.value));
-  document.querySelector("#sortFilter").addEventListener("change", (event) => refreshFrom("sort", event.target.value));
+  document.querySelector("#typeFilter")?.addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
+  document.querySelector("#ownedFilter")?.addEventListener("change", (event) => refreshFrom("owned", event.target.value));
+  document.querySelector("#sortFilter")?.addEventListener("change", (event) => refreshFrom("sort", event.target.value));
 
   for (const [id, key] of [
     ["supportsPlayers", "supportsPlayers"],
@@ -1618,24 +1718,35 @@ function bindCatalogControls() {
     renderCatalog();
   });
 
+  document.querySelector("#clearFacet")?.addEventListener("click", () => {
+    state.category = "";
+    state.mechanic = "";
+    state.offset = 0;
+    renderCatalog();
+  });
+
+  document.querySelector("#catalogAssistantHome")?.addEventListener("click", () => {
+    openCatalogAssistant();
+  });
+
   document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
     void runCatalogBggSync();
   });
 
-  document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
+  document.querySelector("#collapseExpansions")?.addEventListener("change", (event) => {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
     window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
     refreshCatalog();
   });
 
-  document.querySelector("#cardViewButton").addEventListener("click", () => {
+  document.querySelector("#cardViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "cards") return;
     state.catalogView = "cards";
     window.localStorage.setItem("bgc.catalogView", "cards");
     renderCatalog();
   });
-  document.querySelector("#listViewButton").addEventListener("click", () => {
+  document.querySelector("#listViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "list") return;
     state.catalogView = "list";
     window.localStorage.setItem("bgc.catalogView", "list");
@@ -1646,23 +1757,28 @@ function bindCatalogControls() {
 function renderCatalogBggSyncStatus(data) {
   const button = document.querySelector("#catalogBggSync");
   const status = document.querySelector("#catalogBggSyncStatus");
+  const dot = document.querySelector("#catalogBggSyncDot");
   if (!button || !status) return;
   button.disabled = Boolean(data?.running);
+  dot?.classList.remove("is-running", "is-error");
   if (!data?.configured) {
-    status.textContent = "Configura BGG";
+    status.textContent = "BGG non configurato";
+    dot?.classList.add("is-error");
     return;
   }
   if (data.running) {
-    status.textContent = "Sincronizzazione…";
+    status.textContent = "BGG · sync…";
+    dot?.classList.add("is-running");
     return;
   }
   if (data.last_error) {
-    status.textContent = "Ultima sync non riuscita";
+    status.textContent = "BGG · errore";
+    dot?.classList.add("is-error");
     return;
   }
   status.textContent = data.last_success_at
-    ? `Ultima: ${formatBggSyncTime(data.last_success_at)}`
-    : "Mai sincronizzato";
+    ? `BGG · ${formatBggSyncTime(data.last_success_at)}`
+    : "BGG · mai";
 }
 
 async function runCatalogBggSync() {
@@ -1750,6 +1866,8 @@ async function loadCatalogData(signal) {
   if (state.weight) params.set("weight", state.weight);
   if (state.maxMinutes) params.set("max_minutes", state.maxMinutes);
   if (state.minRating) params.set("min_rating", state.minRating);
+  if (state.category) params.set("category", state.category);
+  if (state.mechanic) params.set("mechanic", state.mechanic);
   return api(`/api/games?${params}`, signal ? {signal} : undefined);
 }
 
@@ -2149,91 +2267,113 @@ function bindRagResultActions(bggId, documentItems) {
   });
 }
 
-async function refreshRagIndexStatus(bggId, documentItems) {
+async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   const status = document.querySelector("#ragIndexStatus");
+  const retry = document.querySelector(".rag-prepare-index");
   if (!status || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+
   if (!documentItems.length) {
-    status.className = "rag-index-status warning";
-    status.textContent = "Nessun documento archiviato: aggiungi almeno un PDF prima di preparare il RAG.";
+    status.className = "rag-index-status muted";
+    status.textContent = "L'indice verrà creato automaticamente quando aggiungi un regolamento.";
+    if (retry) retry.hidden = true;
     return;
   }
 
-  status.className = "rag-index-status";
-  status.textContent = "Controllo stato dell'indice…";
-  let ready = 0;
-  let configurationError = null;
-  let statusError = null;
-
-  await Promise.all(documentItems.map(async (item) => {
-    try {
-      const embedding = await api(`/api/documents/${encodeURIComponent(item.id)}/embeddings`);
-      if (embedding.current) ready += 1;
-    } catch (error) {
-      if (error.status === 503 && !configurationError) {
-        configurationError = error.message;
-      } else if (error.status !== 409 && !statusError) {
-        statusError = error.message;
-      }
+  try {
+    const jobs = await Promise.all(
+      documentItems.map((item) =>
+        api(`/api/document-index-jobs?document_id=${encodeURIComponent(item.id)}&limit=1`)
+      ),
+    );
+    const rows = jobs.flatMap((payload) => payload.items || []);
+    if (rows.length < documentItems.length) {
+      status.className = "rag-index-status";
+      status.textContent = "Indicizzazione automatica in preparazione…";
+      if (retry) retry.hidden = true;
+      if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
+      return;
     }
-  }));
 
-  if (!document.querySelector("#ragIndexStatus") || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
-  if (configurationError) {
+    const failed = rows.filter((item) => item.status === "failed");
+    const running = rows.filter((item) => item.status === "pending" || item.status === "running");
+    const ready = rows.filter((item) => item.status === "succeeded");
+
+    if (failed.length) {
+      status.className = "rag-index-status error";
+      status.textContent = "Indicizzazione non riuscita.";
+      if (retry) {
+        retry.hidden = false;
+        retry.disabled = false;
+        retry.textContent = "Riprova indicizzazione";
+      }
+      return;
+    }
+
+    if (running.length) {
+      status.className = "rag-index-status";
+      const stageLabels = {queued: "in coda", ingest: "lettura PDF", chunks: "preparazione testo", embeddings: "indicizzazione"};
+      const stage = running[0]?.stage;
+      status.textContent = `Indicizzazione automatica in corso${stage ? ` · ${stageLabels[stage] || stage}` : ""}…`;
+      if (retry) retry.hidden = true;
+      if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
+      return;
+    }
+
+    if (ready.length === documentItems.length) {
+      status.className = "rag-index-status success";
+      status.textContent = documentItems.length === 1
+        ? "✓ Regolamento indicizzato"
+        : `✓ ${documentItems.length} documenti indicizzati`;
+      if (retry) retry.hidden = true;
+      return;
+    }
+
+    status.className = "rag-index-status";
+    status.textContent = "Indicizzazione automatica in preparazione…";
+    if (retry) retry.hidden = true;
+  } catch (_) {
     status.className = "rag-index-status error";
-    status.innerHTML = `<strong>RAG non configurato.</strong> ${escapeHtml(configurationError)}`;
-    return;
+    status.textContent = "Non riesco a verificare l'indicizzazione.";
+    if (retry) {
+      retry.hidden = false;
+      retry.disabled = false;
+      retry.textContent = "Riprova indicizzazione";
+    }
   }
-  if (statusError) {
-    status.className = "rag-index-status error";
-    status.innerHTML = `<strong>Stato indice non disponibile.</strong> ${escapeHtml(statusError)}`;
-    return;
-  }
-  if (ready === documentItems.length) {
-    status.className = "rag-index-status success";
-    status.innerHTML = `<strong>Indice pronto.</strong> ${ready}/${documentItems.length} documenti indicizzati.`;
-    return;
-  }
-  status.className = "rag-index-status warning";
-  status.innerHTML = `<strong>Indice incompleto.</strong> ${ready}/${documentItems.length} documenti pronti.`;
 }
 
 async function prepareRagIndex(bggId, documentItems) {
   const panel = document.querySelector("#ragPanel");
   const status = document.querySelector("#ragIndexStatus");
+  const retry = document.querySelector(".rag-prepare-index");
   if (!panel || !status || panel.dataset.indexBusy === "true") return;
   if (!documentItems.length) {
-    showToast("Aggiungi prima un PDF al gioco.", true);
+    showToast("Aggiungi prima un regolamento PDF.", true);
     return;
   }
 
   panel.dataset.indexBusy = "true";
-  document.querySelectorAll(".rag-prepare-index").forEach((button) => {
-    button.disabled = true;
-  });
+  if (retry) {
+    retry.disabled = true;
+    retry.textContent = "Riprovo…";
+  }
+  status.className = "rag-index-status";
+  status.textContent = "Riprovo l'indicizzazione…";
   try {
-    for (let index = 0; index < documentItems.length; index += 1) {
-      const item = documentItems[index];
-      const encodedId = encodeURIComponent(item.id);
-      status.className = "rag-index-status";
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: estrazione testo…`;
-      await api(`/api/documents/${encodedId}/ingest`, {method: "POST"});
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: creazione chunk…`;
-      await api(`/api/documents/${encodedId}/chunks/build`, {method: "POST"});
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: embedding…`;
-      await api(`/api/documents/${encodedId}/embeddings/build`, {method: "POST"});
+    for (const item of documentItems) {
+      try {
+        await api(`/api/documents/${encodeURIComponent(item.id)}/auto-index/run`, {method: "POST"});
+      } catch (error) {
+        if (error.status !== 409) throw error;
+      }
     }
-    status.className = "rag-index-status success";
-    status.innerHTML = `<strong>Indice pronto.</strong> ${documentItems.length}/${documentItems.length} documenti indicizzati.`;
-    showToast("Indice dei documenti aggiornato.");
+    showToast("Indicizzazione completata.");
   } catch (error) {
-    status.className = "rag-index-status error";
-    status.innerHTML = `<strong>Preparazione indice non riuscita.</strong> ${escapeHtml(error.message)}`;
     showToast(error.message, true);
   } finally {
     panel.dataset.indexBusy = "false";
-    document.querySelectorAll(".rag-prepare-index").forEach((button) => {
-      button.disabled = false;
-    });
+    if (retry) retry.disabled = false;
+    await refreshRagIndexStatus(bggId, documentItems, {poll: false});
   }
 }
 
@@ -2379,9 +2519,10 @@ async function renderDetail(bggId) {
             </div>
             <dl class="game-summary-list game-facts-primary">
               <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
-              <div><dt>Età consigliata</dt><dd>${escapeHtml(ageText(game))}</dd></div>
+              <div><dt>Raccomandato per</dt><dd>${escapeHtml(bgg.recommended_players || "—")}</dd></div>
+              <div><dt>Ideale per</dt><dd>${escapeHtml(bgg.best_players || "—")}</dd></div>
+              <div><dt>Età ufficiale</dt><dd>${escapeHtml(ageText(game))}</dd></div>
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
-              ${bgg.best_players ? `<div><dt>Ideale in</dt><dd>${escapeHtml(bgg.best_players)}</dd></div>` : ""}
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
@@ -2453,10 +2594,14 @@ async function renderDetail(bggId) {
             </div>
 
             <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
-              <h3>Fai una domanda sul regolamento</h3>
-              <button class="button button-ghost rag-prepare-index visually-hidden" type="button"
-                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-              <div class="rag-index-status visually-hidden" id="ragIndexStatus" role="status">Controllo stato dell'indice…</div>
+              <div class="rag-heading-row">
+                <h3>Fai una domanda sul regolamento</h3>
+                <div class="rag-index-line">
+                  <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo indicizzazione…</span>
+                  <button class="button button-ghost rag-prepare-index" type="button" hidden
+                          ${documentItems.length ? "" : "disabled"}>Riprova indicizzazione</button>
+                </div>
+              </div>
               <form class="rag-query-form" id="ragQueryForm">
                 <label class="rag-question-field" for="ragQuestion">
                   <textarea id="ragQuestion" rows="3" maxlength="4000" required
@@ -2482,7 +2627,6 @@ async function renderDetail(bggId) {
             <summary><span><strong>Altri dati BGG</strong><small>Informazioni secondarie</small></span></summary>
             <div class="technical-game-content">
               <div class="fact-grid">
-                ${fact("Giocatori consigliati", bgg.recommended_players || "—")}
                 ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
                 ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
                 ${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
@@ -3109,6 +3253,167 @@ async function renderUpdates({reset = false} = {}) {
 }
 
 
+
+function openCatalogAssistant() {
+  closeSidebar();
+  catalogAssistantForm?.reset();
+  if (catalogAssistantResult) {
+    catalogAssistantResult.innerHTML =
+      '<p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>';
+  }
+  if (askCatalogAssistant) {
+    askCatalogAssistant.disabled = false;
+    askCatalogAssistant.textContent = "Chiedi all'AI";
+  }
+  if (!catalogAssistantDialog?.open) catalogAssistantDialog?.showModal();
+  window.setTimeout(() => catalogAssistantQuestion?.focus(), 0);
+}
+
+function closeCatalogAssistantDialog() {
+  if (catalogAssistantDialog?.open) catalogAssistantDialog.close();
+}
+
+function assistantRecommendationCard(item) {
+  const meta = [
+    item.best_players ? `ideale: ${item.best_players}` : null,
+    item.rating ? `★ ${formatNumber(item.rating, 1)}` : null,
+    item.weight ? `peso ${formatNumber(item.weight, 2)}` : null,
+  ].filter(Boolean).join(" · ");
+  const tags = [...(item.mechanics || []).slice(0, 3), ...(item.categories || []).slice(0, 2)]
+    .slice(0, 5);
+  return `
+    <a class="assistant-recommendation" href="/games/${encodeURIComponent(item.bgg_id)}" data-nav>
+      <div>
+        <strong>${escapeHtml(item.title)}</strong>
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+        <p>${escapeHtml(item.reason)}</p>
+      </div>
+      ${tags.length ? `<div class="assistant-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    </a>
+  `;
+}
+
+async function submitCatalogAssistant() {
+  const query = catalogAssistantQuestion?.value.trim();
+  if (!query || !catalogAssistantResult || !askCatalogAssistant) return;
+  askCatalogAssistant.disabled = true;
+  askCatalogAssistant.textContent = "Sto scegliendo…";
+  catalogAssistantResult.innerHTML =
+    '<div class="assistant-loading" role="status">Analizzo la tua ludoteca…</div>';
+  try {
+    const answer = await api("/api/catalog/assistant", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query}),
+    });
+    catalogAssistantResult.innerHTML = `
+      <div class="assistant-answer">${escapeHtml(answer.answer)}</div>
+      <div class="assistant-recommendations">
+        ${(answer.recommendations || []).length
+          ? answer.recommendations.map(assistantRecommendationCard).join("")
+          : '<p class="muted">Non ho trovato un gioco che soddisfi abbastanza bene i vincoli indicati.</p>'}
+      </div>
+      <small class="assistant-provider">AI: ${escapeHtml(answer.provider || "provider configurato")}</small>
+    `;
+  } catch (error) {
+    catalogAssistantResult.innerHTML = `
+      <div class="assistant-error">
+        <strong>Non riesco a completare la richiesta.</strong>
+        <p>${escapeHtml(error.message)}</p>
+      </div>
+    `;
+  } finally {
+    askCatalogAssistant.disabled = false;
+    askCatalogAssistant.textContent = "Chiedi all'AI";
+  }
+}
+
+async function renderRankings() {
+  app.innerHTML = `
+    <section class="page-header browse-page-header">
+      <div>
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Classifiche</h1>
+        <p class="page-lead">I giochi posseduti ordinati per posizione nella classifica generale BGG.</p>
+      </div>
+    </section>
+    <section class="browse-grid" id="browseGrid">${skeletons()}</section>
+  `;
+  try {
+    const catalog = await api("/api/games?owned=true&sort=rank_asc&limit=100&offset=0");
+    if (!/^\/rankings\/?$/.test(window.location.pathname)) return;
+    const games = (catalog.items || []).filter(
+      (game) => game.item_type !== "expansion" && Number(game.bgg?.rank || 0) > 0,
+    );
+    const grid = document.querySelector("#browseGrid");
+    grid.innerHTML = games.length
+      ? games.map((game, index) => `
+          <article class="ranking-card">
+            <span class="ranking-position">#${escapeHtml(game.bgg.rank)}</span>
+            ${gameCard(game, [])}
+            <small class="ranking-local-position">${index + 1}° nella tua ludoteca per rank BGG</small>
+          </article>
+        `).join("")
+      : '<div class="empty">Nessun ranking BGG disponibile.</div>';
+    document.title = "Classifiche · BoardGameCompanion";
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare le classifiche: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function renderFacetBrowser(kind) {
+  const isMechanic = kind === "mechanics";
+  const title = isMechanic ? "Meccaniche" : "Generi";
+  const key = isMechanic ? "mechanics" : "categories";
+  app.innerHTML = `
+    <section class="page-header browse-page-header">
+      <div>
+        <p class="eyebrow">Esplora la ludoteca</p>
+        <h1>${title}</h1>
+        <p class="page-lead">
+          ${isMechanic
+            ? "Sfoglia i giochi posseduti in base alle meccaniche registrate su BoardGameGeek."
+            : "Sfoglia i giochi posseduti in base ai generi e alle categorie BoardGameGeek."}
+        </p>
+      </div>
+    </section>
+    <section class="facet-browser" id="facetBrowser">${skeletons()}</section>
+  `;
+  try {
+    const facets = await api("/api/catalog/facets?limit=100");
+    if (window.location.pathname !== `/${kind}`) return;
+    const items = facets[key] || [];
+    const browser = document.querySelector("#facetBrowser");
+    browser.innerHTML = items.length
+      ? items.map((item) => `
+          <button class="facet-card" type="button"
+                  data-facet-kind="${isMechanic ? "mechanic" : "category"}"
+                  data-facet-value="${escapeHtml(item.name)}">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${formatNumber(item.count, 0)} giochi</span>
+          </button>
+        `).join("")
+      : '<div class="empty">I metadati BGG non contengono ancora dati sufficienti.</div>';
+    browser.querySelectorAll("[data-facet-kind]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.q = "";
+        state.itemType = "";
+        state.owned = "true";
+        state.category = button.dataset.facetKind === "category" ? button.dataset.facetValue : "";
+        state.mechanic = button.dataset.facetKind === "mechanic" ? button.dataset.facetValue : "";
+        state.offset = 0;
+        history.pushState({}, "", "/");
+        void renderCatalog();
+        updateShellNavigation();
+        window.scrollTo({top: 0});
+      });
+    });
+    document.title = `${title} · BoardGameCompanion`;
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare ${title.toLowerCase()}: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function route() {
   closeSidebar();
   updateShellNavigation();
@@ -3127,6 +3432,18 @@ async function route() {
     await renderDiscovery();
     return;
   }
+  if (/^\/rankings\/?$/.test(window.location.pathname)) {
+    await renderRankings();
+    return;
+  }
+  if (/^\/categories\/?$/.test(window.location.pathname)) {
+    await renderFacetBrowser("categories");
+    return;
+  }
+  if (/^\/mechanics\/?$/.test(window.location.pathname)) {
+    await renderFacetBrowser("mechanics");
+    return;
+  }
 
   const match = window.location.pathname.match(/^\/games\/(\d+)\/?$/);
   if (match) {
@@ -3143,6 +3460,8 @@ document.addEventListener("click", (event) => {
   const url = new URL(link.href, window.location.origin);
   if (url.origin !== window.location.origin) return;
   event.preventDefault();
+  if (settingsDialog?.open && link.closest("#settingsDialog")) settingsDialog.close();
+  if (catalogAssistantDialog?.open && link.closest("#catalogAssistantDialog")) catalogAssistantDialog.close();
   history.pushState({}, "", url.pathname);
   closeSidebar();
   route();
@@ -3184,6 +3503,10 @@ scannerForm.addEventListener("submit", (event) => {
 toggleCamera.addEventListener("click", () => {
   void startScannerCamera();
 });
+scannerPhoto?.addEventListener("change", () => {
+  const file = scannerPhoto.files?.[0];
+  if (file) void decodeScannerPhoto(file);
+});
 
 copyForm.addEventListener("submit", (event) => {
   void saveCopyEditor(event);
@@ -3224,7 +3547,29 @@ documentFile.addEventListener("change", () => {
 
 settingsButton.addEventListener("click", () => {
   closeSidebar();
-  void openSettingsDialog();
+  void openSettingsDialog("general");
+});
+settingsTabs.forEach((tab) => {
+  tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
+});
+
+catalogAssistantButton?.addEventListener("click", openCatalogAssistant);
+catalogAssistantForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitCatalogAssistant();
+});
+closeCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+cancelCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+catalogAssistantDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeCatalogAssistantDialog();
+});
+document.querySelectorAll("[data-assistant-example]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!catalogAssistantQuestion) return;
+    catalogAssistantQuestion.value = button.dataset.assistantExample || "";
+    catalogAssistantQuestion.focus();
+  });
 });
 
 closeSettings.addEventListener("click", closeSettingsDialog);
@@ -3274,6 +3619,11 @@ geminiClearApiKey.addEventListener("change", () => {
 });
 
 importButton.addEventListener("click", () => {
+  closeSidebar();
+  resetImportDialog();
+  importDialog.showModal();
+});
+importSidebarButton?.addEventListener("click", () => {
   closeSidebar();
   resetImportDialog();
   importDialog.showModal();

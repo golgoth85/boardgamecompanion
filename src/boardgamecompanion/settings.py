@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     rulebook_discovery_retry_max_seconds: int = Field(default=3 * 24 * 60 * 60, ge=60, le=365 * 24 * 60 * 60)
     rulebook_discovery_lease_seconds: int = Field(default=15 * 60, ge=60, le=3600)
     document_index_worker_enabled: bool = True
-    document_index_poll_seconds: float = Field(default=60.0, ge=5.0, le=86400.0)
+    document_index_poll_seconds: float = Field(default=5.0, ge=5.0, le=86400.0)
     document_index_batch_size: int = Field(default=1, ge=1, le=20)
     document_index_retry_base_seconds: int = Field(default=15 * 60, ge=60, le=86400)
     document_index_retry_max_seconds: int = Field(default=24 * 60 * 60, ge=60, le=30 * 24 * 60 * 60)

@@ -89,6 +89,8 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
         "7 Wonders: Duel",
         "7 Wonders Duello",
     ]
+    # Official minage wins over the community suggested_playerage poll.
+    assert item["metadata"]["bgg_recommended_age"] == "10"
     with store.database.connect() as connection:
         game = connection.execute(
             "SELECT min_players,max_players,bgg_average_weight,bgg_rank,bgg_best_players,bgg_recommended_age FROM board_games WHERE bgg_id=173346"
@@ -99,7 +101,7 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
         "bgg_average_weight": 2.2,
         "bgg_rank": 15,
         "bgg_best_players": "2",
-        "bgg_recommended_age": "8",
+        "bgg_recommended_age": "10",
     }
 
 

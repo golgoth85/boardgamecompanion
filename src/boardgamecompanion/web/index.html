@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#121826">
   <title>BoardGameCompanion</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/game-centric.css">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -27,46 +28,46 @@
             <span class="nav-icon" aria-hidden="true">▦</span>
             <span>Catalogo</span>
           </a>
+          <a class="nav-item" href="/rankings" data-nav data-route="rankings">
+            <span class="nav-icon" aria-hidden="true">★</span>
+            <span>Classifiche</span>
+          </a>
+          <a class="nav-item" href="/categories" data-nav data-route="categories">
+            <span class="nav-icon" aria-hidden="true">◫</span>
+            <span>Generi</span>
+          </a>
+          <a class="nav-item" href="/mechanics" data-nav data-route="mechanics">
+            <span class="nav-icon" aria-hidden="true">⌘</span>
+            <span>Meccaniche</span>
+          </a>
+          <button class="nav-item nav-button nav-ai" id="catalogAssistantButton" type="button">
+            <span class="nav-icon" aria-hidden="true">✦</span>
+            <span>Consigliami un gioco</span>
+          </button>
+        </section>
+
+        <section class="nav-group" aria-labelledby="navToolsLabel">
+          <p class="nav-group-label" id="navToolsLabel">Strumenti</p>
           <button class="nav-item nav-button" id="scannerButton" type="button">
             <span class="nav-icon" aria-hidden="true">⌁</span>
-            <span>Importa barcode</span>
+            <span>Scansiona barcode</span>
           </button>
-        </section>
-
-        <section class="nav-group" aria-labelledby="navCollectionLabel">
-          <p class="nav-group-label" id="navCollectionLabel">Collezione</p>
-          <button class="nav-item nav-button" id="importButton" type="button">
-            <span class="nav-icon" aria-hidden="true">⇩</span>
-            <span>Importa BGG CSV</span>
-          </button>
-        </section>
-
-        <section class="nav-group nav-group-admin" aria-labelledby="navAdminLabel">
-          <p class="nav-group-label" id="navAdminLabel">Amministrazione</p>
-          <p class="nav-subgroup-label">Regolamenti</p>
-          <a class="nav-item" href="/reviews" data-nav data-route="reviews">
-            <span class="nav-icon" aria-hidden="true">✓</span>
-            <span>Fonti da verificare</span>
-          </a>
-          <a class="nav-item" href="/discovery" data-nav data-route="discovery">
-            <span class="nav-icon" aria-hidden="true">⌕</span>
-            <span>Ricerca regolamenti</span>
-          </a>
-          <a class="nav-item" href="/updates" data-nav data-route="updates">
-            <span class="nav-icon" aria-hidden="true">↻</span>
-            <span>Aggiornamenti regolamenti</span>
-          </a>
-          <p class="nav-subgroup-label nav-subgroup-system">Sistema</p>
-          <button class="nav-item nav-button" id="settingsButton" type="button" aria-haspopup="dialog" aria-controls="settingsDialog">
-            <span class="nav-icon" aria-hidden="true">⚙</span>
-            <span>Provider e AI</span>
+          <button class="nav-item nav-button" id="importSidebarButton" type="button">
+            <span class="nav-icon" aria-hidden="true">⇧</span>
+            <span>Importa CSV BGG</span>
           </button>
         </section>
       </nav>
 
       <div class="sidebar-footer">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span>Backend locale</span>
+        <button class="sidebar-settings-button" id="settingsButton" type="button"
+                aria-haspopup="dialog" aria-controls="settingsDialog">
+          <span aria-hidden="true">⚙</span><span>Impostazioni</span>
+        </button>
+        <div class="sidebar-backend-status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Backend locale</span>
+        </div>
       </div>
     </aside>
 
@@ -119,178 +120,211 @@
     <form id="settingsForm">
       <div class="dialog-head settings-dialog-head">
         <div>
-          <p class="eyebrow">Sistema</p>
-          <h2 id="settingsDialogTitle">Provider e AI</h2>
-          <p class="muted settings-dialog-intro">Configura le integrazioni senza modificare i contratti di fiducia: il primo provider di ogni priorità è quello effettivo e non esiste fallback automatico.</p>
+          <p class="eyebrow">BoardGameCompanion</p>
+          <h2 id="settingsDialogTitle">Impostazioni</h2>
+          <p class="muted settings-dialog-intro">Collezione, regolamenti e provider in un unico spazio.</p>
         </div>
         <button class="icon-button" id="closeSettings" type="button" aria-label="Chiudi impostazioni">×</button>
       </div>
 
-      <section class="settings-core-card" aria-labelledby="ragPriorityTitle">
-        <div class="settings-section-head">
-          <div>
-            <p class="eyebrow">RAG</p>
-            <h3 id="ragPriorityTitle">Priorità provider</h3>
-          </div>
-          <span class="quiet-pill">Nessun fallback automatico</span>
-        </div>
-        <p class="muted">Inserisci i provider attivi separati da virgola, nell'ordine in cui devono essere considerati. Il primo è quello utilizzato.</p>
-        <div class="settings-grid">
-          <label class="settings-field">
-            <span>Embedding</span>
-            <input id="ragEmbeddingOrder" type="text" placeholder="lmstudio,ollama,gemini">
-          </label>
-          <label class="settings-field">
-            <span>Generation</span>
-            <input id="ragGenerationOrder" type="text" placeholder="lmstudio,gemini,ollama">
-          </label>
-        </div>
-      </section>
+      <div class="settings-tabs" role="tablist" aria-label="Sezioni impostazioni">
+        <button class="settings-tab is-active" id="settingsTabGeneral" type="button"
+                role="tab" aria-selected="true" data-settings-tab="general">Generale</button>
+        <button class="settings-tab" id="settingsTabRulebooks" type="button"
+                role="tab" aria-selected="false" data-settings-tab="rulebooks">Regolamenti</button>
+        <button class="settings-tab" id="settingsTabProviders" type="button"
+                role="tab" aria-selected="false" data-settings-tab="providers">AI e provider</button>
+      </div>
 
-      <div class="settings-provider-stack">
-        <details class="settings-provider" id="bggSettings" open>
-          <summary>
-            <span><strong>BoardGameGeek</strong><small>Metadati e import catalogo</small></span>
-            <span class="settings-provider-state">Configura</span>
-          </summary>
-          <div class="settings-provider-body">
-            <p class="muted">Il token viene salvato in /config e non viene mai restituito in chiaro dalla API.</p>
-            <div class="settings-grid">
-              <label class="settings-field copy-span-2">
-                <span>Username BGG</span>
-                <input id="bggUsername" type="text" autocomplete="username"
-                       placeholder="Il tuo username BoardGameGeek">
-                <small class="muted">Serve per sincronizzare automaticamente i giochi posseduti.</small>
-              </label>
-              <label class="settings-field copy-span-2">
-                <span>BGG Application Token</span>
-                <input id="bggApplicationToken" type="password" autocomplete="new-password"
-                       placeholder="Inserisci o sostituisci il token">
-                <small id="bggTokenHint" class="muted"></small>
-              </label>
-              <label class="settings-check copy-span-2" id="clearTokenRow" hidden>
-                <input id="bggClearToken" type="checkbox">
-                <span>Rimuovi il token BGG salvato</span>
-              </label>
+      <div class="settings-tab-panel" data-settings-panel="general">
+        <section class="settings-card" id="bggSettings">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">BoardGameGeek</p>
+              <h3>Collezione e sincronizzazione</h3>
             </div>
-            <div class="bgg-sync-settings">
-              <div>
-                <strong>Sincronizzazione collezione</strong>
-                <small id="bggSyncSettingsStatus" class="muted">Configura username e token per abilitarla.</small>
+            <span class="quiet-pill">Ogni 6 ore</span>
+          </div>
+          <p class="muted">La sincronizzazione automatica importa i giochi posseduti; il CSV resta disponibile come import manuale.</p>
+          <div class="settings-grid">
+            <label class="settings-field copy-span-2">
+              <span>Username BGG</span>
+              <input id="bggUsername" type="text" autocomplete="username"
+                     placeholder="Il tuo username BoardGameGeek">
+            </label>
+            <label class="settings-field copy-span-2">
+              <span>BGG Application Token</span>
+              <input id="bggApplicationToken" type="password" autocomplete="new-password"
+                     placeholder="Inserisci o sostituisci il token">
+              <small id="bggTokenHint" class="muted"></small>
+            </label>
+            <label class="settings-check copy-span-2" id="clearTokenRow" hidden>
+              <input id="bggClearToken" type="checkbox">
+              <span>Rimuovi il token BGG salvato</span>
+            </label>
+          </div>
+          <div class="bgg-sync-settings">
+            <div>
+              <strong>Sincronizzazione collezione</strong>
+              <small id="bggSyncSettingsStatus" class="muted">Configura username e token per abilitarla.</small>
+            </div>
+            <button class="button button-ghost" id="bggSyncSettingsNow" type="button">Sincronizza ora</button>
+          </div>
+          <div class="settings-inline-actions">
+            <button class="button button-ghost" id="importButton" type="button">Importa CSV BGG</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="settings-tab-panel" data-settings-panel="rulebooks" hidden>
+        <section class="settings-card">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Regolamenti</p>
+              <h3>Gestione fonti</h3>
+            </div>
+          </div>
+          <div class="settings-navigation-grid">
+            <a class="settings-nav-card" href="/reviews" data-nav>
+              <span aria-hidden="true">✓</span>
+              <strong>Fonti da verificare</strong>
+              <small>Approva o rifiuta le fonti trovate.</small>
+            </a>
+            <a class="settings-nav-card" href="/discovery" data-nav>
+              <span aria-hidden="true">⌕</span>
+              <strong>Ricerca regolamenti</strong>
+              <small>Controlla la ricerca automatica delle fonti.</small>
+            </a>
+            <a class="settings-nav-card" href="/updates" data-nav>
+              <span aria-hidden="true">↻</span>
+              <strong>Aggiornamenti</strong>
+              <small>Gestisci il controllo periodico dei regolamenti.</small>
+            </a>
+          </div>
+        </section>
+      </div>
+
+      <div class="settings-tab-panel" data-settings-panel="providers" hidden>
+        <section class="settings-core-card" aria-labelledby="ragPriorityTitle">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">AI</p>
+              <h3 id="ragPriorityTitle">Priorità provider</h3>
+            </div>
+            <span class="quiet-pill">Nessun fallback RAG automatico</span>
+          </div>
+          <p class="muted">Il primo provider di ogni priorità è quello effettivo per il RAG. L'assistente catalogo usa il provider generation attivo.</p>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span>Embedding</span>
+              <input id="ragEmbeddingOrder" type="text" placeholder="lmstudio,ollama,gemini">
+            </label>
+            <label class="settings-field">
+              <span>Generation</span>
+              <input id="ragGenerationOrder" type="text" placeholder="lmstudio,gemini,ollama">
+            </label>
+          </div>
+        </section>
+
+        <div class="settings-provider-stack">
+          <details class="settings-provider" id="ollamaSettings">
+            <summary>
+              <span><strong>Ollama</strong><small>Provider locale</small></span>
+              <span class="settings-provider-state">Configura</span>
+            </summary>
+            <div class="settings-provider-body">
+              <div class="settings-grid">
+                <label class="settings-field copy-span-2"><span>URL</span><input id="ollamaUrl" type="url" placeholder="http://host:11434"></label>
+                <label class="settings-field"><span>Modello embedding</span><input id="ollamaEmbeddingModel" type="text"></label>
+                <label class="settings-field"><span>Modello generation</span><input id="ollamaGenerationModel" type="text"></label>
               </div>
-              <button class="button button-ghost" id="bggSyncSettingsNow" type="button">Sincronizza adesso</button>
             </div>
-          </div>
-        </details>
+          </details>
 
-        <details class="settings-provider" id="ollamaSettings">
-          <summary>
-            <span><strong>Ollama</strong><small>Provider locale</small></span>
-            <span class="settings-provider-state">Configura</span>
-          </summary>
-          <div class="settings-provider-body">
-            <div class="settings-grid">
-              <label class="settings-field copy-span-2">
-                <span>URL</span>
-                <input id="ollamaUrl" type="url" placeholder="http://host:11434">
-              </label>
-              <label class="settings-field">
-                <span>Modello embedding</span>
-                <input id="ollamaEmbeddingModel" type="text">
-              </label>
-              <label class="settings-field">
-                <span>Modello generation</span>
-                <input id="ollamaGenerationModel" type="text">
-              </label>
+          <details class="settings-provider" id="lmstudioSettings">
+            <summary>
+              <span><strong>LM Studio</strong><small>Provider locale OpenAI-compatible</small></span>
+              <span class="settings-provider-state">Configura</span>
+            </summary>
+            <div class="settings-provider-body">
+              <div class="settings-grid">
+                <label class="settings-field copy-span-2"><span>URL</span><input id="lmstudioUrl" type="url" placeholder="http://192.168.1.249:1234"></label>
+                <label class="settings-field"><span>Modello embedding</span><input id="lmstudioEmbeddingModel" type="text"></label>
+                <label class="settings-field"><span>Modello generation</span><input id="lmstudioGenerationModel" type="text"></label>
+                <label class="settings-field copy-span-2">
+                  <span>API key (opzionale)</span>
+                  <input id="lmstudioApiKey" type="password" autocomplete="new-password" placeholder="Lascia vuoto per mantenerla invariata">
+                  <small id="lmstudioApiKeyHint" class="muted"></small>
+                </label>
+                <label class="settings-check copy-span-2" id="clearLmstudioApiKeyRow" hidden>
+                  <input id="lmstudioClearApiKey" type="checkbox"><span>Rimuovi la API key LM Studio salvata</span>
+                </label>
+                <label class="settings-field"><span>Timeout generation (s)</span><input id="lmstudioGenerationTimeout" type="number" min="1" max="900" step="1"></label>
+                <label class="settings-field"><span>Max token generation</span><input id="lmstudioGenerationMaxTokens" type="number" min="64" max="4096" step="1"></label>
+                <label class="settings-check copy-span-2"><input id="lmstudioDisableThinking" type="checkbox"><span>Disattiva thinking per Qwen3 durante le risposte RAG</span></label>
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
 
-        <details class="settings-provider" id="lmstudioSettings">
-          <summary>
-            <span><strong>LM Studio</strong><small>Provider locale OpenAI-compatible</small></span>
-            <span class="settings-provider-state">Configura</span>
-          </summary>
-          <div class="settings-provider-body">
-            <div class="settings-grid">
-              <label class="settings-field copy-span-2">
-                <span>URL</span>
-                <input id="lmstudioUrl" type="url" placeholder="http://192.168.1.249:1234">
-              </label>
-              <label class="settings-field">
-                <span>Modello embedding</span>
-                <input id="lmstudioEmbeddingModel" type="text">
-              </label>
-              <label class="settings-field">
-                <span>Modello generation</span>
-                <input id="lmstudioGenerationModel" type="text">
-              </label>
-              <label class="settings-field copy-span-2">
-                <span>API key (opzionale)</span>
-                <input id="lmstudioApiKey" type="password" autocomplete="new-password"
-                       placeholder="Lascia vuoto per mantenerla invariata">
-                <small id="lmstudioApiKeyHint" class="muted"></small>
-              </label>
-              <label class="settings-check copy-span-2" id="clearLmstudioApiKeyRow" hidden>
-                <input id="lmstudioClearApiKey" type="checkbox">
-                <span>Rimuovi la API key LM Studio salvata</span>
-              </label>
-              <label class="settings-field">
-                <span>Timeout generation (s)</span>
-                <input id="lmstudioGenerationTimeout" type="number" min="1" max="900" step="1">
-              </label>
-              <label class="settings-field">
-                <span>Max token generation</span>
-                <input id="lmstudioGenerationMaxTokens" type="number" min="64" max="4096" step="1">
-              </label>
-              <label class="settings-check copy-span-2">
-                <input id="lmstudioDisableThinking" type="checkbox">
-                <span>Disattiva thinking per Qwen3 durante le risposte RAG</span>
-              </label>
+          <details class="settings-provider" id="geminiSettings">
+            <summary>
+              <span><strong>Gemini</strong><small>Provider Google</small></span>
+              <span class="settings-provider-state">Configura</span>
+            </summary>
+            <div class="settings-provider-body">
+              <div class="settings-grid">
+                <label class="settings-field copy-span-2"><span>URL</span><input id="geminiUrl" type="url" placeholder="https://generativelanguage.googleapis.com"></label>
+                <label class="settings-field"><span>Modello embedding</span><input id="geminiEmbeddingModel" type="text"></label>
+                <label class="settings-field"><span>Modello generation</span><input id="geminiGenerationModel" type="text"></label>
+                <label class="settings-field copy-span-2">
+                  <span>Gemini API key</span>
+                  <input id="geminiApiKey" type="password" autocomplete="new-password" placeholder="Lascia vuoto per mantenerla invariata">
+                  <small id="geminiApiKeyHint" class="muted"></small>
+                </label>
+                <label class="settings-check copy-span-2" id="clearGeminiApiKeyRow" hidden>
+                  <input id="geminiClearApiKey" type="checkbox"><span>Rimuovi la Gemini API key salvata</span>
+                </label>
+              </div>
             </div>
-          </div>
-        </details>
-
-        <details class="settings-provider" id="geminiSettings">
-          <summary>
-            <span><strong>Gemini</strong><small>Provider Google</small></span>
-            <span class="settings-provider-state">Configura</span>
-          </summary>
-          <div class="settings-provider-body">
-            <div class="settings-grid">
-              <label class="settings-field copy-span-2">
-                <span>URL</span>
-                <input id="geminiUrl" type="url" placeholder="https://generativelanguage.googleapis.com">
-              </label>
-              <label class="settings-field">
-                <span>Modello embedding</span>
-                <input id="geminiEmbeddingModel" type="text">
-              </label>
-              <label class="settings-field">
-                <span>Modello generation</span>
-                <input id="geminiGenerationModel" type="text">
-              </label>
-              <label class="settings-field copy-span-2">
-                <span>Gemini API key</span>
-                <input id="geminiApiKey" type="password" autocomplete="new-password"
-                       placeholder="Lascia vuoto per mantenerla invariata">
-                <small id="geminiApiKeyHint" class="muted"></small>
-              </label>
-              <label class="settings-check copy-span-2" id="clearGeminiApiKeyRow" hidden>
-                <input id="geminiClearApiKey" type="checkbox">
-                <span>Rimuovi la Gemini API key salvata</span>
-              </label>
-            </div>
-          </div>
-        </details>
+          </details>
+        </div>
       </div>
 
       <div id="settingsResult" class="import-result settings-result" hidden></div>
-
       <div class="dialog-actions settings-actions">
-        <button class="button button-ghost" type="button" id="cancelSettings">Annulla</button>
+        <button class="button button-ghost" type="button" id="cancelSettings">Chiudi</button>
         <button class="button button-ghost" type="submit" id="saveSettings">Salva</button>
         <button class="button button-primary" type="button" id="saveTestSettings">Salva e verifica BGG</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="catalogAssistantDialog" class="dialog assistant-dialog" aria-labelledby="catalogAssistantTitle">
+    <form id="catalogAssistantForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Assistente ludoteca</p>
+          <h2 id="catalogAssistantTitle">Che cosa giochiamo?</h2>
+          <p class="muted">Descrivi persone, tempo, complessità o meccaniche desiderate.</p>
+        </div>
+        <button class="icon-button" id="closeCatalogAssistant" type="button" aria-label="Chiudi assistente">×</button>
+      </div>
+      <label class="assistant-question">
+        <span>La tua richiesta</span>
+        <textarea id="catalogAssistantQuestion" rows="4" maxlength="2000" required
+          placeholder="Es. Suggeriscimi un cooperativo ideale per 2–3 persone, con deckbuilding e non troppo impegnativo."></textarea>
+      </label>
+      <div class="assistant-examples" aria-label="Esempi">
+        <button type="button" data-assistant-example="Un gioco semplice per 2 persone, massimo 45 minuti.">2 giocatori · rapido</button>
+        <button type="button" data-assistant-example="Suggeriscimi un cooperativo per 2-3 persone, non troppo impegnativo.">Coop · 2–3</button>
+        <button type="button" data-assistant-example="Vorrei un gioco con deckbuilding, peso medio-basso e buona resa in 2.">Deckbuilding · in 2</button>
+      </div>
+      <div id="catalogAssistantResult" class="assistant-result">
+        <p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-ghost" id="cancelCatalogAssistant" type="button">Chiudi</button>
+        <button class="button button-primary" id="askCatalogAssistant" type="submit">Chiedi all'AI</button>
       </div>
     </form>
   </dialog>
@@ -374,8 +408,14 @@
 
     <div id="cameraSection" class="scanner-camera">
       <video id="scannerVideo" playsinline muted></video>
-      <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
-      <p id="cameraHint" class="muted">Inquadra EAN/UPC. Dopo l'assegnazione puoi passare subito al codice successivo.</p>
+      <div class="scanner-camera-actions">
+        <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
+        <label class="button button-primary scanner-photo-button" id="scannerPhotoButton">
+          Scatta foto
+          <input id="scannerPhoto" type="file" accept="image/*" capture="environment" hidden>
+        </label>
+      </div>
+      <p id="cameraHint" class="muted">Inquadra EAN/UPC. Su HTTP usa “Scatta foto”; non richiede accesso live alla fotocamera.</p>
     </div>
 
     <details id="scannerManualFallback" class="scanner-manual">
