@@ -26,6 +26,35 @@ Rules:
 """
 
 
+_ATTRIBUTION_FOOTER_RE = re.compile(
+    r"""(?is)
+    (?:\n|^)\s*
+    (?:[-–—]{1,3}\s*)?
+    (?:
+        descrizione\s+(?:tratta|fornita|adattata|ripresa)\s+
+        (?:dal|dallo|dalla|dall['’])\s*
+        (?:sito\s+(?:del|dello|della|dell['’])\s*)?
+        (?:editore|publisher|produttore)
+        |
+        (?:description|text)\s+(?:from|provided\s+by|courtesy\s+of)\s+
+        (?:the\s+)?(?:publisher|manufacturer)
+        |
+        (?:publisher['’]s\s+description|description\s+by\s+publisher)
+    )
+    [^\n]*\s*$
+    """
+)
+
+
+def _strip_attribution_footer(value: str) -> str:
+    text = value.strip()
+    previous = None
+    while text and text != previous:
+        previous = text
+        text = _ATTRIBUTION_FOOTER_RE.sub("", text).rstrip()
+    return text
+
+
 class DescriptionTranslationError(RuntimeError):
     pass
 
@@ -39,7 +68,7 @@ def _clean_source(value: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" *\n *", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()[:MAX_SOURCE_CHARS]
+    return _strip_attribution_footer(text)[:MAX_SOURCE_CHARS]
 
 
 def _source_hash(value: str) -> str:
@@ -49,7 +78,7 @@ def _source_hash(value: str) -> str:
 def _validate_translation(value: Any) -> str:
     if not isinstance(value, str):
         raise DescriptionTranslationError("Translation provider returned invalid text")
-    text = value.strip()
+    text = _strip_attribution_footer(value)
     if not text:
         raise DescriptionTranslationError("Translation provider returned empty text")
     if len(text) > MAX_TRANSLATION_CHARS:
