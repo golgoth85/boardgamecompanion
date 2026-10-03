@@ -2125,21 +2125,21 @@ async function ensureItalianDescription(bggId) {
   const node = document.querySelector("#gameDescriptionText");
   if (!node?.isConnected || node.dataset.ready === "true") return;
   try {
-    let status = await api(\`/api/games/\${bggId}/description-it\`);
+    let status = await api(`/api/games/${bggId}/description-it`);
     if (!status.source_available) {
-      const metadata = await api(\`/api/games/\${bggId}/bgg-metadata/refresh\`, {method: "POST"});
+      const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
       const cover = document.querySelector(".game-summary-cover .detail-cover");
       if (cover?.isConnected && metadata.cover_url) {
-        cover.innerHTML = \`<img class="cover-image" src="\${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">\`;
+        cover.innerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
       }
-      status = await api(\`/api/games/\${bggId}/description-it\`);
+      status = await api(`/api/games/${bggId}/description-it`);
     }
     if (status.translation?.translated_text) {
       node.textContent = status.translation.translated_text;
       node.dataset.ready = "true";
       return;
     }
-    const translated = await api(\`/api/games/\${bggId}/description-it/translate\`, {method: "POST"});
+    const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
     if (translated.translation?.translated_text && node.isConnected) {
       node.textContent = translated.translation.translated_text;
       node.dataset.ready = "true";
@@ -2151,20 +2151,20 @@ async function ensureItalianDescription(bggId) {
   }
 }
 
-async async function renderDetail(bggId) {
-  app.innerHTML = \`
+async function renderDetail(bggId) {
+  app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
     <section class="game-page game-page-loading">
       <div class="game-summary-rail"><div class="skeleton"></div></div>
       <div class="game-main"><div class="skeleton"></div></div>
     </section>
-  \`;
+  `;
   const requestedPath = window.location.pathname;
   try {
     const [game, copies, documents] = await Promise.all([
-      api(\`/api/games/\${bggId}\`),
-      api(\`/api/games/\${bggId}/copies\`),
-      api(\`/api/games/\${bggId}/documents\`),
+      api(`/api/games/${bggId}`),
+      api(`/api/games/${bggId}/copies`),
+      api(`/api/games/${bggId}/documents`),
     ]);
     if (window.location.pathname !== requestedPath) return;
 
@@ -2179,38 +2179,38 @@ async async function renderDetail(bggId) {
     const description = italianDescription
       ? escapeHtml(italianDescription).replace(/\r?\n/g, "<br>")
       : "Traduzione italiana in preparazione…";
-    const copyLabel = copyItems.length === 1 ? "1 copia registrata" : \`\${copyItems.length} copie registrate\`;
+    const copyLabel = copyItems.length === 1 ? "1 copia registrata" : `${copyItems.length} copie registrate`;
     const firstRulebook = rulebooks[0] || null;
 
-    app.innerHTML = \`
+    app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
 
       <section class="game-page game-centric-detail">
         <aside class="game-summary-rail" aria-label="Riepilogo gioco">
           <div class="game-summary-cover">
             <div class="detail-cover">
-              \${metadata.cover_url
-                ? \`<img class="cover-image" src="\${escapeHtml(metadata.cover_url)}" alt="Cover di \${escapeHtml(game.title)}" referrerpolicy="no-referrer">\`
-                : \`<span class="cover-initials">\${escapeHtml(initials(game.title))}</span>\`}
+              ${metadata.cover_url
+                ? `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+                : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
             </div>
           </div>
 
           <div class="game-summary-card">
             <div class="game-summary-badges">
-              <span class="badge">\${type}</span>
-              \${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
-              \${game.year_published ? \`<span class="badge">\${game.year_published}</span>\` : ""}
+              <span class="badge">${type}</span>
+              ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
+              ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             </div>
             <dl class="game-summary-list game-facts-primary">
-              <div><dt>Giocatori</dt><dd>\${escapeHtml(playerText(game))}</dd></div>
-              <div><dt>Età consigliata</dt><dd>\${escapeHtml(ageText(game))}</dd></div>
-              <div><dt>Durata</dt><dd>\${escapeHtml(timeText(game))}</dd></div>
-              \${bgg.best_players ? \`<div><dt>Ideale in</dt><dd>\${escapeHtml(bgg.best_players)}</dd></div>\` : ""}
-              <div><dt>Complessità</dt><dd>\${bgg.average_weight ? \`\${formatNumber(bgg.average_weight, 2)} / 5\` : "—"}</dd></div>
-              <div><dt>Rating BGG</dt><dd>\${bgg.average ? \`★ \${formatNumber(bgg.average, 2)}\` : "—"}</dd></div>
+              <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
+              <div><dt>Età consigliata</dt><dd>${escapeHtml(ageText(game))}</dd></div>
+              <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
+              ${bgg.best_players ? `<div><dt>Ideale in</dt><dd>${escapeHtml(bgg.best_players)}</dd></div>` : ""}
+              <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
+              <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
             <a class="external-link game-bgg-link"
-               href="https://boardgamegeek.com/boardgame/\${game.bgg_id}"
+               href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
                target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
           </div>
         </aside>
@@ -2218,10 +2218,10 @@ async async function renderDetail(bggId) {
         <article class="game-main detail-main">
           <header class="game-header game-header-player">
             <div>
-              <p class="eyebrow">BGG #\${game.bgg_id}</p>
-              <h1>\${escapeHtml(game.title)}</h1>
-              \${game.original_title && game.original_title !== game.title
-                ? \`<p class="game-original-title">\${escapeHtml(game.original_title)}</p>\`
+              <p class="eyebrow">BGG #${game.bgg_id}</p>
+              <h1>${escapeHtml(game.title)}</h1>
+              ${game.original_title && game.original_title !== game.title
+                ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
                 : ""}
             </div>
             <div class="game-primary-actions">
@@ -2232,27 +2232,27 @@ async async function renderDetail(bggId) {
           <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
-            <div class="game-description-text" id="gameDescriptionText" data-ready="\${italianDescription ? "true" : "false"}">\${description}</div>
+            <div class="game-description-text" id="gameDescriptionText" data-ready="${italianDescription ? "true" : "false"}">${description}</div>
           </section>
 
           <section class="copy-compact-panel" aria-label="Copie fisiche">
             <div class="copy-compact-summary">
               <div>
                 <strong>La tua copia</strong>
-                <span>\${copyItems.length ? escapeHtml(copyLabel) : "Nessuna copia registrata"}</span>
+                <span>${copyItems.length ? escapeHtml(copyLabel) : "Nessuna copia registrata"}</span>
               </div>
               <button class="button button-ghost" id="addPhysicalCopySecondary" type="button">
-                \${copyItems.length ? "+ Aggiungi altra copia" : "+ Aggiungi copia"}
+                ${copyItems.length ? "+ Aggiungi altra copia" : "+ Aggiungi copia"}
               </button>
             </div>
-            \${copyItems.length ? \`
+            ${copyItems.length ? `
               <details class="copy-details-disclosure">
-                <summary>Gestisci \${escapeHtml(copyLabel)}</summary>
+                <summary>Gestisci ${escapeHtml(copyLabel)}</summary>
                 <div class="physical-copy-list" id="physicalCopyList">
-                  \${copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")}
+                  ${copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")}
                 </div>
               </details>
-            \` : '<div id="physicalCopyList" hidden></div>'}
+            ` : '<div id="physicalCopyList" hidden></div>'}
           </section>
 
           <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
@@ -2261,22 +2261,22 @@ async async function renderDetail(bggId) {
                 <p class="eyebrow">Regolamento</p>
                 <h2 id="rulesWorkspaceTitle">Regole</h2>
               </div>
-              <span class="rulebook-presence \${rulebooks.length ? "is-present" : "is-missing"}">
-                \${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
+              <span class="rulebook-presence ${rulebooks.length ? "is-present" : "is-missing"}">
+                ${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
               </span>
             </div>
 
             <div class="simple-rulebook-actions">
               <button class="button button-primary" id="rulebookSearchAction" type="button">Cerca automaticamente</button>
               <button class="button button-ghost" id="addDocument" type="button">Carica PDF</button>
-              \${firstRulebook ? \`<a class="button button-ghost" href="/api/documents/\${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri regolamento</a>\` : ""}
+              ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri regolamento</a>` : ""}
             </div>
             <p id="gameDiscoveryStatus" hidden></p>
 
             <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
               <h3>Fai una domanda sul regolamento</h3>
               <button class="button button-ghost rag-prepare-index visually-hidden" type="button"
-                      \${documentItems.length ? "" : "disabled"}>Prepara indice</button>
+                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
               <div class="rag-index-status visually-hidden" id="ragIndexStatus" role="status">Controllo stato dell'indice…</div>
               <form class="rag-query-form" id="ragQueryForm">
                 <label class="rag-question-field" for="ragQuestion">
@@ -2303,16 +2303,16 @@ async async function renderDetail(bggId) {
             <summary><span><strong>Altri dati BGG</strong><small>Informazioni secondarie</small></span></summary>
             <div class="technical-game-content">
               <div class="fact-grid">
-                \${fact("Giocatori consigliati", bgg.recommended_players || "—")}
-                \${fact("Dipendenza lingua", bgg.language_dependence || "—")}
-                \${fact("Ranking BGG", bgg.rank ? \`#\${formatNumber(bgg.rank, 0)}\` : "—")}
-                \${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
+                ${fact("Giocatori consigliati", bgg.recommended_players || "—")}
+                ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
+                ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
+                ${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
               </div>
             </div>
           </details>
         </article>
       </section>
-    \`;
+    `;
 
     const openCopy = () => openCopyEditor(game.bgg_id, game.title);
     document.querySelector("#addPhysicalCopy")?.addEventListener("click", openCopy);
@@ -2330,12 +2330,12 @@ async async function renderDetail(bggId) {
     setupGameDiscovery(game.bgg_id, game.title);
     ensureItalianDescription(game.bgg_id);
 
-    document.title = \`\${game.title} · BoardGameCompanion\`;
+    document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
-    app.innerHTML = \`
+    app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
-      <div class="empty">Impossibile caricare il gioco: \${escapeHtml(error.message)}</div>
-    \`;
+      <div class="empty">Impossibile caricare il gioco: ${escapeHtml(error.message)}</div>
+    `;
     showToast(error.message, true);
   }
 }
