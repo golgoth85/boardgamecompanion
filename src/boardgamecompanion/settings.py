@@ -70,9 +70,20 @@ class Settings(BaseSettings):
     document_index_retry_max_seconds: int = Field(default=24 * 60 * 60, ge=60, le=30 * 24 * 60 * 60)
     document_index_lease_seconds: int = Field(default=30 * 60, ge=60, le=7200)
     bgg_application_token: str | None = None
+    bgg_username: str | None = None
     bgg_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     bgg_min_interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
     bgg_metadata_refresh_seconds: int = Field(default=30 * 24 * 60 * 60, ge=86400, le=365 * 24 * 60 * 60)
+    bgg_collection_sync_interval_seconds: int = Field(
+        default=6 * 60 * 60,
+        ge=15 * 60,
+        le=7 * 24 * 60 * 60,
+    )
+    bgg_collection_sync_poll_seconds: float = Field(
+        default=5 * 60,
+        ge=30.0,
+        le=6 * 60 * 60,
+    )
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None

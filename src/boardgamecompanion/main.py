@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -24,6 +24,12 @@ from boardgamecompanion.app_settings import (
     resolve_rag_settings,
     save_bgg_settings,
     save_rag_settings,
+)
+from boardgamecompanion.bgg_collection_sync import (
+    BggCollectionClient,
+    BggCollectionConfig,
+    BggCollectionSyncError,
+    BggCollectionSyncService,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_metadata import (
@@ -135,6 +141,28 @@ def get_rulebook_update_service() -> RulebookUpdateService:
     )
 
 
+def get_bgg_collection_sync_service() -> BggCollectionSyncService | None:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    if not resolved.collection_sync_configured:
+        return None
+    client = BggCollectionClient(
+        BggCollectionConfig(
+            application_token=resolved.application_token or "",
+            username=resolved.username or "",
+            timeout_seconds=resolved.timeout_seconds,
+            min_interval_seconds=resolved.min_interval_seconds,
+        ),
+        rate_limiter=PersistentRateLimiter(database).acquire,
+    )
+    return BggCollectionSyncService(
+        database,
+        client,
+        interval_seconds=resolved.collection_sync_interval_seconds,
+    )
+
+
 def get_bgg_metadata_store() -> BggMetadataStore:
     database = get_database()
     database.initialize()
@@ -218,6 +246,7 @@ class BarcodeLookupRequest(BaseModel):
 class BggSettingsUpdate(BaseModel):
     application_token: str | None = Field(default=None, max_length=4096)
     clear_application_token: bool = False
+    username: str | None = Field(default=None, max_length=128)
 
 
 class RagSettingsUpdate(BaseModel):
@@ -319,6 +348,59 @@ async def _rulebook_discovery_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled rulebook discovery worker failed")
 
 
+def _run_bgg_collection_sync(force: bool = False) -> dict[str, object] | None:
+    service = get_bgg_collection_sync_service()
+    if service is None:
+        return None
+    result = service.sync(force=force)
+    if result is None:
+        return None
+
+    try:
+        get_rulebook_discovery_service().synchronize_catalog()
+    except Exception:
+        LOGGER.exception("BGG collection sync: rulebook catalog synchronization failed")
+
+    new_ids = list(result.created_bgg_ids)
+    if new_ids:
+        store = get_bgg_metadata_store()
+        for offset in range(0, len(new_ids), 20):
+            chunk = new_ids[offset:offset + 20]
+            try:
+                store.refresh_many(chunk, force=True)
+            except Exception:
+                LOGGER.exception(
+                    "BGG collection sync: metadata enrichment failed for %s",
+                    chunk,
+                )
+        for bgg_id in new_ids[:10]:
+            try:
+                get_description_translation_service().translate(bgg_id)
+            except Exception:
+                LOGGER.exception(
+                    "BGG collection sync: Italian description translation failed for BGG #%s",
+                    bgg_id,
+                )
+
+    return result.to_dict()
+
+
+async def _bgg_collection_sync_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(_run_bgg_collection_sync, False)
+        except Exception:
+            LOGGER.exception("Scheduled BGG collection sync failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.bgg_collection_sync_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 async def _bgg_metadata_backfill_once(stop_event: asyncio.Event) -> None:
     database = get_database()
     database.initialize()
@@ -363,6 +445,7 @@ async def lifespan(_: FastAPI):
 
     worker_tasks: list[asyncio.Task[None]] = []
     worker_stop = asyncio.Event()
+    worker_tasks.append(asyncio.create_task(_bgg_collection_sync_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
     if settings.rulebook_update_worker_enabled:
         try:
@@ -1426,8 +1509,67 @@ def update_bgg_settings(payload: BggSettingsUpdate) -> dict[str, object]:
         database,
         application_token=payload.application_token,
         clear_application_token=payload.clear_application_token,
+        username=payload.username,
     )
     return resolved.public_dict()
+
+
+@app.get("/api/bgg-collection-sync", tags=["imports"])
+def get_bgg_collection_sync_status() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    service = get_bgg_collection_sync_service()
+    if service is None:
+        return {
+            "configured": False,
+            "username": resolved.username,
+            "due": False,
+            "interval_seconds": resolved.collection_sync_interval_seconds,
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_error": None,
+            "last_result": None,
+        }
+    return {
+        "configured": True,
+        "username": resolved.username,
+        **service.status(),
+    }
+
+
+@app.post("/api/bgg-collection-sync/check", tags=["imports"])
+def check_bgg_collection_sync(background_tasks: BackgroundTasks) -> dict[str, object]:
+    service = get_bgg_collection_sync_service()
+    if service is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Configure both BGG username and Application Token first",
+        )
+    status = service.status()
+    scheduled = bool(status["due"])
+    if scheduled:
+        background_tasks.add_task(_run_bgg_collection_sync, False)
+    return {**status, "configured": True, "scheduled": scheduled}
+
+
+@app.post("/api/bgg-collection-sync/run", tags=["imports"])
+def run_bgg_collection_sync() -> dict[str, object]:
+    service = get_bgg_collection_sync_service()
+    if service is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Configure both BGG username and Application Token first",
+        )
+    try:
+        result = _run_bgg_collection_sync(True)
+    except BggCollectionSyncError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "configured": True,
+        "result": result,
+        **service.status(),
+    }
 
 
 @app.post("/api/settings/bgg/verify", tags=["settings"])

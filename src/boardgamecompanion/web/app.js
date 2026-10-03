@@ -93,10 +93,13 @@ const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
 const saveTestSettings = document.querySelector("#saveTestSettings");
+const bggUsername = document.querySelector("#bggUsername");
 const bggApplicationToken = document.querySelector("#bggApplicationToken");
 const bggClearToken = document.querySelector("#bggClearToken");
 const clearTokenRow = document.querySelector("#clearTokenRow");
 const bggTokenHint = document.querySelector("#bggTokenHint");
+const bggSyncSettingsStatus = document.querySelector("#bggSyncSettingsStatus");
+const bggSyncSettingsNow = document.querySelector("#bggSyncSettingsNow");
 const settingsResult = document.querySelector("#settingsResult");
 const ragEmbeddingOrder = document.querySelector("#ragEmbeddingOrder");
 const ragGenerationOrder = document.querySelector("#ragGenerationOrder");
@@ -284,6 +287,10 @@ function setSettingsBusy(busy) {
   for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
     if (control) control.disabled = busy;
   }
+  if (bggSyncSettingsNow) {
+    bggSyncSettingsNow.disabled =
+      busy || !currentBggSettings?.collection_sync_configured;
+  }
   saveSettings.textContent = busy ? "Salvataggio…" : "Salva";
   saveTestSettings.textContent = busy ? "Verifica…" : "Salva e verifica";
 }
@@ -296,8 +303,12 @@ function closeSettingsDialog() {
 
 function applyBggSettingsToForm(data) {
   currentBggSettings = data;
+  bggUsername.value = data.username || "";
   bggApplicationToken.value = "";
   bggClearToken.checked = false;
+
+  const usernameOverridden = Boolean(data.overrides?.username);
+  bggUsername.disabled = usernameOverridden;
 
   const overridden = Boolean(data.overrides?.application_token);
   bggApplicationToken.disabled = overridden;
@@ -315,6 +326,62 @@ function applyBggSettingsToForm(data) {
     bggTokenHint.textContent =
       "Nessun Application Token BGG configurato.";
     clearTokenRow.hidden = true;
+  }
+}
+
+function formatBggSyncTime(value) {
+  if (!value) return "mai";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "mai";
+  return date.toLocaleString("it-IT", {dateStyle: "short", timeStyle: "short"});
+}
+
+function renderBggSyncSettingsStatus(data) {
+  if (!bggSyncSettingsStatus || !bggSyncSettingsNow) return;
+  bggSyncSettingsNow.disabled = settingsBusy || !data?.configured;
+  if (!data?.configured) {
+    bggSyncSettingsStatus.textContent =
+      "Configura username e token BGG per abilitare la sincronizzazione automatica.";
+    return;
+  }
+  const everyHours = Math.round((data.interval_seconds || 21600) / 3600);
+  const last = formatBggSyncTime(data.last_success_at);
+  bggSyncSettingsStatus.textContent = data.last_error
+    ? `Ultimo tentativo con errore · ${escapeHtml(data.last_error)}`
+    : `Automatica ogni ${everyHours} h · ultima riuscita: ${last}`;
+}
+
+async function runManualBggSync() {
+  if (!bggSyncSettingsNow || bggSyncSettingsNow.disabled) return;
+  const original = bggSyncSettingsNow.textContent;
+  bggSyncSettingsNow.disabled = true;
+  bggSyncSettingsNow.textContent = "Sincronizzazione…";
+  try {
+    const result = await api("/api/bgg-collection-sync/run", {method: "POST"});
+    renderBggSyncSettingsStatus(result);
+    const summary = result.result;
+    if (summary) {
+      showToast(
+        `BGG sincronizzato: ${summary.created_count} nuovi, ${summary.updated_count} aggiornati.`,
+      );
+    } else {
+      showToast("Sincronizzazione BGG già in corso.");
+    }
+    if (window.location.pathname === "/") {
+      const stats = await api("/api/catalog/stats");
+      renderStats(stats);
+      state.offset = 0;
+      await refreshCatalog();
+    }
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    bggSyncSettingsNow.textContent = original;
+    try {
+      renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {
+      bggSyncSettingsNow.disabled = false;
+    }
   }
 }
 
@@ -379,12 +446,14 @@ async function openSettingsDialog() {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const [bggData, ragData] = await Promise.all([
+    const [bggData, ragData, syncData] = await Promise.all([
       api("/api/settings/bgg"),
       api("/api/settings/rag"),
+      api("/api/bgg-collection-sync"),
     ]);
     applyBggSettingsToForm(bggData);
     applyRagSettingsToForm(ragData);
+    renderBggSyncSettingsStatus(syncData);
     settingsDialog.showModal();
   } catch (error) {
     settingsDialog.showModal();
@@ -441,6 +510,7 @@ async function persistSettings({verifyAfter = false} = {}) {
     applyRagSettingsToForm(savedRag);
 
     const bggPayload = {
+      username: bggUsername.disabled ? currentBggSettings?.username || null : bggUsername.value.trim() || null,
       application_token:
         bggApplicationToken.disabled || !bggApplicationToken.value.trim()
           ? null
@@ -454,6 +524,9 @@ async function persistSettings({verifyAfter = false} = {}) {
       body: JSON.stringify(bggPayload),
     });
     applyBggSettingsToForm(savedBgg);
+    try {
+      renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {}
 
     settingsResult.hidden = false;
     settingsResult.innerHTML =
@@ -1399,11 +1472,17 @@ async function renderCatalog() {
         <h1>I tuoi giochi</h1>
         <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
       </div>
-      <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
-        <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
-        <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+      <div class="page-header-meta catalog-header-actions">
+        <div class="catalog-sync-control">
+          <button class="button button-ghost" id="catalogBggSync" type="button">↻ Sincronizza BGG</button>
+          <small class="muted" id="catalogBggSyncStatus"></small>
+        </div>
+        <div class="catalog-view-switch" aria-label="Vista catalogo">
+          <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+          <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+        </div>
       </div>
     </section>
 
@@ -1499,6 +1578,7 @@ async function renderCatalog() {
     renderStats(stats);
     renderCatalogData(catalog);
     backfillMissingMetadata();
+    checkBggCollectionSyncOnOpen();
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
       `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
@@ -1538,6 +1618,10 @@ function bindCatalogControls() {
     renderCatalog();
   });
 
+  document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
+    void runCatalogBggSync();
+  });
+
   document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
@@ -1557,6 +1641,98 @@ function bindCatalogControls() {
     window.localStorage.setItem("bgc.catalogView", "list");
     renderCatalog();
   });
+}
+
+function renderCatalogBggSyncStatus(data) {
+  const button = document.querySelector("#catalogBggSync");
+  const status = document.querySelector("#catalogBggSyncStatus");
+  if (!button || !status) return;
+  button.disabled = Boolean(data?.running);
+  if (!data?.configured) {
+    status.textContent = "Configura BGG";
+    return;
+  }
+  if (data.running) {
+    status.textContent = "Sincronizzazione…";
+    return;
+  }
+  if (data.last_error) {
+    status.textContent = "Ultima sync non riuscita";
+    return;
+  }
+  status.textContent = data.last_success_at
+    ? `Ultima: ${formatBggSyncTime(data.last_success_at)}`
+    : "Mai sincronizzato";
+}
+
+async function runCatalogBggSync() {
+  const button = document.querySelector("#catalogBggSync");
+  if (!button) return;
+  button.disabled = true;
+  renderCatalogBggSyncStatus({configured: true, running: true});
+  try {
+    const result = await api("/api/bgg-collection-sync/run", {method: "POST"});
+    const summary = result.result;
+    renderCatalogBggSyncStatus(result);
+    if (summary) {
+      showToast(
+        `BGG sincronizzato: ${summary.created_count} nuovi, ${summary.updated_count} aggiornati.`,
+      );
+    }
+    const stats = await api("/api/catalog/stats");
+    renderStats(stats);
+    state.offset = 0;
+    await refreshCatalog();
+  } catch (error) {
+    if (error.status === 409) {
+      showToast("Configura username e token BGG nelle impostazioni.", true);
+      void openSettingsDialog();
+    } else {
+      showToast(error.message, true);
+    }
+    try {
+      renderCatalogBggSyncStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {}
+  } finally {
+    if (document.querySelector("#catalogBggSync")) {
+      document.querySelector("#catalogBggSync").disabled = false;
+    }
+  }
+}
+
+async function checkBggCollectionSyncOnOpen() {
+  if (navigator.webdriver || window.location.pathname !== "/") return;
+  try {
+    const before = await api("/api/bgg-collection-sync");
+    renderCatalogBggSyncStatus(before);
+    if (!before.configured) return;
+
+    const check = await api("/api/bgg-collection-sync/check", {method: "POST"});
+    renderCatalogBggSyncStatus({...check, running: check.scheduled});
+    if (!check.scheduled) return;
+
+    const previousSuccess = before.last_success_at;
+    for (let attempt = 0; attempt < 12 && window.location.pathname === "/"; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      const current = await api("/api/bgg-collection-sync");
+      const finished =
+        current.last_success_at &&
+        current.last_success_at !== previousSuccess &&
+        !current.due;
+      renderCatalogBggSyncStatus({...current, running: !finished});
+      if (finished) {
+        const stats = await api("/api/catalog/stats");
+        renderStats(stats);
+        state.offset = 0;
+        await refreshCatalog();
+        showToast("Collezione BGG aggiornata automaticamente.");
+        break;
+      }
+      if (current.last_error) break;
+    }
+  } catch (_) {
+    // Automatic collection sync is opportunistic and must never block browsing.
+  }
 }
 
 async function loadCatalogData(signal) {
@@ -3075,6 +3251,10 @@ settingsForm.addEventListener("submit", (event) => {
 
 saveTestSettings.addEventListener("click", () => {
   void persistSettings({verifyAfter: true});
+});
+
+bggSyncSettingsNow.addEventListener("click", () => {
+  void runManualBggSync();
 });
 
 bggClearToken.addEventListener("change", () => {

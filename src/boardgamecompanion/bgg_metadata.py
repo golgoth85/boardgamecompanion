@@ -78,7 +78,7 @@ class BggApiClient:
         self._last_request_at = self._monotonic()
 
     def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
-        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}"
+        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
         response: httpx.Response | None = None
         content = b""
         for attempt in range(self.config.max_attempts):
@@ -176,6 +176,74 @@ def _attribute(node: ET.Element | None, name: str = "value") -> str | None:
     return value.strip() if value and value.strip() else None
 
 
+def _number_attribute(node: ET.Element | None, name: str = "value") -> float | None:
+    value = _attribute(node, name)
+    if value is None or value.upper() == "N/A":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
+    poll = next(
+        (
+            node
+            for node in item.findall("poll")
+            if node.attrib.get("name") == "suggested_numplayers"
+        ),
+        None,
+    )
+    if poll is None:
+        return None, None
+    best: list[str] = []
+    recommended: list[str] = []
+    for result_group in poll.findall("results"):
+        label = (result_group.attrib.get("numplayers") or "").strip()
+        if not label:
+            continue
+        votes = {
+            (node.attrib.get("value") or "").strip().casefold(): int(
+                node.attrib.get("numvotes") or "0"
+            )
+            for node in result_group.findall("result")
+            if (node.attrib.get("numvotes") or "0").isdigit()
+        }
+        best_votes = votes.get("best", 0)
+        recommended_votes = votes.get("recommended", 0)
+        not_recommended_votes = votes.get("not recommended", 0)
+        if best_votes > 0 and best_votes >= recommended_votes and best_votes >= not_recommended_votes:
+            best.append(label)
+        if best_votes + recommended_votes > not_recommended_votes:
+            recommended.append(label)
+    return (
+        ", ".join(best) or None,
+        ", ".join(recommended) or None,
+    )
+
+
+def _suggested_age(item: ET.Element) -> str | None:
+    poll = next(
+        (
+            node
+            for node in item.findall("poll")
+            if node.attrib.get("name") == "suggested_playerage"
+        ),
+        None,
+    )
+    candidates: list[tuple[int, str]] = []
+    if poll is not None:
+        for group in poll.findall("results"):
+            for node in group.findall("result"):
+                value = (node.attrib.get("value") or "").strip()
+                votes = node.attrib.get("numvotes") or "0"
+                if value and votes.isdigit():
+                    candidates.append((int(votes), value))
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+    return _attribute(item.find("minage"))
+
 def _parse_item(item: ET.Element) -> dict[str, Any]:
     try:
         observed_id = int(item.attrib["id"])
@@ -220,6 +288,15 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
             image = None
 
     year_text = _attribute(item.find("yearpublished"))
+    best_players, recommended_players = _suggested_players(item)
+    ratings = item.find("statistics/ratings")
+    rank = None
+    if ratings is not None:
+        for node in ratings.findall("ranks/rank"):
+            if node.attrib.get("name") == "boardgame":
+                rank_value = _number_attribute(node)
+                rank = int(rank_value) if rank_value is not None else None
+                break
     return {
         "bgg_id": observed_id,
         "title": title,
@@ -227,6 +304,19 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "alternate_titles": list(alternate_titles),
         "year_published": int(year_text) if year_text and year_text.isdigit() else None,
         "item_type": item.attrib.get("type"),
+        "min_players": int(value) if (value := _number_attribute(item.find("minplayers"))) is not None else None,
+        "max_players": int(value) if (value := _number_attribute(item.find("maxplayers"))) is not None else None,
+        "playing_time": int(value) if (value := _number_attribute(item.find("playingtime"))) is not None else None,
+        "min_play_time": int(value) if (value := _number_attribute(item.find("minplaytime"))) is not None else None,
+        "max_play_time": int(value) if (value := _number_attribute(item.find("maxplaytime"))) is not None else None,
+        "bgg_average": _number_attribute(ratings.find("average")) if ratings is not None else None,
+        "bgg_bayes_average": _number_attribute(ratings.find("bayesaverage")) if ratings is not None else None,
+        "bgg_average_weight": _number_attribute(ratings.find("averageweight")) if ratings is not None else None,
+        "bgg_rank": rank,
+        "bgg_num_owned": int(value) if ratings is not None and (value := _number_attribute(ratings.find("owned"))) is not None else None,
+        "bgg_best_players": best_players,
+        "bgg_recommended_players": recommended_players,
+        "bgg_recommended_age": _suggested_age(item),
         "cover_url": image,
         "description": description,
         "publishers": grouped.get("boardgamepublisher", []),
@@ -343,6 +433,37 @@ class BggMetadataStore:
             ).fetchone()
             if game is None:
                 raise BggMetadataError(f"Board game BGG #{bgg_id} not found")
+            board_updates = {
+                "title": metadata.get("title"),
+                "original_title": metadata.get("original_title"),
+                "year_published": metadata.get("year_published"),
+                "min_players": metadata.get("min_players"),
+                "max_players": metadata.get("max_players"),
+                "playing_time": metadata.get("playing_time"),
+                "min_play_time": metadata.get("min_play_time"),
+                "max_play_time": metadata.get("max_play_time"),
+                "bgg_average": metadata.get("bgg_average"),
+                "bgg_bayes_average": metadata.get("bgg_bayes_average"),
+                "bgg_average_weight": metadata.get("bgg_average_weight"),
+                "bgg_rank": metadata.get("bgg_rank"),
+                "bgg_num_owned": metadata.get("bgg_num_owned"),
+                "bgg_best_players": metadata.get("bgg_best_players"),
+                "bgg_recommended_players": metadata.get("bgg_recommended_players"),
+                "bgg_recommended_age": metadata.get("bgg_recommended_age"),
+            }
+            assignments: list[str] = []
+            params: list[Any] = []
+            for key, value in board_updates.items():
+                if value is not None:
+                    assignments.append(f"{key}=?")
+                    params.append(value)
+            if assignments:
+                assignments.append("updated_at=?")
+                params.extend([current_iso, game["id"]])
+                connection.execute(
+                    f"UPDATE board_games SET {', '.join(assignments)} WHERE id=?",
+                    params,
+                )
             connection.execute(
                 """INSERT INTO board_game_enrichments
                    (board_game_id,source,external_id,title,original_title,year_published,cover_url,description,

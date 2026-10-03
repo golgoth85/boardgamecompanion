@@ -1246,6 +1246,22 @@ def _description_translations(connection: sqlite3.Connection) -> None:
     )
 
 
+
+def _bgg_collection_sync_state(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bgg_collection_sync_state (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            last_error TEXT,
+            last_result_json TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1260,6 +1276,7 @@ MIGRATIONS = (
     Migration(11, "catalog-bgg-enrichment", _catalog_enrichment),
     Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
     Migration(13, "description-translations", _description_translations),
+    Migration(14, "bgg-collection-sync-state", _bgg_collection_sync_state),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
