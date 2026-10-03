@@ -741,7 +741,7 @@ async function saveDocumentUpload(event) {
     });
     const created = result.created === true;
     documentDialog.close();
-    showToast(created ? "Documento caricato." : "Documento già presente: nessun duplicato creato.");
+    showToast(created ? "Documento caricato. Indicizzazione automatica avviata." : "Documento già presente. Indicizzazione verificata.");
     if (window.location.pathname === `/games/${bggId}`) {
       await renderDetail(bggId);
     }
@@ -2266,91 +2266,113 @@ function bindRagResultActions(bggId, documentItems) {
   });
 }
 
-async function refreshRagIndexStatus(bggId, documentItems) {
+async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   const status = document.querySelector("#ragIndexStatus");
-  if (!status || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+  const retry = document.querySelector(".rag-prepare-index");
+  if (!status || window.location.pathname.replace(/\/+$/, "") !== \`/games/\${bggId}\`) return;
+
   if (!documentItems.length) {
-    status.className = "rag-index-status warning";
-    status.textContent = "Nessun documento archiviato: aggiungi almeno un PDF prima di preparare il RAG.";
+    status.className = "rag-index-status muted";
+    status.textContent = "L'indice verrà creato automaticamente quando aggiungi un regolamento.";
+    if (retry) retry.hidden = true;
     return;
   }
 
-  status.className = "rag-index-status";
-  status.textContent = "Controllo stato dell'indice…";
-  let ready = 0;
-  let configurationError = null;
-  let statusError = null;
-
-  await Promise.all(documentItems.map(async (item) => {
-    try {
-      const embedding = await api(`/api/documents/${encodeURIComponent(item.id)}/embeddings`);
-      if (embedding.current) ready += 1;
-    } catch (error) {
-      if (error.status === 503 && !configurationError) {
-        configurationError = error.message;
-      } else if (error.status !== 409 && !statusError) {
-        statusError = error.message;
-      }
+  try {
+    const jobs = await Promise.all(
+      documentItems.map((item) =>
+        api(\`/api/document-index-jobs?document_id=\${encodeURIComponent(item.id)}&limit=1\`)
+      ),
+    );
+    const rows = jobs.flatMap((payload) => payload.items || []);
+    if (rows.length < documentItems.length) {
+      status.className = "rag-index-status";
+      status.textContent = "Indicizzazione automatica in preparazione…";
+      if (retry) retry.hidden = true;
+      if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
+      return;
     }
-  }));
 
-  if (!document.querySelector("#ragIndexStatus") || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
-  if (configurationError) {
+    const failed = rows.filter((item) => item.status === "failed");
+    const running = rows.filter((item) => item.status === "pending" || item.status === "running");
+    const ready = rows.filter((item) => item.status === "succeeded");
+
+    if (failed.length) {
+      status.className = "rag-index-status error";
+      status.textContent = "Indicizzazione non riuscita.";
+      if (retry) {
+        retry.hidden = false;
+        retry.disabled = false;
+        retry.textContent = "Riprova indicizzazione";
+      }
+      return;
+    }
+
+    if (running.length) {
+      status.className = "rag-index-status";
+      const stageLabels = {queued: "in coda", ingest: "lettura PDF", chunks: "preparazione testo", embeddings: "indicizzazione"};
+      const stage = running[0]?.stage;
+      status.textContent = \`Indicizzazione automatica in corso\${stage ? \` · \${stageLabels[stage] || stage}\` : ""}…\`;
+      if (retry) retry.hidden = true;
+      if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
+      return;
+    }
+
+    if (ready.length === documentItems.length) {
+      status.className = "rag-index-status success";
+      status.textContent = documentItems.length === 1
+        ? "✓ Regolamento indicizzato"
+        : \`✓ \${documentItems.length} documenti indicizzati\`;
+      if (retry) retry.hidden = true;
+      return;
+    }
+
+    status.className = "rag-index-status";
+    status.textContent = "Indicizzazione automatica in preparazione…";
+    if (retry) retry.hidden = true;
+  } catch (_) {
     status.className = "rag-index-status error";
-    status.innerHTML = `<strong>RAG non configurato.</strong> ${escapeHtml(configurationError)}`;
-    return;
+    status.textContent = "Non riesco a verificare l'indicizzazione.";
+    if (retry) {
+      retry.hidden = false;
+      retry.disabled = false;
+      retry.textContent = "Riprova indicizzazione";
+    }
   }
-  if (statusError) {
-    status.className = "rag-index-status error";
-    status.innerHTML = `<strong>Stato indice non disponibile.</strong> ${escapeHtml(statusError)}`;
-    return;
-  }
-  if (ready === documentItems.length) {
-    status.className = "rag-index-status success";
-    status.innerHTML = `<strong>Indice pronto.</strong> ${ready}/${documentItems.length} documenti indicizzati.`;
-    return;
-  }
-  status.className = "rag-index-status warning";
-  status.innerHTML = `<strong>Indice incompleto.</strong> ${ready}/${documentItems.length} documenti pronti.`;
 }
 
 async function prepareRagIndex(bggId, documentItems) {
   const panel = document.querySelector("#ragPanel");
   const status = document.querySelector("#ragIndexStatus");
+  const retry = document.querySelector(".rag-prepare-index");
   if (!panel || !status || panel.dataset.indexBusy === "true") return;
   if (!documentItems.length) {
-    showToast("Aggiungi prima un PDF al gioco.", true);
+    showToast("Aggiungi prima un regolamento PDF.", true);
     return;
   }
 
   panel.dataset.indexBusy = "true";
-  document.querySelectorAll(".rag-prepare-index").forEach((button) => {
-    button.disabled = true;
-  });
+  if (retry) {
+    retry.disabled = true;
+    retry.textContent = "Riprovo…";
+  }
+  status.className = "rag-index-status";
+  status.textContent = "Riprovo l'indicizzazione…";
   try {
-    for (let index = 0; index < documentItems.length; index += 1) {
-      const item = documentItems[index];
-      const encodedId = encodeURIComponent(item.id);
-      status.className = "rag-index-status";
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: estrazione testo…`;
-      await api(`/api/documents/${encodedId}/ingest`, {method: "POST"});
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: creazione chunk…`;
-      await api(`/api/documents/${encodedId}/chunks/build`, {method: "POST"});
-      status.textContent = `Documento ${index + 1}/${documentItems.length}: embedding…`;
-      await api(`/api/documents/${encodedId}/embeddings/build`, {method: "POST"});
+    for (const item of documentItems) {
+      try {
+        await api(\`/api/documents/\${encodeURIComponent(item.id)}/auto-index/run\`, {method: "POST"});
+      } catch (error) {
+        if (error.status !== 409) throw error;
+      }
     }
-    status.className = "rag-index-status success";
-    status.innerHTML = `<strong>Indice pronto.</strong> ${documentItems.length}/${documentItems.length} documenti indicizzati.`;
-    showToast("Indice dei documenti aggiornato.");
+    showToast("Indicizzazione completata.");
   } catch (error) {
-    status.className = "rag-index-status error";
-    status.innerHTML = `<strong>Preparazione indice non riuscita.</strong> ${escapeHtml(error.message)}`;
     showToast(error.message, true);
   } finally {
     panel.dataset.indexBusy = "false";
-    document.querySelectorAll(".rag-prepare-index").forEach((button) => {
-      button.disabled = false;
-    });
+    if (retry) retry.disabled = false;
+    await refreshRagIndexStatus(bggId, documentItems, {poll: false});
   }
 }
 
@@ -2570,10 +2592,14 @@ async function renderDetail(bggId) {
             </div>
 
             <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
-              <h3>Fai una domanda sul regolamento</h3>
-              <button class="button button-ghost rag-prepare-index visually-hidden" type="button"
-                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-              <div class="rag-index-status visually-hidden" id="ragIndexStatus" role="status">Controllo stato dell'indice…</div>
+              <div class="rag-heading-row">
+                <h3>Fai una domanda sul regolamento</h3>
+                <div class="rag-index-line">
+                  <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo indicizzazione…</span>
+                  <button class="button button-ghost rag-prepare-index" type="button" hidden
+                          \${documentItems.length ? "" : "disabled"}>Riprova indicizzazione</button>
+                </div>
+              </div>
               <form class="rag-query-form" id="ragQueryForm">
                 <label class="rag-question-field" for="ragQuestion">
                   <textarea id="ragQuestion" rows="3" maxlength="4000" required
