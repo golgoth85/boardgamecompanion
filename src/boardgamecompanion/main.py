@@ -992,7 +992,8 @@ def _embedding_provider_label(selected: str, rag) -> str:
     if selected == "ollama":
         model = str(rag.ollama_embedding_model or "")
         return "Qwen" if "qwen" in model.lower() else "Ollama"
-    return "LM Studio"
+    model = str(rag.lmstudio_embedding_model or "")
+    return "Qwen" if "qwen" in model.lower() else "LM Studio"
 
 
 def _embedding_retrieval_service_for(
