@@ -20,6 +20,7 @@ from boardgamecompanion.embedding_retrieval import (
     EmbeddingDescriptor,
     EmbeddingProviderError,
     EmbeddingRetrievalService,
+    GeminiEmbeddingProvider,
     OllamaEmbeddingProvider,
     _descriptor_config,
 )
@@ -480,6 +481,121 @@ def test_embedding_build_revalidates_chunk_set_after_provider_work(
             (document["id"],),
         ).fetchone()["count"]
     assert run_count == 0
+
+
+def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+    sleeps: list[float] = []
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        requests.append(request)
+        if request.url.path.endswith(":batchEmbedContents"):
+            attempts += 1
+            if attempts < 3:
+                return httpx.Response(
+                    429,
+                    headers={"Retry-After": "0"},
+                    json={
+                        "error": {
+                            "code": 429,
+                            "status": "RESOURCE_EXHAUSTED",
+                            "message": "rate limited",
+                        }
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "embeddings": [
+                        {"values": [2.0, 0.0, 0.0, 0.0]},
+                        {"values": [0.0, 3.0, 0.0, 0.0]},
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.time.sleep",
+        lambda seconds: sleeps.append(float(seconds)),
+    )
+    client = httpx.Client(
+        base_url="https://gemini.test",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = GeminiEmbeddingProvider(
+        base_url="https://gemini.test",
+        model="gemini-embedding-2",
+        api_key="test-key",
+        requested_dimensions=4,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        client=client,
+    )
+    descriptor = EmbeddingDescriptor(
+        provider="gemini",
+        model="gemini-embedding-2",
+        model_digest="f" * 64,
+        requested_dimensions=4,
+        endpoint="https://gemini.test",
+    )
+
+    vectors = provider.embed(["alpha", "beta"], descriptor)
+
+    assert attempts == 3
+    assert sleeps == [1.0, 2.0]
+    assert vectors == [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
+    assert len(requests) == 3
+
+
+def test_gemini_embedding_429_fails_closed_after_bounded_retries(monkeypatch) -> None:
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": 429,
+                    "status": "RESOURCE_EXHAUSTED",
+                    "message": "quota exhausted",
+                }
+            },
+        )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.time.sleep",
+        lambda seconds: sleeps.append(float(seconds)),
+    )
+    client = httpx.Client(
+        base_url="https://gemini.test",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = GeminiEmbeddingProvider(
+        base_url="https://gemini.test",
+        model="gemini-embedding-2",
+        api_key="test-key",
+        requested_dimensions=4,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        client=client,
+    )
+    descriptor = EmbeddingDescriptor(
+        provider="gemini",
+        model="gemini-embedding-2",
+        model_digest="f" * 64,
+        requested_dimensions=4,
+        endpoint="https://gemini.test",
+    )
+
+    with pytest.raises(
+        EmbeddingProviderError,
+        match="HTTP 429 after retries",
+    ):
+        provider.embed(["alpha"], descriptor)
+
+    assert sleeps == [1.0, 2.0, 4.0]
 
 
 def test_ollama_provider_pins_digest_and_uses_non_truncating_batch_embed() -> None:

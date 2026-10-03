@@ -6,6 +6,7 @@ import math
 import re
 import sqlite3
 import sys
+import time
 from array import array
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -501,26 +502,64 @@ class GeminiEmbeddingProvider:
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
-        try:
-            if self._client is not None:
-                response = self._client.request(method, path, headers=headers, **kwargs)
-            else:
-                with httpx.Client(
-                    base_url=self.base_url,
-                    timeout=self.timeout_seconds,
-                    verify=self.verify_tls,
-                ) as client:
-                    response = client.request(method, path, headers=headers, **kwargs)
-            response.raise_for_status()
-            return response
-        except httpx.TimeoutException as exc:
-            raise EmbeddingProviderError("Gemini embedding request timed out") from exc
-        except httpx.HTTPStatusError as exc:
-            raise EmbeddingProviderError(
-                f"Gemini embedding request failed with HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise EmbeddingProviderError("Gemini embedding endpoint is unreachable") from exc
+        retryable_statuses = {429, 500, 502, 503, 504}
+        max_attempts = 4
+
+        for attempt in range(max_attempts):
+            try:
+                if self._client is not None:
+                    response = self._client.request(
+                        method,
+                        path,
+                        headers=headers,
+                        **kwargs,
+                    )
+                else:
+                    with httpx.Client(
+                        base_url=self.base_url,
+                        timeout=self.timeout_seconds,
+                        verify=self.verify_tls,
+                    ) as client:
+                        response = client.request(
+                            method,
+                            path,
+                            headers=headers,
+                            **kwargs,
+                        )
+                response.raise_for_status()
+                return response
+            except httpx.TimeoutException as exc:
+                if attempt + 1 >= max_attempts:
+                    raise EmbeddingProviderError(
+                        "Gemini embedding request timed out after retries"
+                    ) from exc
+                delay = min(8.0, float(2**attempt))
+                time.sleep(delay)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status not in retryable_statuses or attempt + 1 >= max_attempts:
+                    suffix = " after retries" if status in retryable_statuses else ""
+                    raise EmbeddingProviderError(
+                        f"Gemini embedding request failed with HTTP {status}{suffix}"
+                    ) from exc
+
+                delay = min(8.0, float(2**attempt))
+                retry_after = exc.response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = min(30.0, max(delay, float(retry_after)))
+                    except ValueError:
+                        pass
+                time.sleep(delay)
+            except httpx.HTTPError as exc:
+                if attempt + 1 >= max_attempts:
+                    raise EmbeddingProviderError(
+                        "Gemini embedding endpoint is unreachable after retries"
+                    ) from exc
+                delay = min(8.0, float(2**attempt))
+                time.sleep(delay)
+
+        raise EmbeddingProviderError("Gemini embedding request failed after retries")
 
     def describe(self) -> EmbeddingDescriptor:
         response = self._request("GET", f"/v1beta/models/{self.model}")

@@ -5,9 +5,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.document_indexing import DocumentIndexingService, enqueue_document_index
+from boardgamecompanion.embedding_retrieval import EmbeddingProviderError
+from boardgamecompanion.main import run_document_auto_index
 
 
 def database(tmp_path: Path) -> Database:
@@ -123,3 +126,24 @@ def test_expired_running_job_is_reclaimed_after_restart(tmp_path: Path) -> None:
     result = restarted.run_due()
     assert result["succeeded"] == 1
     assert calls == ["ingest", "chunks", "embeddings"]
+
+
+def test_auto_index_maps_embedding_provider_failure_to_503(monkeypatch) -> None:
+    class FailingIndexService:
+        def run(self, document_id: str, *, force: bool = True):
+            raise EmbeddingProviderError(
+                "Gemini embedding request failed with HTTP 429 after retries"
+            )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.main.get_document_indexing_service",
+        lambda: FailingIndexService(),
+    )
+
+    with pytest.raises(HTTPException) as captured:
+        run_document_auto_index("doc-1")
+
+    assert captured.value.status_code == 503
+    assert captured.value.detail == (
+        "Gemini embedding request failed with HTTP 429 after retries"
+    )

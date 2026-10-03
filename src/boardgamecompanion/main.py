@@ -1306,6 +1306,31 @@ def run_document_auto_index(document_id: str) -> dict[str, object]:
         return get_document_indexing_service().run(document_id, force=True)
     except DocumentIndexingBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PdfIngestDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PdfIngestIntegrityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PdfIngestParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PdfIngestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ChunkIndexDocumentNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ChunkIndexSourceNotReady, ChunkIndexConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ChunkIndexCorruptSource as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except ChunkIndexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (
+        EmbeddingDocumentNotFound,
+        EmbeddingGameNotFound,
+        EmbeddingSourceNotReady,
+        EmbeddingConflict,
+        EmbeddingProviderError,
+        EmbeddingCorruptRecord,
+    ) as exc:
+        raise embedding_http_error(exc) from exc
     except DocumentIndexingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
