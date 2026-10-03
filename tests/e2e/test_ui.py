@@ -535,6 +535,7 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         expect(page.locator("#settingsDialog")).to_be_visible()
         expect(page.locator("#settingsDialogTitle")).to_have_text("Provider e AI")
 
+        page.locator("#bggUsername").fill("browser-user")
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
         page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
         page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
@@ -553,6 +554,8 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         bgg_body = bgg_response.json()
         assert bgg_body["configured"] is True
         assert bgg_body["application_token_source"] == "stored"
+        assert bgg_body["username"] == "browser-user"
+        assert bgg_body["collection_sync_configured"] is True
         assert "browser-secret-bgg-token" not in bgg_response.text()
 
         rag_response = page.request.get(f"{live_server}/api/settings/rag")
@@ -573,6 +576,7 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         page.locator("#lmstudioSettings summary").click()
         page.locator("#geminiSettings summary").click()
 
+        expect(page.locator("#bggUsername")).to_have_value("browser-user")
         expect(page.locator("#bggApplicationToken")).to_have_value("")
         expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
         expect(page.locator("#clearTokenRow")).to_be_visible()
@@ -582,6 +586,71 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         expect(page.locator("#geminiApiKey")).to_have_value("")
         expect(page.locator("#geminiApiKeyHint")).to_contain_text("API key configurata")
         expect(page.locator("#clearGeminiApiKeyRow")).to_be_visible()
+    finally:
+        context.close()
+
+
+def test_catalog_bgg_sync_button_uses_manual_sync_endpoint(browser, live_server):
+    context, page = new_page(browser)
+    calls = []
+
+    def status_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "configured": True,
+                    "username": "browser-user",
+                    "due": False,
+                    "interval_seconds": 21600,
+                    "last_attempt_at": "2026-10-03T08:00:00+00:00",
+                    "last_success_at": "2026-10-03T08:00:00+00:00",
+                    "last_error": None,
+                    "last_result": None,
+                }
+            ),
+        )
+
+    def run_route(route):
+        calls.append(route.request.method)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "configured": True,
+                    "username": "browser-user",
+                    "due": False,
+                    "interval_seconds": 21600,
+                    "last_attempt_at": "2026-10-03T09:00:00+00:00",
+                    "last_success_at": "2026-10-03T09:00:00+00:00",
+                    "last_error": None,
+                    "last_result": None,
+                    "result": {
+                        "username": "browser-user",
+                        "row_count": 2,
+                        "created_count": 1,
+                        "updated_count": 1,
+                        "unchanged_count": 0,
+                        "bgg_ids": [900001, 900002],
+                        "created_bgg_ids": [900002],
+                        "synced_at": "2026-10-03T09:00:00+00:00",
+                    },
+                }
+            ),
+        )
+
+    try:
+        import_csv(page, live_server)
+        page.route("**/api/bgg-collection-sync", status_route)
+        page.route("**/api/bgg-collection-sync/run", run_route)
+
+        button = page.get_by_role("button", name="↻ Sincronizza BGG")
+        expect(button).to_be_visible()
+        button.click()
+        expect(page.locator("#toast")).to_contain_text("1 nuovi, 1 aggiornati")
+        assert calls == ["POST"]
     finally:
         context.close()
 
