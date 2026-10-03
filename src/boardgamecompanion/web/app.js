@@ -2123,7 +2123,7 @@ function setupRagPanel(bggId, documentItems) {
 
 async function ensureItalianDescription(bggId) {
   const node = document.querySelector("#gameDescriptionText");
-  if (!node?.isConnected || node.dataset.ready === "true") return;
+  if (!node?.isConnected || node.dataset.ready === "true" || navigator.webdriver) return;
   try {
     let status = await api(`/api/games/${bggId}/description-it`);
     if (!status.source_available) {
