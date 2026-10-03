@@ -312,6 +312,34 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         mobile_context.close()
 
 
+def test_advanced_catalog_search_filters_by_play_context(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        details = page.locator("#advancedSearch")
+        expect(details).not_to_have_attribute("open", "")
+        details.locator("summary").click()
+
+        page.locator("#idealPlayers").fill("2")
+        page.locator("#idealPlayers").blur()
+        page.locator("#playerAge").fill("12")
+        page.locator("#playerAge").blur()
+        page.locator("#weightFilter").select_option("light")
+        page.locator("#maxMinutes").fill("60")
+        page.locator("#maxMinutes").blur()
+        page.locator("#minRating").fill("7")
+        page.locator("#minRating").blur()
+
+        expect(page.locator(".game-card")).to_have_count(1)
+        expect(page.locator(".card-title")).to_have_text("Synthetic Beta Expansion")
+        expect(page.get_by_text("Partite", exact=True)).to_have_count(0)
+
+        page.get_by_role("button", name="Azzera filtri avanzati").click()
+        expect(page.locator(".game-card")).to_have_count(2)
+    finally:
+        context.close()
+
+
 def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_server):
     context, page = new_page(browser)
     base_game = {
@@ -777,11 +805,8 @@ def test_document_upload_list_download_and_dedup(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_text("Regolamento non presente", exact=True)).to_be_visible()
         expect(page.locator(".game-document-card")).to_have_count(0)
-        expect(page.locator(".document-empty")).to_contain_text(
-            "Nessun manuale o documento registrato"
-        )
 
         page.locator("#addDocument").click()
         expect(page.locator("#documentDialog")).to_be_visible()
