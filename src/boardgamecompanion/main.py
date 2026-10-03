@@ -20,6 +20,7 @@ from boardgamecompanion.answer_generation import (
     OllamaGenerationProvider,
 )
 from boardgamecompanion.app_settings import (
+    activate_embedding_provider,
     resolve_bgg_settings,
     resolve_rag_settings,
     save_bgg_settings,
@@ -75,6 +76,7 @@ from boardgamecompanion.document_indexing import (
     DocumentIndexingError,
     DocumentIndexingService,
     enqueue_document_index,
+    requeue_document_indexes_for_provider_change,
 )
 from boardgamecompanion.pdf_ingest import (
     PdfIngestDocumentNotFound,
@@ -984,19 +986,24 @@ def get_document_chunk(chunk_id: str) -> dict[str, object]:
 
 
 
-def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
-    database = get_database()
-    database.initialize()
-    rag = resolve_rag_settings(database)
-    selected = rag.embedding_provider
+def _embedding_provider_label(selected: str, rag) -> str:
+    if selected == "gemini":
+        return "Gemini"
+    if selected == "ollama":
+        model = str(rag.ollama_embedding_model or "")
+        return "Qwen" if "qwen" in model.lower() else "Ollama"
+    return "LM Studio"
+
+
+def _embedding_retrieval_service_for(
+    database: Database,
+    rag,
+    selected: str,
+) -> EmbeddingRetrievalService:
     if selected == "lmstudio":
         if not rag.lmstudio_url or not rag.lmstudio_embedding_model:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "LM Studio embedding provider is not configured; set "
-                    "BGC_LMSTUDIO_URL and BGC_LMSTUDIO_EMBEDDING_MODEL"
-                ),
+            raise EmbeddingProviderError(
+                "LM Studio embedding provider is not configured"
             )
         provider = LMStudioEmbeddingProvider(
             base_url=rag.lmstudio_url,
@@ -1009,9 +1016,8 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
         batch_size = settings.lmstudio_embedding_batch_size
     elif selected == "gemini":
         if not rag.gemini_api_key:
-            raise HTTPException(
-                status_code=503,
-                detail="Gemini embedding provider is not configured; set BGC_GEMINI_API_KEY",
+            raise EmbeddingProviderError(
+                "Gemini embedding provider is not configured"
             )
         provider = GeminiEmbeddingProvider(
             base_url=rag.gemini_url,
@@ -1022,14 +1028,10 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
             verify_tls=settings.gemini_verify_tls,
         )
         batch_size = settings.gemini_embedding_batch_size
-    else:
+    elif selected == "ollama":
         if not rag.ollama_url or not rag.ollama_embedding_model:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Ollama embedding provider is not configured; set BGC_OLLAMA_URL "
-                    "and BGC_OLLAMA_EMBEDDING_MODEL"
-                ),
+            raise EmbeddingProviderError(
+                "Ollama embedding provider is not configured"
             )
         provider = OllamaEmbeddingProvider(
             base_url=rag.ollama_url,
@@ -1039,6 +1041,10 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
             verify_tls=settings.ollama_verify_tls,
         )
         batch_size = settings.ollama_embedding_batch_size
+    else:
+        raise EmbeddingProviderError(
+            f"Unsupported embedding provider: {selected}"
+        )
 
     return EmbeddingRetrievalService(
         database,
@@ -1049,6 +1055,104 @@ def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
     )
 
 
+def get_embedding_retrieval_service() -> EmbeddingRetrievalService:
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    try:
+        return _embedding_retrieval_service_for(
+            database,
+            rag,
+            rag.embedding_provider,
+        )
+    except EmbeddingProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _embedding_attempt_message(attempts: list[dict[str, str]]) -> str:
+    parts: list[str] = []
+    for attempt in attempts:
+        if attempt["status"] == "ok":
+            parts.append(f"{attempt['label']} OK")
+        else:
+            detail = attempt.get("error", "").strip()
+            parts.append(
+                f"{attempt['label']} failed"
+                + (f" ({detail})" if detail else "")
+            )
+    return " -> ".join(parts)
+
+
+def build_document_embeddings_with_failover(
+    document_id: str,
+    *,
+    force: bool = False,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    attempts: list[dict[str, str]] = []
+    last_error: EmbeddingProviderError | None = None
+
+    for index, selected in enumerate(rag.embedding_provider_order):
+        label = _embedding_provider_label(selected, rag)
+        try:
+            service = _embedding_retrieval_service_for(database, rag, selected)
+            result = service.build(document_id, force=force)
+        except EmbeddingProviderError as exc:
+            last_error = exc
+            attempts.append(
+                {
+                    "provider": selected,
+                    "label": label,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        attempts.append(
+            {
+                "provider": selected,
+                "label": label,
+                "status": "ok",
+                "error": "",
+            }
+        )
+        message = _embedding_attempt_message(attempts)
+        requeued_documents = 0
+
+        if index > 0:
+            # A secondary embedding model uses a different vector space. Make
+            # the successful fallback the sole active embedding provider and
+            # requeue the remaining documents so retrieval never mixes vector
+            # spaces from different models.
+            activate_embedding_provider(database, selected)
+            requeued_documents = requeue_document_indexes_for_provider_change(
+                database,
+                exclude_document_id=document_id,
+            )
+            LOGGER.warning(
+                "Embedding provider failover activated: %s; requeued_documents=%s",
+                message,
+                requeued_documents,
+            )
+
+        return {
+            **result,
+            "provider_attempts": attempts,
+            "provider_message": message,
+            "active_provider": selected,
+            "requeued_documents": requeued_documents,
+        }
+
+    message = _embedding_attempt_message(attempts)
+    LOGGER.error("Embedding provider failover exhausted: %s", message)
+    if last_error is None:
+        raise EmbeddingProviderError("No embedding provider is configured")
+    raise EmbeddingProviderError(message) from last_error
+
+
 def get_document_indexing_service() -> DocumentIndexingService:
     database = get_database()
     database.initialize()
@@ -1056,7 +1160,9 @@ def get_document_indexing_service() -> DocumentIndexingService:
         database,
         ingest=lambda document_id: get_pdf_ingest_service().ingest(document_id),
         chunks=lambda document_id: get_chunk_index_service().build(document_id),
-        embeddings=lambda document_id: get_embedding_retrieval_service().build(document_id),
+        embeddings=lambda document_id: build_document_embeddings_with_failover(
+            document_id
+        ),
         retry_base_seconds=settings.document_index_retry_base_seconds,
         retry_max_seconds=settings.document_index_retry_max_seconds,
         lease_seconds=settings.document_index_lease_seconds,
@@ -1083,7 +1189,10 @@ def build_document_embeddings(
     force: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
-        return get_embedding_retrieval_service().build(document_id, force=force)
+        return build_document_embeddings_with_failover(
+            document_id,
+            force=force,
+        )
     except (
         EmbeddingDocumentNotFound,
         EmbeddingSourceNotReady,
