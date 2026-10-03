@@ -2071,57 +2071,69 @@ function setupRagPanel(bggId, documentItems) {
 }
 
 async function renderDetail(bggId) {
-  app.innerHTML = `
+  app.innerHTML = \`
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
     <section class="game-page game-page-loading">
       <div class="game-summary-rail"><div class="skeleton"></div></div>
       <div class="game-main"><div class="skeleton"></div></div>
     </section>
-  `;
+  \`;
   const requestedPath = window.location.pathname;
   try {
     const [game, copies, documents] = await Promise.all([
-      api(`/api/games/${bggId}`),
-      api(`/api/games/${bggId}/copies`),
-      api(`/api/games/${bggId}/documents`),
+      api(\`/api/games/\${bggId}\`),
+      api(\`/api/games/\${bggId}/copies\`),
+      api(\`/api/games/\${bggId}/documents\`),
     ]);
     if (window.location.pathname !== requestedPath) return;
+
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
+    const metadata = game.bgg_metadata || {};
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
+    const rawDescription = String(metadata.description || "").trim();
+    const description = rawDescription
+      ? escapeHtml(rawDescription).replace(/\r?\n/g, "<br>")
+      : "Descrizione non ancora disponibile. Puoi aggiornare i metadati BGG dalle funzioni amministrative.";
+    const copyLabel = copyItems.length === 1 ? "1 copia registrata" : \`\${copyItems.length} copie registrate\`;
 
-    app.innerHTML = `
+    app.innerHTML = \`
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
 
-      <section class="game-page">
+      <section class="game-page game-centric-detail">
         <aside class="game-summary-rail" aria-label="Riepilogo gioco">
           <div class="game-summary-cover">
             <div class="detail-cover">
-              ${game.bgg_metadata?.cover_url
-                ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
-                : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
+              \${metadata.cover_url
+                ? \`<img class="cover-image" src="\${escapeHtml(metadata.cover_url)}" alt="Cover di \${escapeHtml(game.title)}" referrerpolicy="no-referrer">\`
+                : \`<span class="cover-initials">\${escapeHtml(initials(game.title))}</span>\`}
             </div>
           </div>
 
           <div class="game-summary-card">
             <div class="game-summary-badges">
-              <span class="badge">${type}</span>
-              ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
-              ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
+              <span class="badge">\${type}</span>
+              \${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
+              \${game.year_published ? \`<span class="badge">\${game.year_published}</span>\` : ""}
             </div>
 
-            <dl class="game-summary-list">
-              <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
-              <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
-              <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
-              <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
+            <dl class="game-summary-list game-facts-primary">
+              <div><dt>Giocatori</dt><dd>\${escapeHtml(playerText(game))}</dd></div>
+              <div><dt>Età consigliata</dt><dd>\${escapeHtml(ageText(game))}</dd></div>
+              <div><dt>Durata</dt><dd>\${escapeHtml(timeText(game))}</dd></div>
+              \${bgg.best_players ? \`<div><dt>Ideale in</dt><dd>\${escapeHtml(bgg.best_players)}</dd></div>\` : ""}
+              <div><dt>Complessità</dt><dd>\${bgg.average_weight ? \`\${formatNumber(bgg.average_weight, 2)} / 5\` : "—"}</dd></div>
+              <div><dt>Rating BGG</dt><dd>\${bgg.average ? \`★ \${formatNumber(bgg.average, 2)}\` : "—"}</dd></div>
+              \${collection.num_plays !== null && collection.num_plays !== undefined
+                ? \`<div><dt>Partite</dt><dd>\${collection.num_plays}</dd></div>\`
+                : ""}
             </dl>
 
             <a class="external-link game-bgg-link"
-               href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
+               href="https://boardgamegeek.com/boardgame/\${game.bgg_id}"
                target="_blank" rel="noopener noreferrer">
               Apri su BoardGameGeek ↗
             </a>
@@ -2129,189 +2141,162 @@ async function renderDetail(bggId) {
         </aside>
 
         <article class="game-main detail-main">
-          <header class="game-header">
-            <p class="eyebrow">BGG #${game.bgg_id}</p>
-            <h1>${escapeHtml(game.title)}</h1>
-            ${game.original_title && game.original_title !== game.title
-              ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
-              : ""}
-            <div class="game-header-status">
-              <span>${copyItems.length} ${copyItems.length === 1 ? "copia fisica" : "copie fisiche"}</span>
-              <span aria-hidden="true">·</span>
-              <span>${rulebooks.length} ${rulebooks.length === 1 ? "regolamento" : "regolamenti"} archiviati</span>
-              ${collection.num_plays !== null && collection.num_plays !== undefined
-                ? `<span aria-hidden="true">·</span><span>${collection.num_plays} partite</span>`
+          <header class="game-header game-header-player">
+            <div>
+              <p class="eyebrow">BGG #\${game.bgg_id}</p>
+              <h1>\${escapeHtml(game.title)}</h1>
+              \${game.original_title && game.original_title !== game.title
+                ? \`<p class="game-original-title">\${escapeHtml(game.original_title)}</p>\`
                 : ""}
+            </div>
+            <div class="game-primary-actions">
+              <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
+              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
             </div>
           </header>
 
-          <section class="game-section rules-workspace" aria-labelledby="rulesWorkspaceTitle">
+          <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
+            <p class="eyebrow">Il gioco</p>
+            <h2 id="gameDescriptionTitle">Descrizione</h2>
+            <div class="game-description-text">\${description}</div>
+          </section>
+
+          <section class="copy-compact-panel" aria-label="Copie fisiche">
+            <div class="copy-compact-summary">
+              <div>
+                <strong>La tua copia</strong>
+                <span>\${copyItems.length ? escapeHtml(copyLabel) : "Nessuna copia registrata"}</span>
+              </div>
+              <button class="button button-ghost" id="addPhysicalCopySecondary" type="button">
+                \${copyItems.length ? "+ Aggiungi altra copia" : "+ Aggiungi copia"}
+              </button>
+            </div>
+            \${copyItems.length ? \`
+              <details class="copy-details-disclosure">
+                <summary>Gestisci \${escapeHtml(copyLabel)}</summary>
+                <div class="physical-copy-list" id="physicalCopyList">
+                  \${copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")}
+                </div>
+              </details>
+            \` : '<div id="physicalCopyList" hidden></div>'}
+          </section>
+
+          <section class="game-section rules-workspace rules-secondary" aria-labelledby="rulesWorkspaceTitle">
             <div class="game-section-head">
               <div>
-                <p class="eyebrow">Regole</p>
-                <h2 id="rulesWorkspaceTitle">Regolamento e assistente</h2>
+                <p class="eyebrow">Quando ti servono</p>
+                <h2 id="rulesWorkspaceTitle">Regole e manuali</h2>
                 <p class="section-subtitle">
-                  Cerca il regolamento, archivia i PDF e interroga solo i documenti verificabili del gioco.
+                  Cerca un regolamento, apri i PDF archiviati o usa l'assistente sulle fonti del gioco.
                 </p>
               </div>
-              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
+              <button class="button button-ghost" id="rulebookSearchAction" type="button">
+                Cerca regolamento
+              </button>
             </div>
 
-            <section class="rulebook-discovery-panel rulebook-search-card"
-                     aria-label="Ricerca e acquisizione regolamenti">
-              <div class="rulebook-search-copy">
-                <strong>Trova il regolamento</strong>
-                <p>
-                  Un solo flusso: prima le fonti note, IT prima di EN. Se non emerge alcun candidato,
-                  lo stesso pulsante passa alla ricerca PDF su Google; il caricamento resta sempre manuale.
-                </p>
-              </div>
-              <div class="rulebook-discovery-actions">
-                <button class="button button-primary" id="rulebookSearchAction" type="button">
-                  Cerca regolamento
-                </button>
-              </div>
-              <details class="technical-disclosure rulebook-search-details">
-                <summary>Stato ricerca e fonti</summary>
-                <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
-                  Caricamento stato…
-                </p>
-                <p class="muted">
-                  <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
-                  ·
-                  <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
-                </p>
-              </details>
-            </section>
+            <details class="technical-disclosure rulebook-search-details">
+              <summary>Stato ricerca regolamenti</summary>
+              <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
+                Caricamento stato…
+              </p>
+              <p class="muted">
+                <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
+                ·
+                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
+              </p>
+            </details>
 
             <section class="game-subsection documents-subsection" aria-labelledby="documentsTitle">
               <div class="section-heading-row document-heading">
                 <div>
-                  <h2 class="section-title" id="documentsTitle">Manuali e documenti</h2>
+                  <h3 class="section-title" id="documentsTitle">Manuali e documenti</h3>
                   <p class="section-subtitle">
-                    ${documentItems.length} ${documentItems.length === 1 ? "documento" : "documenti"} archiviati
+                    \${documentItems.length
+                      ? \`\${documentItems.length} \${documentItems.length === 1 ? "documento archiviato" : "documenti archiviati"}\`
+                      : "Nessun documento archiviato"}
                   </p>
                 </div>
               </div>
               <div class="game-document-list" id="gameDocumentList">
-                ${documentItems.length
+                \${documentItems.length
                   ? documentItems.map(documentCard).join("")
                   : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
               </div>
             </section>
 
-            <section class="rag-panel" id="ragPanel" data-index-busy="false">
-              <div class="section-heading-row rag-heading">
-                <div>
-                  <p class="eyebrow">Assistente regole</p>
-                  <h2>Chiedi al regolamento</h2>
-                  <p class="section-subtitle">
-                    Risposte solo dai documenti del gioco, con pagina, versione e fonte verificabili.
-                  </p>
-                </div>
-                <button class="button button-ghost rag-prepare-index" type="button"
-                        ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-              </div>
-              <div class="rag-index-status" id="ragIndexStatus" role="status">
-                Controllo stato dell'indice…
-              </div>
-              <form class="rag-query-form" id="ragQueryForm">
-                <label class="rag-question-field" for="ragQuestion">
-                  <span>Domanda sulle regole</span>
-                  <textarea id="ragQuestion" rows="3" maxlength="4000" required
-                    placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
-                </label>
-                <details class="rag-filters">
-                  <summary>Filtri avanzati</summary>
-                  <div class="rag-filter-grid">
-                    <label>
-                      <span>Lingua</span>
-                      <select id="ragLanguage">
-                        <option value="it" selected>Italiano</option>
-                        <option value="en">English</option>
-                        <option value="">Qualsiasi</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Tipo</span>
-                      <select id="ragDocumentType">
-                        <option value="">Tutti i documenti</option>
-                        <option value="rulebook">Regolamento</option>
-                        <option value="reference">Riferimento</option>
-                        <option value="faq">FAQ</option>
-                        <option value="errata">Errata</option>
-                        <option value="campaign_book">Campaign book</option>
-                        <option value="scenario_book">Scenario book</option>
-                        <option value="player_aid">Player aid</option>
-                        <option value="other">Altro</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Versione</span>
-                      <input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1">
-                    </label>
-                    <label>
-                      <span>Edizione</span>
-                      <input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT">
-                    </label>
+            <details class="rag-disclosure">
+              <summary>
+                <span>
+                  <strong>Chiedi al regolamento</strong>
+                  <small>Assistente sulle fonti archiviate</small>
+                </span>
+              </summary>
+              <section class="rag-panel" id="ragPanel" data-index-busy="false">
+                <div class="section-heading-row rag-heading">
+                  <div>
+                    <p class="eyebrow">Assistente regole</p>
+                    <h3>Chiedi al regolamento</h3>
+                    <p class="section-subtitle">
+                      Risposte dai documenti del gioco, con pagina, versione e fonte verificabili.
+                    </p>
                   </div>
-                </details>
-                <div class="rag-query-actions">
-                  <p class="muted">
-                    Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.
-                  </p>
-                  <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                  <button class="button button-ghost rag-prepare-index" type="button"
+                          \${documentItems.length ? "" : "disabled"}>Prepara indice</button>
                 </div>
-              </form>
-              <div class="rag-result" id="ragResult" aria-live="polite">
-                <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
-              </div>
-            </section>
-          </section>
-
-          <section class="game-section copies-workspace" aria-labelledby="copiesTitle">
-            <div class="game-section-head">
-              <div>
-                <p class="eyebrow">Inventario</p>
-                <h2 id="copiesTitle">Copie fisiche</h2>
-                <p class="section-subtitle">
-                  Edizione, lingua, barcode, posizione e dati della tua copia.
-                </p>
-              </div>
-              <button class="button button-ghost" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
-            </div>
-            <div class="physical-copy-list" id="physicalCopyList">
-              ${copyItems.length
-                ? copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")
-                : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
-            </div>
+                <div class="rag-index-status" id="ragIndexStatus" role="status">
+                  Controllo stato dell'indice…
+                </div>
+                <form class="rag-query-form" id="ragQueryForm">
+                  <label class="rag-question-field" for="ragQuestion">
+                    <span>Domanda sulle regole</span>
+                    <textarea id="ragQuestion" rows="3" maxlength="4000" required
+                      placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
+                  </label>
+                  <details class="rag-filters">
+                    <summary>Filtri avanzati</summary>
+                    <div class="rag-filter-grid">
+                      <label><span>Lingua</span><select id="ragLanguage"><option value="it" selected>Italiano</option><option value="en">English</option><option value="">Qualsiasi</option></select></label>
+                      <label><span>Tipo</span><select id="ragDocumentType"><option value="">Tutti i documenti</option><option value="rulebook">Regolamento</option><option value="reference">Riferimento</option><option value="faq">FAQ</option><option value="errata">Errata</option><option value="campaign_book">Campaign book</option><option value="scenario_book">Scenario book</option><option value="player_aid">Player aid</option><option value="other">Altro</option></select></label>
+                      <label><span>Versione</span><input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1"></label>
+                      <label><span>Edizione</span><input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT"></label>
+                    </div>
+                  </details>
+                  <div class="rag-query-actions">
+                    <p class="muted">Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.</p>
+                    <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                  </div>
+                </form>
+                <div class="rag-result" id="ragResult" aria-live="polite">
+                  <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
+                </div>
+              </section>
+            </details>
           </section>
 
           <details class="game-section technical-game-details">
             <summary>
               <span>
-                <strong>Dati e dettagli tecnici</strong>
-                <small>Metadati BGG e informazioni secondarie</small>
+                <strong>Altri dati BGG</strong>
+                <small>Informazioni secondarie</small>
               </span>
             </summary>
             <div class="technical-game-content">
               <div class="fact-grid">
-                ${fact("Best players", bgg.best_players || "—")}
-                ${fact("Età consigliata", bgg.recommended_age || "—")}
-                ${fact("Recommended players", bgg.recommended_players || "—")}
-                ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
-                ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
-                ${fact("Partite registrate", collection.num_plays ?? "—")}
+                \${fact("Giocatori consigliati", bgg.recommended_players || "—")}
+                \${fact("Dipendenza lingua", bgg.language_dependence || "—")}
+                \${fact("Ranking BGG", bgg.rank ? \`#\${formatNumber(bgg.rank, 0)}\` : "—")}
+                \${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
               </div>
             </div>
           </details>
         </article>
       </section>
-    `;
+    \`;
 
-    document.querySelector("#addPhysicalCopy")?.addEventListener("click", () => {
-      openCopyEditor(game.bgg_id, game.title);
-    });
+    const openCopy = () => openCopyEditor(game.bgg_id, game.title);
+    document.querySelector("#addPhysicalCopy")?.addEventListener("click", openCopy);
+    document.querySelector("#addPhysicalCopySecondary")?.addEventListener("click", openCopy);
     document.querySelectorAll(".edit-copy").forEach((button) => {
       button.addEventListener("click", () => {
         const copy = copyItems.find((item) => item.id === button.dataset.copyId);
@@ -2324,12 +2309,12 @@ async function renderDetail(bggId) {
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
 
-    document.title = `${game.title} · BoardGameCompanion`;
+    document.title = \`\${game.title} · BoardGameCompanion\`;
   } catch (error) {
-    app.innerHTML = `
+    app.innerHTML = \`
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
-      <div class="empty">Impossibile caricare il gioco: ${escapeHtml(error.message)}</div>
-    `;
+      <div class="empty">Impossibile caricare il gioco: \${escapeHtml(error.message)}</div>
+    \`;
     showToast(error.message, true);
   }
 }
