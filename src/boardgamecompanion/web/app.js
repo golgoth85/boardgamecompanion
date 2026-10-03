@@ -149,6 +149,12 @@ const state = {
   catalogView: window.localStorage.getItem("bgc.catalogView") === "list" ? "list" : "cards",
   collapseExpansions: window.localStorage.getItem("bgc.collapseExpansions") !== "false",
   expandedGameGroups: new Set(),
+  supportsPlayers: "",
+  idealPlayers: "",
+  playerAge: "",
+  weight: "",
+  maxMinutes: "",
+  minRating: "",
 };
 
 let searchTimer;
@@ -171,6 +177,7 @@ let scannerStartId = 0;
 let scannerImportCount = 0;
 let documentBusy = false;
 let documentBggId = null;
+let metadataBackfillRunning = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -1285,7 +1292,6 @@ function gameCard(game, expansions = []) {
   const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
   const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
   const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
-  const plays = game.collection?.num_plays ?? 0;
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
   const groupId = `game-group-${game.bgg_id}`;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
@@ -1305,7 +1311,6 @@ function gameCard(game, expansions = []) {
             ${catalogMetric("Età", ageText(game))}
             ${catalogMetric("Durata", timeText(game).replace(" min", ""))}
             ${catalogMetric("Peso", weight)}
-            ${catalogMetric("Partite", String(plays))}
           </div>
           <div class="card-footer-meta">
             <span>${game.year_published || "—"}</span>
@@ -1330,7 +1335,6 @@ function gameCard(game, expansions = []) {
 function gameListRow(game, expansions = [], isExpansion = false) {
   const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
   const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
-  const plays = game.collection?.num_plays ?? 0;
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
   return `
@@ -1350,7 +1354,6 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
       <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
       <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
-      <span class="list-stat"><strong>${plays}</strong><small>Partite</small></span>
       <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
       ${expansions.length ? `
         <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
@@ -1394,7 +1397,7 @@ async function renderCatalog() {
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
         <h1>I tuoi giochi</h1>
-        <p class="page-lead">Sfoglia la collezione come una libreria: copertine, giocatori, durata, complessità e rating a colpo d'occhio.</p>
+        <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
       </div>
       <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
         <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
@@ -1415,7 +1418,7 @@ async function renderCatalog() {
       <div class="catalog-head catalog-workspace-head">
         <div>
           <h2 id="catalogGamesHeading">Collezione</h2>
-          <p class="section-subtitle">Le espansioni possono restare raccolte sotto il relativo gioco base.</p>
+          <p class="section-subtitle">Ricerca semplice sempre visibile; i filtri avanzati restano a un clic.</p>
         </div>
         <div class="catalog-head-actions">
           <label class="collapse-expansions-toggle">
@@ -1426,10 +1429,10 @@ async function renderCatalog() {
         </div>
       </div>
 
-      <section class="toolbar" aria-label="Filtri catalogo">
+      <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
         <label class="field search-field">
           <input id="searchInput" type="search" aria-label="Cerca per titolo"
-                 placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
+                 placeholder="Cerca un gioco…" value="${escapeHtml(state.q)}" autocomplete="off">
         </label>
         <label class="field">
           <select id="typeFilter" aria-label="Tipo">
@@ -1440,7 +1443,7 @@ async function renderCatalog() {
         </label>
         <label class="field">
           <select id="ownedFilter" aria-label="Stato collezione">
-            <option value="">Tutti gli stati</option>
+            <option value="">Tutti</option>
             <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
             <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
           </select>
@@ -1448,13 +1451,35 @@ async function renderCatalog() {
         <label class="field">
           <select id="sortFilter" aria-label="Ordina">
             <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
             <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
             <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
+            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
           </select>
         </label>
       </section>
+
+      <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
+        <summary>Ricerca avanzata</summary>
+        <div class="advanced-search-grid">
+          <label><span>Giocabile in</span><input id="supportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.supportsPlayers)}"></label>
+          <label><span>Ideale in</span><input id="idealPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.idealPlayers)}"></label>
+          <label><span>Età del giocatore</span><input id="playerAge" type="number" min="3" max="99" placeholder="es. 8" value="${escapeHtml(state.playerAge)}"></label>
+          <label><span>Complessità</span>
+            <select id="weightFilter">
+              <option value="">Qualsiasi</option>
+              <option value="light" ${state.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
+              <option value="medium" ${state.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
+              <option value="heavy" ${state.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
+            </select>
+          </label>
+          <label><span>Durata massima</span><input id="maxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="${escapeHtml(state.maxMinutes)}"></label>
+          <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(state.minRating)}"></label>
+        </div>
+        <div class="advanced-search-actions">
+          <p>“Età del giocatore” mostra i titoli con età consigliata BGG uguale o inferiore.</p>
+          <button class="button button-ghost" id="resetAdvancedSearch" type="button">Azzera filtri avanzati</button>
+        </div>
+      </details>
 
       <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
                id="catalogGrid">${skeletons()}</section>
@@ -1473,6 +1498,7 @@ async function renderCatalog() {
     if (window.location.pathname !== requestedPath) return;
     renderStats(stats);
     renderCatalogData(catalog);
+    backfillMissingMetadata();
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
       `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
@@ -1481,31 +1507,35 @@ async function renderCatalog() {
 }
 
 function bindCatalogControls() {
+  const refreshFrom = (key, value) => {
+    state[key] = String(value ?? "").trim();
+    state.offset = 0;
+    refreshCatalog();
+  };
+
   document.querySelector("#searchInput").addEventListener("input", (event) => {
     window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => {
-      state.q = event.target.value.trim();
-      state.offset = 0;
-      refreshCatalog();
-    }, 260);
+    searchTimer = window.setTimeout(() => refreshFrom("q", event.target.value), 260);
   });
+  document.querySelector("#typeFilter").addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
+  document.querySelector("#ownedFilter").addEventListener("change", (event) => refreshFrom("owned", event.target.value));
+  document.querySelector("#sortFilter").addEventListener("change", (event) => refreshFrom("sort", event.target.value));
 
-  document.querySelector("#typeFilter").addEventListener("change", (event) => {
-    state.itemType = event.target.value;
-    state.offset = 0;
-    refreshCatalog();
-  });
+  for (const [id, key] of [
+    ["supportsPlayers", "supportsPlayers"],
+    ["idealPlayers", "idealPlayers"],
+    ["playerAge", "playerAge"],
+    ["weightFilter", "weight"],
+    ["maxMinutes", "maxMinutes"],
+    ["minRating", "minRating"],
+  ]) {
+    document.querySelector(`#${id}`)?.addEventListener("change", (event) => refreshFrom(key, event.target.value));
+  }
 
-  document.querySelector("#ownedFilter").addEventListener("change", (event) => {
-    state.owned = event.target.value;
+  document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
+    for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) state[key] = "";
     state.offset = 0;
-    refreshCatalog();
-  });
-
-  document.querySelector("#sortFilter").addEventListener("change", (event) => {
-    state.sort = event.target.value;
-    state.offset = 0;
-    refreshCatalog();
+    renderCatalog();
   });
 
   document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
@@ -1521,7 +1551,6 @@ function bindCatalogControls() {
     window.localStorage.setItem("bgc.catalogView", "cards");
     renderCatalog();
   });
-
   document.querySelector("#listViewButton").addEventListener("click", () => {
     if (state.catalogView === "list") return;
     state.catalogView = "list";
@@ -1539,6 +1568,12 @@ async function loadCatalogData(signal) {
   if (state.q) params.set("q", state.q);
   if (state.itemType) params.set("item_type", state.itemType);
   if (state.owned) params.set("owned", state.owned);
+  if (state.supportsPlayers) params.set("supports_players", state.supportsPlayers);
+  if (state.idealPlayers) params.set("ideal_players", state.idealPlayers);
+  if (state.playerAge) params.set("player_age", state.playerAge);
+  if (state.weight) params.set("weight", state.weight);
+  if (state.maxMinutes) params.set("max_minutes", state.maxMinutes);
+  if (state.minRating) params.set("min_rating", state.minRating);
   return api(`/api/games?${params}`, signal ? {signal} : undefined);
 }
 
@@ -1567,6 +1602,22 @@ async function refreshCatalog() {
     if (catalogRequestController === controller) {
       catalogRequestController = undefined;
     }
+  }
+}
+
+async function backfillMissingMetadata() {
+  if (navigator.webdriver || metadataBackfillRunning || window.location.pathname !== "/") return;
+  metadataBackfillRunning = true;
+  try {
+    for (let batch = 0; batch < 10 && window.location.pathname === "/"; batch += 1) {
+      const result = await api("/api/catalog/bgg-metadata/refresh-missing?limit=20", {method: "POST"});
+      if (!result.updated || !result.remaining) break;
+      await refreshCatalog();
+    }
+  } catch (_) {
+    // Opportunistic enrichment must never block catalog browsing.
+  } finally {
+    metadataBackfillRunning = false;
   }
 }
 
@@ -1599,7 +1650,7 @@ function renderCatalogData(catalog) {
       grid.innerHTML = `
         <div class="catalog-list-head" aria-hidden="true">
           <span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span>
-          <span>Peso</span><span>Partite</span><span>BGG</span><span></span>
+          <span>Peso</span><span>BGG</span><span></span>
         </div>
         ${groups.map(({game, expansions}) => gameListRow(game, expansions)).join("")}
       `;
@@ -2070,6 +2121,36 @@ function setupRagPanel(bggId, documentItems) {
   void refreshRagIndexStatus(bggId, documentItems);
 }
 
+async function ensureItalianDescription(bggId) {
+  const node = document.querySelector("#gameDescriptionText");
+  if (!node?.isConnected || node.dataset.ready === "true" || navigator.webdriver) return;
+  try {
+    let status = await api(`/api/games/${bggId}/description-it`);
+    if (!status.source_available) {
+      const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
+      const cover = document.querySelector(".game-summary-cover .detail-cover");
+      if (cover?.isConnected && metadata.cover_url) {
+        cover.innerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+      }
+      status = await api(`/api/games/${bggId}/description-it`);
+    }
+    if (status.translation?.translated_text) {
+      node.textContent = status.translation.translated_text;
+      node.dataset.ready = "true";
+      return;
+    }
+    const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
+    if (translated.translation?.translated_text && node.isConnected) {
+      node.textContent = translated.translation.translated_text;
+      node.dataset.ready = "true";
+    }
+  } catch (_) {
+    if (node?.isConnected) {
+      node.textContent = "Descrizione italiana non disponibile al momento.";
+    }
+  }
+}
+
 async function renderDetail(bggId) {
   app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -2094,11 +2175,12 @@ async function renderDetail(bggId) {
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
-    const rawDescription = String(metadata.description || "").trim();
-    const description = rawDescription
-      ? escapeHtml(rawDescription).replace(/\r?\n/g, "<br>")
-      : "Descrizione non ancora disponibile. Puoi aggiornare i metadati BGG dalle funzioni amministrative.";
+    const italianDescription = String(game.description_it || "").trim();
+    const description = italianDescription
+      ? escapeHtml(italianDescription).replace(/\r?\n/g, "<br>")
+      : "Traduzione italiana in preparazione…";
     const copyLabel = copyItems.length === 1 ? "1 copia registrata" : `${copyItems.length} copie registrate`;
+    const firstRulebook = rulebooks[0] || null;
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -2119,7 +2201,6 @@ async function renderDetail(bggId) {
               ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
               ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             </div>
-
             <dl class="game-summary-list game-facts-primary">
               <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
               <div><dt>Età consigliata</dt><dd>${escapeHtml(ageText(game))}</dd></div>
@@ -2127,16 +2208,10 @@ async function renderDetail(bggId) {
               ${bgg.best_players ? `<div><dt>Ideale in</dt><dd>${escapeHtml(bgg.best_players)}</dd></div>` : ""}
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
-              ${collection.num_plays !== null && collection.num_plays !== undefined
-                ? `<div><dt>Partite</dt><dd>${collection.num_plays}</dd></div>`
-                : ""}
             </dl>
-
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
-               target="_blank" rel="noopener noreferrer">
-              Apri su BoardGameGeek ↗
-            </a>
+               target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
           </div>
         </aside>
 
@@ -2151,14 +2226,13 @@ async function renderDetail(bggId) {
             </div>
             <div class="game-primary-actions">
               <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
-              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
             </div>
           </header>
 
           <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
-            <div class="game-description-text">${description}</div>
+            <div class="game-description-text" id="gameDescriptionText" data-ready="${italianDescription ? "true" : "false"}">${description}</div>
           </section>
 
           <section class="copy-compact-panel" aria-label="Copie fisiche">
@@ -2181,106 +2255,55 @@ async function renderDetail(bggId) {
             ` : '<div id="physicalCopyList" hidden></div>'}
           </section>
 
-          <section class="game-section rules-workspace rules-secondary" aria-labelledby="rulesWorkspaceTitle">
-            <div class="game-section-head">
+          <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
+            <div class="simple-rulebook-head">
               <div>
-                <p class="eyebrow">Quando ti servono</p>
-                <h2 id="rulesWorkspaceTitle">Regole e manuali</h2>
-                <p class="section-subtitle">
-                  Cerca un regolamento, apri i PDF archiviati o usa l'assistente sulle fonti del gioco.
-                </p>
+                <p class="eyebrow">Regolamento</p>
+                <h2 id="rulesWorkspaceTitle">Regole</h2>
               </div>
+              <span class="rulebook-presence ${rulebooks.length ? "is-present" : "is-missing"}">
+                ${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
+              </span>
             </div>
 
-            <div class="rulebook-discovery-panel rulebook-search-card compact-rulebook-search">
-              <div class="rulebook-search-copy">
-                <strong>Trova il regolamento</strong>
-                <p>Un solo flusso: prima le fonti note, poi la ricerca PDF assistita se non emerge alcun candidato.</p>
-              </div>
-              <div class="rulebook-discovery-actions">
-                <button class="button button-ghost" id="rulebookSearchAction" type="button">
-                  Cerca regolamento
-                </button>
-              </div>
+            <div class="simple-rulebook-actions">
+              <button class="button button-primary" id="rulebookSearchAction" type="button">Cerca automaticamente</button>
+              <button class="button button-ghost" id="addDocument" type="button">Carica PDF</button>
+              ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri regolamento</a>` : ""}
+            </div>
+            <p id="gameDiscoveryStatus" hidden></p>
+            <div class="game-document-list visually-hidden" id="gameDocumentList" aria-hidden="true">
+              ${documentItems.map(documentCard).join("")}
             </div>
 
-            <details class="technical-disclosure rulebook-search-details">
-              <summary>Stato ricerca regolamenti</summary>
-              <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
-                Caricamento stato…
-              </p>
-              <p class="muted">
-                <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
-                ·
-                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
-              </p>
-            </details>
-
-            <section class="game-subsection documents-subsection" aria-labelledby="documentsTitle">
-              <div class="section-heading-row document-heading">
-                <div>
-                  <h3 class="section-title" id="documentsTitle">Manuali e documenti</h3>
-                  <p class="section-subtitle">
-                    ${documentItems.length
-                      ? `${documentItems.length} ${documentItems.length === 1 ? "documento archiviato" : "documenti archiviati"}`
-                      : "Nessun documento archiviato"}
-                  </p>
+            <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
+              <h3>Fai una domanda sul regolamento</h3>
+              <button class="button button-ghost rag-prepare-index visually-hidden" type="button"
+                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
+              <div class="rag-index-status visually-hidden" id="ragIndexStatus" role="status">Controllo stato dell'indice…</div>
+              <form class="rag-query-form" id="ragQueryForm">
+                <label class="rag-question-field" for="ragQuestion">
+                  <textarea id="ragQuestion" rows="3" maxlength="4000" required
+                    placeholder="Scrivi qui la tua domanda sulle regole…"></textarea>
+                </label>
+                <div class="visually-hidden" aria-hidden="true">
+                  <select id="ragLanguage"><option value="it" selected>Italiano</option><option value="en">English</option><option value="">Qualsiasi</option></select>
+                  <select id="ragDocumentType"><option value="">Tutti i documenti</option><option value="rulebook">Regolamento</option></select>
+                  <input id="ragVersion" type="text">
+                  <input id="ragEdition" type="text">
                 </div>
-              </div>
-              <div class="game-document-list" id="gameDocumentList">
-                ${documentItems.length
-                  ? documentItems.map(documentCard).join("")
-                  : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
+                <div class="rag-query-actions simple-rag-actions">
+                  <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                </div>
+              </form>
+              <div class="rag-result" id="ragResult" aria-live="polite">
+                <div class="rag-empty">Le risposte useranno il regolamento archiviato.</div>
               </div>
             </section>
-
-            <section class="rag-panel rag-panel-secondary" id="ragPanel" data-index-busy="false">
-                <div class="section-heading-row rag-heading">
-                  <div>
-                    <p class="eyebrow">Assistente regole</p>
-                    <h3>Chiedi al regolamento</h3>
-                    <p class="section-subtitle">
-                      Risposte dai documenti del gioco, con pagina, versione e fonte verificabili.
-                    </p>
-                  </div>
-                  <button class="button button-ghost rag-prepare-index" type="button"
-                          ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-                </div>
-                <div class="rag-index-status" id="ragIndexStatus" role="status">
-                  Controllo stato dell'indice…
-                </div>
-                <form class="rag-query-form" id="ragQueryForm">
-                  <label class="rag-question-field" for="ragQuestion">
-                    <span>Domanda sulle regole</span>
-                    <textarea id="ragQuestion" rows="3" maxlength="4000" required
-                      placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
-                  </label>
-                  <details class="rag-filters">
-                    <summary>Filtri avanzati</summary>
-                    <div class="rag-filter-grid">
-                      <label><span>Lingua</span><select id="ragLanguage"><option value="it" selected>Italiano</option><option value="en">English</option><option value="">Qualsiasi</option></select></label>
-                      <label><span>Tipo</span><select id="ragDocumentType"><option value="">Tutti i documenti</option><option value="rulebook">Regolamento</option><option value="reference">Riferimento</option><option value="faq">FAQ</option><option value="errata">Errata</option><option value="campaign_book">Campaign book</option><option value="scenario_book">Scenario book</option><option value="player_aid">Player aid</option><option value="other">Altro</option></select></label>
-                      <label><span>Versione</span><input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1"></label>
-                      <label><span>Edizione</span><input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT"></label>
-                    </div>
-                  </details>
-                  <div class="rag-query-actions">
-                    <p class="muted">Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.</p>
-                    <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
-                  </div>
-                </form>
-                <div class="rag-result" id="ragResult" aria-live="polite">
-                  <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
-                </div>
-            </section>          </section>
+          </section>
 
           <details class="game-section technical-game-details">
-            <summary>
-              <span>
-                <strong>Altri dati BGG</strong>
-                <small>Informazioni secondarie</small>
-              </span>
-            </summary>
+            <summary><span><strong>Altri dati BGG</strong><small>Informazioni secondarie</small></span></summary>
             <div class="technical-game-content">
               <div class="fact-grid">
                 ${fact("Giocatori consigliati", bgg.recommended_players || "—")}
@@ -2308,6 +2331,7 @@ async function renderDetail(bggId) {
     });
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
+    ensureItalianDescription(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
@@ -2336,11 +2360,11 @@ async function setupGameDiscovery(bggId, gameTitle) {
     if (knownSourceMiss) {
       button.textContent = "Cerca PDF su Google ↗";
     } else if (failures > 0) {
-      button.textContent = "Riprova ricerca regolamento";
+      button.textContent = "Riprova ricerca automatica";
     } else if (candidates > 0) {
-      button.textContent = "Aggiorna ricerca regolamento";
+      button.textContent = "Aggiorna ricerca automatica";
     } else {
-      button.textContent = "Cerca regolamento";
+      button.textContent = "Cerca automaticamente";
     }
   };
 
@@ -2363,7 +2387,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
       if (status.isConnected) status.textContent = error.message;
       if (button?.isConnected) {
         button.dataset.mode = "discovery";
-        button.textContent = "Riprova ricerca regolamento";
+        button.textContent = "Riprova ricerca automatica";
       }
     }
   };

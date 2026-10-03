@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from boardgamecompanion.database import Database
@@ -70,6 +71,40 @@ def _game_dict(row) -> dict[str, Any]:
     return result
 
 
+_RANGE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[-–—]\s*(\d{1,2})(?!\d)")
+_PLUS_RE = re.compile(r"(?<!\d)(\d{1,2})\s*\+(?!\d)")
+_SINGLE_RE = re.compile(r"(?<!\d)(\d{1,2})(?!\d)")
+
+
+def _player_text_matches(value: str | None, player_count: int) -> bool:
+    """Interpret the compact BGG CSV best/recommended-player text conservatively."""
+    text = (value or "").strip()
+    if not text:
+        return False
+    for match in _RANGE_RE.finditer(text):
+        low, high = int(match.group(1)), int(match.group(2))
+        if low <= player_count <= high:
+            return True
+    for match in _PLUS_RE.finditer(text):
+        if player_count >= int(match.group(1)):
+            return True
+    return any(int(match.group(1)) == player_count for match in _SINGLE_RE.finditer(text))
+
+
+def _ideal_players_match(row, player_count: int) -> bool:
+    if row["bgg_best_players"]:
+        return _player_text_matches(row["bgg_best_players"], player_count)
+    if row["bgg_recommended_players"]:
+        return _player_text_matches(row["bgg_recommended_players"], player_count)
+    minimum = row["min_players"]
+    maximum = row["max_players"]
+    return bool(
+        minimum is not None
+        and maximum is not None
+        and int(minimum) <= player_count <= int(maximum)
+    )
+
+
 class Catalog:
     def __init__(self, database: Database):
         self.database = database
@@ -80,6 +115,12 @@ class Catalog:
         query: str | None = None,
         item_type: str | None = None,
         owned: bool | None = None,
+        supports_players: int | None = None,
+        ideal_players: int | None = None,
+        player_age: int | None = None,
+        weight: str | None = None,
+        max_minutes: int | None = None,
+        min_rating: float | None = None,
         sort: str = "title",
         limit: int = 50,
         offset: int = 0,
@@ -96,6 +137,37 @@ class Catalog:
         if owned is not None:
             where.append("COALESCE(c.own, 0) = ?")
             params.append(1 if owned else 0)
+        if supports_players is not None:
+            where.append(
+                "g.min_players IS NOT NULL AND g.max_players IS NOT NULL "
+                "AND g.min_players <= ? AND g.max_players >= ?"
+            )
+            params.extend([supports_players, supports_players])
+        if player_age is not None:
+            where.append(
+                "g.bgg_recommended_age IS NOT NULL "
+                "AND CAST(g.bgg_recommended_age AS INTEGER) > 0 "
+                "AND CAST(g.bgg_recommended_age AS INTEGER) <= ?"
+            )
+            params.append(player_age)
+        if weight == "light":
+            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight <= 2.30")
+        elif weight == "medium":
+            where.append(
+                "g.bgg_average_weight IS NOT NULL "
+                "AND g.bgg_average_weight > 2.30 AND g.bgg_average_weight <= 3.50"
+            )
+        elif weight == "heavy":
+            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight > 3.50")
+        if max_minutes is not None:
+            where.append(
+                "COALESCE(g.max_play_time, g.playing_time, g.min_play_time) IS NOT NULL "
+                "AND COALESCE(g.max_play_time, g.playing_time, g.min_play_time) <= ?"
+            )
+            params.append(max_minutes)
+        if min_rating is not None:
+            where.append("g.bgg_average IS NOT NULL AND g.bgg_average >= ?")
+            params.append(min_rating)
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
@@ -104,29 +176,49 @@ class Catalog:
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
             LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
         """
+        select_sql = """
+            SELECT g.*, c.coll_id, c.user_rating, c.num_plays, c.own,
+                   c.for_trade, c.want, c.want_to_buy, c.want_to_play,
+                   c.previously_owned, c.preordered, c.wishlist,
+                   c.wishlist_priority, c.barcode, c.version_languages,
+                   c.version_publishers, c.version_year_published,
+                   c.version_nickname, c.inventory_location, c.quantity,
+                   e.source AS metadata_source, e.cover_url,
+                   e.description AS enriched_description,
+                   e.fetched_at AS metadata_fetched_at
+        """
 
         with self.database.connect() as connection:
-            total = connection.execute(
-                f"SELECT COUNT(*) AS count {from_sql} {where_sql}", params
-            ).fetchone()["count"]
-            rows = connection.execute(
-                f"""
-                SELECT g.*, c.coll_id, c.user_rating, c.num_plays, c.own,
-                       c.for_trade, c.want, c.want_to_buy, c.want_to_play,
-                       c.previously_owned, c.preordered, c.wishlist,
-                       c.wishlist_priority, c.barcode, c.version_languages,
-                       c.version_publishers, c.version_year_published,
-                       c.version_nickname, c.inventory_location, c.quantity
-                       , e.source AS metadata_source, e.cover_url,
-                       e.description AS enriched_description,
-                       e.fetched_at AS metadata_fetched_at
-                {from_sql}
-                {where_sql}
-                ORDER BY {order_sql}
-                LIMIT ? OFFSET ?
-                """,
-                [*params, limit, offset],
-            ).fetchall()
+            if ideal_players is None:
+                total = connection.execute(
+                    f"SELECT COUNT(*) AS count {from_sql} {where_sql}", params
+                ).fetchone()["count"]
+                rows = connection.execute(
+                    f"""
+                    {select_sql}
+                    {from_sql}
+                    {where_sql}
+                    ORDER BY {order_sql}
+                    LIMIT ? OFFSET ?
+                    """,
+                    [*params, limit, offset],
+                ).fetchall()
+            else:
+                candidates = connection.execute(
+                    f"""
+                    {select_sql}
+                    {from_sql}
+                    {where_sql}
+                    ORDER BY {order_sql}
+                    """,
+                    params,
+                ).fetchall()
+                filtered = [
+                    row for row in candidates
+                    if _ideal_players_match(row, ideal_players)
+                ]
+                total = len(filtered)
+                rows = filtered[offset:offset + limit]
 
         return {
             "items": [_game_dict(row) for row in rows],
@@ -145,8 +237,8 @@ class Catalog:
                        c.previously_owned, c.preordered, c.wishlist,
                        c.wishlist_priority, c.barcode, c.version_languages,
                        c.version_publishers, c.version_year_published,
-                       c.version_nickname, c.inventory_location, c.quantity
-                       , e.source AS metadata_source, e.cover_url,
+                       c.version_nickname, c.inventory_location, c.quantity,
+                       e.source AS metadata_source, e.cover_url,
                        e.description AS enriched_description,
                        e.fetched_at AS metadata_fetched_at
                 FROM board_games g
@@ -159,6 +251,33 @@ class Catalog:
                 (bgg_id,),
             ).fetchone()
         return _game_dict(row) if row else None
+
+    def missing_metadata_ids(self, *, limit: int = 20) -> list[int]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT g.bgg_id
+                FROM board_games g
+                LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
+                WHERE e.board_game_id IS NULL
+                ORDER BY g.title COLLATE NOCASE, g.bgg_id
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [int(row["bgg_id"]) for row in rows]
+
+    def missing_metadata_count(self) -> int:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM board_games g
+                LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
+                WHERE e.board_game_id IS NULL
+                """
+            ).fetchone()
+        return int(row["count"] or 0)
 
     def stats(self) -> dict[str, int]:
         with self.database.connect() as connection:

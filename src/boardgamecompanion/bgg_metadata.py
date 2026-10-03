@@ -4,7 +4,7 @@ import html
 import json
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,6 +18,7 @@ from boardgamecompanion.database import Database
 BGG_API_ORIGIN = "https://boardgamegeek.com"
 MAX_XML_BYTES = 2 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
+MAX_THING_IDS = 20
 BGG_IMAGE_HOSTS = frozenset(
     {"cf.geekdo-images.com", "cf.geekdo-static.com", "boardgamegeek.com"}
 )
@@ -76,11 +77,8 @@ class BggApiClient:
                 self._sleep(remaining)
         self._last_request_at = self._monotonic()
 
-    def thing(self, bgg_id: int) -> dict[str, Any]:
-        identifier = int(bgg_id)
-        if identifier <= 0:
-            raise ValueError("BGG ID must be positive")
-        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={identifier}"
+    def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
+        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}"
         response: httpx.Response | None = None
         content = b""
         for attempt in range(self.config.max_attempts):
@@ -97,10 +95,10 @@ class BggApiClient:
                         "GET",
                         url,
                         headers={
-                        "Authorization": f"Bearer {self.config.application_token}",
-                        "Accept": "application/xml, text/xml",
-                        "Accept-Encoding": "identity",
-                        "User-Agent": "BoardGameCompanion/0.1 BGG-metadata",
+                            "Authorization": f"Bearer {self.config.application_token}",
+                            "Accept": "application/xml, text/xml",
+                            "Accept-Encoding": "identity",
+                            "User-Agent": "BoardGameCompanion/0.1 BGG-metadata",
                         },
                         timeout=self.config.timeout_seconds,
                         follow_redirects=False,
@@ -129,12 +127,20 @@ class BggApiClient:
                     self._sleep(min(2**attempt, 5))
                     continue
                 raise BggMetadataError("BGG API request failed") from exc
-            if response.status_code in {202, 429, 500, 502, 503, 504} and attempt + 1 < self.config.max_attempts:
+            if (
+                response.status_code in {202, 429, 500, 502, 503, 504}
+                and attempt + 1 < self.config.max_attempts
+            ):
                 retry_after = response.headers.get("retry-after", "").strip()
-                delay = min(float(retry_after), 5.0) if retry_after.isdigit() else min(2**attempt, 5)
+                delay = (
+                    min(float(retry_after), 5.0)
+                    if retry_after.isdigit()
+                    else min(2**attempt, 5)
+                )
                 self._sleep(delay)
                 continue
             break
+
         assert response is not None
         if 300 <= response.status_code < 400:
             raise BggMetadataError("BGG API redirect refused")
@@ -142,7 +148,25 @@ class BggApiClient:
             raise BggMetadataError("BGG application token was rejected")
         if response.status_code != 200:
             raise BggMetadataError(f"BGG API returned HTTP {response.status_code}")
-        return _parse_thing(content, expected_bgg_id=identifier)
+        return content
+
+    def thing(self, bgg_id: int) -> dict[str, Any]:
+        identifier = int(bgg_id)
+        if identifier <= 0:
+            raise ValueError("BGG ID must be positive")
+        items = self.things([identifier])
+        if identifier not in items:
+            raise BggMetadataError("BGG API did not return exactly one item")
+        return items[identifier]
+
+    def things(self, bgg_ids: list[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
+        identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
+        if not identifiers or len(identifiers) > MAX_THING_IDS:
+            raise ValueError(f"BGG thing batch must contain between 1 and {MAX_THING_IDS} IDs")
+        if any(value <= 0 for value in identifiers):
+            raise ValueError("BGG IDs must be positive")
+        content = self._request_things(identifiers)
+        return _parse_things(content, expected_bgg_ids=set(identifiers))
 
 
 def _attribute(node: ET.Element | None, name: str = "value") -> str | None:
@@ -152,21 +176,12 @@ def _attribute(node: ET.Element | None, name: str = "value") -> str | None:
     return value.strip() if value and value.strip() else None
 
 
-def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
-    try:
-        root = ET.fromstring(content)
-    except (ET.ParseError, ValueError) as exc:
-        raise BggMetadataError("BGG API returned invalid XML") from exc
-    items = root.findall("item")
-    if len(items) != 1:
-        raise BggMetadataError("BGG API did not return exactly one item")
-    item = items[0]
+def _parse_item(item: ET.Element) -> dict[str, Any]:
     try:
         observed_id = int(item.attrib["id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise BggMetadataError("BGG API item has no valid ID") from exc
-    if observed_id != expected_bgg_id:
-        raise BggMetadataError("BGG API returned a conflicting canonical ID")
+
     names = item.findall("name")
     primary = next((node for node in names if node.attrib.get("type") == "primary"), None)
     title = _attribute(primary)
@@ -182,6 +197,7 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
         )
     )
     alternate = alternate_titles[0] if alternate_titles else None
+
     links = item.findall("link")
     grouped: dict[str, list[str]] = {}
     for node in links:
@@ -189,6 +205,7 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
         value = _attribute(node)
         if kind and value and len(value) <= 500:
             grouped.setdefault(kind, []).append(value)
+
     raw_description = item.findtext("description") or ""
     description = html.unescape(raw_description).strip()[:20_000] or None
     image = (item.findtext("image") or "").strip() or None
@@ -201,6 +218,7 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
             or image_parts.password is not None
         ):
             image = None
+
     year_text = _attribute(item.find("yearpublished"))
     return {
         "bgg_id": observed_id,
@@ -215,6 +233,35 @@ def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
         "categories": grouped.get("boardgamecategory", []),
         "designers": grouped.get("boardgamedesigner", []),
     }
+
+
+def _parse_things(
+    content: bytes,
+    *,
+    expected_bgg_ids: set[int],
+) -> dict[int, dict[str, Any]]:
+    try:
+        root = ET.fromstring(content)
+    except (ET.ParseError, ValueError) as exc:
+        raise BggMetadataError("BGG API returned invalid XML") from exc
+
+    result: dict[int, dict[str, Any]] = {}
+    for item in root.findall("item"):
+        metadata = _parse_item(item)
+        identifier = int(metadata["bgg_id"])
+        if identifier not in expected_bgg_ids:
+            raise BggMetadataError("BGG API returned a conflicting canonical ID")
+        if identifier in result:
+            raise BggMetadataError("BGG API returned a duplicate canonical ID")
+        result[identifier] = metadata
+    return result
+
+
+def _parse_thing(content: bytes, *, expected_bgg_id: int) -> dict[str, Any]:
+    items = _parse_things(content, expected_bgg_ids={expected_bgg_id})
+    if set(items) != {expected_bgg_id}:
+        raise BggMetadataError("BGG API did not return exactly one item")
+    return items[expected_bgg_id]
 
 
 class BggMetadataStore:
@@ -236,7 +283,8 @@ class BggMetadataStore:
             row = connection.execute(
                 """SELECT e.* FROM board_game_enrichments e
                    JOIN board_games g ON g.id=e.board_game_id
-                   WHERE g.bgg_id=?""", (int(bgg_id),)
+                   WHERE g.bgg_id=?""",
+                (int(bgg_id),),
             ).fetchone()
         if row is None:
             return None
@@ -245,37 +293,54 @@ class BggMetadataStore:
             value[key.removesuffix("_json")] = json.loads(value.pop(key))
         return value
 
-    def refresh(self, bgg_id: int, *, force: bool = False, now: datetime | None = None) -> dict[str, Any]:
-        if self.client is None:
-            raise BggMetadataError("BGG API is not configured")
-        current = (now or datetime.now(UTC)).astimezone(UTC)
+    def _record_failure(self, bgg_id: int, exc: Exception, current: datetime) -> None:
         current_iso = current.isoformat()
-        existing = self.get(bgg_id)
-        if existing and not force and existing["next_refresh_at"] > current_iso:
-            return existing
-        try:
-            metadata = self.client.thing(int(bgg_id))
-        except Exception as exc:
-            with self.database.transaction(immediate=True) as connection:
-                game = connection.execute("SELECT id FROM board_games WHERE bgg_id=?", (int(bgg_id),)).fetchone()
-                if game is None:
-                    raise BggMetadataError(f"Board game BGG #{bgg_id} not found") from exc
-                connection.execute(
-                    """INSERT INTO board_game_enrichments
-                       (board_game_id,source,external_id,next_refresh_at,consecutive_failures,last_error,created_at,updated_at)
-                       VALUES (?,'bgg_xml_api2',?,?,1,?,?,?)
-                       ON CONFLICT(board_game_id) DO UPDATE SET
-                         next_refresh_at=excluded.next_refresh_at,
-                         consecutive_failures=board_game_enrichments.consecutive_failures+1,
-                         last_error=excluded.last_error,updated_at=excluded.updated_at""",
-                    (game["id"], str(bgg_id), (current + timedelta(seconds=self.retry_seconds)).isoformat(), str(exc)[:1000], current_iso, current_iso),
-                )
-            raise
-        raw = json.dumps(metadata, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        with self.database.transaction(immediate=True) as connection:
+            game = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id=?",
+                (int(bgg_id),),
+            ).fetchone()
+            if game is None:
+                raise BggMetadataError(f"Board game BGG #{bgg_id} not found") from exc
+            connection.execute(
+                """INSERT INTO board_game_enrichments
+                   (board_game_id,source,external_id,next_refresh_at,consecutive_failures,last_error,created_at,updated_at)
+                   VALUES (?,'bgg_xml_api2',?,?,1,?,?,?)
+                   ON CONFLICT(board_game_id) DO UPDATE SET
+                     next_refresh_at=excluded.next_refresh_at,
+                     consecutive_failures=board_game_enrichments.consecutive_failures+1,
+                     last_error=excluded.last_error,updated_at=excluded.updated_at""",
+                (
+                    game["id"],
+                    str(bgg_id),
+                    (current + timedelta(seconds=self.retry_seconds)).isoformat(),
+                    str(exc)[:1000],
+                    current_iso,
+                    current_iso,
+                ),
+            )
+
+    def _persist_metadata(
+        self,
+        bgg_id: int,
+        metadata: dict[str, Any],
+        current: datetime,
+    ) -> None:
+        current_iso = current.isoformat()
+        raw = json.dumps(
+            metadata,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         if len(raw.encode()) > MAX_METADATA_BYTES:
             raise BggMetadataError("Normalized BGG metadata exceeds the byte limit")
+
         with self.database.transaction(immediate=True) as connection:
-            game = connection.execute("SELECT id FROM board_games WHERE bgg_id=?", (int(bgg_id),)).fetchone()
+            game = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id=?",
+                (int(bgg_id),),
+            ).fetchone()
             if game is None:
                 raise BggMetadataError(f"Board game BGG #{bgg_id} not found")
             connection.execute(
@@ -292,11 +357,93 @@ class BggMetadataStore:
                     designers_json=excluded.designers_json,metadata_json=excluded.metadata_json,
                     fetched_at=excluded.fetched_at,next_refresh_at=excluded.next_refresh_at,
                     consecutive_failures=0,last_error=NULL,updated_at=excluded.updated_at""",
-                (game["id"], str(bgg_id), metadata["title"], metadata["original_title"], metadata["year_published"],
-                 metadata["cover_url"], metadata["description"], json.dumps(metadata["publishers"]),
-                 json.dumps(metadata["categories"]), json.dumps(metadata["designers"]), raw, current_iso,
-                 (current + timedelta(seconds=self.refresh_seconds)).isoformat(), current_iso, current_iso),
+                (
+                    game["id"],
+                    str(bgg_id),
+                    metadata["title"],
+                    metadata["original_title"],
+                    metadata["year_published"],
+                    metadata["cover_url"],
+                    metadata["description"],
+                    json.dumps(metadata["publishers"]),
+                    json.dumps(metadata["categories"]),
+                    json.dumps(metadata["designers"]),
+                    raw,
+                    current_iso,
+                    (current + timedelta(seconds=self.refresh_seconds)).isoformat(),
+                    current_iso,
+                    current_iso,
+                ),
             )
+
+    def refresh(
+        self,
+        bgg_id: int,
+        *,
+        force: bool = False,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        if self.client is None:
+            raise BggMetadataError("BGG API is not configured")
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        current_iso = current.isoformat()
+        existing = self.get(bgg_id)
+        if existing and not force and existing["next_refresh_at"] > current_iso:
+            return existing
+        try:
+            metadata = self.client.thing(int(bgg_id))
+            self._persist_metadata(int(bgg_id), metadata, current)
+        except Exception as exc:
+            self._record_failure(int(bgg_id), exc, current)
+            raise
+
         result = self.get(bgg_id)
         assert result is not None
+        return result
+
+    def refresh_many(
+        self,
+        bgg_ids: list[int] | tuple[int, ...],
+        *,
+        force: bool = False,
+        now: datetime | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        if self.client is None:
+            raise BggMetadataError("BGG API is not configured")
+        identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
+        if not identifiers or len(identifiers) > MAX_THING_IDS:
+            raise ValueError(f"BGG metadata batch must contain between 1 and {MAX_THING_IDS} IDs")
+
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        current_iso = current.isoformat()
+        pending: list[int] = []
+        result: dict[int, dict[str, Any]] = {}
+        for identifier in identifiers:
+            existing = self.get(identifier)
+            if existing and not force and existing["next_refresh_at"] > current_iso:
+                result[identifier] = existing
+            else:
+                pending.append(identifier)
+
+        if pending:
+            try:
+                metadata_by_id = self.client.things(pending)
+            except Exception as exc:
+                for identifier in pending:
+                    self._record_failure(identifier, exc, current)
+                raise
+
+            for identifier in pending:
+                metadata = metadata_by_id.get(identifier)
+                if metadata is None:
+                    exc = BggMetadataError(
+                        f"BGG API returned no metadata for BGG #{identifier}"
+                    )
+                    self._record_failure(identifier, exc, current)
+                    continue
+                self._persist_metadata(identifier, metadata, current)
+                stored = self.get(identifier)
+                if stored is not None:
+                    result[identifier] = stored
+
         return result

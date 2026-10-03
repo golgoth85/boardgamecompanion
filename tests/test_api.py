@@ -35,3 +35,24 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         assert sorted_games.status_code == 200
         assert sorted_games.json()["sort"] == "rating_desc"
         assert sorted_games.json()["items"][0]["bgg_id"] == 900001
+
+        advanced = client.get(
+            "/api/games",
+            params={
+                "ideal_players": 2,
+                "player_age": 12,
+                "weight": "light",
+                "max_minutes": 60,
+                "min_rating": 7,
+            },
+        )
+        assert advanced.status_code == 200
+        assert advanced.json()["total"] == 1
+        assert advanced.json()["items"][0]["bgg_id"] == 900002
+
+        suitable_for_age_10 = client.get(
+            "/api/games",
+            params={"player_age": 10},
+        )
+        assert suitable_for_age_10.status_code == 200
+        assert [item["bgg_id"] for item in suitable_for_age_10.json()["items"]] == [900001]
