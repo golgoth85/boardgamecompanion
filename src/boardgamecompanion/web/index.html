@@ -157,6 +157,12 @@
             <p class="muted">Il token viene salvato in /config e non viene mai restituito in chiaro dalla API.</p>
             <div class="settings-grid">
               <label class="settings-field copy-span-2">
+                <span>Username BGG</span>
+                <input id="bggUsername" type="text" autocomplete="username"
+                       placeholder="Il tuo username BoardGameGeek">
+                <small class="muted">Serve per sincronizzare automaticamente i giochi posseduti.</small>
+              </label>
+              <label class="settings-field copy-span-2">
                 <span>BGG Application Token</span>
                 <input id="bggApplicationToken" type="password" autocomplete="new-password"
                        placeholder="Inserisci o sostituisci il token">
@@ -166,6 +172,13 @@
                 <input id="bggClearToken" type="checkbox">
                 <span>Rimuovi il token BGG salvato</span>
               </label>
+            </div>
+            <div class="bgg-sync-settings">
+              <div>
+                <strong>Sincronizzazione collezione</strong>
+                <small id="bggSyncSettingsStatus" class="muted">Configura username e token per abilitarla.</small>
+              </div>
+              <button class="button button-ghost" id="bggSyncSettingsNow" type="button">Sincronizza adesso</button>
             </div>
           </div>
         </details>
