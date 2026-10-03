@@ -45,7 +45,7 @@ def _game_dict(row) -> dict[str, Any]:
     metadata = _metadata_from_row(row)
     result = {
         "bgg_id": row["bgg_id"],
-        "parent_bgg_id": row["parent_bgg_id"] if "parent_bgg_id" in row.keys() else None,
+        "parent_bgg_id": metadata.get("parent_bgg_id"),
         "title": row["title"],
         "original_title": row["original_title"],
         "year_published": row["year_published"],
@@ -314,6 +314,8 @@ class Catalog:
                 WHERE e.board_game_id IS NULL
                    OR e.next_refresh_at IS NULL
                    OR e.next_refresh_at <= ?
+                   OR e.metadata_json NOT LIKE '%"parent_bgg_id"%'
+                   OR e.metadata_json NOT LIKE '%"mechanics"%'
                 ORDER BY
                     e.board_game_id IS NOT NULL,
                     g.title COLLATE NOCASE,
