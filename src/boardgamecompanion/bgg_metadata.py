@@ -288,6 +288,15 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
             image = None
 
     year_text = _attribute(item.find("yearpublished"))
+    best_players, recommended_players = _suggested_players(item)
+    ratings = item.find("statistics/ratings")
+    rank = None
+    if ratings is not None:
+        for node in ratings.findall("ranks/rank"):
+            if node.attrib.get("name") == "boardgame":
+                rank_value = _number_attribute(node)
+                rank = int(rank_value) if rank_value is not None else None
+                break
     return {
         "bgg_id": observed_id,
         "title": title,
@@ -295,6 +304,19 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "alternate_titles": list(alternate_titles),
         "year_published": int(year_text) if year_text and year_text.isdigit() else None,
         "item_type": item.attrib.get("type"),
+        "min_players": int(value) if (value := _number_attribute(item.find("minplayers"))) is not None else None,
+        "max_players": int(value) if (value := _number_attribute(item.find("maxplayers"))) is not None else None,
+        "playing_time": int(value) if (value := _number_attribute(item.find("playingtime"))) is not None else None,
+        "min_play_time": int(value) if (value := _number_attribute(item.find("minplaytime"))) is not None else None,
+        "max_play_time": int(value) if (value := _number_attribute(item.find("maxplaytime"))) is not None else None,
+        "bgg_average": _number_attribute(ratings.find("average")) if ratings is not None else None,
+        "bgg_bayes_average": _number_attribute(ratings.find("bayesaverage")) if ratings is not None else None,
+        "bgg_average_weight": _number_attribute(ratings.find("averageweight")) if ratings is not None else None,
+        "bgg_rank": rank,
+        "bgg_num_owned": int(value) if ratings is not None and (value := _number_attribute(ratings.find("owned"))) is not None else None,
+        "bgg_best_players": best_players,
+        "bgg_recommended_players": recommended_players,
+        "bgg_recommended_age": _suggested_age(item),
         "cover_url": image,
         "description": description,
         "publishers": grouped.get("boardgamepublisher", []),
