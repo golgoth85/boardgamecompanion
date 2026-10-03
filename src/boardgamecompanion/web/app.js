@@ -2190,9 +2190,18 @@ async function renderDetail(bggId) {
                   Cerca un regolamento, apri i PDF archiviati o usa l'assistente sulle fonti del gioco.
                 </p>
               </div>
-              <button class="button button-ghost" id="rulebookSearchAction" type="button">
-                Cerca regolamento
-              </button>
+            </div>
+
+            <div class="rulebook-discovery-panel rulebook-search-card compact-rulebook-search">
+              <div class="rulebook-search-copy">
+                <strong>Trova il regolamento</strong>
+                <p>Un solo flusso: prima le fonti note, poi la ricerca PDF assistita se non emerge alcun candidato.</p>
+              </div>
+              <div class="rulebook-discovery-actions">
+                <button class="button button-ghost" id="rulebookSearchAction" type="button">
+                  Cerca regolamento
+                </button>
+              </div>
             </div>
 
             <details class="technical-disclosure rulebook-search-details">
@@ -2225,14 +2234,7 @@ async function renderDetail(bggId) {
               </div>
             </section>
 
-            <details class="rag-disclosure">
-              <summary>
-                <span>
-                  <strong>Chiedi al regolamento</strong>
-                  <small>Assistente sulle fonti archiviate</small>
-                </span>
-              </summary>
-              <section class="rag-panel" id="ragPanel" data-index-busy="false">
+            <section class="rag-panel rag-panel-secondary" id="ragPanel" data-index-busy="false">
                 <div class="section-heading-row rag-heading">
                   <div>
                     <p class="eyebrow">Assistente regole</p>
@@ -2270,9 +2272,7 @@ async function renderDetail(bggId) {
                 <div class="rag-result" id="ragResult" aria-live="polite">
                   <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
                 </div>
-              </section>
-            </details>
-          </section>
+            </section>          </section>
 
           <details class="game-section technical-game-details">
             <summary>
