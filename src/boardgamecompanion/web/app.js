@@ -93,10 +93,13 @@ const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
 const saveTestSettings = document.querySelector("#saveTestSettings");
+const bggUsername = document.querySelector("#bggUsername");
 const bggApplicationToken = document.querySelector("#bggApplicationToken");
 const bggClearToken = document.querySelector("#bggClearToken");
 const clearTokenRow = document.querySelector("#clearTokenRow");
 const bggTokenHint = document.querySelector("#bggTokenHint");
+const bggSyncSettingsStatus = document.querySelector("#bggSyncSettingsStatus");
+const bggSyncSettingsNow = document.querySelector("#bggSyncSettingsNow");
 const settingsResult = document.querySelector("#settingsResult");
 const ragEmbeddingOrder = document.querySelector("#ragEmbeddingOrder");
 const ragGenerationOrder = document.querySelector("#ragGenerationOrder");
@@ -296,8 +299,12 @@ function closeSettingsDialog() {
 
 function applyBggSettingsToForm(data) {
   currentBggSettings = data;
+  bggUsername.value = data.username || "";
   bggApplicationToken.value = "";
   bggClearToken.checked = false;
+
+  const usernameOverridden = Boolean(data.overrides?.username);
+  bggUsername.disabled = usernameOverridden;
 
   const overridden = Boolean(data.overrides?.application_token);
   bggApplicationToken.disabled = overridden;
@@ -315,6 +322,62 @@ function applyBggSettingsToForm(data) {
     bggTokenHint.textContent =
       "Nessun Application Token BGG configurato.";
     clearTokenRow.hidden = true;
+  }
+}
+
+function formatBggSyncTime(value) {
+  if (!value) return "mai";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "mai";
+  return date.toLocaleString("it-IT", {dateStyle: "short", timeStyle: "short"});
+}
+
+function renderBggSyncSettingsStatus(data) {
+  if (!bggSyncSettingsStatus || !bggSyncSettingsNow) return;
+  bggSyncSettingsNow.disabled = settingsBusy || !data?.configured;
+  if (!data?.configured) {
+    bggSyncSettingsStatus.textContent =
+      "Configura username e token BGG per abilitare la sincronizzazione automatica.";
+    return;
+  }
+  const everyHours = Math.round((data.interval_seconds || 21600) / 3600);
+  const last = formatBggSyncTime(data.last_success_at);
+  bggSyncSettingsStatus.textContent = data.last_error
+    ? `Ultimo tentativo con errore · ${escapeHtml(data.last_error)}`
+    : `Automatica ogni ${everyHours} h · ultima riuscita: ${last}`;
+}
+
+async function runManualBggSync() {
+  if (!bggSyncSettingsNow || bggSyncSettingsNow.disabled) return;
+  const original = bggSyncSettingsNow.textContent;
+  bggSyncSettingsNow.disabled = true;
+  bggSyncSettingsNow.textContent = "Sincronizzazione…";
+  try {
+    const result = await api("/api/bgg-collection-sync/run", {method: "POST"});
+    renderBggSyncSettingsStatus(result);
+    const summary = result.result;
+    if (summary) {
+      showToast(
+        `BGG sincronizzato: ${summary.created_count} nuovi, ${summary.updated_count} aggiornati.`,
+      );
+    } else {
+      showToast("Sincronizzazione BGG già in corso.");
+    }
+    if (window.location.pathname === "/") {
+      const stats = await api("/api/catalog/stats");
+      renderStats(stats);
+      state.offset = 0;
+      await refreshCatalog();
+    }
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    bggSyncSettingsNow.textContent = original;
+    try {
+      renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {
+      bggSyncSettingsNow.disabled = false;
+    }
   }
 }
 
@@ -379,12 +442,14 @@ async function openSettingsDialog() {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const [bggData, ragData] = await Promise.all([
+    const [bggData, ragData, syncData] = await Promise.all([
       api("/api/settings/bgg"),
       api("/api/settings/rag"),
+      api("/api/bgg-collection-sync"),
     ]);
     applyBggSettingsToForm(bggData);
     applyRagSettingsToForm(ragData);
+    renderBggSyncSettingsStatus(syncData);
     settingsDialog.showModal();
   } catch (error) {
     settingsDialog.showModal();
@@ -441,6 +506,7 @@ async function persistSettings({verifyAfter = false} = {}) {
     applyRagSettingsToForm(savedRag);
 
     const bggPayload = {
+      username: bggUsername.disabled ? currentBggSettings?.username || null : bggUsername.value.trim() || null,
       application_token:
         bggApplicationToken.disabled || !bggApplicationToken.value.trim()
           ? null
@@ -454,6 +520,9 @@ async function persistSettings({verifyAfter = false} = {}) {
       body: JSON.stringify(bggPayload),
     });
     applyBggSettingsToForm(savedBgg);
+    try {
+      renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
+    } catch (_) {}
 
     settingsResult.hidden = false;
     settingsResult.innerHTML =
