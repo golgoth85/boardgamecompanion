@@ -2270,7 +2270,8 @@ function bindRagResultActions(bggId, documentItems) {
 async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   const status = document.querySelector("#ragIndexStatus");
   const retry = document.querySelector(".rag-prepare-index");
-  if (!status || window.location.pathname.replace(/\/+$/, "") !== `/games/${bggId}`) return;
+  const currentPath = window.location.pathname.replace(/\/+$/, "");
+  if (!status || currentPath !== "/games/" + bggId) return;
 
   if (!documentItems.length) {
     status.className = "rag-index-status muted";
@@ -2282,7 +2283,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   try {
     const jobs = await Promise.all(
       documentItems.map((item) =>
-        api(`/api/document-index-jobs?document_id=${encodeURIComponent(item.id)}&limit=1`)
+        api("/api/document-index-jobs?document_id=" + encodeURIComponent(item.id) + "&limit=1")
       ),
     );
     const rows = jobs.flatMap((payload) => payload.items || []);
@@ -2313,7 +2314,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
       status.className = "rag-index-status";
       const stageLabels = {queued: "in coda", ingest: "lettura PDF", chunks: "preparazione testo", embeddings: "indicizzazione"};
       const stage = running[0]?.stage;
-      status.textContent = `Indicizzazione automatica in corso${stage ? ` · ${stageLabels[stage] || stage}` : ""}…`;
+      status.textContent = "Indicizzazione automatica in corso" + (stage ? " · " + (stageLabels[stage] || stage) : "") + "…";
       if (retry) retry.hidden = true;
       if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
       return;
@@ -2323,7 +2324,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
       status.className = "rag-index-status success";
       status.textContent = documentItems.length === 1
         ? "✓ Regolamento indicizzato"
-        : `✓ ${documentItems.length} documenti indicizzati`;
+        : "✓ " + documentItems.length + " documenti indicizzati";
       if (retry) retry.hidden = true;
       return;
     }
@@ -2362,7 +2363,7 @@ async function prepareRagIndex(bggId, documentItems) {
   try {
     for (const item of documentItems) {
       try {
-        await api(`/api/documents/${encodeURIComponent(item.id)}/auto-index/run`, {method: "POST"});
+        await api("/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run", {method: "POST"});
       } catch (error) {
         if (error.status !== 409) throw error;
       }
