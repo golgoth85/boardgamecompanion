@@ -22,4 +22,4 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
       - name: End-to-end UI tests
-        run: pytest -q tests/e2e/test_ui.py::test_app_bootstrap_diagnostics
+        run: pytest -q tests/e2e
