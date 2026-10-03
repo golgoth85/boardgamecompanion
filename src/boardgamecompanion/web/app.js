@@ -1606,7 +1606,7 @@ async function refreshCatalog() {
 }
 
 async function backfillMissingMetadata() {
-  if (metadataBackfillRunning || window.location.pathname !== "/") return;
+  if (navigator.webdriver || metadataBackfillRunning || window.location.pathname !== "/") return;
   metadataBackfillRunning = true;
   try {
     for (let batch = 0; batch < 10 && window.location.pathname === "/"; batch += 1) {
