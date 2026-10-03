@@ -3252,6 +3252,167 @@ async function renderUpdates({reset = false} = {}) {
 }
 
 
+
+function openCatalogAssistant() {
+  closeSidebar();
+  catalogAssistantForm?.reset();
+  if (catalogAssistantResult) {
+    catalogAssistantResult.innerHTML =
+      '<p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>';
+  }
+  if (askCatalogAssistant) {
+    askCatalogAssistant.disabled = false;
+    askCatalogAssistant.textContent = "Chiedi all'AI";
+  }
+  if (!catalogAssistantDialog?.open) catalogAssistantDialog?.showModal();
+  window.setTimeout(() => catalogAssistantQuestion?.focus(), 0);
+}
+
+function closeCatalogAssistantDialog() {
+  if (catalogAssistantDialog?.open) catalogAssistantDialog.close();
+}
+
+function assistantRecommendationCard(item) {
+  const meta = [
+    item.best_players ? `ideale: ${item.best_players}` : null,
+    item.rating ? `★ ${formatNumber(item.rating, 1)}` : null,
+    item.weight ? `peso ${formatNumber(item.weight, 2)}` : null,
+  ].filter(Boolean).join(" · ");
+  const tags = [...(item.mechanics || []).slice(0, 3), ...(item.categories || []).slice(0, 2)]
+    .slice(0, 5);
+  return `
+    <a class="assistant-recommendation" href="/games/${encodeURIComponent(item.bgg_id)}" data-nav>
+      <div>
+        <strong>${escapeHtml(item.title)}</strong>
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+        <p>${escapeHtml(item.reason)}</p>
+      </div>
+      ${tags.length ? `<div class="assistant-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    </a>
+  `;
+}
+
+async function submitCatalogAssistant() {
+  const query = catalogAssistantQuestion?.value.trim();
+  if (!query || !catalogAssistantResult || !askCatalogAssistant) return;
+  askCatalogAssistant.disabled = true;
+  askCatalogAssistant.textContent = "Sto scegliendo…";
+  catalogAssistantResult.innerHTML =
+    '<div class="assistant-loading" role="status">Analizzo la tua ludoteca…</div>';
+  try {
+    const answer = await api("/api/catalog/assistant", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query}),
+    });
+    catalogAssistantResult.innerHTML = `
+      <div class="assistant-answer">${escapeHtml(answer.answer)}</div>
+      <div class="assistant-recommendations">
+        ${(answer.recommendations || []).length
+          ? answer.recommendations.map(assistantRecommendationCard).join("")
+          : '<p class="muted">Non ho trovato un gioco che soddisfi abbastanza bene i vincoli indicati.</p>'}
+      </div>
+      <small class="assistant-provider">AI: ${escapeHtml(answer.provider || "provider configurato")}</small>
+    `;
+  } catch (error) {
+    catalogAssistantResult.innerHTML = `
+      <div class="assistant-error">
+        <strong>Non riesco a completare la richiesta.</strong>
+        <p>${escapeHtml(error.message)}</p>
+      </div>
+    `;
+  } finally {
+    askCatalogAssistant.disabled = false;
+    askCatalogAssistant.textContent = "Chiedi all'AI";
+  }
+}
+
+async function renderRankings() {
+  app.innerHTML = `
+    <section class="page-header browse-page-header">
+      <div>
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Classifiche</h1>
+        <p class="page-lead">I giochi posseduti ordinati per posizione nella classifica generale BGG.</p>
+      </div>
+    </section>
+    <section class="browse-grid" id="browseGrid">${skeletons()}</section>
+  `;
+  try {
+    const catalog = await api("/api/games?owned=true&sort=rank_asc&limit=100&offset=0");
+    if (!/^\/rankings\/?$/.test(window.location.pathname)) return;
+    const games = (catalog.items || []).filter(
+      (game) => game.item_type !== "expansion" && Number(game.bgg?.rank || 0) > 0,
+    );
+    const grid = document.querySelector("#browseGrid");
+    grid.innerHTML = games.length
+      ? games.map((game, index) => `
+          <article class="ranking-card">
+            <span class="ranking-position">#${escapeHtml(game.bgg.rank)}</span>
+            ${gameCard(game, [])}
+            <small class="ranking-local-position">${index + 1}° nella tua ludoteca per rank BGG</small>
+          </article>
+        `).join("")
+      : '<div class="empty">Nessun ranking BGG disponibile.</div>';
+    document.title = "Classifiche · BoardGameCompanion";
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare le classifiche: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function renderFacetBrowser(kind) {
+  const isMechanic = kind === "mechanics";
+  const title = isMechanic ? "Meccaniche" : "Generi";
+  const key = isMechanic ? "mechanics" : "categories";
+  app.innerHTML = `
+    <section class="page-header browse-page-header">
+      <div>
+        <p class="eyebrow">Esplora la ludoteca</p>
+        <h1>${title}</h1>
+        <p class="page-lead">
+          ${isMechanic
+            ? "Sfoglia i giochi posseduti in base alle meccaniche registrate su BoardGameGeek."
+            : "Sfoglia i giochi posseduti in base ai generi e alle categorie BoardGameGeek."}
+        </p>
+      </div>
+    </section>
+    <section class="facet-browser" id="facetBrowser">${skeletons()}</section>
+  `;
+  try {
+    const facets = await api("/api/catalog/facets?limit=100");
+    if (window.location.pathname !== `/${kind}`) return;
+    const items = facets[key] || [];
+    const browser = document.querySelector("#facetBrowser");
+    browser.innerHTML = items.length
+      ? items.map((item) => `
+          <button class="facet-card" type="button"
+                  data-facet-kind="${isMechanic ? "mechanic" : "category"}"
+                  data-facet-value="${escapeHtml(item.name)}">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${formatNumber(item.count, 0)} giochi</span>
+          </button>
+        `).join("")
+      : '<div class="empty">I metadati BGG non contengono ancora dati sufficienti.</div>';
+    browser.querySelectorAll("[data-facet-kind]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.q = "";
+        state.itemType = "";
+        state.owned = "true";
+        state.category = button.dataset.facetKind === "category" ? button.dataset.facetValue : "";
+        state.mechanic = button.dataset.facetKind === "mechanic" ? button.dataset.facetValue : "";
+        state.offset = 0;
+        history.pushState({}, "", "/");
+        void renderCatalog();
+        updateShellNavigation();
+        window.scrollTo({top: 0});
+      });
+    });
+    document.title = `${title} · BoardGameCompanion`;
+  } catch (error) {
+    app.innerHTML = `<div class="empty">Impossibile caricare ${title.toLowerCase()}: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function route() {
   closeSidebar();
   updateShellNavigation();
@@ -3268,6 +3429,18 @@ async function route() {
   }
   if (/^\/discovery\/?$/.test(window.location.pathname)) {
     await renderDiscovery();
+    return;
+  }
+  if (/^\/rankings\/?$/.test(window.location.pathname)) {
+    await renderRankings();
+    return;
+  }
+  if (/^\/categories\/?$/.test(window.location.pathname)) {
+    await renderFacetBrowser("categories");
+    return;
+  }
+  if (/^\/mechanics\/?$/.test(window.location.pathname)) {
+    await renderFacetBrowser("mechanics");
     return;
   }
 
