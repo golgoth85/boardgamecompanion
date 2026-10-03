@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.description_translation import (
@@ -81,3 +84,57 @@ def test_description_status_handles_missing_source(tmp_path: Path) -> None:
         "status": "missing_source",
         "translation": None,
     }
+
+
+def test_description_translation_falls_back_to_local_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "bgc.sqlite3")
+    database.initialize()
+    _seed_game(database, description="A tactical board game.")
+    service = DescriptionTranslationService(database)
+
+    fake_rag = SimpleNamespace(
+        generation_provider="gemini",
+        gemini_api_key="test",
+        gemini_generation_model="gemini-test",
+        gemini_url="https://example.invalid",
+        lmstudio_url="http://192.0.2.10:1234",
+        lmstudio_api_key=None,
+        lmstudio_generation_model="local-test",
+        lmstudio_generation_timeout_seconds=30.0,
+        lmstudio_generation_max_tokens=512,
+        ollama_url=None,
+        ollama_generation_model=None,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.description_translation.resolve_rag_settings",
+        lambda _database: fake_rag,
+    )
+
+    calls: list[str] = []
+
+    def fail_gemini(_source: str, _rag):
+        calls.append("gemini")
+        raise RuntimeError("unexpected raw error")
+
+    def fail_gemini_wrapped(_source: str, _rag):
+        calls.append("gemini")
+        from boardgamecompanion.description_translation import DescriptionTranslationError
+        raise DescriptionTranslationError("Gemini unavailable")
+
+    def use_lmstudio(_source: str, _rag):
+        calls.append("lmstudio")
+        return "Un gioco da tavolo tattico.", "lmstudio", "local-test"
+
+    monkeypatch.setattr(service, "_translate_gemini", fail_gemini_wrapped)
+    monkeypatch.setattr(service, "_translate_lmstudio", use_lmstudio)
+
+    result = service.translate(123456)
+
+    assert calls == ["gemini", "lmstudio"]
+    assert result["status"] == "ready"
+    assert result["translation"]["translated_text"] == "Un gioco da tavolo tattico."
+    assert result["translation"]["provider"] == "lmstudio"
+    assert result["translation"]["model"] == "local-test"

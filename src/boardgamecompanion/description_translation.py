@@ -249,15 +249,50 @@ class DescriptionTranslationService:
             }
 
         rag = resolve_rag_settings(self.database)
-        provider = rag.generation_provider
-        if provider == "gemini":
-            translated, provider_name, model = self._translate_gemini(source_text, rag)
-        elif provider == "lmstudio":
-            translated, provider_name, model = self._translate_lmstudio(source_text, rag)
-        elif provider == "ollama":
-            translated, provider_name, model = self._translate_ollama(source_text, rag)
-        else:
-            raise DescriptionTranslationError("Unsupported description translation provider")
+        provider_order = tuple(
+            dict.fromkeys(
+                (
+                    rag.generation_provider,
+                    "lmstudio",
+                    "ollama",
+                    "gemini",
+                )
+            )
+        )
+        translated: str | None = None
+        provider_name: str | None = None
+        model: str | None = None
+        failures: list[str] = []
+
+        for provider in provider_order:
+            try:
+                if provider == "gemini":
+                    translated, provider_name, model = self._translate_gemini(
+                        source_text,
+                        rag,
+                    )
+                elif provider == "lmstudio":
+                    translated, provider_name, model = self._translate_lmstudio(
+                        source_text,
+                        rag,
+                    )
+                elif provider == "ollama":
+                    translated, provider_name, model = self._translate_ollama(
+                        source_text,
+                        rag,
+                    )
+                else:
+                    continue
+                break
+            except DescriptionTranslationError as exc:
+                failures.append(f"{provider}: {exc}")
+                translated = provider_name = model = None
+
+        if translated is None or provider_name is None or model is None:
+            raise DescriptionTranslationError(
+                "No configured description translation provider succeeded"
+                + (f" ({'; '.join(failures)})" if failures else "")
+            )
 
         translated_at = datetime.now(UTC).isoformat()
         with self.database.transaction(immediate=True) as connection:
