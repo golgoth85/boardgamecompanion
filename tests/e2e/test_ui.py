@@ -146,7 +146,7 @@ def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
 
 
 def open_barcode_scanner(page) -> None:
-    scanner_button = page.get_by_role("button", name="Importa barcode")
+    scanner_button = page.get_by_role("button", name="Scansiona barcode")
     if not scanner_button.is_visible():
         page.get_by_role("button", name="Apri navigazione").click()
     scanner_button.click()
@@ -578,14 +578,15 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
         page.get_by_role("button", name="Impostazioni").click()
-        page.get_by_role("tab", name="AI e provider").click()
-        page.locator("#lmstudioSettings summary").click()
-        page.locator("#geminiSettings summary").click()
 
         expect(page.locator("#bggUsername")).to_have_value("browser-user")
         expect(page.locator("#bggApplicationToken")).to_have_value("")
         expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
         expect(page.locator("#clearTokenRow")).to_be_visible()
+
+        page.get_by_role("tab", name="AI e provider").click()
+        page.locator("#lmstudioSettings summary").click()
+        page.locator("#geminiSettings summary").click()
         expect(page.locator("#lmstudioApiKey")).to_have_value("")
         expect(page.locator("#lmstudioApiKeyHint")).to_contain_text("API key configurata")
         expect(page.locator("#clearLmstudioApiKeyRow")).to_be_visible()
@@ -852,10 +853,10 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
         expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
-        expect(page.get_by_role("button", name="Importa barcode")).not_to_be_visible()
+        expect(page.get_by_role("button", name="Scansiona barcode")).not_to_be_visible()
 
         page.get_by_role("button", name="Apri navigazione").click()
-        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
+        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
         page.wait_for_function(
             "document.querySelector('#appSidebar').getBoundingClientRect().x >= 0"
         )
