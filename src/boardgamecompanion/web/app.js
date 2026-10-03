@@ -2267,6 +2267,25 @@ function bindRagResultActions(bggId, documentItems) {
   });
 }
 
+function ragIndexFailureText(item) {
+  const raw = String(item?.last_error_message || "").trim();
+  if (!raw) return "Indicizzazione non riuscita.";
+
+  if (/Gemini embedding request failed with HTTP 429/i.test(raw)) {
+    return "Gemini embedding non disponibile: quota/rate limit (HTTP 429).";
+  }
+  if (/Gemini embedding/i.test(raw)) {
+    return "Gemini embedding non disponibile: " + raw.slice(0, 220);
+  }
+  if (/Ollama/i.test(raw) || /qwen/i.test(raw)) {
+    return "Qwen/Ollama embedding non disponibile: " + raw.slice(0, 220);
+  }
+  if (/embedding/i.test(raw)) {
+    return "Embedding non disponibile: " + raw.slice(0, 220);
+  }
+  return "Indicizzazione non riuscita: " + raw.slice(0, 220);
+}
+
 async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   const status = document.querySelector("#ragIndexStatus");
   const retry = document.querySelector(".rag-prepare-index");
@@ -2301,7 +2320,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
 
     if (failed.length) {
       status.className = "rag-index-status error";
-      status.textContent = "Indicizzazione non riuscita.";
+      status.textContent = ragIndexFailureText(failed[0]);
       if (retry) {
         retry.hidden = false;
         retry.disabled = false;
