@@ -95,8 +95,11 @@ def test_collection_sync_is_idempotent_and_does_not_delete_missing_owned_rows(tm
     responses = {"base": BASE_XML, "exp": EXP_XML}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        body = responses["exp"] if "subtype=boardgameexpansion" in url else responses["base"]
+        body = (
+            responses["exp"]
+            if request.url.params.get("subtype") == "boardgameexpansion"
+            else responses["base"]
+        )
         return httpx.Response(200, content=body, request=request)
 
     service = BggCollectionSyncService(
