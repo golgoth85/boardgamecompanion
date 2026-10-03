@@ -1262,25 +1262,6 @@ def _bgg_collection_sync_state(connection: sqlite3.Connection) -> None:
     )
 
 
-def _bgg_game_relationships(connection: sqlite3.Connection) -> None:
-    columns = {
-        row["name"]
-        for row in connection.execute("PRAGMA table_info(board_games)").fetchall()
-    }
-    if "parent_bgg_id" not in columns:
-        connection.execute(
-            "ALTER TABLE board_games ADD COLUMN parent_bgg_id INTEGER"
-        )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_board_games_parent_bgg_id ON board_games(parent_bgg_id)"
-    )
-    # Force one bounded metadata refresh after this schema upgrade so existing
-    # records receive official minimum age, mechanics and expansion parents.
-    connection.execute(
-        "UPDATE board_game_enrichments SET next_refresh_at='1970-01-01T00:00:00+00:00'"
-    )
-
-
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1296,7 +1277,6 @@ MIGRATIONS = (
     Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
     Migration(13, "description-translations", _description_translations),
     Migration(14, "bgg-collection-sync-state", _bgg_collection_sync_state),
-    Migration(15, "bgg-game-relationships", _bgg_game_relationships),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
