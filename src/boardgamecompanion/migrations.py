@@ -1227,6 +1227,25 @@ def _discovery_dedup_and_rate_limits(connection: sqlite3.Connection) -> None:
 
 
 
+
+def _description_translations(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS board_game_description_translations (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            source_sha256 TEXT NOT NULL,
+            source_language TEXT NOT NULL DEFAULT 'en',
+            target_language TEXT NOT NULL DEFAULT 'it',
+            translated_text TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            translated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1240,6 +1259,7 @@ MIGRATIONS = (
     Migration(10, "automatic-document-indexing", _automatic_document_indexing),
     Migration(11, "catalog-bgg-enrichment", _catalog_enrichment),
     Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
+    Migration(13, "description-translations", _description_translations),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
