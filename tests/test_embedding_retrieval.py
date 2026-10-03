@@ -549,6 +549,67 @@ def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> No
     assert len(requests) == 3
 
 
+def test_gemini_embedding_honors_google_retryinfo_delay(monkeypatch) -> None:
+    sleeps: list[float] = []
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "code": 429,
+                        "status": "RESOURCE_EXHAUSTED",
+                        "message": "rate limited",
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                                "retryDelay": "45.25s",
+                            }
+                        ],
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"embeddings": [{"values": [1.0, 0.0, 0.0, 0.0]}]},
+        )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.time.sleep",
+        lambda seconds: sleeps.append(float(seconds)),
+    )
+    client = httpx.Client(
+        base_url="https://gemini.test",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = GeminiEmbeddingProvider(
+        base_url="https://gemini.test",
+        model="gemini-embedding-2",
+        api_key="test-key",
+        requested_dimensions=4,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        client=client,
+    )
+    descriptor = EmbeddingDescriptor(
+        provider="gemini",
+        model="gemini-embedding-2",
+        model_digest="f" * 64,
+        requested_dimensions=4,
+        endpoint="https://gemini.test",
+    )
+
+    vectors = provider.embed(["alpha"], descriptor)
+
+    assert attempts == 2
+    assert sleeps == [45.25]
+    assert vectors == [[1.0, 0.0, 0.0, 0.0]]
+
+
 def test_gemini_embedding_429_fails_closed_after_bounded_retries(monkeypatch) -> None:
     sleeps: list[float] = []
 
@@ -595,7 +656,7 @@ def test_gemini_embedding_429_fails_closed_after_bounded_retries(monkeypatch) ->
     ):
         provider.embed(["alpha"], descriptor)
 
-    assert sleeps == [1.0, 2.0, 4.0]
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
 
 
 def test_ollama_provider_pins_digest_and_uses_non_truncating_batch_embed() -> None:
