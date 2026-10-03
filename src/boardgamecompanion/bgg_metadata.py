@@ -433,6 +433,37 @@ class BggMetadataStore:
             ).fetchone()
             if game is None:
                 raise BggMetadataError(f"Board game BGG #{bgg_id} not found")
+            board_updates = {
+                "title": metadata.get("title"),
+                "original_title": metadata.get("original_title"),
+                "year_published": metadata.get("year_published"),
+                "min_players": metadata.get("min_players"),
+                "max_players": metadata.get("max_players"),
+                "playing_time": metadata.get("playing_time"),
+                "min_play_time": metadata.get("min_play_time"),
+                "max_play_time": metadata.get("max_play_time"),
+                "bgg_average": metadata.get("bgg_average"),
+                "bgg_bayes_average": metadata.get("bgg_bayes_average"),
+                "bgg_average_weight": metadata.get("bgg_average_weight"),
+                "bgg_rank": metadata.get("bgg_rank"),
+                "bgg_num_owned": metadata.get("bgg_num_owned"),
+                "bgg_best_players": metadata.get("bgg_best_players"),
+                "bgg_recommended_players": metadata.get("bgg_recommended_players"),
+                "bgg_recommended_age": metadata.get("bgg_recommended_age"),
+            }
+            assignments: list[str] = []
+            params: list[Any] = []
+            for key, value in board_updates.items():
+                if value is not None:
+                    assignments.append(f"{key}=?")
+                    params.append(value)
+            if assignments:
+                assignments.append("updated_at=?")
+                params.extend([current_iso, game["id"]])
+                connection.execute(
+                    f"UPDATE board_games SET {', '.join(assignments)} WHERE id=?",
+                    params,
+                )
             connection.execute(
                 """INSERT INTO board_game_enrichments
                    (board_game_id,source,external_id,title,original_title,year_published,cover_url,description,
