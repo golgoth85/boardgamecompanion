@@ -319,6 +319,27 @@ async def _rulebook_discovery_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled rulebook discovery worker failed")
 
 
+async def _bgg_metadata_backfill_once(stop_event: asyncio.Event) -> None:
+    database = get_database()
+    database.initialize()
+    if not resolve_bgg_settings(database).configured:
+        return
+
+    catalog = Catalog(database)
+    store = get_bgg_metadata_store()
+    for _ in range(10):
+        if stop_event.is_set():
+            return
+        identifiers = await asyncio.to_thread(catalog.missing_metadata_ids, limit=20)
+        if not identifiers:
+            return
+        try:
+            await asyncio.to_thread(store.refresh_many, identifiers, force=True)
+        except Exception:
+            LOGGER.exception("Initial BGG metadata backfill failed")
+            return
+
+
 async def _document_index_worker(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
@@ -342,6 +363,7 @@ async def lifespan(_: FastAPI):
 
     worker_tasks: list[asyncio.Task[None]] = []
     worker_stop = asyncio.Event()
+    worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(
