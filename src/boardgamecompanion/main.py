@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -24,6 +24,12 @@ from boardgamecompanion.app_settings import (
     resolve_rag_settings,
     save_bgg_settings,
     save_rag_settings,
+)
+from boardgamecompanion.bgg_collection_sync import (
+    BggCollectionClient,
+    BggCollectionConfig,
+    BggCollectionSyncError,
+    BggCollectionSyncService,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_metadata import (
@@ -135,6 +141,28 @@ def get_rulebook_update_service() -> RulebookUpdateService:
     )
 
 
+def get_bgg_collection_sync_service() -> BggCollectionSyncService | None:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    if not resolved.collection_sync_configured:
+        return None
+    client = BggCollectionClient(
+        BggCollectionConfig(
+            application_token=resolved.application_token or "",
+            username=resolved.username or "",
+            timeout_seconds=resolved.timeout_seconds,
+            min_interval_seconds=resolved.min_interval_seconds,
+        ),
+        rate_limiter=PersistentRateLimiter(database).acquire,
+    )
+    return BggCollectionSyncService(
+        database,
+        client,
+        interval_seconds=resolved.collection_sync_interval_seconds,
+    )
+
+
 def get_bgg_metadata_store() -> BggMetadataStore:
     database = get_database()
     database.initialize()
@@ -218,6 +246,7 @@ class BarcodeLookupRequest(BaseModel):
 class BggSettingsUpdate(BaseModel):
     application_token: str | None = Field(default=None, max_length=4096)
     clear_application_token: bool = False
+    username: str | None = Field(default=None, max_length=128)
 
 
 class RagSettingsUpdate(BaseModel):
