@@ -133,7 +133,7 @@ def new_page(browser, *, mobile: bool = False):
 
 def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.goto(base_url)
-    import_button = page.get_by_role("button", name="Importa BGG CSV")
+    import_button = page.get_by_role("button", name="Importa CSV BGG")
     if not import_button.is_visible():
         page.get_by_role("button", name="Apri navigazione").click()
     import_button.click()
@@ -206,7 +206,7 @@ def test_close_x_never_submits_and_dialog_resets(browser, live_server):
 
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         page.locator("#csvFile").set_input_files(str(SAMPLE))
         expect(page.locator("#fileName")).to_have_text(SAMPLE.name)
 
@@ -215,7 +215,7 @@ def test_close_x_never_submits_and_dialog_resets(browser, live_server):
         page.wait_for_timeout(250)
         assert import_requests == []
 
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         expect(page.locator("#fileName")).to_have_text("Nessun file selezionato")
         assert page.locator("#csvFile").input_value() == ""
 
@@ -259,7 +259,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
         expect(page.locator(".detail-main h1")).to_have_text("Synthetic Beta Expansion")
         expect(page.get_by_text("Espansione", exact=True)).to_be_visible()
 
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         page.locator("#csvFile").set_input_files(str(SAMPLE))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("0 nuovi")
@@ -426,7 +426,7 @@ def test_import_error_is_visible_and_recoverable(browser, live_server):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         page.locator("#csvFile").set_input_files(
             {
                 "name": "not-a-csv.txt",
@@ -440,7 +440,7 @@ def test_import_error_is_visible_and_recoverable(browser, live_server):
         page.get_by_role("button", name="Chiudi").click()
         expect(page.locator("#importDialog")).not_to_be_visible()
 
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         expect(page.locator("#importResult")).to_be_hidden()
         expect(page.locator("#fileName")).to_have_text("Nessun file selezionato")
     finally:
@@ -452,7 +452,7 @@ def test_pagination(browser, live_server, tmp_path: Path):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         page.locator("#csvFile").set_input_files(str(many))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("30 righe")
@@ -477,8 +477,9 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
 
         page.get_by_role("button", name="Apri navigazione").click()
-        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Impostazioni").click()
+        expect(page.locator("#settingsDialog")).to_be_visible()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         expect(page.locator("#importDialog")).to_be_visible()
         box = page.locator("#importDialog").bounding_box()
         assert box is not None
@@ -489,22 +490,25 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         context.close()
 
 
-def test_sidebar_separates_daily_and_admin_navigation(browser, live_server):
+def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
         sidebar = page.locator("#appSidebar")
         expect(sidebar).to_be_visible()
         expect(sidebar.get_by_text("Ludoteca", exact=True)).to_be_visible()
-        expect(sidebar.get_by_text("Collezione", exact=True)).to_be_visible()
-        expect(sidebar.get_by_text("Amministrazione", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Strumenti", exact=True)).to_be_visible()
         expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
             "aria-current", "page"
         )
-        expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Aggiornamenti regolamenti")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Ricerca regolamenti")).to_be_visible()
-        expect(sidebar.get_by_role("button", name="Provider e AI")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Generi")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Meccaniche")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Scansiona barcode")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Impostazioni")).to_be_visible()
+        expect(sidebar.get_by_text("Amministrazione", exact=True)).to_have_count(0)
+        expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_have_count(0)
     finally:
         context.close()
 
@@ -514,7 +518,7 @@ def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa BGG CSV").click()
+        page.get_by_role("button", name="Importa CSV BGG").click()
         page.locator("#csvFile").set_input_files(str(malicious))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("Import completato.")
@@ -531,12 +535,13 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Provider e AI").click()
+        page.get_by_role("button", name="Impostazioni").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
-        expect(page.locator("#settingsDialogTitle")).to_have_text("Provider e AI")
+        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni")
 
         page.locator("#bggUsername").fill("browser-user")
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
+        page.get_by_role("tab", name="AI e provider").click()
         page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
         page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
         page.locator("#lmstudioSettings summary").click()
@@ -572,7 +577,8 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         assert "browser-secret-gemini-key" not in rag_response.text()
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
-        page.get_by_role("button", name="Provider e AI").click()
+        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("tab", name="AI e provider").click()
         page.locator("#lmstudioSettings summary").click()
         page.locator("#geminiSettings summary").click()
 
@@ -646,7 +652,7 @@ def test_catalog_bgg_sync_button_uses_manual_sync_endpoint(browser, live_server)
         page.route("**/api/bgg-collection-sync", status_route)
         page.route("**/api/bgg-collection-sync/run", run_route)
 
-        button = page.get_by_role("button", name="↻ Sincronizza BGG")
+        button = page.get_by_role("button", name="Sincronizza ora con BoardGameGeek")
         expect(button).to_be_visible()
         button.click()
         expect(page.locator("#toast")).to_contain_text("1 nuovi, 1 aggiornati")
@@ -666,12 +672,16 @@ def test_mobile_settings_and_drawer_accessibility(browser, live_server):
         expect(page.locator("#sidebarToggle")).to_have_attribute(
             "aria-expanded", "true"
         )
-        expect(page.get_by_role("button", name="Provider e AI")).to_be_visible()
-        page.get_by_role("button", name="Provider e AI").click()
+        expect(page.get_by_role("button", name="Impostazioni")).to_be_visible()
+        page.get_by_role("button", name="Impostazioni").click()
 
         expect(page.locator("#settingsDialog")).to_be_visible()
         expect(page.locator("#appSidebar")).not_to_be_in_viewport()
-        expect(page.locator("#bggSettings")).to_have_attribute("open", "")
+        expect(page.get_by_role("tab", name="Generale")).to_have_attribute("aria-selected", "true")
+        expect(page.locator("[data-settings-panel='general']")).to_be_visible()
+        expect(page.locator("[data-settings-panel='providers']")).to_be_hidden()
+        page.get_by_role("tab", name="AI e provider").click()
+        expect(page.locator("[data-settings-panel='providers']")).to_be_visible()
         expect(page.locator("#ollamaSettings")).not_to_have_attribute("open", "")
         expect(page.locator("#lmstudioSettings")).not_to_have_attribute("open", "")
         expect(page.locator("#geminiSettings")).not_to_have_attribute("open", "")
@@ -719,7 +729,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
 
         expect(page.locator(".game-summary-rail")).to_be_visible()
         expect(page.get_by_text("Giocatori", exact=True)).to_be_visible()
-        expect(page.get_by_text("Età consigliata", exact=True)).to_be_visible()
+        expect(page.get_by_text("Età ufficiale", exact=True)).to_be_visible()
         expect(page.get_by_text("10+", exact=True)).to_be_visible()
 
         description = page.get_by_role("heading", name="Descrizione")
