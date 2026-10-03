@@ -176,6 +176,74 @@ def _attribute(node: ET.Element | None, name: str = "value") -> str | None:
     return value.strip() if value and value.strip() else None
 
 
+def _number_attribute(node: ET.Element | None, name: str = "value") -> float | None:
+    value = _attribute(node, name)
+    if value is None or value.upper() == "N/A":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
+    poll = next(
+        (
+            node
+            for node in item.findall("poll")
+            if node.attrib.get("name") == "suggested_numplayers"
+        ),
+        None,
+    )
+    if poll is None:
+        return None, None
+    best: list[str] = []
+    recommended: list[str] = []
+    for result_group in poll.findall("results"):
+        label = (result_group.attrib.get("numplayers") or "").strip()
+        if not label:
+            continue
+        votes = {
+            (node.attrib.get("value") or "").strip().casefold(): int(
+                node.attrib.get("numvotes") or "0"
+            )
+            for node in result_group.findall("result")
+            if (node.attrib.get("numvotes") or "0").isdigit()
+        }
+        best_votes = votes.get("best", 0)
+        recommended_votes = votes.get("recommended", 0)
+        not_recommended_votes = votes.get("not recommended", 0)
+        if best_votes > 0 and best_votes >= recommended_votes and best_votes >= not_recommended_votes:
+            best.append(label)
+        if best_votes + recommended_votes > not_recommended_votes:
+            recommended.append(label)
+    return (
+        ", ".join(best) or None,
+        ", ".join(recommended) or None,
+    )
+
+
+def _suggested_age(item: ET.Element) -> str | None:
+    poll = next(
+        (
+            node
+            for node in item.findall("poll")
+            if node.attrib.get("name") == "suggested_playerage"
+        ),
+        None,
+    )
+    candidates: list[tuple[int, str]] = []
+    if poll is not None:
+        for group in poll.findall("results"):
+            for node in group.findall("result"):
+                value = (node.attrib.get("value") or "").strip()
+                votes = node.attrib.get("numvotes") or "0"
+                if value and votes.isdigit():
+                    candidates.append((int(votes), value))
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+    return _attribute(item.find("minage"))
+
 def _parse_item(item: ET.Element) -> dict[str, Any]:
     try:
         observed_id = int(item.attrib["id"])
