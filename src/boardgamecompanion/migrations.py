@@ -1274,6 +1274,11 @@ def _bgg_game_relationships(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_board_games_parent_bgg_id ON board_games(parent_bgg_id)"
     )
+    # Force one bounded metadata refresh after this schema upgrade so existing
+    # records receive official minimum age, mechanics and expansion parents.
+    connection.execute(
+        "UPDATE board_game_enrichments SET next_refresh_at='1970-01-01T00:00:00+00:00'"
+    )
 
 
 MIGRATIONS = (
