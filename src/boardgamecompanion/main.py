@@ -48,6 +48,10 @@ from boardgamecompanion.copies import (
     PhysicalCopyStore,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.description_translation import (
+    DescriptionTranslationError,
+    DescriptionTranslationService,
+)
 from boardgamecompanion.documents import (
     BoardGameDocumentNotFound,
     DocumentError,
@@ -153,6 +157,12 @@ def get_bgg_metadata_store() -> BggMetadataStore:
         client,
         refresh_seconds=settings.bgg_metadata_refresh_seconds,
     )
+
+
+def get_description_translation_service() -> DescriptionTranslationService:
+    database = get_database()
+    database.initialize()
+    return DescriptionTranslationService(database)
 
 
 def get_rulebook_discovery_service() -> RulebookDiscoveryService:
@@ -444,6 +454,12 @@ def list_games(
     q: str | None = Query(default=None, min_length=1),
     item_type: str | None = Query(default=None),
     owned: bool | None = Query(default=None),
+    supports_players: int | None = Query(default=None, ge=1, le=30),
+    ideal_players: int | None = Query(default=None, ge=1, le=30),
+    player_age: int | None = Query(default=None, ge=3, le=99),
+    weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
+    max_minutes: int | None = Query(default=None, ge=1, le=1440),
+    min_rating: float | None = Query(default=None, ge=0, le=10),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0),
@@ -454,6 +470,12 @@ def list_games(
         query=q,
         item_type=item_type,
         owned=owned,
+        supports_players=supports_players,
+        ideal_players=ideal_players,
+        player_age=player_age,
+        weight=weight,
+        max_minutes=max_minutes,
+        min_rating=min_rating,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
@@ -468,7 +490,36 @@ def get_game(bgg_id: int) -> dict[str, object]:
     if game is None:
         raise HTTPException(status_code=404, detail="Board game not found")
     game["bgg_metadata"] = get_bgg_metadata_store().get(bgg_id)
+    cached_translation = DescriptionTranslationService(database).get_cached(bgg_id)
+    game["description_it"] = (
+        cached_translation["translated_text"] if cached_translation else None
+    )
     return game
+
+
+@app.get("/api/games/{bgg_id}/description-it", tags=["catalog"])
+def get_game_description_it(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_description_translation_service().status(bgg_id)
+    except DescriptionTranslationError as exc:
+        if "not found" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/games/{bgg_id}/description-it/translate", tags=["catalog"])
+def translate_game_description_it(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_description_translation_service().translate(bgg_id)
+    except DescriptionTranslationError as exc:
+        detail = str(exc)
+        if "not found" in detail:
+            code = 404
+        elif "No BGG description" in detail:
+            code = 409
+        else:
+            code = 503
+        raise HTTPException(status_code=code, detail=detail) from exc
 
 
 @app.get("/api/games/{bgg_id}/copies", tags=["copies"])
@@ -1257,6 +1308,37 @@ def list_rulebook_update_runs(
         )
     except RulebookUpdateError as exc:
         raise rulebook_update_http_error(exc) from exc
+
+
+@app.post("/api/catalog/bgg-metadata/refresh-missing", tags=["catalog"])
+def refresh_missing_bgg_metadata(
+    limit: int = Query(default=20, ge=1, le=20),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    catalog = Catalog(database)
+    identifiers = catalog.missing_metadata_ids(limit=limit)
+    if not identifiers:
+        return {"attempted": 0, "updated": 0, "remaining": 0, "items": []}
+    try:
+        refreshed = get_bgg_metadata_store().refresh_many(identifiers, force=True)
+    except BggMetadataError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    items = [
+        {
+            "bgg_id": identifier,
+            "cover_url": refreshed[identifier].get("cover_url"),
+            "description_available": bool(refreshed[identifier].get("description")),
+        }
+        for identifier in identifiers
+        if identifier in refreshed
+    ]
+    return {
+        "attempted": len(identifiers),
+        "updated": len(items),
+        "remaining": catalog.missing_metadata_count(),
+        "items": items,
+    }
 
 
 @app.get("/api/catalog/stats", tags=["catalog"])
