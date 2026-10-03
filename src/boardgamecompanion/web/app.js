@@ -2267,6 +2267,28 @@ function bindRagResultActions(bggId, documentItems) {
   });
 }
 
+function ragIndexFailureText(item) {
+  const raw = String(item?.last_error_message || "").trim();
+  if (!raw) return "Indicizzazione non riuscita.";
+
+  if (/failed.*->.*failed/i.test(raw)) {
+    return raw.slice(0, 320);
+  }
+  if (/Gemini embedding request failed with HTTP 429/i.test(raw)) {
+    return "Gemini embedding non disponibile: quota/rate limit (HTTP 429).";
+  }
+  if (/Gemini embedding/i.test(raw)) {
+    return "Gemini embedding non disponibile: " + raw.slice(0, 220);
+  }
+  if (/Ollama/i.test(raw) || /qwen/i.test(raw)) {
+    return "Qwen/Ollama embedding non disponibile: " + raw.slice(0, 220);
+  }
+  if (/embedding/i.test(raw)) {
+    return "Embedding non disponibile: " + raw.slice(0, 220);
+  }
+  return "Indicizzazione non riuscita: " + raw.slice(0, 220);
+}
+
 async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
   const status = document.querySelector("#ragIndexStatus");
   const retry = document.querySelector(".rag-prepare-index");
@@ -2301,7 +2323,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
 
     if (failed.length) {
       status.className = "rag-index-status error";
-      status.textContent = "Indicizzazione non riuscita.";
+      status.textContent = ragIndexFailureText(failed[0]);
       if (retry) {
         retry.hidden = false;
         retry.disabled = false;
@@ -2361,14 +2383,26 @@ async function prepareRagIndex(bggId, documentItems) {
   status.className = "rag-index-status";
   status.textContent = "Riprovo l'indicizzazione…";
   try {
+    const providerMessages = [];
     for (const item of documentItems) {
       try {
-        await api("/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run", {method: "POST"});
+        const indexed = await api(
+          "/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run",
+          {method: "POST"},
+        );
+        const providerMessage = indexed?.embeddings?.provider_message;
+        if (providerMessage && !providerMessages.includes(providerMessage)) {
+          providerMessages.push(providerMessage);
+        }
       } catch (error) {
         if (error.status !== 409) throw error;
       }
     }
-    showToast("Indicizzazione completata.");
+    showToast(
+      providerMessages.length
+        ? providerMessages.join(" · ")
+        : "Indicizzazione completata."
+    );
   } catch (error) {
     showToast(error.message, true);
   } finally {

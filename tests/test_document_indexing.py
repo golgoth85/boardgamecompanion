@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -10,7 +11,10 @@ from fastapi import HTTPException
 from boardgamecompanion.database import Database
 from boardgamecompanion.document_indexing import DocumentIndexingService, enqueue_document_index
 from boardgamecompanion.embedding_retrieval import EmbeddingProviderError
-from boardgamecompanion.main import run_document_auto_index
+from boardgamecompanion.main import (
+    build_document_embeddings_with_failover,
+    run_document_auto_index,
+)
 
 
 def database(tmp_path: Path) -> Database:
@@ -147,3 +151,109 @@ def test_auto_index_maps_embedding_provider_failure_to_503(monkeypatch) -> None:
     assert captured.value.detail == (
         "Gemini embedding request failed with HTTP 429 after retries"
     )
+
+
+def test_embedding_failover_promotes_qwen_after_gemini_failure(monkeypatch) -> None:
+    class FakeDatabase:
+        def initialize(self) -> None:
+            pass
+
+    class FakeService:
+        def __init__(self, provider: str):
+            self.provider = provider
+
+        def build(self, document_id: str, *, force: bool = False):
+            if self.provider == "gemini":
+                raise EmbeddingProviderError(
+                    "Gemini embedding request failed with HTTP 429 after retries"
+                )
+            return {
+                "created": True,
+                "embedding_index": {
+                    "document_id": document_id,
+                    "provider": "ollama",
+                    "model": "qwen3-embedding:0.6b",
+                    "chunk_count": 42,
+                },
+            }
+
+    database = FakeDatabase()
+    rag = SimpleNamespace(
+        embedding_provider_order=("gemini", "ollama"),
+        ollama_embedding_model="qwen3-embedding:0.6b",
+    )
+    activated: list[str] = []
+
+    monkeypatch.setattr(
+        "boardgamecompanion.main.get_database",
+        lambda: database,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main.resolve_rag_settings",
+        lambda _database: rag,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main._embedding_retrieval_service_for",
+        lambda _database, _rag, selected: FakeService(selected),
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main.activate_embedding_provider",
+        lambda _database, provider: activated.append(provider),
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main.requeue_document_indexes_for_provider_change",
+        lambda _database, *, exclude_document_id: 3,
+    )
+
+    result = build_document_embeddings_with_failover("doc-1")
+
+    assert result["active_provider"] == "ollama"
+    assert result["provider_message"].startswith("Gemini failed")
+    assert result["provider_message"].endswith("Qwen OK")
+    assert result["requeued_documents"] == 3
+    assert activated == ["ollama"]
+
+
+def test_embedding_failover_reports_both_provider_failures(monkeypatch) -> None:
+    class FakeDatabase:
+        def initialize(self) -> None:
+            pass
+
+    class FailingService:
+        def __init__(self, provider: str):
+            self.provider = provider
+
+        def build(self, document_id: str, *, force: bool = False):
+            if self.provider == "gemini":
+                raise EmbeddingProviderError(
+                    "Gemini embedding request failed with HTTP 429 after retries"
+                )
+            raise EmbeddingProviderError("Ollama model qwen3-embedding:0.6b is unavailable")
+
+    database = FakeDatabase()
+    rag = SimpleNamespace(
+        embedding_provider_order=("gemini", "ollama"),
+        ollama_embedding_model="qwen3-embedding:0.6b",
+    )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.main.get_database",
+        lambda: database,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main.resolve_rag_settings",
+        lambda _database: rag,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.main._embedding_retrieval_service_for",
+        lambda _database, _rag, selected: FailingService(selected),
+    )
+
+    with pytest.raises(EmbeddingProviderError) as captured:
+        build_document_embeddings_with_failover("doc-1")
+
+    message = str(captured.value)
+    assert "Gemini failed" in message
+    assert "Qwen failed" in message
+    assert "HTTP 429" in message
+    assert "qwen3-embedding:0.6b" in message

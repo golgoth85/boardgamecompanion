@@ -37,6 +37,24 @@ def enqueue_document_index(
     return result.rowcount == 1
 
 
+def requeue_document_indexes_for_provider_change(
+    database: Database,
+    *,
+    exclude_document_id: str,
+) -> int:
+    now = datetime.now(UTC).isoformat()
+    with database.transaction(immediate=True) as connection:
+        result = connection.execute(
+            """UPDATE document_index_jobs
+               SET status='pending',stage='queued',next_attempt_at=?,
+                   consecutive_failures=0,last_error_code=NULL,last_error_message=NULL,
+                   lease_owner=NULL,lease_until=NULL,updated_at=?
+               WHERE document_id<>?""",
+            (now, now, exclude_document_id),
+        )
+    return int(result.rowcount)
+
+
 class DocumentIndexingService:
     def __init__(
         self,

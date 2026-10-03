@@ -328,6 +328,21 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
     )
 
 
+def activate_embedding_provider(
+    database: Database,
+    provider: str,
+) -> ResolvedRagSettings:
+    selected = str(provider).strip().lower()
+    if selected not in RAG_PROVIDERS:
+        raise ValueError(f"Unsupported RAG provider: {provider}")
+    AppSettingsStore(database).set(
+        "rag_embedding_provider_order",
+        json.dumps([selected]),
+        sensitive=False,
+    )
+    return resolve_rag_settings(database)
+
+
 def save_rag_settings(
     database: Database,
     *,

@@ -1891,6 +1891,16 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
                             "document_id": "doc-rag",
                             "status": state["status"],
                             "stage": "embeddings" if state["status"] == "failed" else "complete",
+                            "last_error_code": (
+                                "EmbeddingProviderError"
+                                if state["status"] == "failed"
+                                else None
+                            ),
+                            "last_error_message": (
+                                "Gemini embedding request failed with HTTP 429 after retries"
+                                if state["status"] == "failed"
+                                else None
+                            ),
                         }
                     ],
                 }
@@ -1908,6 +1918,11 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
                     "document_id": "doc-rag",
                     "status": "succeeded",
                     "stage": "complete",
+                    "embeddings": {
+                        "provider_message": (
+                            "Gemini failed (HTTP 429 / quota) -> Qwen OK"
+                        )
+                    },
                 }
             ),
         )
@@ -1967,8 +1982,9 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Indicizzazione non riuscita"
+            "Gemini embedding non disponibile"
         )
+        expect(page.locator("#ragIndexStatus")).to_contain_text("HTTP 429")
         expect(page.get_by_role("button", name="Riprova indicizzazione")).to_be_visible()
 
         page.locator("#ragQuestion").fill("Quando finisce il turno?")
@@ -1979,6 +1995,9 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
         page.locator(".rag-state-not-found .rag-prepare-index").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
             "Regolamento indicizzato"
+        )
+        expect(page.locator(".toast")).to_contain_text(
+            "Gemini failed (HTTP 429 / quota) -> Qwen OK"
         )
         assert retry_calls == [True]
     finally:
