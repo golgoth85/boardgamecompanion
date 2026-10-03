@@ -499,11 +499,48 @@ class GeminiEmbeddingProvider:
         if not self.api_key:
             raise ValueError("Gemini API key is required")
 
+    @staticmethod
+    def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
+        delay = float(fallback)
+
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                delay = max(delay, float(retry_after))
+            except ValueError:
+                pass
+
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            details = error.get("details") if isinstance(error, dict) else None
+            if isinstance(details, list):
+                for item in details:
+                    if not isinstance(item, dict):
+                        continue
+                    type_name = str(item.get("@type") or "")
+                    if not type_name.endswith("RetryInfo"):
+                        continue
+                    raw = item.get("retryDelay")
+                    if not isinstance(raw, str):
+                        continue
+                    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)s", raw.strip())
+                    if match:
+                        delay = max(delay, float(match.group(1)))
+
+        # Google's SDK uses bounded exponential backoff for transient 429/5xx
+        # failures. Honour the server-provided RetryInfo window while keeping
+        # the synchronous indexing request bounded.
+        return min(60.0, delay)
+
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
         retryable_statuses = {429, 500, 502, 503, 504}
-        max_attempts = 4
+        max_attempts = 5
 
         for attempt in range(max_attempts):
             try:
@@ -543,13 +580,10 @@ class GeminiEmbeddingProvider:
                         f"Gemini embedding request failed with HTTP {status}{suffix}"
                     ) from exc
 
-                delay = min(8.0, float(2**attempt))
-                retry_after = exc.response.headers.get("Retry-After")
-                if retry_after:
-                    try:
-                        delay = min(30.0, max(delay, float(retry_after)))
-                    except ValueError:
-                        pass
+                delay = self._retry_delay(
+                    exc.response,
+                    fallback=min(8.0, float(2**attempt)),
+                )
                 time.sleep(delay)
             except httpx.HTTPError as exc:
                 if attempt + 1 >= max_attempts:
