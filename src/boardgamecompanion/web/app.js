@@ -284,8 +284,12 @@ async function api(url, options) {
 
 function setSettingsBusy(busy) {
   settingsBusy = busy;
-  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings, bggSyncSettingsNow]) {
+  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
     if (control) control.disabled = busy;
+  }
+  if (bggSyncSettingsNow) {
+    bggSyncSettingsNow.disabled =
+      busy || !currentBggSettings?.collection_sync_configured;
   }
   saveSettings.textContent = busy ? "Salvataggio…" : "Salva";
   saveTestSettings.textContent = busy ? "Verifica…" : "Salva e verifica";
