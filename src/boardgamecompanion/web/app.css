@@ -3237,3 +3237,65 @@ a { color: inherit; text-decoration: none; }
     width: 100%;
   }
 }
+
+/* BGG automatic collection synchronization */
+.catalog-header-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.catalog-sync-control {
+  display: grid;
+  justify-items: end;
+  gap: .22rem;
+}
+.catalog-sync-control small {
+  min-height: .9rem;
+  font-size: .62rem;
+}
+.bgg-sync-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .8rem;
+  margin-top: .8rem;
+  padding: .72rem .8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(11, 15, 23, .32);
+}
+.bgg-sync-settings > div {
+  min-width: 0;
+}
+.bgg-sync-settings strong,
+.bgg-sync-settings small {
+  display: block;
+}
+.bgg-sync-settings strong {
+  font-size: .8rem;
+}
+.bgg-sync-settings small {
+  margin-top: .18rem;
+  line-height: 1.35;
+}
+@media (max-width: 760px) {
+  .catalog-header-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .catalog-sync-control {
+    justify-items: stretch;
+  }
+  .catalog-sync-control small {
+    text-align: left;
+  }
+  .bgg-sync-settings {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .bgg-sync-settings .button {
+    width: 100%;
+  }
+}
