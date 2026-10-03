@@ -3036,3 +3036,157 @@ a { color: inherit; text-decoration: none; }
 .catalog-list-expansions[hidden] {
   display: none !important;
 }
+
+
+/* Game-centric detail */
+.game-centric-detail .game-summary-rail {
+  top: 1rem;
+}
+.game-header-centric {
+  padding-bottom: .35rem;
+}
+.game-header-centric h1 {
+  max-width: 20ch;
+}
+.game-overview {
+  margin-top: .25rem;
+  padding: 1.15rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(73,190,132,.055), rgba(59,130,246,.025)),
+    rgba(13,18,28,.58);
+}
+.game-overview-heading {
+  margin-bottom: .65rem;
+}
+.game-overview-heading h2 {
+  margin: .08rem 0 0;
+  font-size: 1.15rem;
+}
+.game-description {
+  color: #d7deea;
+  font-size: .94rem;
+  line-height: 1.68;
+}
+.game-description p {
+  margin: 0 0 .8rem;
+}
+.game-description p:last-child {
+  margin-bottom: 0;
+}
+.game-primary-actions {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+  margin: .8rem 0 0;
+}
+.collection-compact {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(190px, auto);
+  gap: 1rem;
+  align-items: center;
+  margin-top: .8rem;
+  padding: .9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(18,24,38,.48);
+}
+.collection-compact-copy h2 {
+  margin: .08rem 0 .2rem;
+  font-size: 1rem;
+}
+.collection-compact-copy .section-subtitle {
+  margin: 0;
+}
+.copy-details-compact {
+  min-width: min(100%, 260px);
+}
+.copy-details-compact > summary {
+  list-style: none;
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: .58rem .78rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(11,15,23,.5);
+  font-size: .78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.copy-details-compact > summary::-webkit-details-marker {
+  display: none;
+}
+.copy-details-compact[open] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.copy-details-compact[open] > summary {
+  justify-content: flex-start;
+  margin-bottom: .65rem;
+}
+.rules-workspace-secondary {
+  margin-top: 1rem;
+}
+.rules-workspace-secondary .game-document-list {
+  margin-top: .8rem;
+}
+.rules-workspace-secondary .rulebook-search-details {
+  margin-top: .75rem;
+}
+.rules-workspace-secondary .rag-panel {
+  margin-top: 1rem;
+}
+.game-facts-primary > div:nth-child(2) dd {
+  color: #7ce0aa;
+}
+.game-facts-primary > div:nth-child(5) dd {
+  color: var(--accent-2);
+}
+.technical-game-details {
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 760px) {
+  .game-header-centric {
+    padding-top: .15rem;
+  }
+  .game-overview {
+    padding: .95rem;
+  }
+  .game-primary-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .game-primary-actions .button:first-child {
+    grid-column: 1 / -1;
+  }
+  .collection-compact {
+    grid-template-columns: 1fr;
+    gap: .7rem;
+  }
+  .copy-details-compact {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 460px) {
+  .game-primary-actions {
+    grid-template-columns: 1fr;
+  }
+  .game-primary-actions .button:first-child {
+    grid-column: auto;
+  }
+  .game-primary-actions .button {
+    width: 100%;
+  }
+  .game-description {
+    font-size: .9rem;
+    line-height: 1.6;
+  }
+}
