@@ -63,23 +63,35 @@ class ResolvedBggSettings:
     application_token: str | None
     token_source: str | None
     stored_token_configured: bool
+    username: str | None
+    username_source: str | None
     timeout_seconds: float
     min_interval_seconds: float
+    collection_sync_interval_seconds: int
 
     @property
     def configured(self) -> bool:
         return bool(self.application_token)
 
+    @property
+    def collection_sync_configured(self) -> bool:
+        return bool(self.application_token and self.username)
+
     def public_dict(self) -> dict[str, object]:
         return {
             "configured": self.configured,
+            "collection_sync_configured": self.collection_sync_configured,
             "application_token_configured": self.configured,
             "application_token_source": self.token_source,
             "stored_application_token_configured": self.stored_token_configured,
+            "username": self.username,
+            "username_source": self.username_source,
             "timeout_seconds": self.timeout_seconds,
             "min_interval_seconds": self.min_interval_seconds,
+            "collection_sync_interval_seconds": self.collection_sync_interval_seconds,
             "overrides": {
                 "application_token": self.token_source == "environment",
+                "username": self.username_source == "environment",
             },
         }
 
@@ -87,16 +99,33 @@ class ResolvedBggSettings:
 def resolve_bgg_settings(database: Database) -> ResolvedBggSettings:
     store = AppSettingsStore(database)
     stored_token = store.get("bgg_application_token")
+    stored_username = store.get("bgg_username")
     env_token = os.environ.get("BGC_BGG_APPLICATION_TOKEN")
+    env_username = os.environ.get("BGC_BGG_USERNAME")
     token = env_token.strip() if env_token and env_token.strip() else stored_token
+    username = (
+        env_username.strip()
+        if env_username and env_username.strip()
+        else stored_username
+    )
     source = "environment" if env_token and env_token.strip() else "stored" if stored_token else None
+    username_source = (
+        "environment"
+        if env_username and env_username.strip()
+        else "stored"
+        if stored_username
+        else None
+    )
 
     return ResolvedBggSettings(
         application_token=token,
         token_source=source,
         stored_token_configured=bool(stored_token),
+        username=username,
+        username_source=username_source,
         timeout_seconds=float(settings.bgg_timeout_seconds),
         min_interval_seconds=float(settings.bgg_min_interval_seconds),
+        collection_sync_interval_seconds=int(settings.bgg_collection_sync_interval_seconds),
     )
 
 
@@ -105,6 +134,7 @@ def save_bgg_settings(
     *,
     application_token: str | None,
     clear_application_token: bool,
+    username: str | None,
 ) -> ResolvedBggSettings:
     store = AppSettingsStore(database)
     if clear_application_token:
@@ -115,6 +145,8 @@ def save_bgg_settings(
             application_token.strip(),
             sensitive=True,
         )
+    if username is not None:
+        store.set("bgg_username", username.strip() or None, sensitive=False)
     return resolve_bgg_settings(database)
 
 
