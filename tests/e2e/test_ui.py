@@ -497,7 +497,7 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         assert box is not None
         assert box["x"] >= 0
         assert box["x"] + box["width"] <= 391
-        page.get_by_role("button", name="Chiudi").click()
+        page.locator("#closeImport").click()
     finally:
         context.close()
 
@@ -1098,7 +1098,9 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
 
         page.goto(live_server)
-        page.get_by_role("link", name="Fonti da verificare").click()
+        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("tab", name="Regolamenti").click()
+        page.locator("#settingsDialog").get_by_role("link", name="Fonti da verificare").click()
         expect(page).to_have_url(f"{live_server}/reviews")
         expect(page.get_by_role("heading", name="Fonti da verificare")).to_be_visible()
         expect(page.locator(".review-card")).to_have_count(1)
@@ -1395,7 +1397,9 @@ def test_rulebook_updates_ui_schedule_and_run_controls(browser, live_server):
         )
 
         page.goto(live_server)
-        page.get_by_role("link", name="Aggiornamenti").click()
+        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("tab", name="Regolamenti").click()
+        page.locator("#settingsDialog").get_by_role("link", name="Aggiornamenti").click()
         expect(page).to_have_url(f"{live_server}/updates")
         expect(
             page.get_by_role("heading", name="Aggiornamenti regolamenti")
@@ -1809,15 +1813,20 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
             ),
         )
         page.route(
-            "**/api/documents/doc-rag/embeddings",
+            "**/api/document-index-jobs?document_id=doc-rag&limit=1",
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
                 body=json.dumps(
                     {
-                        "document_id": "doc-rag",
-                        "current": {"id": "embedding-run"},
-                        "latest_run": {"id": "embedding-run"},
+                        "count": 1,
+                        "items": [
+                            {
+                                "document_id": "doc-rag",
+                                "status": "succeeded",
+                                "stage": "complete",
+                            }
+                        ],
                     }
                 ),
             ),
@@ -1826,7 +1835,7 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
-        expect(page.locator("#ragIndexStatus")).to_contain_text("1/1 documenti indicizzati")
+        expect(page.locator("#ragIndexStatus")).to_contain_text("Regolamento indicizzato")
 
         page.locator("#ragQuestion").fill("Come si prepara?")
         page.locator("#ragAsk").click()
@@ -1867,41 +1876,40 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
 
 def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
     context, page = new_page(browser)
-    build_calls = []
+    state = {"status": "failed"}
+    retry_calls = []
 
-    def embeddings_route(route):
-        if route.request.method == "GET":
-            route.fulfill(
-                status=409,
-                content_type="application/json",
-                body=json.dumps({"detail": "Document has no current P7B chunk index"}),
-            )
-            return
-        build_calls.append("embeddings")
+    def job_route(route):
         route.fulfill(
             status=200,
             content_type="application/json",
             body=json.dumps(
                 {
-                    "created": True,
-                    "embedding_index": {"id": "embedding-run", "chunk_count": 3},
+                    "count": 1,
+                    "items": [
+                        {
+                            "document_id": "doc-rag",
+                            "status": state["status"],
+                            "stage": "embeddings" if state["status"] == "failed" else "complete",
+                        }
+                    ],
                 }
             ),
         )
 
-    def ingest_route(route):
-        build_calls.append("ingest")
+    def retry_route(route):
+        retry_calls.append(True)
+        state["status"] = "succeeded"
         route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({"created": True, "ingest": {"id": "parse-run"}}),
-        )
-    def chunks_route(route):
-        build_calls.append("chunks")
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps({"created": True, "index": {"id": "chunk-run"}}),
+            body=json.dumps(
+                {
+                    "document_id": "doc-rag",
+                    "status": "succeeded",
+                    "stage": "complete",
+                }
+            ),
         )
 
     not_found = {
@@ -1940,10 +1948,14 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
                 body=json.dumps(_rag_document_response()),
             ),
         )
-        page.route("**/api/documents/doc-rag/embeddings", embeddings_route)
-        page.route("**/api/documents/doc-rag/embeddings/build", embeddings_route)
-        page.route("**/api/documents/doc-rag/ingest", ingest_route)
-        page.route("**/api/documents/doc-rag/chunks/build", chunks_route)
+        page.route(
+            "**/api/document-index-jobs?document_id=doc-rag&limit=1",
+            job_route,
+        )
+        page.route(
+            "**/api/documents/doc-rag/auto-index/run",
+            retry_route,
+        )
         page.route(
             "**/api/games/900001/answer",
             lambda route: route.fulfill(
@@ -1954,22 +1966,23 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
         )
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        expect(page.locator("#ragIndexStatus")).to_contain_text("Indice incompleto")
+        expect(page.locator("#ragIndexStatus")).to_contain_text(
+            "Indicizzazione non riuscita"
+        )
+        expect(page.get_by_role("button", name="Riprova indicizzazione")).to_be_visible()
 
         page.locator("#ragQuestion").fill("Quando finisce il turno?")
         page.locator("#ragAsk").click()
         expect(page.locator(".rag-state-not-found")).to_contain_text(
             "Nessuna risposta affidabile"
         )
-        expect(page.locator(".rag-state-not-found")).to_contain_text(
-            "indice dei documenti non è completo"
-        )
         page.locator(".rag-state-not-found .rag-prepare-index").click()
-        expect(page.locator("#ragIndexStatus")).to_contain_text("Indice pronto")
-        assert build_calls == ["ingest", "chunks", "embeddings"]
+        expect(page.locator("#ragIndexStatus")).to_contain_text(
+            "Regolamento indicizzato"
+        )
+        assert retry_calls == [True]
     finally:
         context.close()
-
 
 def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server):
     context, page = new_page(browser, mobile=True)
@@ -1979,7 +1992,7 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
 
         expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Nessun documento archiviato"
+            "verrà creato automaticamente"
         )
         box = page.locator("#ragPanel").bounding_box()
         assert box is not None
