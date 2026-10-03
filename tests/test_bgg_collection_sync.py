@@ -66,7 +66,7 @@ def test_collection_client_retries_202_and_splits_base_from_expansions() -> None
         if not queued_once["done"]:
             queued_once["done"] = True
             return httpx.Response(202, request=request)
-        body = EXP_XML if "subtype=boardgameexpansion" in url else BASE_XML
+        body = EXP_XML if request.url.params.get("subtype") == "boardgameexpansion" else BASE_XML
         return httpx.Response(200, content=body, request=request)
 
     client = BggCollectionClient(
@@ -164,7 +164,7 @@ def test_collection_sync_due_state_uses_last_success(tmp_path: Path) -> None:
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
                     200,
-                    content=EXP_XML if "subtype=boardgameexpansion" in str(request.url) else BASE_XML,
+                    content=EXP_XML if request.url.params.get("subtype") == "boardgameexpansion" else BASE_XML,
                     request=request,
                 )
             )
