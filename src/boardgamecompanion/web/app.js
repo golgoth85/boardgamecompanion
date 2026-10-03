@@ -6,12 +6,18 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 
 const shellSectionLabels = {
   catalog: "Ludoteca",
+  rankings: "Classifiche",
+  categories: "Generi",
+  mechanics: "Meccaniche",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
 };
 
 function shellRouteKey(pathname = window.location.pathname) {
+  if (/^\/rankings\/?$/.test(pathname)) return "rankings";
+  if (/^\/categories\/?$/.test(pathname)) return "categories";
+  if (/^\/mechanics\/?$/.test(pathname)) return "mechanics";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
   if (/^\/updates\/?$/.test(pathname)) return "updates";
   if (/^\/discovery\/?$/.test(pathname)) return "discovery";
@@ -86,6 +92,8 @@ const cameraSection = document.querySelector("#cameraSection");
 const scannerVideo = document.querySelector("#scannerVideo");
 const toggleCamera = document.querySelector("#toggleCamera");
 const cameraHint = document.querySelector("#cameraHint");
+const scannerPhoto = document.querySelector("#scannerPhoto");
+const scannerPhotoButton = document.querySelector("#scannerPhotoButton");
 const settingsDialog = document.querySelector("#settingsDialog");
 const settingsButton = document.querySelector("#settingsButton");
 const settingsForm = document.querySelector("#settingsForm");
@@ -93,6 +101,8 @@ const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
 const saveTestSettings = document.querySelector("#saveTestSettings");
+const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
+const settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
 const bggUsername = document.querySelector("#bggUsername");
 const bggApplicationToken = document.querySelector("#bggApplicationToken");
 const bggClearToken = document.querySelector("#bggClearToken");
@@ -139,6 +149,14 @@ const documentEdition = document.querySelector("#documentEdition");
 const documentSourceUrl = document.querySelector("#documentSourceUrl");
 const documentOfficial = document.querySelector("#documentOfficial");
 const documentResult = document.querySelector("#documentResult");
+const catalogAssistantButton = document.querySelector("#catalogAssistantButton");
+const catalogAssistantDialog = document.querySelector("#catalogAssistantDialog");
+const catalogAssistantForm = document.querySelector("#catalogAssistantForm");
+const catalogAssistantQuestion = document.querySelector("#catalogAssistantQuestion");
+const catalogAssistantResult = document.querySelector("#catalogAssistantResult");
+const closeCatalogAssistant = document.querySelector("#closeCatalogAssistant");
+const cancelCatalogAssistant = document.querySelector("#cancelCatalogAssistant");
+const askCatalogAssistant = document.querySelector("#askCatalogAssistant");
 const toast = document.querySelector("#toast");
 
 const state = {
@@ -158,6 +176,8 @@ const state = {
   weight: "",
   maxMinutes: "",
   minRating: "",
+  category: "",
+  mechanic: "",
 };
 
 let searchTimer;
