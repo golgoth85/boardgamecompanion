@@ -1391,8 +1391,8 @@ function skeletons() {
   return Array.from({length: 12}, () => '<div class="skeleton"></div>').join("");
 }
 
-async async function renderCatalog() {
-  app.innerHTML = \`
+async function renderCatalog() {
+  app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
@@ -1400,10 +1400,10 @@ async async function renderCatalog() {
         <p class="page-lead">Cerca un titolo oppure filtra la collezione in base a come vuoi giocare.</p>
       </div>
       <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
-        <button class="view-switch-button \${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                type="button" aria-pressed="\${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
-        <button class="view-switch-button \${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                type="button" aria-pressed="\${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+        <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+        <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
       </div>
     </section>
 
@@ -1422,7 +1422,7 @@ async async function renderCatalog() {
         </div>
         <div class="catalog-head-actions">
           <label class="collapse-expansions-toggle">
-            <input id="collapseExpansions" type="checkbox" \${state.collapseExpansions ? "checked" : ""}>
+            <input id="collapseExpansions" type="checkbox" ${state.collapseExpansions ? "checked" : ""}>
             <span>Raggruppa espansioni</span>
           </label>
           <span class="muted" id="resultCount">Caricamento…</span>
@@ -1432,48 +1432,48 @@ async async function renderCatalog() {
       <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
         <label class="field search-field">
           <input id="searchInput" type="search" aria-label="Cerca per titolo"
-                 placeholder="Cerca un gioco…" value="\${escapeHtml(state.q)}" autocomplete="off">
+                 placeholder="Cerca un gioco…" value="${escapeHtml(state.q)}" autocomplete="off">
         </label>
         <label class="field">
           <select id="typeFilter" aria-label="Tipo">
             <option value="">Tutti i tipi</option>
-            <option value="standalone" \${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
-            <option value="expansion" \${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
+            <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
+            <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
           </select>
         </label>
         <label class="field">
           <select id="ownedFilter" aria-label="Stato collezione">
             <option value="">Tutti</option>
-            <option value="true" \${state.owned === "true" ? "selected" : ""}>Posseduti</option>
-            <option value="false" \${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
+            <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
+            <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
           </select>
         </label>
         <label class="field">
           <select id="sortFilter" aria-label="Ordina">
-            <option value="title" \${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-            <option value="rating_desc" \${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-            <option value="weight_desc" \${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
-            <option value="year_desc" \${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
+            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
+            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
           </select>
         </label>
       </section>
 
-      <details class="advanced-search" id="advancedSearch" \${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
+      <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
         <summary>Ricerca avanzata</summary>
         <div class="advanced-search-grid">
-          <label><span>Giocabile in</span><input id="supportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="\${escapeHtml(state.supportsPlayers)}"></label>
-          <label><span>Ideale in</span><input id="idealPlayers" type="number" min="1" max="30" placeholder="es. 2" value="\${escapeHtml(state.idealPlayers)}"></label>
-          <label><span>Età del giocatore</span><input id="playerAge" type="number" min="3" max="99" placeholder="es. 8" value="\${escapeHtml(state.playerAge)}"></label>
+          <label><span>Giocabile in</span><input id="supportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.supportsPlayers)}"></label>
+          <label><span>Ideale in</span><input id="idealPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.idealPlayers)}"></label>
+          <label><span>Età del giocatore</span><input id="playerAge" type="number" min="3" max="99" placeholder="es. 8" value="${escapeHtml(state.playerAge)}"></label>
           <label><span>Complessità</span>
             <select id="weightFilter">
               <option value="">Qualsiasi</option>
-              <option value="light" \${state.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
-              <option value="medium" \${state.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
-              <option value="heavy" \${state.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
+              <option value="light" ${state.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
+              <option value="medium" ${state.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
+              <option value="heavy" ${state.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
             </select>
           </label>
-          <label><span>Durata massima</span><input id="maxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="\${escapeHtml(state.maxMinutes)}"></label>
-          <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="\${escapeHtml(state.minRating)}"></label>
+          <label><span>Durata massima</span><input id="maxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="${escapeHtml(state.maxMinutes)}"></label>
+          <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(state.minRating)}"></label>
         </div>
         <div class="advanced-search-actions">
           <p>“Età del giocatore” mostra i titoli con età consigliata BGG uguale o inferiore.</p>
@@ -1481,11 +1481,11 @@ async async function renderCatalog() {
         </div>
       </details>
 
-      <section class="catalog-results \${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
-               id="catalogGrid">\${skeletons()}</section>
+      <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
+               id="catalogGrid">${skeletons()}</section>
       <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
-  \`;
+  `;
 
   bindCatalogControls();
   const requestedPath = window.location.pathname;
@@ -1501,7 +1501,7 @@ async async function renderCatalog() {
     backfillMissingMetadata();
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
-      \`<div class="empty catalog-empty">Impossibile caricare il catalogo: \${escapeHtml(error.message)}</div>\`;
+      `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
   }
 }
@@ -1529,7 +1529,7 @@ function bindCatalogControls() {
     ["maxMinutes", "maxMinutes"],
     ["minRating", "minRating"],
   ]) {
-    document.querySelector(\`#\${id}\`)?.addEventListener("change", (event) => refreshFrom(key, event.target.value));
+    document.querySelector(`#${id}`)?.addEventListener("change", (event) => refreshFrom(key, event.target.value));
   }
 
   document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
@@ -1574,7 +1574,7 @@ async function loadCatalogData(signal) {
   if (state.weight) params.set("weight", state.weight);
   if (state.maxMinutes) params.set("max_minutes", state.maxMinutes);
   if (state.minRating) params.set("min_rating", state.minRating);
-  return api(\`/api/games?\${params}\`, signal ? {signal} : undefined);
+  return api(`/api/games?${params}`, signal ? {signal} : undefined);
 }
 
 async function refreshCatalog() {
