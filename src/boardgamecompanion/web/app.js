@@ -2518,9 +2518,10 @@ async function renderDetail(bggId) {
             </div>
             <dl class="game-summary-list game-facts-primary">
               <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
-              <div><dt>Età consigliata</dt><dd>${escapeHtml(ageText(game))}</dd></div>
+              <div><dt>Raccomandato per</dt><dd>${escapeHtml(bgg.recommended_players || "—")}</dd></div>
+              <div><dt>Ideale per</dt><dd>${escapeHtml(bgg.best_players || "—")}</dd></div>
+              <div><dt>Età ufficiale</dt><dd>${escapeHtml(ageText(game))}</dd></div>
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
-              ${bgg.best_players ? `<div><dt>Ideale in</dt><dd>${escapeHtml(bgg.best_players)}</dd></div>` : ""}
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
@@ -2625,7 +2626,6 @@ async function renderDetail(bggId) {
             <summary><span><strong>Altri dati BGG</strong><small>Informazioni secondarie</small></span></summary>
             <div class="technical-game-content">
               <div class="fact-grid">
-                ${fact("Giocatori consigliati", bgg.recommended_players || "—")}
                 ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
                 ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
                 ${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
@@ -3459,6 +3459,8 @@ document.addEventListener("click", (event) => {
   const url = new URL(link.href, window.location.origin);
   if (url.origin !== window.location.origin) return;
   event.preventDefault();
+  if (settingsDialog?.open && link.closest("#settingsDialog")) settingsDialog.close();
+  if (catalogAssistantDialog?.open && link.closest("#catalogAssistantDialog")) catalogAssistantDialog.close();
   history.pushState({}, "", url.pathname);
   closeSidebar();
   route();
@@ -3500,6 +3502,10 @@ scannerForm.addEventListener("submit", (event) => {
 toggleCamera.addEventListener("click", () => {
   void startScannerCamera();
 });
+scannerPhoto?.addEventListener("change", () => {
+  const file = scannerPhoto.files?.[0];
+  if (file) void decodeScannerPhoto(file);
+});
 
 copyForm.addEventListener("submit", (event) => {
   void saveCopyEditor(event);
@@ -3540,7 +3546,29 @@ documentFile.addEventListener("change", () => {
 
 settingsButton.addEventListener("click", () => {
   closeSidebar();
-  void openSettingsDialog();
+  void openSettingsDialog("general");
+});
+settingsTabs.forEach((tab) => {
+  tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
+});
+
+catalogAssistantButton?.addEventListener("click", openCatalogAssistant);
+catalogAssistantForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitCatalogAssistant();
+});
+closeCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+cancelCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
+catalogAssistantDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeCatalogAssistantDialog();
+});
+document.querySelectorAll("[data-assistant-example]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!catalogAssistantQuestion) return;
+    catalogAssistantQuestion.value = button.dataset.assistantExample || "";
+    catalogAssistantQuestion.focus();
+  });
 });
 
 closeSettings.addEventListener("click", closeSettingsDialog);
