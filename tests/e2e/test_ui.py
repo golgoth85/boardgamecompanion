@@ -626,7 +626,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         expect(page.get_by_text("10+", exact=True)).to_be_visible()
 
         description = page.get_by_role("heading", name="Descrizione")
-        rules = page.get_by_role("heading", name="Regole e manuali")
+        rules = page.get_by_role("heading", name="Regolamenti e documenti")
         expect(description).to_be_visible()
         expect(rules).to_be_visible()
         description_box = description.bounding_box()
@@ -635,7 +635,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         assert description_box["y"] < rules_box["y"]
 
         expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+        expect(page.get_by_text("1 copia fisica", exact=True)).to_be_visible()
 
         expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
         expect(page.locator("#ragQuestion")).to_be_visible()
@@ -652,15 +652,37 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         context.close()
 
 
+
+def test_mobile_game_detail_keeps_game_first_and_no_horizontal_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.get_by_role("heading", name="Descrizione")).to_be_visible()
+        expect(page.get_by_role("heading", name="Regolamenti e documenti")).to_be_visible()
+        expect(page.get_by_text("Età consigliata", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+
+        description_y = page.get_by_role("heading", name="Descrizione").bounding_box()["y"]
+        rules_y = page.get_by_role("heading", name="Regolamenti e documenti").bounding_box()["y"]
+        assert description_y < rules_y
+    finally:
+        context.close()
+
+
 def test_physical_copy_detail_and_edit_flow(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+        expect(page.get_by_text("1 copia fisica", exact=True)).to_be_visible()
         expect(page.locator(".physical-copy-card")).not_to_be_visible()
-        page.locator(".copy-details-disclosure summary").click()
+        page.locator(".copy-details-compact summary").click()
         expect(page.locator(".physical-copy-card")).to_have_count(1)
         expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
         expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")
@@ -677,6 +699,8 @@ def test_physical_copy_detail_and_edit_flow(browser, live_server):
         page.get_by_role("button", name="Salva copia").click()
 
         expect(page.locator("#copyDialog")).not_to_be_visible()
+        expect(page.locator(".physical-copy-card")).not_to_be_visible()
+        page.locator(".copy-details-compact summary").click()
         expect(page.locator(".physical-copy-card")).to_contain_text("555-000-111")
         expect(page.locator(".physical-copy-card")).to_contain_text("Kallax Z9")
         expect(page.locator(".physical-copy-card")).to_contain_text("Copia aggiornata da UI")
@@ -779,7 +803,7 @@ def test_document_upload_list_download_and_dedup(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Regolamenti e documenti", exact=True)).to_be_visible()
         expect(page.locator(".game-document-card")).to_have_count(0)
         expect(page.locator(".document-empty")).to_contain_text(
             "Nessun manuale o documento registrato"
