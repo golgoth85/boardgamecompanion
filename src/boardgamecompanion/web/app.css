@@ -3030,3 +3030,9 @@ a { color: inherit; text-decoration: none; }
     width: 100%;
   }
 }
+
+
+.expansion-drawer[hidden],
+.catalog-list-expansions[hidden] {
+  display: none !important;
+}
