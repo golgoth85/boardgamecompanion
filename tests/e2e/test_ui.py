@@ -614,23 +614,37 @@ def test_mobile_admin_surfaces_do_not_overflow(browser, live_server):
         context.close()
 
 
-def test_game_detail_prioritizes_rules_and_progressive_disclosure(browser, live_server):
+def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
         expect(page.locator(".game-summary-rail")).to_be_visible()
-        expect(page.get_by_role("heading", name="Regolamento e assistente")).to_be_visible()
-        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
-        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
-        expect(page.get_by_role("heading", name="Copie fisiche")).to_be_visible()
+        expect(page.get_by_text("Giocatori", exact=True)).to_be_visible()
+        expect(page.get_by_text("Età consigliata", exact=True)).to_be_visible()
+        expect(page.get_by_text("10+", exact=True)).to_be_visible()
+
+        description = page.get_by_role("heading", name="Descrizione")
+        rules = page.get_by_role("heading", name="Regole e manuali")
+        expect(description).to_be_visible()
+        expect(rules).to_be_visible()
+        description_box = description.bounding_box()
+        rules_box = rules.bounding_box()
+        assert description_box is not None and rules_box is not None
+        assert description_box["y"] < rules_box["y"]
+
+        expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+
+        rag = page.locator(".rag-disclosure")
+        expect(rag).not_to_have_attribute("open", "")
+        expect(page.locator("#ragQuestion")).not_to_be_visible()
+        rag.locator("summary").click()
+        expect(page.locator("#ragQuestion")).to_be_visible()
 
         technical = page.locator(".technical-game-details")
         expect(technical).not_to_have_attribute("open", "")
-        expect(page.get_by_text("Best players", exact=True)).not_to_be_visible()
-        technical.locator("summary").click()
-        expect(page.get_by_text("Best players", exact=True)).to_be_visible()
 
         discovery_details = page.locator(".rulebook-search-details")
         expect(discovery_details).not_to_have_attribute("open", "")
@@ -647,7 +661,9 @@ def test_physical_copy_detail_and_edit_flow(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("Copie fisiche", exact=True)).to_be_visible()
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+        expect(page.locator(".physical-copy-card")).not_to_be_visible()
+        page.locator(".copy-details-disclosure summary").click()
         expect(page.locator(".physical-copy-card")).to_have_count(1)
         expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
         expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")
