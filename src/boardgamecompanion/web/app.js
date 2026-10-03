@@ -53,6 +53,7 @@ function updateShellNavigation() {
 }
 const importDialog = document.querySelector("#importDialog");
 const importButton = document.querySelector("#importButton");
+const importSidebarButton = document.querySelector("#importSidebarButton");
 const importForm = document.querySelector("#importForm");
 const csvFile = document.querySelector("#csvFile");
 const fileName = document.querySelector("#fileName");
@@ -3618,6 +3619,11 @@ geminiClearApiKey.addEventListener("change", () => {
 });
 
 importButton.addEventListener("click", () => {
+  closeSidebar();
+  resetImportDialog();
+  importDialog.showModal();
+});
+importSidebarButton?.addEventListener("click", () => {
   closeSidebar();
   resetImportDialog();
   importDialog.showModal();
