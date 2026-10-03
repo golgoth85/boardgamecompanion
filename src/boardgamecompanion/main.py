@@ -737,19 +737,10 @@ def list_game_documents(bgg_id: int) -> dict[str, object]:
     return {"bgg_id": bgg_id, "count": len(documents), "items": documents}
 
 
-def _run_document_index_background(document_id: str) -> None:
-    try:
-        get_document_indexing_service().run(document_id, force=True)
-    except DocumentIndexingBusy:
-        return
-    except Exception:
-        LOGGER.exception("Automatic document indexing failed for %s", document_id)
-
 
 @app.post("/api/games/{bgg_id}/documents", tags=["documents"])
 def upload_game_document(
     bgg_id: int,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     document_type: str = Form("rulebook"),
     language: str = Form("und"),
@@ -789,15 +780,11 @@ def upload_game_document(
 
     with database.transaction(immediate=True) as connection:
         enqueue_document_index(connection, str(document["id"]))
-    background_tasks.add_task(
-        _run_document_index_background,
-        str(document["id"]),
-    )
 
     return {
         "created": created,
         "document": document,
-        "indexing": "scheduled",
+        "indexing": "queued",
     }
 
 
