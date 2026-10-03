@@ -301,6 +301,29 @@ class Catalog:
             ).fetchone()
         return _game_dict(row) if row else None
 
+    def refreshable_metadata_ids(self, *, limit: int = 20) -> list[int]:
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT g.bgg_id
+                FROM board_games g
+                LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
+                WHERE e.board_game_id IS NULL
+                   OR e.next_refresh_at IS NULL
+                   OR e.next_refresh_at <= ?
+                ORDER BY
+                    e.board_game_id IS NOT NULL,
+                    g.title COLLATE NOCASE,
+                    g.bgg_id
+                LIMIT ?
+                """,
+                (now, max(1, min(int(limit), 20))),
+            ).fetchall()
+        return [int(row["bgg_id"]) for row in rows]
+
     def missing_metadata_ids(self, *, limit: int = 20) -> list[int]:
         with self.database.connect() as connection:
             rows = connection.execute(
