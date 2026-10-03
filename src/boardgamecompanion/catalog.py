@@ -365,7 +365,7 @@ class Catalog:
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT g.item_type,e.metadata_json
+                SELECT g.item_type,e.metadata_json AS enriched_metadata_json
                 {self._from_sql()}
                 {where}
                 """
