@@ -321,6 +321,20 @@ function closeSettingsDialog() {
   }
 }
 
+function setSettingsTab(name = "general") {
+  const active = ["general", "rulebooks", "providers"].includes(name) ? name : "general";
+  settingsTabs.forEach((tab) => {
+    const selected = tab.dataset.settingsTab === active;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+  settingsPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== active;
+  });
+  if (saveSettings) saveSettings.hidden = active === "rulebooks";
+  if (saveTestSettings) saveTestSettings.hidden = active !== "general";
+}
+
 function applyBggSettingsToForm(data) {
   currentBggSettings = data;
   bggUsername.value = data.username || "";
@@ -367,7 +381,7 @@ function renderBggSyncSettingsStatus(data) {
   const everyHours = Math.round((data.interval_seconds || 21600) / 3600);
   const last = formatBggSyncTime(data.last_success_at);
   bggSyncSettingsStatus.textContent = data.last_error
-    ? `Ultimo tentativo con errore · ${escapeHtml(data.last_error)}`
+    ? `Ultimo tentativo con errore · ${String(data.last_error).slice(0, 160)}`
     : `Automatica ogni ${everyHours} h · ultima riuscita: ${last}`;
 }
 
@@ -458,10 +472,11 @@ function parseProviderOrder(value, label) {
   return result;
 }
 
-async function openSettingsDialog() {
+async function openSettingsDialog(initialTab = "general") {
   settingsDialog.querySelectorAll(".settings-provider").forEach((section) => {
-    section.open = section.id === "bggSettings";
+    section.open = false;
   });
+  setSettingsTab(initialTab);
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   setSettingsBusy(true);
