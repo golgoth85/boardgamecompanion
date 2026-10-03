@@ -276,6 +276,124 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
         context.close()
 
 
+
+def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        expect(page.locator(".catalog-results-cards")).to_be_visible()
+        expect(page.locator(".game-card")).to_have_count(2)
+
+        page.get_by_role("button", name="☷ Lista").click()
+        expect(page.locator(".catalog-results-list")).to_be_visible()
+        expect(page.locator(".catalog-list-row")).to_have_count(2)
+        expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
+
+        page.reload()
+        expect(page.locator(".catalog-results-list")).to_be_visible()
+        expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
+    finally:
+        context.close()
+
+    mobile_context, mobile_page = new_page(browser, mobile=True)
+    try:
+        import_csv(mobile_page, live_server)
+        mobile_page.get_by_role("button", name="☷ Lista").click()
+        expect(mobile_page.locator(".catalog-results-list")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+        mobile_page.get_by_role("button", name="▦ Card").click()
+        expect(mobile_page.locator(".catalog-results-cards")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        mobile_context.close()
+
+
+def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_server):
+    context, page = new_page(browser)
+    base_game = {
+        "bgg_id": 100,
+        "title": "Root",
+        "original_title": "Root",
+        "year_published": 2018,
+        "item_type": "standalone",
+        "players": {"min": 2, "max": 4},
+        "play_time": {"playing": 90, "min": 60, "max": 90},
+        "bgg": {
+            "average": 8.1,
+            "average_weight": 3.8,
+            "recommended_age": "10",
+        },
+        "collection": {"own": True, "num_plays": 12},
+        "bgg_metadata": {"cover_url": None},
+    }
+    expansion = {
+        "bgg_id": 101,
+        "title": "Root: The Riverfolk Expansion",
+        "original_title": "Root: The Riverfolk Expansion",
+        "year_published": 2018,
+        "item_type": "expansion",
+        "players": {"min": 1, "max": 6},
+        "play_time": {"playing": 90, "min": 60, "max": 90},
+        "bgg": {
+            "average": 8.4,
+            "average_weight": 3.7,
+            "recommended_age": "10",
+        },
+        "collection": {"own": True, "num_plays": 3},
+        "bgg_metadata": {"cover_url": None},
+    }
+
+    def games_route(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "items": [base_game, expansion],
+                    "total": 2,
+                    "limit": 250,
+                    "offset": 0,
+                    "sort": "title",
+                }
+            ),
+        )
+
+    try:
+        page.route(re.compile(r".*/api/games\?.*"), games_route)
+        page.route(
+            "**/api/catalog/stats",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {"total": 2, "standalone": 1, "expansions": 1, "owned": 2}
+                ),
+            ),
+        )
+        page.goto(live_server)
+
+        expect(page.locator(".game-card")).to_have_count(1)
+        badge = page.locator(".expansion-count-badge")
+        expect(badge).to_have_count(1)
+        expect(badge).to_contain_text("1")
+        expect(page.locator(".expansion-mini-card")).to_be_hidden()
+
+        badge.click()
+        expect(page.locator(".expansion-mini-card")).to_be_visible()
+        expect(page.locator(".expansion-mini-card")).to_contain_text(
+            "Root: The Riverfolk Expansion"
+        )
+
+        page.locator("#collapseExpansions").uncheck()
+        expect(page.locator(".game-card")).to_have_count(2)
+    finally:
+        context.close()
+
+
 def test_import_error_is_visible_and_recoverable(browser, live_server):
     context, page = new_page(browser)
     try:
@@ -312,13 +430,8 @@ def test_pagination(browser, live_server, tmp_path: Path):
         expect(page.locator("#importResult")).to_contain_text("30 righe")
         page.get_by_role("button", name="Chiudi").click()
 
-        expect(page.locator(".game-card")).to_have_count(24)
-        expect(page.locator("#pagination")).to_contain_text("Pagina 1 di 2")
-        page.get_by_role("button", name="Successiva").click()
-        expect(page.locator(".game-card")).to_have_count(6)
-        expect(page.locator("#pagination")).to_contain_text("Pagina 2 di 2")
-        page.get_by_role("button", name="Precedente").click()
-        expect(page.locator(".game-card")).to_have_count(24)
+        expect(page.locator(".game-card")).to_have_count(30)
+        expect(page.locator("#pagination")).to_be_hidden()
     finally:
         context.close()
 
@@ -501,23 +614,34 @@ def test_mobile_admin_surfaces_do_not_overflow(browser, live_server):
         context.close()
 
 
-def test_game_detail_prioritizes_rules_and_progressive_disclosure(browser, live_server):
+def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
         expect(page.locator(".game-summary-rail")).to_be_visible()
-        expect(page.get_by_role("heading", name="Regolamento e assistente")).to_be_visible()
-        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_text("Giocatori", exact=True)).to_be_visible()
+        expect(page.get_by_text("Età consigliata", exact=True)).to_be_visible()
+        expect(page.get_by_text("10+", exact=True)).to_be_visible()
+
+        description = page.get_by_role("heading", name="Descrizione")
+        rules = page.get_by_role("heading", name="Regole e manuali")
+        expect(description).to_be_visible()
+        expect(rules).to_be_visible()
+        description_box = description.bounding_box()
+        rules_box = rules.bounding_box()
+        assert description_box is not None and rules_box is not None
+        assert description_box["y"] < rules_box["y"]
+
+        expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+
         expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
-        expect(page.get_by_role("heading", name="Copie fisiche")).to_be_visible()
+        expect(page.locator("#ragQuestion")).to_be_visible()
 
         technical = page.locator(".technical-game-details")
         expect(technical).not_to_have_attribute("open", "")
-        expect(page.get_by_text("Best players", exact=True)).not_to_be_visible()
-        technical.locator("summary").click()
-        expect(page.get_by_text("Best players", exact=True)).to_be_visible()
 
         discovery_details = page.locator(".rulebook-search-details")
         expect(discovery_details).not_to_have_attribute("open", "")
@@ -534,7 +658,9 @@ def test_physical_copy_detail_and_edit_flow(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("Copie fisiche", exact=True)).to_be_visible()
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+        expect(page.locator(".physical-copy-card")).not_to_be_visible()
+        page.locator(".copy-details-disclosure summary").click()
         expect(page.locator(".physical-copy-card")).to_have_count(1)
         expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
         expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")

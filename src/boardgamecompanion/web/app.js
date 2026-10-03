@@ -143,9 +143,12 @@ const state = {
   itemType: "",
   owned: "",
   sort: "title",
-  limit: 24,
+  limit: 250,
   offset: 0,
   total: 0,
+  catalogView: window.localStorage.getItem("bgc.catalogView") === "list" ? "list" : "cards",
+  collapseExpansions: window.localStorage.getItem("bgc.collapseExpansions") !== "false",
+  expandedGameGroups: new Set(),
 };
 
 let searchTimer;
@@ -1193,28 +1196,192 @@ async function assignScannedBarcodeToGame(bggId, title, barcode) {
   }
 }
 
-function gameCard(game) {
-  const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
-  const year = game.year_published || "—";
-  const rating = game.bgg?.average ? `★ ${formatNumber(game.bgg.average, 1)}` : "★ —";
+function normalizedGameTitle(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("it")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ageText(game) {
+  const value = game.bgg?.recommended_age;
+  if (!value) return "—";
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return `${text}+`;
+  return text;
+}
+
+function catalogMetric(label, value) {
+  return `<div class="catalog-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function inferExpansionParent(expansion, standaloneGames) {
+  const titles = [expansion.title, expansion.original_title]
+    .filter(Boolean)
+    .map(normalizedGameTitle);
+  const candidates = standaloneGames.filter((base) => {
+    const baseTitles = [base.title, base.original_title].filter(Boolean).map(normalizedGameTitle);
+    return baseTitles.some((baseTitle) => titles.some((title) => {
+      if (!baseTitle || title === baseTitle || !title.startsWith(baseTitle)) return false;
+      const rest = title.slice(baseTitle.length);
+      return /^(\s*[:–—-]\s*|\s+\(|\s+–\s+|\s+—\s+)/.test(rest);
+    }));
+  });
+  candidates.sort((a, b) => normalizedGameTitle(b.title).length - normalizedGameTitle(a.title).length);
+  return candidates[0] || null;
+}
+
+function groupCatalogItems(items) {
+  if (!state.collapseExpansions || state.itemType === "expansion") {
+    return items.map((game) => ({game, expansions: []}));
+  }
+  const standaloneGames = items.filter((game) => game.item_type !== "expansion");
+  const byId = new Map(standaloneGames.map((game) => [game.bgg_id, {game, expansions: []}]));
+  const orphanIds = new Set();
+
+  for (const game of items) {
+    if (game.item_type !== "expansion") continue;
+    const parent = inferExpansionParent(game, standaloneGames);
+    if (parent) byId.get(parent.bgg_id).expansions.push(game);
+    else orphanIds.add(game.bgg_id);
+  }
+
+  const emitted = new Set();
+  const groups = [];
+  for (const game of items) {
+    if (game.item_type === "expansion") {
+      if (!orphanIds.has(game.bgg_id)) continue;
+      groups.push({game, expansions: []});
+      continue;
+    }
+    if (!emitted.has(game.bgg_id)) {
+      groups.push(byId.get(game.bgg_id));
+      emitted.add(game.bgg_id);
+    }
+  }
+  return groups;
+}
+
+function expansionMiniCard(game) {
   return `
-    <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
-      <div class="cover">
-        <span class="badge card-badge">${type}</span>
+    <a class="expansion-mini-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri espansione ${escapeHtml(game.title)}">
+      <span class="expansion-mini-cover">
         ${game.bgg_metadata?.cover_url
-          ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
-          : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
-      </div>
-      <div class="card-body">
-        <h3 class="card-title">${escapeHtml(game.title)}</h3>
-        <div class="card-meta">
-          <span>${escapeHtml(year)}</span>
-          <span>${escapeHtml(playerText(game))} gioc.</span>
-          <span class="rating">${rating}</span>
-        </div>
-      </div>
+          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span>${escapeHtml(initials(game.title))}</span>`}
+      </span>
+      <span class="expansion-mini-copy">
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
+      </span>
+      ${game.collection?.own ? '<span class="owned-dot" title="Posseduta">✓</span>' : ""}
     </a>
   `;
+}
+
+function gameCard(game, expansions = []) {
+  const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
+  const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
+  const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
+  const plays = game.collection?.num_plays ?? 0;
+  const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
+  const groupId = `game-group-${game.bgg_id}`;
+  const expanded = state.expandedGameGroups.has(String(game.bgg_id));
+  return `
+    <article class="game-card-wrap ${expansions.length ? "has-expansions" : ""}" data-game-id="${game.bgg_id}">
+      <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
+        <div class="cover">
+          <span class="badge card-badge">${type}</span>
+          ${game.bgg_metadata?.cover_url
+            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
+        </div>
+        <div class="card-body">
+          <h3 class="card-title">${escapeHtml(game.title)}</h3>
+          <div class="catalog-metrics">
+            ${catalogMetric("Giocatori", playerText(game))}
+            ${catalogMetric("Età", ageText(game))}
+            ${catalogMetric("Durata", timeText(game).replace(" min", ""))}
+            ${catalogMetric("Peso", weight)}
+            ${catalogMetric("Partite", String(plays))}
+          </div>
+          <div class="card-footer-meta">
+            <span>${game.year_published || "—"}</span>
+            <span class="rating">★ ${rating}</span>
+          </div>
+        </div>
+      </a>
+      ${expansions.length ? `
+        <button class="expansion-count-badge" type="button" data-expansion-toggle="${game.bgg_id}"
+                aria-controls="${groupId}" aria-expanded="${expanded ? "true" : "false"}"
+                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
+          <strong>${ownedExpansionCount}</strong><span>esp.</span>
+        </button>
+        <div class="expansion-drawer" id="${groupId}" ${expanded ? "" : "hidden"}>
+          ${expansions.map(expansionMiniCard).join("")}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function gameListRow(game, expansions = [], isExpansion = false) {
+  const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
+  const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
+  const plays = game.collection?.num_plays ?? 0;
+  const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
+  const expanded = state.expandedGameGroups.has(String(game.bgg_id));
+  return `
+    <div class="catalog-list-row ${isExpansion ? "is-expansion-row" : ""}">
+      <a class="catalog-list-game" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
+        <span class="catalog-list-cover">
+          ${game.bgg_metadata?.cover_url
+            ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span>${escapeHtml(initials(game.title))}</span>`}
+        </span>
+        <span class="catalog-list-title">
+          <strong>${escapeHtml(game.title)}</strong>
+          <small>${game.item_type === "expansion" ? "Espansione" : (game.year_published || "Gioco base")}</small>
+        </span>
+      </a>
+      <span class="list-stat"><strong>${escapeHtml(playerText(game))}</strong><small>Giocatori</small></span>
+      <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
+      <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
+      <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
+      <span class="list-stat"><strong>${plays}</strong><small>Partite</small></span>
+      <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
+      ${expansions.length ? `
+        <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
+                aria-expanded="${expanded ? "true" : "false"}"
+                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
+          <strong>${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">${expanded ? "▴" : "▾"}</i>
+        </button>
+      ` : '<span class="list-expansion-placeholder"></span>'}
+    </div>
+    ${expansions.length ? `
+      <div class="catalog-list-expansions" id="game-group-${game.bgg_id}" ${expanded ? "" : "hidden"}>
+        ${expansions.map((item) => gameListRow(item, [], true)).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function bindExpansionToggles() {
+  document.querySelectorAll("[data-expansion-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = String(button.dataset.expansionToggle);
+      if (state.expandedGameGroups.has(id)) state.expandedGameGroups.delete(id);
+      else state.expandedGameGroups.add(id);
+      const panel = document.querySelector(`#game-group-${CSS.escape(id)}`);
+      const expanded = state.expandedGameGroups.has(id);
+      button.setAttribute("aria-expanded", expanded ? "true" : "false");
+      if (panel) panel.hidden = !expanded;
+      const caret = button.querySelector("i");
+      if (caret) caret.textContent = expanded ? "▴" : "▾";
+    });
+  });
 }
 
 function skeletons() {
@@ -1226,16 +1393,14 @@ async function renderCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
-        <h1>Catalogo</h1>
-        <p class="page-lead">
-          Giochi ed espansioni della collezione, con ricerca e filtri in primo piano.
-          Le funzioni di importazione e amministrazione restano nel menu laterale.
-        </p>
+        <h1>I tuoi giochi</h1>
+        <p class="page-lead">Sfoglia la collezione come una libreria: copertine, giocatori, durata, complessità e rating a colpo d'occhio.</p>
       </div>
-      <div class="page-header-meta">
-        <span class="quiet-pill">Catalogo locale</span>
-        <a class="external-link" href="https://boardgamegeek.com" target="_blank"
-           rel="noopener noreferrer">BoardGameGeek ↗</a>
+      <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
+        <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+        <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
       </div>
     </section>
 
@@ -1249,10 +1414,16 @@ async function renderCatalog() {
     <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
       <div class="catalog-head catalog-workspace-head">
         <div>
-          <h2 id="catalogGamesHeading">Giochi</h2>
-          <p class="section-subtitle">Trova rapidamente un titolo oppure restringi il catalogo.</p>
+          <h2 id="catalogGamesHeading">Collezione</h2>
+          <p class="section-subtitle">Le espansioni possono restare raccolte sotto il relativo gioco base.</p>
         </div>
-        <span class="muted" id="resultCount">Caricamento…</span>
+        <div class="catalog-head-actions">
+          <label class="collapse-expansions-toggle">
+            <input id="collapseExpansions" type="checkbox" ${state.collapseExpansions ? "checked" : ""}>
+            <span>Raggruppa espansioni</span>
+          </label>
+          <span class="muted" id="resultCount">Caricamento…</span>
+        </div>
       </div>
 
       <section class="toolbar" aria-label="Filtri catalogo">
@@ -1285,7 +1456,8 @@ async function renderCatalog() {
         </label>
       </section>
 
-      <section class="grid" id="catalogGrid">${skeletons()}</section>
+      <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
+               id="catalogGrid">${skeletons()}</section>
       <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
   `;
@@ -1303,7 +1475,7 @@ async function renderCatalog() {
     renderCatalogData(catalog);
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
-      `<div class="empty" style="grid-column:1/-1">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
+      `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
   }
 }
@@ -1334,6 +1506,27 @@ function bindCatalogControls() {
     state.sort = event.target.value;
     state.offset = 0;
     refreshCatalog();
+  });
+
+  document.querySelector("#collapseExpansions").addEventListener("change", (event) => {
+    state.collapseExpansions = event.target.checked;
+    state.expandedGameGroups.clear();
+    window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
+    refreshCatalog();
+  });
+
+  document.querySelector("#cardViewButton").addEventListener("click", () => {
+    if (state.catalogView === "cards") return;
+    state.catalogView = "cards";
+    window.localStorage.setItem("bgc.catalogView", "cards");
+    renderCatalog();
+  });
+
+  document.querySelector("#listViewButton").addEventListener("click", () => {
+    if (state.catalogView === "list") return;
+    state.catalogView = "list";
+    window.localStorage.setItem("bgc.catalogView", "list");
+    renderCatalog();
   });
 }
 
@@ -1393,20 +1586,42 @@ function renderCatalogData(catalog) {
   state.total = catalog.total;
   const grid = document.querySelector("#catalogGrid");
   const count = document.querySelector("#resultCount");
+  if (!grid || !count) return;
 
-  count.textContent = `${formatNumber(catalog.total, 0)} risultati`;
+  count.textContent = `${formatNumber(catalog.total, 0)} titoli`;
+  grid.className = `catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}`;
+
   if (!catalog.items.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Nessun gioco corrisponde ai filtri selezionati.</div>';
+    grid.innerHTML = '<div class="empty catalog-empty">Nessun gioco corrisponde ai filtri selezionati.</div>';
   } else {
-    grid.innerHTML = catalog.items.map(gameCard).join("");
+    const groups = groupCatalogItems(catalog.items);
+    if (state.catalogView === "list") {
+      grid.innerHTML = `
+        <div class="catalog-list-head" aria-hidden="true">
+          <span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span>
+          <span>Peso</span><span>Partite</span><span>BGG</span><span></span>
+        </div>
+        ${groups.map(({game, expansions}) => gameListRow(game, expansions)).join("")}
+      `;
+    } else {
+      grid.innerHTML = groups.map(({game, expansions}) => gameCard(game, expansions)).join("");
+    }
+    bindExpansionToggles();
   }
   renderPagination();
 }
 
 function renderPagination() {
   const container = document.querySelector("#pagination");
+  if (!container) return;
   const page = Math.floor(state.offset / state.limit) + 1;
   const pages = Math.max(1, Math.ceil(state.total / state.limit));
+  if (pages <= 1) {
+    container.innerHTML = "";
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
   container.innerHTML = `
     <button class="button button-ghost" id="prevPage" ${page <= 1 ? "disabled" : ""}>← Precedente</button>
     <span class="muted">Pagina ${page} di ${pages}</span>
@@ -1871,22 +2086,29 @@ async function renderDetail(bggId) {
       api(`/api/games/${bggId}/documents`),
     ]);
     if (window.location.pathname !== requestedPath) return;
+
     const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
     const collection = game.collection || {};
     const bgg = game.bgg || {};
+    const metadata = game.bgg_metadata || {};
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
+    const rawDescription = String(metadata.description || "").trim();
+    const description = rawDescription
+      ? escapeHtml(rawDescription).replace(/\r?\n/g, "<br>")
+      : "Descrizione non ancora disponibile. Puoi aggiornare i metadati BGG dalle funzioni amministrative.";
+    const copyLabel = copyItems.length === 1 ? "1 copia registrata" : `${copyItems.length} copie registrate`;
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
 
-      <section class="game-page">
+      <section class="game-page game-centric-detail">
         <aside class="game-summary-rail" aria-label="Riepilogo gioco">
           <div class="game-summary-cover">
             <div class="detail-cover">
-              ${game.bgg_metadata?.cover_url
-                ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+              ${metadata.cover_url
+                ? `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
                 : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
             </div>
           </div>
@@ -1898,11 +2120,16 @@ async function renderDetail(bggId) {
               ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             </div>
 
-            <dl class="game-summary-list">
+            <dl class="game-summary-list game-facts-primary">
               <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
+              <div><dt>Età consigliata</dt><dd>${escapeHtml(ageText(game))}</dd></div>
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
+              ${bgg.best_players ? `<div><dt>Ideale in</dt><dd>${escapeHtml(bgg.best_players)}</dd></div>` : ""}
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
+              ${collection.num_plays !== null && collection.num_plays !== undefined
+                ? `<div><dt>Partite</dt><dd>${collection.num_plays}</dd></div>`
+                : ""}
             </dl>
 
             <a class="external-link game-bgg-link"
@@ -1914,67 +2141,89 @@ async function renderDetail(bggId) {
         </aside>
 
         <article class="game-main detail-main">
-          <header class="game-header">
-            <p class="eyebrow">BGG #${game.bgg_id}</p>
-            <h1>${escapeHtml(game.title)}</h1>
-            ${game.original_title && game.original_title !== game.title
-              ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
-              : ""}
-            <div class="game-header-status">
-              <span>${copyItems.length} ${copyItems.length === 1 ? "copia fisica" : "copie fisiche"}</span>
-              <span aria-hidden="true">·</span>
-              <span>${rulebooks.length} ${rulebooks.length === 1 ? "regolamento" : "regolamenti"} archiviati</span>
-              ${collection.num_plays !== null && collection.num_plays !== undefined
-                ? `<span aria-hidden="true">·</span><span>${collection.num_plays} partite</span>`
+          <header class="game-header game-header-player">
+            <div>
+              <p class="eyebrow">BGG #${game.bgg_id}</p>
+              <h1>${escapeHtml(game.title)}</h1>
+              ${game.original_title && game.original_title !== game.title
+                ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
                 : ""}
+            </div>
+            <div class="game-primary-actions">
+              <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
+              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
             </div>
           </header>
 
-          <section class="game-section rules-workspace" aria-labelledby="rulesWorkspaceTitle">
+          <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
+            <p class="eyebrow">Il gioco</p>
+            <h2 id="gameDescriptionTitle">Descrizione</h2>
+            <div class="game-description-text">${description}</div>
+          </section>
+
+          <section class="copy-compact-panel" aria-label="Copie fisiche">
+            <div class="copy-compact-summary">
+              <div>
+                <strong>La tua copia</strong>
+                <span>${copyItems.length ? escapeHtml(copyLabel) : "Nessuna copia registrata"}</span>
+              </div>
+              <button class="button button-ghost" id="addPhysicalCopySecondary" type="button">
+                ${copyItems.length ? "+ Aggiungi altra copia" : "+ Aggiungi copia"}
+              </button>
+            </div>
+            ${copyItems.length ? `
+              <details class="copy-details-disclosure">
+                <summary>Gestisci ${escapeHtml(copyLabel)}</summary>
+                <div class="physical-copy-list" id="physicalCopyList">
+                  ${copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")}
+                </div>
+              </details>
+            ` : '<div id="physicalCopyList" hidden></div>'}
+          </section>
+
+          <section class="game-section rules-workspace rules-secondary" aria-labelledby="rulesWorkspaceTitle">
             <div class="game-section-head">
               <div>
-                <p class="eyebrow">Regole</p>
-                <h2 id="rulesWorkspaceTitle">Regolamento e assistente</h2>
+                <p class="eyebrow">Quando ti servono</p>
+                <h2 id="rulesWorkspaceTitle">Regole e manuali</h2>
                 <p class="section-subtitle">
-                  Cerca il regolamento, archivia i PDF e interroga solo i documenti verificabili del gioco.
+                  Cerca un regolamento, apri i PDF archiviati o usa l'assistente sulle fonti del gioco.
                 </p>
               </div>
-              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
             </div>
 
-            <section class="rulebook-discovery-panel rulebook-search-card"
-                     aria-label="Ricerca e acquisizione regolamenti">
+            <div class="rulebook-discovery-panel rulebook-search-card compact-rulebook-search">
               <div class="rulebook-search-copy">
                 <strong>Trova il regolamento</strong>
-                <p>
-                  Un solo flusso: prima le fonti note, IT prima di EN. Se non emerge alcun candidato,
-                  lo stesso pulsante passa alla ricerca PDF su Google; il caricamento resta sempre manuale.
-                </p>
+                <p>Un solo flusso: prima le fonti note, poi la ricerca PDF assistita se non emerge alcun candidato.</p>
               </div>
               <div class="rulebook-discovery-actions">
-                <button class="button button-primary" id="rulebookSearchAction" type="button">
+                <button class="button button-ghost" id="rulebookSearchAction" type="button">
                   Cerca regolamento
                 </button>
               </div>
-              <details class="technical-disclosure rulebook-search-details">
-                <summary>Stato ricerca e fonti</summary>
-                <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
-                  Caricamento stato…
-                </p>
-                <p class="muted">
-                  <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
-                  ·
-                  <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
-                </p>
-              </details>
-            </section>
+            </div>
+
+            <details class="technical-disclosure rulebook-search-details">
+              <summary>Stato ricerca regolamenti</summary>
+              <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
+                Caricamento stato…
+              </p>
+              <p class="muted">
+                <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
+                ·
+                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
+              </p>
+            </details>
 
             <section class="game-subsection documents-subsection" aria-labelledby="documentsTitle">
               <div class="section-heading-row document-heading">
                 <div>
-                  <h2 class="section-title" id="documentsTitle">Manuali e documenti</h2>
+                  <h3 class="section-title" id="documentsTitle">Manuali e documenti</h3>
                   <p class="section-subtitle">
-                    ${documentItems.length} ${documentItems.length === 1 ? "documento" : "documenti"} archiviati
+                    ${documentItems.length
+                      ? `${documentItems.length} ${documentItems.length === 1 ? "documento archiviato" : "documenti archiviati"}`
+                      : "Nessun documento archiviato"}
                   </p>
                 </div>
               </div>
@@ -1985,108 +2234,59 @@ async function renderDetail(bggId) {
               </div>
             </section>
 
-            <section class="rag-panel" id="ragPanel" data-index-busy="false">
-              <div class="section-heading-row rag-heading">
-                <div>
-                  <p class="eyebrow">Assistente regole</p>
-                  <h2>Chiedi al regolamento</h2>
-                  <p class="section-subtitle">
-                    Risposte solo dai documenti del gioco, con pagina, versione e fonte verificabili.
-                  </p>
-                </div>
-                <button class="button button-ghost rag-prepare-index" type="button"
-                        ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-              </div>
-              <div class="rag-index-status" id="ragIndexStatus" role="status">
-                Controllo stato dell'indice…
-              </div>
-              <form class="rag-query-form" id="ragQueryForm">
-                <label class="rag-question-field" for="ragQuestion">
-                  <span>Domanda sulle regole</span>
-                  <textarea id="ragQuestion" rows="3" maxlength="4000" required
-                    placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
-                </label>
-                <details class="rag-filters">
-                  <summary>Filtri avanzati</summary>
-                  <div class="rag-filter-grid">
-                    <label>
-                      <span>Lingua</span>
-                      <select id="ragLanguage">
-                        <option value="it" selected>Italiano</option>
-                        <option value="en">English</option>
-                        <option value="">Qualsiasi</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Tipo</span>
-                      <select id="ragDocumentType">
-                        <option value="">Tutti i documenti</option>
-                        <option value="rulebook">Regolamento</option>
-                        <option value="reference">Riferimento</option>
-                        <option value="faq">FAQ</option>
-                        <option value="errata">Errata</option>
-                        <option value="campaign_book">Campaign book</option>
-                        <option value="scenario_book">Scenario book</option>
-                        <option value="player_aid">Player aid</option>
-                        <option value="other">Altro</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Versione</span>
-                      <input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1">
-                    </label>
-                    <label>
-                      <span>Edizione</span>
-                      <input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT">
-                    </label>
+            <section class="rag-panel rag-panel-secondary" id="ragPanel" data-index-busy="false">
+                <div class="section-heading-row rag-heading">
+                  <div>
+                    <p class="eyebrow">Assistente regole</p>
+                    <h3>Chiedi al regolamento</h3>
+                    <p class="section-subtitle">
+                      Risposte dai documenti del gioco, con pagina, versione e fonte verificabili.
+                    </p>
                   </div>
-                </details>
-                <div class="rag-query-actions">
-                  <p class="muted">
-                    Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.
-                  </p>
-                  <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                  <button class="button button-ghost rag-prepare-index" type="button"
+                          ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
                 </div>
-              </form>
-              <div class="rag-result" id="ragResult" aria-live="polite">
-                <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
-              </div>
-            </section>
-          </section>
-
-          <section class="game-section copies-workspace" aria-labelledby="copiesTitle">
-            <div class="game-section-head">
-              <div>
-                <p class="eyebrow">Inventario</p>
-                <h2 id="copiesTitle">Copie fisiche</h2>
-                <p class="section-subtitle">
-                  Edizione, lingua, barcode, posizione e dati della tua copia.
-                </p>
-              </div>
-              <button class="button button-ghost" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
-            </div>
-            <div class="physical-copy-list" id="physicalCopyList">
-              ${copyItems.length
-                ? copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")
-                : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
-            </div>
-          </section>
+                <div class="rag-index-status" id="ragIndexStatus" role="status">
+                  Controllo stato dell'indice…
+                </div>
+                <form class="rag-query-form" id="ragQueryForm">
+                  <label class="rag-question-field" for="ragQuestion">
+                    <span>Domanda sulle regole</span>
+                    <textarea id="ragQuestion" rows="3" maxlength="4000" required
+                      placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
+                  </label>
+                  <details class="rag-filters">
+                    <summary>Filtri avanzati</summary>
+                    <div class="rag-filter-grid">
+                      <label><span>Lingua</span><select id="ragLanguage"><option value="it" selected>Italiano</option><option value="en">English</option><option value="">Qualsiasi</option></select></label>
+                      <label><span>Tipo</span><select id="ragDocumentType"><option value="">Tutti i documenti</option><option value="rulebook">Regolamento</option><option value="reference">Riferimento</option><option value="faq">FAQ</option><option value="errata">Errata</option><option value="campaign_book">Campaign book</option><option value="scenario_book">Scenario book</option><option value="player_aid">Player aid</option><option value="other">Altro</option></select></label>
+                      <label><span>Versione</span><input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1"></label>
+                      <label><span>Edizione</span><input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT"></label>
+                    </div>
+                  </details>
+                  <div class="rag-query-actions">
+                    <p class="muted">Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.</p>
+                    <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                  </div>
+                </form>
+                <div class="rag-result" id="ragResult" aria-live="polite">
+                  <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
+                </div>
+            </section>          </section>
 
           <details class="game-section technical-game-details">
             <summary>
               <span>
-                <strong>Dati e dettagli tecnici</strong>
-                <small>Metadati BGG e informazioni secondarie</small>
+                <strong>Altri dati BGG</strong>
+                <small>Informazioni secondarie</small>
               </span>
             </summary>
             <div class="technical-game-content">
               <div class="fact-grid">
-                ${fact("Best players", bgg.best_players || "—")}
-                ${fact("Età consigliata", bgg.recommended_age || "—")}
-                ${fact("Recommended players", bgg.recommended_players || "—")}
+                ${fact("Giocatori consigliati", bgg.recommended_players || "—")}
                 ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
                 ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
-                ${fact("Partite registrate", collection.num_plays ?? "—")}
+                ${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
               </div>
             </div>
           </details>
@@ -2094,9 +2294,9 @@ async function renderDetail(bggId) {
       </section>
     `;
 
-    document.querySelector("#addPhysicalCopy")?.addEventListener("click", () => {
-      openCopyEditor(game.bgg_id, game.title);
-    });
+    const openCopy = () => openCopyEditor(game.bgg_id, game.title);
+    document.querySelector("#addPhysicalCopy")?.addEventListener("click", openCopy);
+    document.querySelector("#addPhysicalCopySecondary")?.addEventListener("click", openCopy);
     document.querySelectorAll(".edit-copy").forEach((button) => {
       button.addEventListener("click", () => {
         const copy = copyItems.find((item) => item.id === button.dataset.copyId);
