@@ -840,6 +840,36 @@ function configureZxingFormats(reader) {
   ].filter((value) => value !== undefined);
 }
 
+
+async function decodeScannerPhoto(file) {
+  if (!file || scannerBusy) return;
+  const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
+  if (!Reader) {
+    cameraHint.textContent = "Lettore barcode non disponibile.";
+    scannerManualFallback.open = true;
+    return;
+  }
+  const objectUrl = URL.createObjectURL(file);
+  scannerPhotoButton?.classList.add("is-busy");
+  cameraHint.textContent = "Leggo il barcode dalla foto…";
+  try {
+    const reader = new Reader();
+    configureZxingFormats(reader);
+    const result = await reader.decodeFromImageUrl(objectUrl);
+    const text = result?.getText?.() ?? result?.text;
+    if (!text) throw new Error("Barcode non trovato");
+    acceptScannerDetection(text);
+  } catch (_) {
+    cameraHint.textContent =
+      "Non riesco a leggere il barcode dalla foto. Riprova più vicino oppure inseriscilo manualmente.";
+    scannerManualFallback.open = true;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    if (scannerPhoto) scannerPhoto.value = "";
+    scannerPhotoButton?.classList.remove("is-busy");
+  }
+}
+
 async function startZxingScanner(existingStream = null, startId = scannerStartId) {
   if (startId !== scannerStartId || !scannerDialog.open) {
     for (const track of existingStream?.getTracks?.() || []) track.stop();
@@ -938,7 +968,7 @@ async function scanCameraFrame() {
 
 function scannerCameraErrorMessage(error) {
   if (!window.isSecureContext) {
-    return "La fotocamera richiede HTTPS (oppure localhost). Usa l’inserimento manuale.";
+    return "Il browser blocca la fotocamera live su HTTP. Usa “Scatta foto”: funziona anche nella LAN.";
   }
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
     return "Permesso fotocamera negato. Abilitalo nel browser oppure usa l’inserimento manuale.";
@@ -1013,16 +1043,17 @@ function resetScanner() {
   scannerDetectionLocked = false;
   scannerImportCount = 0;
   scannerForm.reset();
+  if (scannerPhoto) scannerPhoto.value = "";
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inquadra il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
+    '<p class="muted">Inquadra o fotografa il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
   cameraSection.hidden = false;
   const cameraUsable = scannerCameraUsable();
   toggleCamera.disabled = !cameraUsable;
-  scannerManualFallback.open = !cameraUsable;
+  scannerManualFallback.open = false;
   cameraHint.textContent = cameraUsable
-    ? "La fotocamera partirà automaticamente."
+    ? "La fotocamera live partirà automaticamente; puoi anche scattare una foto."
     : scannerCameraErrorMessage();
 }
 
@@ -1031,18 +1062,17 @@ function beginNextScannerImport() {
   scannerBusy = false;
   scannerDetectionLocked = false;
   scannerBarcode.value = "";
+  if (scannerPhoto) scannerPhoto.value = "";
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra il prossimo codice.</p>`;
+    `<p class="muted">${scannerImportCount ? `${scannerImportCount} barcode importati. ` : ""}Inquadra o fotografa il prossimo codice.</p>`;
   cameraSection.hidden = false;
   if (scannerCameraUsable()) {
     cameraHint.textContent = "Fotocamera pronta per il prossimo barcode.";
     void startScannerCamera();
   } else {
-    scannerManualFallback.open = true;
     cameraHint.textContent = scannerCameraErrorMessage();
-    window.setTimeout(() => scannerBarcode.focus(), 0);
   }
 }
 
@@ -1069,7 +1099,7 @@ function openScannerDialog() {
   if (scannerCameraUsable()) {
     void startScannerCamera();
   } else {
-    window.setTimeout(() => scannerBarcode.focus(), 0);
+    cameraHint.textContent = scannerCameraErrorMessage();
   }
 }
 
