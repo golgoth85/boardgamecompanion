@@ -21,6 +21,26 @@ XML = b"""<?xml version='1.0'?>
  <name type='alternate' value='7 Wonders: Duel'/>
  <name type='alternate' value='7 Wonders Duello'/>
  <yearpublished value='2015'/>
+ <minplayers value='2'/><maxplayers value='2'/>
+ <playingtime value='30'/><minplaytime value='30'/><maxplaytime value='30'/>
+ <minage value='10'/>
+ <poll name='suggested_numplayers'>
+   <results numplayers='2'>
+     <result value='Best' numvotes='100'/>
+     <result value='Recommended' numvotes='20'/>
+     <result value='Not Recommended' numvotes='1'/>
+   </results>
+ </poll>
+ <poll name='suggested_playerage'>
+   <results>
+     <result value='10' numvotes='5'/>
+     <result value='8' numvotes='25'/>
+   </results>
+ </poll>
+ <statistics><ratings>
+   <average value='8.1'/><bayesaverage value='7.9'/><averageweight value='2.2'/><owned value='50000'/>
+   <ranks><rank name='boardgame' value='15'/></ranks>
+ </ratings></statistics>
  <image>https://cf.geekdo-images.com/cover.jpg</image>
  <description>A &amp; B</description>
  <link type='boardgamepublisher' value='Repos Production'/>
@@ -59,7 +79,7 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
 
     assert observed == {
         "authorization": "Bearer secret",
-        "url": "https://boardgamegeek.com/xmlapi2/thing?id=173346",
+        "url": "https://boardgamegeek.com/xmlapi2/thing?id=173346&stats=1",
     }
     assert item["external_id"] == "173346"
     assert item["cover_url"] == "https://cf.geekdo-images.com/cover.jpg"
@@ -69,6 +89,18 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
         "7 Wonders: Duel",
         "7 Wonders Duello",
     ]
+    with store.database.connect() as connection:
+        game = connection.execute(
+            "SELECT min_players,max_players,bgg_average_weight,bgg_rank,bgg_best_players,bgg_recommended_age FROM board_games WHERE bgg_id=173346"
+        ).fetchone()
+    assert dict(game) == {
+        "min_players": 2,
+        "max_players": 2,
+        "bgg_average_weight": 2.2,
+        "bgg_rank": 15,
+        "bgg_best_players": "2",
+        "bgg_recommended_age": "8",
+    }
 
 
 def test_bgg_api_rejects_conflicting_identity_and_keeps_catalog_independent(tmp_path: Path) -> None:
