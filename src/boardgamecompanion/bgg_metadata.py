@@ -223,25 +223,8 @@ def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
     )
 
 
-def _suggested_age(item: ET.Element) -> str | None:
-    poll = next(
-        (
-            node
-            for node in item.findall("poll")
-            if node.attrib.get("name") == "suggested_playerage"
-        ),
-        None,
-    )
-    candidates: list[tuple[int, str]] = []
-    if poll is not None:
-        for group in poll.findall("results"):
-            for node in group.findall("result"):
-                value = (node.attrib.get("value") or "").strip()
-                votes = node.attrib.get("numvotes") or "0"
-                if value and votes.isdigit():
-                    candidates.append((int(votes), value))
-    if candidates:
-        return max(candidates, key=lambda item: item[0])[1]
+def _official_min_age(item: ET.Element) -> str | None:
+    """Return the publisher-declared BGG minimum age, never the community poll."""
     return _attribute(item.find("minage"))
 
 def _parse_item(item: ET.Element) -> dict[str, Any]:
@@ -268,11 +251,20 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
 
     links = item.findall("link")
     grouped: dict[str, list[str]] = {}
+    parent_bgg_id: int | None = None
     for node in links:
         kind = node.attrib.get("type", "")
         value = _attribute(node)
         if kind and value and len(value) <= 500:
             grouped.setdefault(kind, []).append(value)
+        if (
+            kind == "boardgameexpansion"
+            and node.attrib.get("inbound") == "true"
+            and parent_bgg_id is None
+        ):
+            raw_parent = (node.attrib.get("id") or "").strip()
+            if raw_parent.isdigit():
+                parent_bgg_id = int(raw_parent)
 
     raw_description = item.findtext("description") or ""
     description = html.unescape(raw_description).strip()[:20_000] or None
@@ -316,11 +308,13 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "bgg_num_owned": int(value) if ratings is not None and (value := _number_attribute(ratings.find("owned"))) is not None else None,
         "bgg_best_players": best_players,
         "bgg_recommended_players": recommended_players,
-        "bgg_recommended_age": _suggested_age(item),
+        "bgg_recommended_age": _official_min_age(item),
+        "parent_bgg_id": parent_bgg_id,
         "cover_url": image,
         "description": description,
         "publishers": grouped.get("boardgamepublisher", []),
         "categories": grouped.get("boardgamecategory", []),
+        "mechanics": grouped.get("boardgamemechanic", []),
         "designers": grouped.get("boardgamedesigner", []),
     }
 
@@ -450,6 +444,7 @@ class BggMetadataStore:
                 "bgg_best_players": metadata.get("bgg_best_players"),
                 "bgg_recommended_players": metadata.get("bgg_recommended_players"),
                 "bgg_recommended_age": metadata.get("bgg_recommended_age"),
+                "parent_bgg_id": metadata.get("parent_bgg_id"),
             }
             assignments: list[str] = []
             params: list[Any] = []
