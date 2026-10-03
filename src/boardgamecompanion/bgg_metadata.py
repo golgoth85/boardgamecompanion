@@ -444,7 +444,6 @@ class BggMetadataStore:
                 "bgg_best_players": metadata.get("bgg_best_players"),
                 "bgg_recommended_players": metadata.get("bgg_recommended_players"),
                 "bgg_recommended_age": metadata.get("bgg_recommended_age"),
-                "parent_bgg_id": metadata.get("parent_bgg_id"),
             }
             assignments: list[str] = []
             params: list[Any] = []
