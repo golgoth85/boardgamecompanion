@@ -133,8 +133,14 @@ def new_page(browser, *, mobile: bool = False):
 
 def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.goto(base_url)
-    import_button = page.get_by_role("button", name="Importa CSV BGG")
-    if not import_button.is_visible():
+    import_button = page.locator("#importSidebarButton")
+    in_viewport = import_button.evaluate(
+        """el => {
+            const r = el.getBoundingClientRect();
+            return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
+        }"""
+    )
+    if not in_viewport:
         page.get_by_role("button", name="Apri navigazione").click()
     import_button.click()
     page.locator("#csvFile").set_input_files(str(path))
@@ -146,8 +152,14 @@ def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
 
 
 def open_barcode_scanner(page) -> None:
-    scanner_button = page.get_by_role("button", name="Scansiona barcode")
-    if not scanner_button.is_visible():
+    scanner_button = page.locator("#scannerButton")
+    in_viewport = scanner_button.evaluate(
+        """el => {
+            const r = el.getBoundingClientRect();
+            return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
+        }"""
+    )
+    if not in_viewport:
         page.get_by_role("button", name="Apri navigazione").click()
     scanner_button.click()
 
@@ -479,7 +491,7 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         page.get_by_role("button", name="Apri navigazione").click()
         page.get_by_role("button", name="Impostazioni").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        page.locator("#settingsDialog").get_by_role("button", name="Importa CSV BGG").click()
         expect(page.locator("#importDialog")).to_be_visible()
         box = page.locator("#importDialog").bounding_box()
         assert box is not None
