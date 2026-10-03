@@ -1003,7 +1003,8 @@ def _embedding_retrieval_service_for(
     if selected == "lmstudio":
         if not rag.lmstudio_url or not rag.lmstudio_embedding_model:
             raise EmbeddingProviderError(
-                "LM Studio embedding provider is not configured"
+                "LM Studio embedding provider is not configured; set "
+                "BGC_LMSTUDIO_URL and BGC_LMSTUDIO_EMBEDDING_MODEL"
             )
         provider = LMStudioEmbeddingProvider(
             base_url=rag.lmstudio_url,
@@ -1017,7 +1018,7 @@ def _embedding_retrieval_service_for(
     elif selected == "gemini":
         if not rag.gemini_api_key:
             raise EmbeddingProviderError(
-                "Gemini embedding provider is not configured"
+                "Gemini embedding provider is not configured; set BGC_GEMINI_API_KEY"
             )
         provider = GeminiEmbeddingProvider(
             base_url=rag.gemini_url,
@@ -1031,7 +1032,8 @@ def _embedding_retrieval_service_for(
     elif selected == "ollama":
         if not rag.ollama_url or not rag.ollama_embedding_model:
             raise EmbeddingProviderError(
-                "Ollama embedding provider is not configured"
+                "Ollama embedding provider is not configured; set BGC_OLLAMA_URL "
+                "and BGC_OLLAMA_EMBEDDING_MODEL"
             )
         provider = OllamaEmbeddingProvider(
             base_url=rag.ollama_url,
