@@ -17,6 +17,7 @@ def configure_paths(tmp_path: Path) -> None:
 
 def clear_bgg_env() -> None:
     os.environ.pop("BGC_BGG_APPLICATION_TOKEN", None)
+    os.environ.pop("BGC_BGG_USERNAME", None)
 
 
 def test_bgg_settings_persist_without_returning_secret(tmp_path: Path) -> None:
@@ -30,13 +31,18 @@ def test_bgg_settings_persist_without_returning_secret(tmp_path: Path) -> None:
 
         saved = client.put(
             "/api/settings/bgg",
-            json={"application_token": "super-secret-bgg-token"},
+            json={
+                "application_token": "super-secret-bgg-token",
+                "username": "test-user",
+            },
         )
         assert saved.status_code == 200
         body = saved.json()
         assert body["configured"] is True
         assert body["application_token_source"] == "stored"
         assert body["stored_application_token_configured"] is True
+        assert body["username"] == "test-user"
+        assert body["collection_sync_configured"] is True
         assert "super-secret-bgg-token" not in saved.text
         assert "application_token" not in body
 
@@ -70,10 +76,11 @@ def test_bgg_environment_token_overrides_stored_value(tmp_path: Path) -> None:
     with TestClient(app) as client:
         client.put(
             "/api/settings/bgg",
-            json={"application_token": "stored-token"},
+            json={"application_token": "stored-token", "username": "stored-user"},
         )
 
         os.environ["BGC_BGG_APPLICATION_TOKEN"] = "env-token"
+        os.environ["BGC_BGG_USERNAME"] = "env-user"
         try:
             response = client.get("/api/settings/bgg")
         finally:
@@ -84,6 +91,8 @@ def test_bgg_environment_token_overrides_stored_value(tmp_path: Path) -> None:
     assert body["configured"] is True
     assert body["application_token_source"] == "environment"
     assert body["overrides"]["application_token"] is True
+    assert body["overrides"]["username"] is True
+    assert body["username"] == "env-user"
     assert body["stored_application_token_configured"] is True
     assert "env-token" not in response.text
     assert "stored-token" not in response.text
