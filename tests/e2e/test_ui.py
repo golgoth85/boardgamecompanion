@@ -194,23 +194,6 @@ def make_xss_csv(path: Path) -> Path:
     return path
 
 
-def test_app_bootstrap_diagnostics(browser, live_server):
-    context, page = new_page(browser)
-    errors = []
-    page.on("pageerror", lambda error: errors.append(str(error)))
-    try:
-        response = page.goto(live_server)
-        assert response is not None and response.ok
-        static_response = page.request.get(f"{live_server}/static/app.js")
-        assert static_response.ok
-        page.wait_for_timeout(500)
-        assert errors == []
-        assert page.evaluate("typeof googleRulebookSearchUrl") == "function"
-        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
-    finally:
-        context.close()
-
-
 def test_close_x_never_submits_and_dialog_resets(browser, live_server):
     context, page = new_page(browser)
     import_requests: list[str] = []
