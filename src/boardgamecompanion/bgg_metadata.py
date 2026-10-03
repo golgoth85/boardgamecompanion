@@ -78,7 +78,7 @@ class BggApiClient:
         self._last_request_at = self._monotonic()
 
     def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
-        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}"
+        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
         response: httpx.Response | None = None
         content = b""
         for attempt in range(self.config.max_attempts):
