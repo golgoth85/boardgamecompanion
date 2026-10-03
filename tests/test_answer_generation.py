@@ -648,6 +648,106 @@ def test_generation_model_digest_change_aborts_answer() -> None:
         )
 
 
+def test_answer_expands_retrieval_recall_for_rule_reasoning() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "La regola si applica al caso descritto.",
+                    "supports": [
+                        {
+                            "evidence_id": "E1",
+                            "quote": "Una pedina bloccata non può muoversi.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    payload = _retrieval_payload(
+        [
+            _result(
+                chunk_id="chunk-1",
+                text="Una pedina bloccata non può muoversi.",
+            )
+        ]
+    )
+    service = _service(payload, provider)
+
+    result = service.answer(
+        bgg_id=900001,
+        query="La mia pedina è bloccata: posso muoverla?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+
+    assert service.retrieval.calls[0]["top_k"] == 12
+    assert result["retrieval"]["requested_top_k"] == 8
+    assert result["retrieval"]["effective_top_k"] == 12
+
+
+def test_grounded_deduction_can_cite_multiple_rule_premises() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": (
+                        "Nel caso descritto il personaggio non può effettuare Movimento."
+                    ),
+                    "supports": [
+                        {
+                            "evidence_id": "E1",
+                            "quote": "Un personaggio ingaggiato è bloccato.",
+                        },
+                        {
+                            "evidence_id": "E2",
+                            "quote": "Un personaggio bloccato non può effettuare Movimento.",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload(
+            [
+                _result(
+                    chunk_id="chunk-1",
+                    text="Un personaggio ingaggiato è bloccato.",
+                ),
+                _result(
+                    chunk_id="chunk-2",
+                    text="Un personaggio bloccato non può effettuare Movimento.",
+                    page_id="page-2",
+                    page_number=2,
+                ),
+            ]
+        ),
+        provider,
+    )
+
+    result = service.answer(
+        bgg_id=900001,
+        query="Il mio personaggio è ingaggiato: può effettuare Movimento?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+
+    assert result["status"] == "answer"
+    assert result["claims"][0]["citations"] == [1, 2]
+    assert len(result["claims"][0]["supports"]) == 2
+
+
 def test_evidence_budget_keeps_full_top_ranked_chunks_only() -> None:
     first = _result(chunk_id="chunk-1", text="A" * 800)
     second = _result(chunk_id="chunk-2", text="B" * 800, page_id="page-2", page_number=2)
@@ -708,7 +808,11 @@ def test_ollama_chat_contract_treats_evidence_as_untrusted_data() -> None:
                 "answer",
                 "not_found",
             ]
-            assert "untrusted quoted data" in payload["messages"][0]["content"]
+            system_prompt = payload["messages"][0]["content"]
+            assert "untrusted quoted data" in system_prompt
+            assert "apply a general rule to a specific case" in system_prompt
+            assert "potentially applicable exception" in system_prompt
+            assert "cite supports for every rule premise" in system_prompt
             user_payload = json.loads(payload["messages"][1]["content"])
             assert user_payload["question"] == "Question"
             assert user_payload["evidence"][0]["text"] == injection

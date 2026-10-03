@@ -25,6 +25,8 @@ CITATION_MARKER_RE = re.compile(
 )
 MAX_GENERATION_JSON_BYTES = 64 * 1024
 MAX_CLAIM_TEXT_CHARS = 4000
+MIN_REASONING_RETRIEVAL_K = 12
+MAX_REASONING_RETRIEVAL_K = 20
 
 
 class AnswerGenerationError(RuntimeError):
@@ -110,7 +112,20 @@ Security and evidence rules:
 - Do not merge or reconcile different versions or editions.
 - Every answer claim must include one or more supports. Each support must contain
   a supplied evidence ID and a short verbatim quote copied from that evidence.
-- The claim must be directly supported by those quotes.
+- A claim may state either a rule explicitly present in the evidence or a direct
+  application of cited rules to concrete facts stated in the user's question.
+- You may apply a general rule to a specific case only when every rule premise
+  needed for the conclusion is explicit in the supplied evidence. Treat facts
+  stated by the user as case facts, but never invent, alter, or complete them.
+- Before concluding, check the supplied evidence for relevant definitions,
+  prerequisites, timing rules, restrictions, exceptions, and special cases.
+- Do not infer that no exception exists merely because no exception was retrieved.
+  If a necessary premise or a potentially applicable exception cannot be resolved
+  from the supplied evidence, return not_found with an empty claims array.
+- When a conclusion depends on multiple rules, cite supports for every rule premise
+  required by that conclusion.
+- Do not use analogy, customary play, intent, or "common sense" to extend a rule
+  beyond what the cited evidence and the user's stated facts directly entail.
 - Answer in the same language as the user's question.
 - If the supplied evidence does not support a reliable answer, return not_found
   with an empty claims array.
@@ -952,6 +967,15 @@ class AnswerGenerationService:
         top_k: int,
         min_score: float,
     ) -> dict[str, Any]:
+        # Rule questions often need more than the single highest-similarity
+        # paragraph: a concrete case can depend on a general rule plus a nearby
+        # definition, prerequisite, exception, or special-case clause. Increase
+        # recall for generation while preserving the same document/version policy
+        # and the existing bounded evidence-character budget.
+        retrieval_top_k = min(
+            MAX_REASONING_RETRIEVAL_K,
+            max(int(top_k), MIN_REASONING_RETRIEVAL_K),
+        )
         retrieval_payload = self.retrieval.retrieve(
             bgg_id=bgg_id,
             query=query,
@@ -959,7 +983,7 @@ class AnswerGenerationService:
             document_type=document_type,
             version_label=version_label,
             edition=edition,
-            top_k=top_k,
+            top_k=retrieval_top_k,
             min_score=min_score,
         )
 
@@ -1114,6 +1138,8 @@ class AnswerGenerationService:
                 "model_digest": retrieval_payload.get("model_digest"),
                 "coverage": coverage,
                 "selected_tier": policy.get("selected_tier"),
+                "requested_top_k": int(top_k),
+                "effective_top_k": retrieval_top_k,
                 "retrieved_evidence_count": len(results),
                 "generation_evidence_count": len(evidence),
             },
