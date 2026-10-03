@@ -2272,6 +2272,9 @@ async function renderDetail(bggId) {
               ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri regolamento</a>` : ""}
             </div>
             <p id="gameDiscoveryStatus" hidden></p>
+            <div class="game-document-list visually-hidden" id="gameDocumentList" aria-hidden="true">
+              ${documentItems.map(documentCard).join("")}
+            </div>
 
             <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
               <h3>Fai una domanda sul regolamento</h3>
