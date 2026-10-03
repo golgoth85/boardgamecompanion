@@ -2271,6 +2271,9 @@ function ragIndexFailureText(item) {
   const raw = String(item?.last_error_message || "").trim();
   if (!raw) return "Indicizzazione non riuscita.";
 
+  if (/failed.*->.*failed/i.test(raw)) {
+    return raw.slice(0, 320);
+  }
   if (/Gemini embedding request failed with HTTP 429/i.test(raw)) {
     return "Gemini embedding non disponibile: quota/rate limit (HTTP 429).";
   }
@@ -2380,14 +2383,26 @@ async function prepareRagIndex(bggId, documentItems) {
   status.className = "rag-index-status";
   status.textContent = "Riprovo l'indicizzazione…";
   try {
+    const providerMessages = [];
     for (const item of documentItems) {
       try {
-        await api("/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run", {method: "POST"});
+        const indexed = await api(
+          "/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run",
+          {method: "POST"},
+        );
+        const providerMessage = indexed?.embeddings?.provider_message;
+        if (providerMessage && !providerMessages.includes(providerMessage)) {
+          providerMessages.push(providerMessage);
+        }
       } catch (error) {
         if (error.status !== 409) throw error;
       }
     }
-    showToast("Indicizzazione completata.");
+    showToast(
+      providerMessages.length
+        ? providerMessages.join(" · ")
+        : "Indicizzazione completata."
+    );
   } catch (error) {
     showToast(error.message, true);
   } finally {
