@@ -637,10 +637,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
         expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
 
-        rag = page.locator(".rag-disclosure")
-        expect(rag).not_to_have_attribute("open", "")
-        expect(page.locator("#ragQuestion")).not_to_be_visible()
-        rag.locator("summary").click()
+        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
         expect(page.locator("#ragQuestion")).to_be_visible()
 
         technical = page.locator(".technical-game-details")
