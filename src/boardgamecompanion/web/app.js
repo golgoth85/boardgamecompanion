@@ -1,4 +1,50 @@
 const app = document.querySelector("#app");
+const appSidebar = document.querySelector("#appSidebar");
+const sidebarToggle = document.querySelector("#sidebarToggle");
+const sidebarBackdrop = document.querySelector("#sidebarBackdrop");
+const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
+
+const shellSectionLabels = {
+  catalog: "Ludoteca",
+  reviews: "Fonti da verificare",
+  updates: "Aggiornamenti regolamenti",
+  discovery: "Ricerca regolamenti",
+};
+
+function shellRouteKey(pathname = window.location.pathname) {
+  if (/^\/reviews\/?$/.test(pathname)) return "reviews";
+  if (/^\/updates\/?$/.test(pathname)) return "updates";
+  if (/^\/discovery\/?$/.test(pathname)) return "discovery";
+  return "catalog";
+}
+
+function setSidebarOpen(open) {
+  const expanded = Boolean(open);
+  document.body.classList.toggle("sidebar-open", expanded);
+  sidebarToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  sidebarToggle?.setAttribute(
+    "aria-label",
+    expanded ? "Chiudi navigazione" : "Apri navigazione",
+  );
+  if (sidebarBackdrop) sidebarBackdrop.hidden = !expanded;
+}
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
+function updateShellNavigation() {
+  const routeKey = shellRouteKey();
+  document.querySelectorAll("[data-route]").forEach((item) => {
+    const active = item.dataset.route === routeKey;
+    item.classList.toggle("is-active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  if (mobileSectionTitle) {
+    mobileSectionTitle.textContent = shellSectionLabels[routeKey] || "Ludoteca";
+  }
+}
 const importDialog = document.querySelector("#importDialog");
 const importButton = document.querySelector("#importButton");
 const importForm = document.querySelector("#importForm");
@@ -316,6 +362,9 @@ function parseProviderOrder(value, label) {
 }
 
 async function openSettingsDialog() {
+  settingsDialog.querySelectorAll(".settings-provider").forEach((section) => {
+    section.open = section.id === "bggSettings";
+  });
   settingsResult.hidden = true;
   settingsResult.textContent = "";
   setSettingsBusy(true);
@@ -1174,60 +1223,71 @@ function skeletons() {
 
 async function renderCatalog() {
   app.innerHTML = `
-    <section class="hero">
-      <article class="hero-card">
-        <p class="eyebrow">Catalogo locale</p>
-        <h1>La tua ludoteca, ordinata.</h1>
-        <p class="lead">
-          Cerca giochi ed espansioni, consulta il catalogo locale e arricchiscilo
-          opzionalmente tramite l'API ufficiale BoardGameGeek.
+    <section class="page-header catalog-page-header">
+      <div class="page-header-copy">
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Catalogo</h1>
+        <p class="page-lead">
+          Giochi ed espansioni della collezione, con ricerca e filtri in primo piano.
+          Le funzioni di importazione e amministrazione restano nel menu laterale.
         </p>
-        <p class="muted"><a class="external-link" href="https://boardgamegeek.com" target="_blank" rel="noopener noreferrer">Powered by BoardGameGeek</a></p>
-      </article>
-      <section class="stats-panel" id="statsPanel" aria-label="Statistiche catalogo">
-        <div class="stat"><strong>—</strong><span>Totale</span></div>
-        <div class="stat"><strong>—</strong><span>Giochi base</span></div>
-        <div class="stat"><strong>—</strong><span>Espansioni</span></div>
-        <div class="stat"><strong>—</strong><span>Posseduti</span></div>
+      </div>
+      <div class="page-header-meta">
+        <span class="quiet-pill">Catalogo locale</span>
+        <a class="external-link" href="https://boardgamegeek.com" target="_blank"
+           rel="noopener noreferrer">BoardGameGeek ↗</a>
+      </div>
+    </section>
+
+    <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Statistiche catalogo">
+      <div class="stat"><strong>—</strong><span>Totale</span></div>
+      <div class="stat"><strong>—</strong><span>Giochi base</span></div>
+      <div class="stat"><strong>—</strong><span>Espansioni</span></div>
+      <div class="stat"><strong>—</strong><span>Posseduti</span></div>
+    </section>
+
+    <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
+      <div class="catalog-head catalog-workspace-head">
+        <div>
+          <h2 id="catalogGamesHeading">Giochi</h2>
+          <p class="section-subtitle">Trova rapidamente un titolo oppure restringi il catalogo.</p>
+        </div>
+        <span class="muted" id="resultCount">Caricamento…</span>
+      </div>
+
+      <section class="toolbar" aria-label="Filtri catalogo">
+        <label class="field search-field">
+          <input id="searchInput" type="search" aria-label="Cerca per titolo"
+                 placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
+        </label>
+        <label class="field">
+          <select id="typeFilter" aria-label="Tipo">
+            <option value="">Tutti i tipi</option>
+            <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
+            <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
+          </select>
+        </label>
+        <label class="field">
+          <select id="ownedFilter" aria-label="Stato collezione">
+            <option value="">Tutti gli stati</option>
+            <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
+            <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
+          </select>
+        </label>
+        <label class="field">
+          <select id="sortFilter" aria-label="Ordina">
+            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
+            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
+            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
+          </select>
+        </label>
       </section>
+
+      <section class="grid" id="catalogGrid">${skeletons()}</section>
+      <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
-
-    <section class="toolbar" aria-label="Filtri catalogo">
-      <label class="field search-field">
-        <input id="searchInput" type="search" aria-label="Cerca per titolo" placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
-      </label>
-      <label class="field">
-        <select id="typeFilter" aria-label="Tipo">
-          <option value="">Tutti i tipi</option>
-          <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
-          <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
-        </select>
-      </label>
-      <label class="field">
-        <select id="ownedFilter" aria-label="Stato collezione">
-          <option value="">Tutti gli stati</option>
-          <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
-          <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
-        </select>
-      </label>
-      <label class="field">
-        <select id="sortFilter" aria-label="Ordina">
-          <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-          <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
-          <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-          <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
-          <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
-        </select>
-      </label>
-    </section>
-
-    <div class="catalog-head">
-      <h2>Catalogo</h2>
-      <span class="muted" id="resultCount">Caricamento…</span>
-    </div>
-
-    <section class="grid" id="catalogGrid">${skeletons()}</section>
-    <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
   `;
 
   bindCatalogControls();
@@ -1798,9 +1858,9 @@ function setupRagPanel(bggId, documentItems) {
 async function renderDetail(bggId) {
   app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
-    <section class="detail">
-      <div class="skeleton"></div>
-      <div class="panel detail-main"><div class="skeleton"></div></div>
+    <section class="game-page game-page-loading">
+      <div class="game-summary-rail"><div class="skeleton"></div></div>
+      <div class="game-main"><div class="skeleton"></div></div>
     </section>
   `;
   const requestedPath = window.location.pathname;
@@ -1816,155 +1876,220 @@ async function renderDetail(bggId) {
     const bgg = game.bgg || {};
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
+    const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
-      <section class="detail">
-        <div class="detail-cover">
-          ${game.bgg_metadata?.cover_url
-            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
-            : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
-        </div>
-        <article class="panel detail-main">
-          <p class="eyebrow">BGG #${game.bgg_id}</p>
-          <h1>${escapeHtml(game.title)}</h1>
-          <p class="detail-subtitle">
-            ${escapeHtml(game.original_title && game.original_title !== game.title ? game.original_title : "")}
-          </p>
 
-          <div class="detail-badges">
-            <span class="badge">${type}</span>
-            ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
-            ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
-            <span class="badge">${copyItems.length} ${copyItems.length === 1 ? "copia" : "copie"}</span>
-          </div>
-
-          <section class="rulebook-discovery-panel" aria-label="Ricerca e acquisizione regolamenti">
-            <div class="rulebook-discovery-info">
-              <p class="eyebrow">Ricerca regolamento · IT prima di EN</p>
-              <p class="muted">Un solo flusso: il primo clic controlla le fonti note e la relativa trust policy.
-                Se una ricerca completata non trova alcuna fonte, lo stesso pulsante passa alla ricerca Google
-                al clic successivo, anche se una fonte nota non ha risposto. Google non importa né approva documenti.</p>
-              <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">Caricamento stato…</p>
-              <p class="muted">I PDF compaiono sotto «Manuali e documenti» solo dopo l’archiviazione.
-                Un PDF trovato sul web resta una scelta manuale: scaricalo dopo verifica e caricalo con «+ Aggiungi PDF».
-                <a class="external-link" href="/updates" data-nav>Stato download</a> ·
-                <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>.</p>
+      <section class="game-page">
+        <aside class="game-summary-rail" aria-label="Riepilogo gioco">
+          <div class="game-summary-cover">
+            <div class="detail-cover">
+              ${game.bgg_metadata?.cover_url
+                ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+                : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
             </div>
-            <div class="rulebook-discovery-actions">
-              <button class="button button-primary" id="rulebookSearchAction" type="button">Cerca regolamento</button>
+          </div>
+
+          <div class="game-summary-card">
+            <div class="game-summary-badges">
+              <span class="badge">${type}</span>
+              ${collection.own ? '<span class="badge">✓ Posseduto</span>' : ""}
+              ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             </div>
-          </section>
 
-          <div class="fact-grid">
-            ${fact("Giocatori", playerText(game))}
-            ${fact("Durata", timeText(game))}
-            ${fact("Rating BGG", bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—")}
-            ${fact("Complessità", bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—")}
-            ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
-            ${fact("Partite registrate", collection.num_plays ?? "—")}
-          </div>
+            <dl class="game-summary-list">
+              <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
+              <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
+              <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
+              <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
+            </dl>
 
-          <div class="section-heading-row">
-            <h2 class="section-title">Copie fisiche</h2>
-            <button class="button button-ghost" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
-          </div>
-          <div class="physical-copy-list" id="physicalCopyList">
-            ${copyItems.length
-              ? copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")
-              : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
-          </div>
-
-          <div class="section-heading-row document-heading">
-            <div>
-              <h2 class="section-title">Manuali e documenti</h2>
-              <p class="section-subtitle">${documentItems.length} ${documentItems.length === 1 ? "documento" : "documenti"} archiviati</p>
-            </div>
-            <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
-          </div>
-          <div class="game-document-list" id="gameDocumentList">
-            ${documentItems.length
-              ? documentItems.map(documentCard).join("")
-              : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
-          </div>
-
-          <section class="rag-panel" id="ragPanel" data-index-busy="false">
-            <div class="section-heading-row rag-heading">
-              <div>
-                <p class="eyebrow">RAG locale</p>
-                <h2>Chiedi al regolamento</h2>
-                <p class="section-subtitle">Risposte solo dai documenti del gioco, con pagina, versione e fonte verificabili.</p>
-              </div>
-              <button class="button button-ghost rag-prepare-index" type="button"
-                      ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
-            </div>
-            <div class="rag-index-status" id="ragIndexStatus" role="status">
-              Controllo stato dell'indice…
-            </div>
-            <form class="rag-query-form" id="ragQueryForm">
-              <label class="rag-question-field" for="ragQuestion">
-                <span>Domanda sulle regole</span>
-                <textarea id="ragQuestion" rows="3" maxlength="4000" required
-                  placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
-              </label>
-              <details class="rag-filters">
-                <summary>Filtri documento</summary>
-                <div class="rag-filter-grid">
-                  <label>
-                    <span>Lingua</span>
-                    <select id="ragLanguage">
-                      <option value="it" selected>Italiano</option>
-                      <option value="en">English</option>
-                      <option value="">Qualsiasi</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Tipo</span>
-                    <select id="ragDocumentType">
-                      <option value="">Tutti i documenti</option>
-                      <option value="rulebook">Regolamento</option>
-                      <option value="reference">Riferimento</option>
-                      <option value="faq">FAQ</option>
-                      <option value="errata">Errata</option>
-                      <option value="campaign_book">Campaign book</option>
-                      <option value="scenario_book">Scenario book</option>
-                      <option value="player_aid">Player aid</option>
-                      <option value="other">Altro</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Versione</span>
-                    <input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1">
-                  </label>
-                  <label>
-                    <span>Edizione</span>
-                    <input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT">
-                  </label>
-                </div>
-              </details>
-              <div class="rag-query-actions">
-                <p class="muted">Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.</p>
-                <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
-              </div>
-            </form>
-            <div class="rag-result" id="ragResult" aria-live="polite">
-              <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
-            </div>
-          </section>
-
-          <h2 class="section-title">Dati BGG</h2>
-          <div class="fact-grid">
-            ${fact("Best players", bgg.best_players || "—")}
-            ${fact("Età consigliata", bgg.recommended_age || "—")}
-            ${fact("Recommended players", bgg.recommended_players || "—")}
-            ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
-          </div>
-
-          <p style="margin-top:1.4rem">
-            <a class="external-link" href="https://boardgamegeek.com/boardgame/${game.bgg_id}" target="_blank" rel="noopener noreferrer">
+            <a class="external-link game-bgg-link"
+               href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
+               target="_blank" rel="noopener noreferrer">
               Apri su BoardGameGeek ↗
             </a>
-          </p>
+          </div>
+        </aside>
+
+        <article class="game-main detail-main">
+          <header class="game-header">
+            <p class="eyebrow">BGG #${game.bgg_id}</p>
+            <h1>${escapeHtml(game.title)}</h1>
+            ${game.original_title && game.original_title !== game.title
+              ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
+              : ""}
+            <div class="game-header-status">
+              <span>${copyItems.length} ${copyItems.length === 1 ? "copia fisica" : "copie fisiche"}</span>
+              <span aria-hidden="true">·</span>
+              <span>${rulebooks.length} ${rulebooks.length === 1 ? "regolamento" : "regolamenti"} archiviati</span>
+              ${collection.num_plays !== null && collection.num_plays !== undefined
+                ? `<span aria-hidden="true">·</span><span>${collection.num_plays} partite</span>`
+                : ""}
+            </div>
+          </header>
+
+          <section class="game-section rules-workspace" aria-labelledby="rulesWorkspaceTitle">
+            <div class="game-section-head">
+              <div>
+                <p class="eyebrow">Regole</p>
+                <h2 id="rulesWorkspaceTitle">Regolamento e assistente</h2>
+                <p class="section-subtitle">
+                  Cerca il regolamento, archivia i PDF e interroga solo i documenti verificabili del gioco.
+                </p>
+              </div>
+              <button class="button button-ghost" id="addDocument" type="button">+ Aggiungi PDF</button>
+            </div>
+
+            <section class="rulebook-discovery-panel rulebook-search-card"
+                     aria-label="Ricerca e acquisizione regolamenti">
+              <div class="rulebook-search-copy">
+                <strong>Trova il regolamento</strong>
+                <p>
+                  Un solo flusso: prima le fonti note, IT prima di EN. Se non emerge alcun candidato,
+                  lo stesso pulsante passa alla ricerca PDF su Google; il caricamento resta sempre manuale.
+                </p>
+              </div>
+              <div class="rulebook-discovery-actions">
+                <button class="button button-primary" id="rulebookSearchAction" type="button">
+                  Cerca regolamento
+                </button>
+              </div>
+              <details class="technical-disclosure rulebook-search-details">
+                <summary>Stato ricerca e fonti</summary>
+                <p class="muted" id="gameDiscoveryStatus" role="status" aria-live="polite">
+                  Caricamento stato…
+                </p>
+                <p class="muted">
+                  <a class="external-link" href="/updates" data-nav>Aggiornamenti regolamenti</a>
+                  ·
+                  <a class="external-link" href="/reviews" data-nav>Fonti da verificare</a>
+                </p>
+              </details>
+            </section>
+
+            <section class="game-subsection documents-subsection" aria-labelledby="documentsTitle">
+              <div class="section-heading-row document-heading">
+                <div>
+                  <h2 class="section-title" id="documentsTitle">Manuali e documenti</h2>
+                  <p class="section-subtitle">
+                    ${documentItems.length} ${documentItems.length === 1 ? "documento" : "documenti"} archiviati
+                  </p>
+                </div>
+              </div>
+              <div class="game-document-list" id="gameDocumentList">
+                ${documentItems.length
+                  ? documentItems.map(documentCard).join("")
+                  : '<div class="empty document-empty">Nessun manuale o documento registrato.</div>'}
+              </div>
+            </section>
+
+            <section class="rag-panel" id="ragPanel" data-index-busy="false">
+              <div class="section-heading-row rag-heading">
+                <div>
+                  <p class="eyebrow">Assistente regole</p>
+                  <h2>Chiedi al regolamento</h2>
+                  <p class="section-subtitle">
+                    Risposte solo dai documenti del gioco, con pagina, versione e fonte verificabili.
+                  </p>
+                </div>
+                <button class="button button-ghost rag-prepare-index" type="button"
+                        ${documentItems.length ? "" : "disabled"}>Prepara indice</button>
+              </div>
+              <div class="rag-index-status" id="ragIndexStatus" role="status">
+                Controllo stato dell'indice…
+              </div>
+              <form class="rag-query-form" id="ragQueryForm">
+                <label class="rag-question-field" for="ragQuestion">
+                  <span>Domanda sulle regole</span>
+                  <textarea id="ragQuestion" rows="3" maxlength="4000" required
+                    placeholder="Es. Posso usare questa carta prima di risolvere il combattimento?"></textarea>
+                </label>
+                <details class="rag-filters">
+                  <summary>Filtri avanzati</summary>
+                  <div class="rag-filter-grid">
+                    <label>
+                      <span>Lingua</span>
+                      <select id="ragLanguage">
+                        <option value="it" selected>Italiano</option>
+                        <option value="en">English</option>
+                        <option value="">Qualsiasi</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Tipo</span>
+                      <select id="ragDocumentType">
+                        <option value="">Tutti i documenti</option>
+                        <option value="rulebook">Regolamento</option>
+                        <option value="reference">Riferimento</option>
+                        <option value="faq">FAQ</option>
+                        <option value="errata">Errata</option>
+                        <option value="campaign_book">Campaign book</option>
+                        <option value="scenario_book">Scenario book</option>
+                        <option value="player_aid">Player aid</option>
+                        <option value="other">Altro</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Versione</span>
+                      <input id="ragVersion" type="text" maxlength="500" placeholder="es. v2.1">
+                    </label>
+                    <label>
+                      <span>Edizione</span>
+                      <input id="ragEdition" type="text" maxlength="500" placeholder="es. Retail IT">
+                    </label>
+                  </div>
+                </details>
+                <div class="rag-query-actions">
+                  <p class="muted">
+                    Se le fonti non bastano, BoardGameCompanion restituisce “nessuna risposta affidabile”.
+                  </p>
+                  <button class="button button-primary" id="ragAsk" type="submit">Chiedi</button>
+                </div>
+              </form>
+              <div class="rag-result" id="ragResult" aria-live="polite">
+                <div class="rag-empty">Fai una domanda per cercare nei manuali indicizzati.</div>
+              </div>
+            </section>
+          </section>
+
+          <section class="game-section copies-workspace" aria-labelledby="copiesTitle">
+            <div class="game-section-head">
+              <div>
+                <p class="eyebrow">Inventario</p>
+                <h2 id="copiesTitle">Copie fisiche</h2>
+                <p class="section-subtitle">
+                  Edizione, lingua, barcode, posizione e dati della tua copia.
+                </p>
+              </div>
+              <button class="button button-ghost" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
+            </div>
+            <div class="physical-copy-list" id="physicalCopyList">
+              ${copyItems.length
+                ? copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")
+                : '<div class="empty copy-empty">Nessuna copia fisica registrata.</div>'}
+            </div>
+          </section>
+
+          <details class="game-section technical-game-details">
+            <summary>
+              <span>
+                <strong>Dati e dettagli tecnici</strong>
+                <small>Metadati BGG e informazioni secondarie</small>
+              </span>
+            </summary>
+            <div class="technical-game-content">
+              <div class="fact-grid">
+                ${fact("Best players", bgg.best_players || "—")}
+                ${fact("Età consigliata", bgg.recommended_age || "—")}
+                ${fact("Recommended players", bgg.recommended_players || "—")}
+                ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
+                ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
+                ${fact("Partite registrate", collection.num_plays ?? "—")}
+              </div>
+            </div>
+          </details>
         </article>
       </section>
     `;
@@ -2032,7 +2157,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
       const candidates = Number(item.candidates_found || 0);
       const failures = Number(item.provider_failures || 0);
-      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti candidate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
+      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti trovate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
       setButtonState(item);
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
@@ -2081,16 +2206,16 @@ async function renderDiscovery() {
   try {
     const data = await api("/api/rulebook-discovery?limit=500");
     app.innerHTML = `
-      <section class="review-page">
-        <div class="review-page-head">
-          <div><p class="eyebrow">P5 · Provider discovery</p><h1>Discovery regolamenti</h1>
-          <p class="muted">Ricerca incrementale IT/EN. I risultati attraversano sempre la trust policy P6A.</p></div>
-          <button class="button button-primary" id="runDiscoveryBatch" type="button">Avvia batch bounded</button>
+      <section class="admin-page review-page">
+        <div class="review-page-head admin-page-head">
+          <div><p class="eyebrow">Regolamenti</p><h1>Ricerca regolamenti</h1>
+          <p class="muted">Controlla la copertura delle fonti note per il catalogo. Italiano prima di inglese; ogni candidato continua a passare dalla policy di fiducia.</p></div>
+          <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
           ${data.items.map((item) => `<article class="update-card">
             <div><strong>${escapeHtml(item.title)}</strong> <span class="badge">BGG #${item.bgg_id}</span></div>
-            <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · candidate: ${item.candidates_found} · nuove review: ${item.review_items_created}</p>
+            <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · fonti trovate: ${item.candidates_found} · da verificare: ${item.review_items_created}</p>
             <p class="muted">${(item.providers || []).map((value) => `${escapeHtml(value.provider)}: ${escapeHtml(value.outcome)} (${value.candidate_count})`).join(" · ") || "Nessun provider ancora interrogato"}</p>
             ${item.last_error ? `<p class="integration-error">${escapeHtml(item.last_error)}</p>` : ""}
             <a class="external-link" href="/games/${item.bgg_id}" data-nav>Apri gioco →</a>
@@ -2101,16 +2226,16 @@ async function renderDiscovery() {
       event.currentTarget.disabled = true;
       try {
         const result = await api("/api/rulebook-discovery/run?limit=5", {method: "POST"});
-        showToast(`Discovery completata per ${result.attempted} giochi.`);
+        showToast(`Ricerca completata per ${result.attempted} giochi.`);
         await renderDiscovery();
       } catch (error) {
         showToast(error.message, true);
         event.currentTarget.disabled = false;
       }
     });
-    document.title = "Discovery · BoardGameCompanion";
+    document.title = "Ricerca regolamenti · BoardGameCompanion";
   } catch (error) {
-    app.innerHTML = `<div class="empty">Impossibile caricare la discovery: ${escapeHtml(error.message)}</div>`;
+    app.innerHTML = `<div class="empty">Impossibile caricare la ricerca regolamenti: ${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -2149,7 +2274,7 @@ function reviewCard(item) {
   const pending = item.status === "pending";
   const statusLabel = item.status === "approved"
     ? (item.decision_source === "policy" ? "Auto-approvato" : "Approvato")
-    : item.status === "rejected" ? "Rifiutato" : "Da revisionare";
+    : item.status === "rejected" ? "Rifiutato" : "Da verificare";
   const source = String(candidate.source_kind || "unknown").replaceAll("_", " ");
   const reasons = (item.policy_reasons || [])
     .map((reason) => `<span class="review-reason">${escapeHtml(reason)}</span>`)
@@ -2212,7 +2337,7 @@ async function renderReviews({reset = false} = {}) {
     reviewPendingOffset = 0;
     reviewDecidedOffset = 0;
   }
-  app.innerHTML = '<div class="empty">Caricamento coda di revisione…</div>';
+  app.innerHTML = '<div class="empty">Caricamento fonti da verificare…</div>';
   try {
     const [pendingData, decidedData] = await Promise.all([
       api(`/api/rulebook-reviews?status=pending&limit=${REVIEW_PAGE_SIZE}&offset=${reviewPendingOffset}`),
@@ -2238,21 +2363,21 @@ async function renderReviews({reset = false} = {}) {
       : "";
 
     app.innerHTML = `
-      <section class="review-page">
-        <div class="review-page-head">
+      <section class="admin-page review-page">
+        <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">P6 · Rulebook review</p>
-            <h1>Coda di revisione</h1>
+            <p class="eyebrow">Regolamenti</p>
+            <h1>Fonti da verificare</h1>
             <p class="muted">
-              I candidati non idonei al download unattended richiedono una decisione esplicita.
+              Decidi esplicitamente sulle fonti che non possono essere considerate attendibili in automatico.
             </p>
           </div>
-          <span class="review-counter">${pendingData.total} pending</span>
+          <span class="review-counter">${pendingData.total} da verificare</span>
         </div>
 
         ${corruptWarning}
 
-        <h2 class="section-title">Da revisionare</h2>
+        <h2 class="section-title">In attesa di decisione</h2>
         <div class="review-list">
           ${pendingData.items.length ? pendingData.items.map(reviewCard).join("") : '<div class="empty">Nessun candidato in attesa.</div>'}
         </div>
@@ -2282,7 +2407,7 @@ async function renderReviews({reset = false} = {}) {
         void renderReviews();
       });
     });
-    document.title = "Revisioni · BoardGameCompanion";
+    document.title = "Fonti da verificare · BoardGameCompanion";
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare la coda: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
@@ -2477,7 +2602,7 @@ async function toggleUpdate(reviewId, enabled) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({enabled: !enabled}),
     });
-    showToast(enabled ? "Aggiornamenti automatici in pausa." : "Aggiornamenti automatici riattivati.");
+    showToast(enabled ? "Aggiornamenti regolamenti in pausa." : "Aggiornamenti regolamenti riattivati.");
     await renderUpdates();
   } catch (error) {
     showToast(error.message, true);
@@ -2518,24 +2643,24 @@ async function renderUpdates({reset = false} = {}) {
 
     const worker = data.worker || {};
     const workerLabel = worker.enabled
-      ? `Scheduler attivo · scansione coda ogni ${escapeHtml(formatUpdateInterval(worker.poll_seconds || 60))}`
-      : "Scheduler automatico disattivato";
+      ? `Controllo automatico attivo · coda ogni ${escapeHtml(formatUpdateInterval(worker.poll_seconds || 60))}`
+      : "Controllo automatico disattivato";
     const corruptWarning = data.corrupt_count
       ? `<div class="review-warning">${data.corrupt_count} target collegati a review corrotte sono stati esclusi da questa pagina.</div>`
       : "";
 
     app.innerHTML = `
-      <section class="update-page">
-        <div class="review-page-head">
+      <section class="admin-page update-page">
+        <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">P6B · Rulebook updates</p>
-            <h1>Aggiornamenti automatici</h1>
+            <p class="eyebrow">Regolamenti</p>
+            <h1>Aggiornamenti regolamenti</h1>
             <p class="muted">
-              I candidati approvati vengono ricontrollati con il guarded fetch.
-              Una nuova versione viene archiviata solo quando cambia il contenuto.
+              Le fonti già approvate vengono ricontrollate in sicurezza.
+              Una nuova versione viene archiviata solo quando cambia davvero il PDF.
             </p>
           </div>
-          <span class="review-counter">${data.total} target</span>
+          <span class="review-counter">${data.total} monitorati</span>
         </div>
         <div class="update-worker-state ${worker.enabled ? "" : "disabled"}">
           ${workerLabel}
@@ -2574,7 +2699,7 @@ async function renderUpdates({reset = false} = {}) {
         void renderUpdates();
       });
     });
-    document.title = "Aggiornamenti · BoardGameCompanion";
+    document.title = "Aggiornamenti regolamenti · BoardGameCompanion";
     scheduleUpdateRefresh();
   } catch (error) {
     app.innerHTML = `<div class="empty">Impossibile caricare gli aggiornamenti: ${escapeHtml(error.message)}</div>`;
@@ -2585,6 +2710,8 @@ async function renderUpdates({reset = false} = {}) {
 
 
 async function route() {
+  closeSidebar();
+  updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
     clearUpdateRefresh();
   }
@@ -2617,13 +2744,30 @@ document.addEventListener("click", (event) => {
   if (url.origin !== window.location.origin) return;
   event.preventDefault();
   history.pushState({}, "", url.pathname);
+  closeSidebar();
   route();
   window.scrollTo({top: 0});
 });
 
 window.addEventListener("popstate", route);
 
-scannerButton.addEventListener("click", openScannerDialog);
+sidebarToggle?.addEventListener("click", () => {
+  setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+});
+sidebarBackdrop?.addEventListener("click", closeSidebar);
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 1040) closeSidebar();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
+    closeSidebar();
+  }
+});
+
+scannerButton.addEventListener("click", () => {
+  closeSidebar();
+  openScannerDialog();
+});
 closeScanner.addEventListener("click", closeScannerDialog);
 scannerDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
@@ -2679,6 +2823,7 @@ documentFile.addEventListener("change", () => {
 });
 
 settingsButton.addEventListener("click", () => {
+  closeSidebar();
   void openSettingsDialog();
 });
 
@@ -2725,6 +2870,7 @@ geminiClearApiKey.addEventListener("change", () => {
 });
 
 importButton.addEventListener("click", () => {
+  closeSidebar();
   resetImportDialog();
   importDialog.showModal();
 });

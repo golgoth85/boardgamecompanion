@@ -133,13 +133,23 @@ def new_page(browser, *, mobile: bool = False):
 
 def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.goto(base_url)
-    page.get_by_role("button", name="Importa BGG CSV").click()
+    import_button = page.get_by_role("button", name="Importa BGG CSV")
+    if not import_button.is_visible():
+        page.get_by_role("button", name="Apri navigazione").click()
+    import_button.click()
     page.locator("#csvFile").set_input_files(str(path))
     page.get_by_role("button", name="Importa", exact=True).click()
     expect(page.locator("#importResult")).to_contain_text("Import completato.")
     expect(page.locator("#importResult")).to_contain_text("2 righe")
     page.get_by_role("button", name="Chiudi").click()
     expect(page.locator("#importDialog")).not_to_be_visible()
+
+
+def open_barcode_scanner(page) -> None:
+    scanner_button = page.get_by_role("button", name="Importa barcode")
+    if not scanner_button.is_visible():
+        page.get_by_role("button", name="Apri navigazione").click()
+    scanner_button.click()
 
 
 def make_many_games_csv(path: Path, count: int = 30) -> Path:
@@ -318,13 +328,15 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
     try:
         import_csv(page, live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
+        expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
         expect(page.locator(".game-card")).to_have_count(2)
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator(".detail-main h1")).to_have_text("Synthetic Alpha")
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
 
+        page.get_by_role("button", name="Apri navigazione").click()
+        expect(page.get_by_role("button", name="Importa BGG CSV")).to_be_visible()
         page.get_by_role("button", name="Importa BGG CSV").click()
         expect(page.locator("#importDialog")).to_be_visible()
         box = page.locator("#importDialog").bounding_box()
@@ -332,6 +344,26 @@ def test_mobile_layout_has_no_horizontal_overflow(browser, live_server):
         assert box["x"] >= 0
         assert box["x"] + box["width"] <= 391
         page.get_by_role("button", name="Chiudi").click()
+    finally:
+        context.close()
+
+
+def test_sidebar_separates_daily_and_admin_navigation(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        page.goto(live_server)
+        sidebar = page.locator("#appSidebar")
+        expect(sidebar).to_be_visible()
+        expect(sidebar.get_by_text("Ludoteca", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Collezione", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Amministrazione", exact=True)).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
+            "aria-current", "page"
+        )
+        expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Aggiornamenti regolamenti")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Ricerca regolamenti")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Provider e AI")).to_be_visible()
     finally:
         context.close()
 
@@ -358,13 +390,15 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("button", name="Provider e AI").click()
         expect(page.locator("#settingsDialog")).to_be_visible()
-        expect(page.locator("#settingsDialogTitle")).to_have_text("Impostazioni")
+        expect(page.locator("#settingsDialogTitle")).to_have_text("Provider e AI")
 
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
         page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
         page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
+        page.locator("#lmstudioSettings summary").click()
+        page.locator("#geminiSettings summary").click()
         page.locator("#lmstudioUrl").fill("http://lmstudio.test:1234")
         page.locator("#lmstudioEmbeddingModel").fill("embed-test")
         page.locator("#lmstudioGenerationModel").fill("qwen3-14b")
@@ -394,7 +428,9 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         assert "browser-secret-gemini-key" not in rag_response.text()
 
         page.get_by_role("button", name="Chiudi impostazioni").click()
-        page.get_by_role("button", name="Impostazioni").click()
+        page.get_by_role("button", name="Provider e AI").click()
+        page.locator("#lmstudioSettings summary").click()
+        page.locator("#geminiSettings summary").click()
 
         expect(page.locator("#bggApplicationToken")).to_have_value("")
         expect(page.locator("#bggTokenHint")).to_contain_text("Token BGG configurato")
@@ -405,6 +441,89 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         expect(page.locator("#geminiApiKey")).to_have_value("")
         expect(page.locator("#geminiApiKeyHint")).to_contain_text("API key configurata")
         expect(page.locator("#clearGeminiApiKeyRow")).to_be_visible()
+    finally:
+        context.close()
+
+
+def test_mobile_settings_and_drawer_accessibility(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        page.goto(live_server)
+        menu = page.get_by_role("button", name="Apri navigazione")
+        expect(menu).to_have_attribute("aria-expanded", "false")
+
+        menu.click()
+        expect(page.locator("#sidebarToggle")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(page.get_by_role("button", name="Provider e AI")).to_be_visible()
+        page.get_by_role("button", name="Provider e AI").click()
+
+        expect(page.locator("#settingsDialog")).to_be_visible()
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
+        expect(page.locator("#bggSettings")).to_have_attribute("open", "")
+        expect(page.locator("#ollamaSettings")).not_to_have_attribute("open", "")
+        expect(page.locator("#lmstudioSettings")).not_to_have_attribute("open", "")
+        expect(page.locator("#geminiSettings")).not_to_have_attribute("open", "")
+        box = page.locator("#settingsDialog").bounding_box()
+        assert box is not None
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= 391
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
+
+        page.get_by_role("button", name="Chiudi impostazioni").click()
+        menu = page.get_by_role("button", name="Apri navigazione")
+        menu.click()
+        expect(page.locator("#sidebarToggle")).to_have_attribute("aria-label", "Chiudi navigazione")
+        page.keyboard.press("Escape")
+        expect(page.get_by_role("button", name="Apri navigazione")).to_have_attribute(
+            "aria-expanded", "false"
+        )
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
+    finally:
+        context.close()
+
+
+def test_mobile_admin_surfaces_do_not_overflow(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        for path, heading in (
+            ("/reviews", "Fonti da verificare"),
+            ("/discovery", "Ricerca regolamenti"),
+            ("/updates", "Aggiornamenti regolamenti"),
+        ):
+            page.goto(f"{live_server}{path}")
+            expect(page.get_by_role("heading", name=heading)).to_be_visible()
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= window.innerWidth + 1"
+            )
+    finally:
+        context.close()
+
+
+def test_game_detail_prioritizes_rules_and_progressive_disclosure(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("link", name="Apri Synthetic Alpha").click()
+
+        expect(page.locator(".game-summary-rail")).to_be_visible()
+        expect(page.get_by_role("heading", name="Regolamento e assistente")).to_be_visible()
+        expect(page.get_by_role("heading", name="Manuali e documenti", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Chiedi al regolamento")).to_be_visible()
+        expect(page.get_by_role("heading", name="Copie fisiche")).to_be_visible()
+
+        technical = page.locator(".technical-game-details")
+        expect(technical).not_to_have_attribute("open", "")
+        expect(page.get_by_text("Best players", exact=True)).not_to_be_visible()
+        technical.locator("summary").click()
+        expect(page.get_by_text("Best players", exact=True)).to_be_visible()
+
+        discovery_details = page.locator(".rulebook-search-details")
+        expect(discovery_details).not_to_have_attribute("open", "")
+        expect(page.locator("#gameDiscoveryStatus")).not_to_be_visible()
+        discovery_details.locator("summary").click()
+        expect(page.locator("#gameDiscoveryStatus")).to_be_visible()
     finally:
         context.close()
 
@@ -451,7 +570,7 @@ def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
         page.locator("#scannerBarcode").fill("1234-5678-90123")
         page.get_by_role("button", name="Cerca", exact=True).click()
@@ -469,7 +588,7 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.locator("#scannerBarcode").fill("222-222-222")
         page.get_by_role("button", name="Cerca", exact=True).click()
 
@@ -496,15 +615,27 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
         context.close()
 
 
-def test_mobile_topbar_and_scanner_dialog_do_not_overflow(browser, live_server):
+def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server):
     context, page = new_page(browser, mobile=True)
     try:
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
-        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
+        expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
+        expect(page.get_by_role("button", name="Importa barcode")).not_to_be_visible()
 
-        page.get_by_role("button", name="Importa barcode").click()
+        page.get_by_role("button", name="Apri navigazione").click()
+        expect(page.get_by_role("button", name="Importa barcode")).to_be_visible()
+        page.wait_for_function(
+            "document.querySelector('#appSidebar').getBoundingClientRect().x >= 0"
+        )
+        sidebar_box = page.locator("#appSidebar").bounding_box()
+        assert sidebar_box is not None
+        assert sidebar_box["x"] >= 0
+        assert sidebar_box["x"] + sidebar_box["width"] <= 390
+
+        open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
+        expect(page.locator("#appSidebar")).not_to_be_in_viewport()
         box = page.locator("#scannerDialog").bounding_box()
         assert box is not None
         assert box["x"] >= 0
@@ -726,9 +857,9 @@ def test_review_queue_ui_allows_explicit_approval(browser, live_server):
         page.route("**/api/rulebook-reviews/review-1/decision", decision_route)
 
         page.goto(live_server)
-        page.get_by_role("link", name="Revisioni").click()
+        page.get_by_role("link", name="Fonti da verificare").click()
         expect(page).to_have_url(f"{live_server}/reviews")
-        expect(page.get_by_role("heading", name="Coda di revisione")).to_be_visible()
+        expect(page.get_by_role("heading", name="Fonti da verificare")).to_be_visible()
         expect(page.locator(".review-card")).to_have_count(1)
         expect(page.locator(".review-card")).to_contain_text("Synthetic Alpha")
         expect(page.locator(".review-card")).to_contain_text("community")
@@ -819,7 +950,7 @@ def test_review_queue_ui_paginates_all_pending_items(browser, live_server):
         )
 
         page.goto(f"{live_server}/reviews")
-        expect(page.locator(".review-counter")).to_have_text("101 pending")
+        expect(page.locator(".review-counter")).to_have_text("101 da verificare")
         expect(page.locator(".review-card")).to_have_count(50)
         expect(page.locator(".review-pagination")).to_contain_text("1–50 di 101")
 
@@ -1026,7 +1157,7 @@ def test_rulebook_updates_ui_schedule_and_run_controls(browser, live_server):
         page.get_by_role("link", name="Aggiornamenti").click()
         expect(page).to_have_url(f"{live_server}/updates")
         expect(
-            page.get_by_role("heading", name="Aggiornamenti automatici")
+            page.get_by_role("heading", name="Aggiornamenti regolamenti")
         ).to_be_visible()
         expect(page.locator(".update-card")).to_have_count(1)
         expect(page.locator(".update-card")).to_contain_text("Synthetic Alpha")
@@ -1160,7 +1291,7 @@ def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, 
     _install_camera_stub(page, native_code="8001234567890")
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
 
         expect(page.locator("#scannerDialog")).to_be_visible()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
@@ -1211,7 +1342,7 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
 
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
         expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
         assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
@@ -1242,7 +1373,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.wait_for_function("window.__bgcResolveDetection !== undefined")
 
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
@@ -1284,7 +1415,7 @@ def test_closing_scanner_cancels_pending_camera_start(browser, live_server):
     )
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa barcode").click()
+        open_barcode_scanner(page)
         page.wait_for_function("typeof window.__bgcResolveCamera === 'function'")
 
         page.get_by_role("button", name="Chiudi scanner").click()
