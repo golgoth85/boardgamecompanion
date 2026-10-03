@@ -2188,7 +2188,7 @@ def test_rulebook_search_candidates_keep_single_known_source_action(
             "Trovate 2 fonti: 1 approvate, 1 da verificare"
         )
         expect(
-            page.get_by_role("button", name="Aggiorna ricerca regolamento")
+            page.get_by_role("button", name="Aggiorna ricerca automatica")
         ).to_be_visible()
         expect(page.get_by_role("button", name="Cerca PDF su Google")).to_have_count(0)
         expect(page.locator(".game-document-card")).to_have_count(0)
