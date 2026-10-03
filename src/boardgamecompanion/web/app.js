@@ -1209,12 +1209,12 @@ function ageText(game) {
   const value = game.bgg?.recommended_age;
   if (!value) return "—";
   const text = String(value).trim();
-  if (/^\d+$/.test(text)) return \`\${text}+\`;
+  if (/^\d+$/.test(text)) return `${text}+`;
   return text;
 }
 
 function catalogMetric(label, value) {
-  return \`<div class="catalog-metric"><strong>\${escapeHtml(value)}</strong><span>\${escapeHtml(label)}</span></div>\`;
+  return `<div class="catalog-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
 function inferExpansionParent(expansion, standaloneGames) {
@@ -1265,20 +1265,20 @@ function groupCatalogItems(items) {
 }
 
 function expansionMiniCard(game) {
-  return \`
-    <a class="expansion-mini-card" href="/games/\${game.bgg_id}" data-nav aria-label="Apri espansione \${escapeHtml(game.title)}">
+  return `
+    <a class="expansion-mini-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri espansione ${escapeHtml(game.title)}">
       <span class="expansion-mini-cover">
-        \${game.bgg_metadata?.cover_url
-          ? \`<img src="\${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">\`
-          : \`<span>\${escapeHtml(initials(game.title))}</span>\`}
+        ${game.bgg_metadata?.cover_url
+          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span>${escapeHtml(initials(game.title))}</span>`}
       </span>
       <span class="expansion-mini-copy">
-        <strong>\${escapeHtml(game.title)}</strong>
-        <small>\${escapeHtml(playerText(game))} gioc. · \${escapeHtml(timeText(game))}</small>
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
       </span>
-      \${game.collection?.own ? '<span class="owned-dot" title="Posseduta">✓</span>' : ""}
+      ${game.collection?.own ? '<span class="owned-dot" title="Posseduta">✓</span>' : ""}
     </a>
-  \`;
+  `;
 }
 
 function gameCard(game, expansions = []) {
@@ -1287,44 +1287,44 @@ function gameCard(game, expansions = []) {
   const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
   const plays = game.collection?.num_plays ?? 0;
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
-  const groupId = \`game-group-\${game.bgg_id}\`;
+  const groupId = `game-group-${game.bgg_id}`;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
-  return \`
-    <article class="game-card-wrap \${expansions.length ? "has-expansions" : ""}" data-game-id="\${game.bgg_id}">
-      <a class="game-card" href="/games/\${game.bgg_id}" data-nav aria-label="Apri \${escapeHtml(game.title)}">
+  return `
+    <article class="game-card-wrap ${expansions.length ? "has-expansions" : ""}" data-game-id="${game.bgg_id}">
+      <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
         <div class="cover">
-          <span class="badge card-badge">\${type}</span>
-          \${game.bgg_metadata?.cover_url
-            ? \`<img class="cover-image" src="\${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di \${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">\`
-            : \`<span class="cover-initials">\${escapeHtml(initials(game.title))}</span>\`}
+          <span class="badge card-badge">${type}</span>
+          ${game.bgg_metadata?.cover_url
+            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
         </div>
         <div class="card-body">
-          <h3 class="card-title">\${escapeHtml(game.title)}</h3>
+          <h3 class="card-title">${escapeHtml(game.title)}</h3>
           <div class="catalog-metrics">
-            \${catalogMetric("Giocatori", playerText(game))}
-            \${catalogMetric("Età", ageText(game))}
-            \${catalogMetric("Durata", timeText(game).replace(" min", ""))}
-            \${catalogMetric("Peso", weight)}
-            \${catalogMetric("Partite", String(plays))}
+            ${catalogMetric("Giocatori", playerText(game))}
+            ${catalogMetric("Età", ageText(game))}
+            ${catalogMetric("Durata", timeText(game).replace(" min", ""))}
+            ${catalogMetric("Peso", weight)}
+            ${catalogMetric("Partite", String(plays))}
           </div>
           <div class="card-footer-meta">
-            <span>\${game.year_published || "—"}</span>
-            <span class="rating">★ \${rating}</span>
+            <span>${game.year_published || "—"}</span>
+            <span class="rating">★ ${rating}</span>
           </div>
         </div>
       </a>
-      \${expansions.length ? \`
-        <button class="expansion-count-badge" type="button" data-expansion-toggle="\${game.bgg_id}"
-                aria-controls="\${groupId}" aria-expanded="\${expanded ? "true" : "false"}"
-                title="\${ownedExpansionCount} espansioni possedute su \${expansions.length}">
-          <strong>\${ownedExpansionCount}</strong><span>esp.</span>
+      ${expansions.length ? `
+        <button class="expansion-count-badge" type="button" data-expansion-toggle="${game.bgg_id}"
+                aria-controls="${groupId}" aria-expanded="${expanded ? "true" : "false"}"
+                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
+          <strong>${ownedExpansionCount}</strong><span>esp.</span>
         </button>
-        <div class="expansion-drawer" id="\${groupId}" \${expanded ? "" : "hidden"}>
-          \${expansions.map(expansionMiniCard).join("")}
+        <div class="expansion-drawer" id="${groupId}" ${expanded ? "" : "hidden"}>
+          ${expansions.map(expansionMiniCard).join("")}
         </div>
-      \` : ""}
+      ` : ""}
     </article>
-  \`;
+  `;
 }
 
 function gameListRow(game, expansions = [], isExpansion = false) {
@@ -1333,39 +1333,39 @@ function gameListRow(game, expansions = [], isExpansion = false) {
   const plays = game.collection?.num_plays ?? 0;
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
-  return \`
-    <div class="catalog-list-row \${isExpansion ? "is-expansion-row" : ""}">
-      <a class="catalog-list-game" href="/games/\${game.bgg_id}" data-nav aria-label="Apri \${escapeHtml(game.title)}">
+  return `
+    <div class="catalog-list-row ${isExpansion ? "is-expansion-row" : ""}">
+      <a class="catalog-list-game" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
         <span class="catalog-list-cover">
-          \${game.bgg_metadata?.cover_url
-            ? \`<img src="\${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">\`
-            : \`<span>\${escapeHtml(initials(game.title))}</span>\`}
+          ${game.bgg_metadata?.cover_url
+            ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span>${escapeHtml(initials(game.title))}</span>`}
         </span>
         <span class="catalog-list-title">
-          <strong>\${escapeHtml(game.title)}</strong>
-          <small>\${game.item_type === "expansion" ? "Espansione" : (game.year_published || "Gioco base")}</small>
+          <strong>${escapeHtml(game.title)}</strong>
+          <small>${game.item_type === "expansion" ? "Espansione" : (game.year_published || "Gioco base")}</small>
         </span>
       </a>
-      <span class="list-stat"><strong>\${escapeHtml(playerText(game))}</strong><small>Giocatori</small></span>
-      <span class="list-stat"><strong>\${escapeHtml(ageText(game))}</strong><small>Età</small></span>
-      <span class="list-stat"><strong>\${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
-      <span class="list-stat"><strong>\${weight}</strong><small>Peso</small></span>
-      <span class="list-stat"><strong>\${plays}</strong><small>Partite</small></span>
-      <span class="list-rating"><strong>\${rating}</strong><small>BGG</small></span>
-      \${expansions.length ? \`
-        <button class="list-expansion-toggle" type="button" data-expansion-toggle="\${game.bgg_id}"
-                aria-expanded="\${expanded ? "true" : "false"}"
-                title="\${ownedExpansionCount} espansioni possedute su \${expansions.length}">
-          <strong>\${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">\${expanded ? "▴" : "▾"}</i>
+      <span class="list-stat"><strong>${escapeHtml(playerText(game))}</strong><small>Giocatori</small></span>
+      <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
+      <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
+      <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
+      <span class="list-stat"><strong>${plays}</strong><small>Partite</small></span>
+      <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
+      ${expansions.length ? `
+        <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
+                aria-expanded="${expanded ? "true" : "false"}"
+                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
+          <strong>${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">${expanded ? "▴" : "▾"}</i>
         </button>
-      \` : '<span class="list-expansion-placeholder"></span>'}
+      ` : '<span class="list-expansion-placeholder"></span>'}
     </div>
-    \${expansions.length ? \`
-      <div class="catalog-list-expansions" id="game-group-\${game.bgg_id}" \${expanded ? "" : "hidden"}>
-        \${expansions.map((item) => gameListRow(item, [], true)).join("")}
+    ${expansions.length ? `
+      <div class="catalog-list-expansions" id="game-group-${game.bgg_id}" ${expanded ? "" : "hidden"}>
+        ${expansions.map((item) => gameListRow(item, [], true)).join("")}
       </div>
-    \` : ""}
-  \`;
+    ` : ""}
+  `;
 }
 
 function bindExpansionToggles() {
@@ -1374,7 +1374,7 @@ function bindExpansionToggles() {
       const id = String(button.dataset.expansionToggle);
       if (state.expandedGameGroups.has(id)) state.expandedGameGroups.delete(id);
       else state.expandedGameGroups.add(id);
-      const panel = document.querySelector(\`#game-group-\${CSS.escape(id)}\`);
+      const panel = document.querySelector(`#game-group-${CSS.escape(id)}`);
       const expanded = state.expandedGameGroups.has(id);
       button.setAttribute("aria-expanded", expanded ? "true" : "false");
       if (panel) panel.hidden = !expanded;
@@ -1389,7 +1389,7 @@ function skeletons() {
 }
 
 async function renderCatalog() {
-  app.innerHTML = \`
+  app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
@@ -1397,10 +1397,10 @@ async function renderCatalog() {
         <p class="page-lead">Sfoglia la collezione come una libreria: copertine, giocatori, durata, complessità e rating a colpo d'occhio.</p>
       </div>
       <div class="page-header-meta catalog-view-switch" aria-label="Vista catalogo">
-        <button class="view-switch-button \${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                type="button" aria-pressed="\${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
-        <button class="view-switch-button \${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                type="button" aria-pressed="\${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+        <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+        <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
       </div>
     </section>
 
@@ -1419,7 +1419,7 @@ async function renderCatalog() {
         </div>
         <div class="catalog-head-actions">
           <label class="collapse-expansions-toggle">
-            <input id="collapseExpansions" type="checkbox" \${state.collapseExpansions ? "checked" : ""}>
+            <input id="collapseExpansions" type="checkbox" ${state.collapseExpansions ? "checked" : ""}>
             <span>Raggruppa espansioni</span>
           </label>
           <span class="muted" id="resultCount">Caricamento…</span>
@@ -1429,38 +1429,38 @@ async function renderCatalog() {
       <section class="toolbar" aria-label="Filtri catalogo">
         <label class="field search-field">
           <input id="searchInput" type="search" aria-label="Cerca per titolo"
-                 placeholder="Cerca titolo…" value="\${escapeHtml(state.q)}" autocomplete="off">
+                 placeholder="Cerca titolo…" value="${escapeHtml(state.q)}" autocomplete="off">
         </label>
         <label class="field">
           <select id="typeFilter" aria-label="Tipo">
             <option value="">Tutti i tipi</option>
-            <option value="standalone" \${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
-            <option value="expansion" \${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
+            <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
+            <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
           </select>
         </label>
         <label class="field">
           <select id="ownedFilter" aria-label="Stato collezione">
             <option value="">Tutti gli stati</option>
-            <option value="true" \${state.owned === "true" ? "selected" : ""}>Posseduti</option>
-            <option value="false" \${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
+            <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
+            <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
           </select>
         </label>
         <label class="field">
           <select id="sortFilter" aria-label="Ordina">
-            <option value="title" \${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-            <option value="year_desc" \${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
-            <option value="rating_desc" \${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-            <option value="rank_asc" \${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
-            <option value="weight_desc" \${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
+            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
+            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
+            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Ranking BGG</option>
+            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
           </select>
         </label>
       </section>
 
-      <section class="catalog-results \${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
-               id="catalogGrid">\${skeletons()}</section>
+      <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
+               id="catalogGrid">${skeletons()}</section>
       <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
-  \`;
+  `;
 
   bindCatalogControls();
   const requestedPath = window.location.pathname;
@@ -1475,7 +1475,7 @@ async function renderCatalog() {
     renderCatalogData(catalog);
   } catch (error) {
     document.querySelector("#catalogGrid").innerHTML =
-      \`<div class="empty catalog-empty">Impossibile caricare il catalogo: \${escapeHtml(error.message)}</div>\`;
+      `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
   }
 }
@@ -1588,21 +1588,21 @@ function renderCatalogData(catalog) {
   const count = document.querySelector("#resultCount");
   if (!grid || !count) return;
 
-  count.textContent = \`\${formatNumber(catalog.total, 0)} titoli\`;
-  grid.className = \`catalog-results \${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}\`;
+  count.textContent = `${formatNumber(catalog.total, 0)} titoli`;
+  grid.className = `catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}`;
 
   if (!catalog.items.length) {
     grid.innerHTML = '<div class="empty catalog-empty">Nessun gioco corrisponde ai filtri selezionati.</div>';
   } else {
     const groups = groupCatalogItems(catalog.items);
     if (state.catalogView === "list") {
-      grid.innerHTML = \`
+      grid.innerHTML = `
         <div class="catalog-list-head" aria-hidden="true">
           <span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span>
           <span>Peso</span><span>Partite</span><span>BGG</span><span></span>
         </div>
-        \${groups.map(({game, expansions}) => gameListRow(game, expansions)).join("")}
-      \`;
+        ${groups.map(({game, expansions}) => gameListRow(game, expansions)).join("")}
+      `;
     } else {
       grid.innerHTML = groups.map(({game, expansions}) => gameCard(game, expansions)).join("");
     }
@@ -1622,11 +1622,11 @@ function renderPagination() {
     return;
   }
   container.hidden = false;
-  container.innerHTML = \`
-    <button class="button button-ghost" id="prevPage" \${page <= 1 ? "disabled" : ""}>← Precedente</button>
-    <span class="muted">Pagina \${page} di \${pages}</span>
-    <button class="button button-ghost" id="nextPage" \${page >= pages ? "disabled" : ""}>Successiva →</button>
-  \`;
+  container.innerHTML = `
+    <button class="button button-ghost" id="prevPage" ${page <= 1 ? "disabled" : ""}>← Precedente</button>
+    <span class="muted">Pagina ${page} di ${pages}</span>
+    <button class="button button-ghost" id="nextPage" ${page >= pages ? "disabled" : ""}>Successiva →</button>
+  `;
   document.querySelector("#prevPage").addEventListener("click", () => {
     state.offset = Math.max(0, state.offset - state.limit);
     refreshCatalog();
