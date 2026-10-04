@@ -324,6 +324,35 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         mobile_context.close()
 
 
+def test_catalog_list_headers_sort_and_toggle_direction(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.get_by_role("button", name="☷ Lista").click()
+
+        titles = page.locator(".catalog-list-title strong")
+        expect(titles.nth(0)).to_have_text("Synthetic Alpha")
+
+        page.locator('[data-catalog-sort="title"]').click()
+        expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
+        expect(page.locator("#sortFilter")).to_have_value("title_desc")
+        expect(page.locator('[data-catalog-sort="title"]')).to_contain_text("↓")
+
+        page.locator('[data-catalog-sort="rating"]').click()
+        expect(titles.nth(0)).to_have_text("Synthetic Alpha")
+        expect(page.locator("#sortFilter")).to_have_value("rating_desc")
+
+        page.locator('[data-catalog-sort="rating"]').click()
+        expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
+        expect(page.locator("#sortFilter")).to_have_value("rating_asc")
+
+        page.locator('[data-catalog-sort="duration"]').click()
+        expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
+        expect(page.locator("#sortFilter")).to_have_value("duration_asc")
+    finally:
+        context.close()
+
+
 def test_advanced_catalog_search_filters_by_play_context(browser, live_server):
     context, page = new_page(browser)
     try:
