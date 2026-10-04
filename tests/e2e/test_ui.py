@@ -543,8 +543,9 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
             "aria-current", "page"
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Generi")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Meccaniche")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
+        expect(sidebar.get_by_role("link", name="Meccaniche")).to_have_count(0)
         expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
         expect(sidebar.get_by_role("button", name="Scansiona barcode")).to_be_visible()
         expect(sidebar.get_by_role("button", name="Impostazioni")).to_be_visible()
@@ -552,6 +553,121 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_have_count(0)
     finally:
         context.close()
+
+
+def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_server):
+    context, page = new_page(browser)
+
+    def explore_payload(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        categories = query.get("category", [])
+        mechanics = query.get("mechanic", [])
+        filtered = bool(categories or mechanics or query.get("ideal_players"))
+        total = 1 if filtered else 2
+        game = {
+            "bgg_id": 900001,
+            "parent_bgg_id": None,
+            "title": "Synthetic Alpha",
+            "year_published": 2020,
+            "item_type": "standalone",
+            "players": {"min": 2, "max": 4},
+            "play_time": {"playing": 60, "min": 45, "max": 90},
+            "bgg": {
+                "average": 7.8,
+                "average_weight": 2.2,
+                "rank": 42,
+                "recommended_age": "10+",
+            },
+            "collection": {"own": True},
+            "bgg_metadata": {"cover_url": None},
+        }
+        payload = {
+            "total": total,
+            "categories": [
+                {
+                    "name": "Fantasy",
+                    "count": total,
+                    "covers": ["https://example.test/fantasy.jpg"],
+                    "selected": "Fantasy" in categories,
+                },
+                {
+                    "name": "Adventure",
+                    "count": 1,
+                    "covers": [],
+                    "selected": "Adventure" in categories,
+                },
+            ],
+            "mechanics": [
+                {
+                    "name": "Dice Rolling",
+                    "count": total,
+                    "covers": ["https://example.test/dice.jpg"],
+                    "selected": "Dice Rolling" in mechanics,
+                },
+                {
+                    "name": "Hand Management",
+                    "count": 1,
+                    "covers": [],
+                    "selected": "Hand Management" in mechanics,
+                },
+            ],
+            "games": [game],
+            "limit": 250,
+            "filters": {},
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(payload),
+        )
+
+    page.route("**/api/catalog/explore?**", explore_payload)
+
+    try:
+        page.goto(f"{live_server}/explore")
+        expect(page.get_by_role("heading", name="Esplora")).to_be_visible()
+        expect(page.get_by_role("tab", name="Generi")).to_have_attribute(
+            "aria-selected", "true"
+        )
+        expect(page.get_by_text("Altri parametri", exact=True)).to_be_visible()
+        expect(page.locator("#exploreResultCount")).to_have_text(
+            "2 giochi corrispondenti"
+        )
+
+        fantasy = page.locator('[data-explore-kind="category"][data-explore-name="Fantasy"]')
+        expect(fantasy).to_contain_text("2 giochi")
+        fantasy.click()
+        expect(page.locator(".explore-selection-chip")).to_contain_text("Fantasy")
+        expect(page.locator("#exploreResultCount")).to_have_text(
+            "1 giochi corrispondenti"
+        )
+
+        page.get_by_role("tab", name="Meccaniche").click()
+        dice = page.locator('[data-explore-kind="mechanic"][data-explore-name="Dice Rolling"]')
+        dice.click()
+        expect(page.locator(".explore-selection-chip")).to_have_count(2)
+        expect(page.locator("#exploreResultCount")).to_have_text(
+            "1 giochi corrispondenti"
+        )
+
+        page.locator("#exploreIdealPlayers").fill("2")
+        page.locator("#exploreIdealPlayers").blur()
+        expect(page.locator("#exploreResultCount")).to_have_text(
+            "1 giochi corrispondenti"
+        )
+    finally:
+        context.close()
+
+    mobile_context, mobile_page = new_page(browser, mobile=True)
+    mobile_page.route("**/api/catalog/explore?**", explore_payload)
+    try:
+        mobile_page.goto(f"{live_server}/explore")
+        expect(mobile_page.locator(".explore-filter-panel")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        mobile_context.close()
 
 
 def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
