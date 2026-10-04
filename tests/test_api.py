@@ -36,6 +36,22 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         assert sorted_games.json()["sort"] == "rating_desc"
         assert sorted_games.json()["items"][0]["bgg_id"] == 900001
 
+        for sort_name, first_bgg_id in (
+            ("title_desc", 900002),
+            ("age_desc", 900002),
+            ("duration_asc", 900002),
+            ("weight_desc", 900001),
+            ("rating_asc", 900002),
+        ):
+            sorted_column = client.get("/api/games", params={"sort": sort_name})
+            assert sorted_column.status_code == 200
+            assert sorted_column.json()["sort"] == sort_name
+            assert sorted_column.json()["items"][0]["bgg_id"] == first_bgg_id
+
+        players_sorted = client.get("/api/games", params={"sort": "players_asc"})
+        assert players_sorted.status_code == 200
+        assert players_sorted.json()["sort"] == "players_asc"
+
         advanced = client.get(
             "/api/games",
             params={
