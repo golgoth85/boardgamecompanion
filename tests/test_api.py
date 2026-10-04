@@ -144,6 +144,21 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
                         "2026-01-01T00:00:00+00:00",
                     ),
                 )
+            connection.execute(
+                """
+                INSERT INTO board_game_gameplay_summaries(
+                    board_game_id,source_sha256,summary_text,provider,model,generated_at
+                ) VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    ids[900001],
+                    "synthetic",
+                    "I giocatori lanciano dadi, gestiscono la propria mano e combinano risorse per completare obiettivi prima degli avversari.",
+                    "gemini",
+                    "test-model",
+                    "2026-10-04T00:00:00+00:00",
+                ),
+            )
 
         overall = client.get("/api/catalog/rankings", params={"mode": "overall"})
         assert overall.status_code == 200
@@ -156,6 +171,19 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
             [item["score"] for item in overall.json()["items"]],
             reverse=True,
         )
+        assert all(
+            not any(factor.casefold().startswith("qualità ") for factor in item["factors"])
+            for item in overall.json()["items"]
+        )
+        assert all(
+            any(factor.startswith("ideale in ") for factor in item["factors"])
+            for item in overall.json()["items"]
+        )
+        alpha = next(
+            item for item in overall.json()["items"]
+            if item["game"]["bgg_id"] == 900001
+        )
+        assert alpha["game"]["gameplay_summary"].startswith("I giocatori lanciano dadi")
 
         for mode in (
             "outside_top",
