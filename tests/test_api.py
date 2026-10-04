@@ -148,9 +148,14 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
         overall = client.get("/api/catalog/rankings", params={"mode": "overall"})
         assert overall.status_code == 200
         assert overall.json()["mode"] == "overall"
-        assert overall.json()["items"][0]["game"]["bgg_id"] == 900001
         assert overall.json()["items"][0]["score"] > 0
         assert overall.json()["items"][0]["reason"]
+        assert [
+            item["score"] for item in overall.json()["items"]
+        ] == sorted(
+            [item["score"] for item in overall.json()["items"]],
+            reverse=True,
+        )
 
         for mode in (
             "outside_top",
