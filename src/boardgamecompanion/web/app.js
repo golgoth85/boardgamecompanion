@@ -3559,7 +3559,9 @@ function renderExplorePayload(payload) {
     ? tabItems.map((item) => exploreFacetCard(item, exploreState.activeTab)).join("")
     : '<div class="empty explore-empty-facets">Nessun altro criterio compatibile con la selezione corrente.</div>';
 
-  resultCount.textContent = `${formatNumber(payload.total, 0)} giochi corrispondenti`;
+  resultCount.textContent = Number(payload.total) === 1
+    ? "1 gioco corrispondente"
+    : `${formatNumber(payload.total, 0)} giochi corrispondenti`;
   resultGrid.innerHTML = visibleGames.length
     ? visibleGames.map((game) => gameCard(game, [])).join("")
     : '<div class="empty catalog-empty">Nessun gioco soddisfa contemporaneamente tutti i criteri.</div>';
