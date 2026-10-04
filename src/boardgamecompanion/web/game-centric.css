@@ -244,7 +244,7 @@
 .trophy-card.is-compact .trophy-achievements{display:none}
 
 .ranking-result-row.is-podium{
-  min-height:5.7rem;border-color:rgba(232,191,93,.2);
+  min-height:6.1rem;border-color:rgba(232,191,93,.2);
   background:linear-gradient(90deg,rgba(232,191,93,.055),rgba(18,24,38,.52));
 }
 .ranking-result-row.is-podium .ranking-result-cover{width:5rem;height:5rem}
