@@ -4344,6 +4344,7 @@ async function renderExplore(initialTab = null) {
 async function route() {
   catalogRequestController?.abort();
   exploreRequestController?.abort();
+  rankingRequestController?.abort();
   closeSidebar();
   updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
@@ -4363,6 +4364,14 @@ async function route() {
   }
   if (/^\/rankings\/?$/.test(window.location.pathname)) {
     await renderRankings();
+    return;
+  }
+  if (/^\/play-next\/?$/.test(window.location.pathname)) {
+    await renderPlayNext();
+    return;
+  }
+  if (/^\/new\/?$/.test(window.location.pathname)) {
+    await renderNewGames();
     return;
   }
   if (/^\/explore\/?$/.test(window.location.pathname)) {
