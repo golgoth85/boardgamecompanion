@@ -3628,35 +3628,41 @@ function rankingModeButtons() {
 }
 
 function rankingGameSummary(game) {
-  const categories = Array.isArray(game.bgg_metadata?.categories)
-    ? game.bgg_metadata.categories.filter(Boolean).slice(0, 2)
-    : [];
-  const mechanics = Array.isArray(game.bgg_metadata?.mechanics)
-    ? game.bgg_metadata.mechanics.filter(Boolean).slice(0, 2)
-    : [];
+  const summary = String(game.gameplay_summary || "").trim();
+  if (summary) return summary;
+  return game.bgg_metadata?.description
+    ? "Riassunto gameplay in preparazione…"
+    : "Descrizione gameplay non disponibile.";
+}
 
-  const weight = Number(game.bgg?.average_weight);
-  let complexity = "";
-  if (Number.isFinite(weight) && weight > 0) {
-    if (weight <= 1.8) complexity = "molto accessibile";
-    else if (weight <= 2.6) complexity = "complessità leggera";
-    else if (weight <= 3.4) complexity = "complessità media";
-    else if (weight <= 4.1) complexity = "impegnativo";
-    else complexity = "molto impegnativo";
+async function ensureRankingGameplaySummaries(items) {
+  if (navigator.webdriver) return;
+  const missing = (items || []).filter(
+    (item) =>
+      !String(item.game?.gameplay_summary || "").trim()
+      && String(item.game?.bgg_metadata?.description || "").trim()
+  ).slice(0, 8);
+  if (!missing.length) return;
+
+  try {
+    const payload = await api("/api/catalog/gameplay-summaries/ensure", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        bgg_ids: missing.map((item) => Number(item.game.bgg_id)),
+      }),
+    });
+    for (const item of payload.items || []) {
+      const summary = String(item.summary || "").trim();
+      if (!summary) continue;
+      const target = document.querySelector(
+        `[data-ranking-summary-bgg="${CSS.escape(String(item.bgg_id))}"]`
+      );
+      if (target?.isConnected) target.textContent = summary;
+    }
+  } catch (_) {
+    // Ranking remains usable; cached summaries will be retried on a later visit.
   }
-
-  const parts = [];
-  if (categories.length) parts.push(categories.join(" / "));
-  if (mechanics.length) parts.push(mechanics.join(" + "));
-  if (complexity) parts.push(complexity);
-
-  if (!parts.length) {
-    const fallback = [];
-    if (playerText(game) !== "—") fallback.push(`${playerText(game)} giocatori`);
-    if (timeText(game) !== "—") fallback.push(timeText(game));
-    return fallback.join(" · ") || "Caratteristiche non ancora disponibili";
-  }
-  return parts.join(" · ");
 }
 
 function rankingGameRow(item, index) {
@@ -3679,7 +3685,7 @@ function rankingGameRow(item, index) {
           <strong>${escapeHtml(game.title)}</strong>
           <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}</small>
         </span>
-        <span class="ranking-result-summary">${escapeHtml(rankingGameSummary(game))}</span>
+        <span class="ranking-result-summary" data-ranking-summary-bgg="${escapeHtml(game.bgg_id)}">${escapeHtml(rankingGameSummary(game))}</span>
         <span class="ranking-result-factors">${factors}</span>
       </span>
       <span class="ranking-result-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">
@@ -3855,6 +3861,9 @@ async function refreshRankings() {
     results.innerHTML = payload.items.length
       ? payload.items.map((item, index) => rankingGameRow(item, index + 1)).join("")
       : '<div class="empty">Nessun gioco soddisfa questa classifica e i filtri selezionati.</div>';
+    runWhenIdle(() => {
+      void ensureRankingGameplaySummaries(payload.items || []);
+    });
 
     document.querySelector("#rankingModes").innerHTML = rankingModeButtons();
     document.querySelector("#rankingFilters").innerHTML = rankingFilterMarkup(
