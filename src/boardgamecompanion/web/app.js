@@ -3533,6 +3533,104 @@ function exploreSelectionChips() {
   `).join("");
 }
 
+const exploreOptionalGroups = [
+  {
+    apiKey: "supports_players",
+    stateKey: "supportsPlayers",
+    title: "Giocatori",
+    hint: "Il gioco supporta questo numero di giocatori.",
+  },
+  {
+    apiKey: "ideal_players",
+    stateKey: "idealPlayers",
+    title: "Ideale in",
+    hint: "Valore “best/recommended players” BGG.",
+  },
+  {
+    apiKey: "player_age",
+    stateKey: "playerAge",
+    title: "Età giocatore",
+    hint: "Età minima consigliata BGG compatibile.",
+  },
+  {
+    apiKey: "max_minutes",
+    stateKey: "maxMinutes",
+    title: "Durata",
+    hint: "Durata massima della partita in minuti.",
+  },
+  {
+    apiKey: "weight",
+    stateKey: "weight",
+    title: "Complessità",
+    hint: "Peso medio BGG.",
+  },
+  {
+    apiKey: "min_rating",
+    stateKey: "minRating",
+    title: "Rating BGG",
+    hint: "Valutazione media minima.",
+  },
+];
+
+function exploreOptionalGroup(group, options) {
+  const current = String(exploreState[group.stateKey] || "");
+  if (!Array.isArray(options) || !options.length) {
+    return `
+      <section class="explore-option-group is-empty">
+        <div class="explore-option-heading">
+          <strong>${escapeHtml(group.title)}</strong>
+          <small>${escapeHtml(group.hint)}</small>
+        </div>
+        <span class="explore-option-none">Nessuna opzione compatibile</span>
+      </section>
+    `;
+  }
+  return `
+    <section class="explore-option-group">
+      <div class="explore-option-heading">
+        <strong>${escapeHtml(group.title)}</strong>
+        <small>${escapeHtml(group.hint)}</small>
+      </div>
+      <div class="explore-option-buttons">
+        ${options.map((option) => {
+          const selected = Boolean(option.selected) || current === String(option.value);
+          return `
+            <button class="explore-option-button ${selected ? "is-selected" : ""}"
+                    type="button"
+                    data-explore-option-key="${group.apiKey}"
+                    data-explore-option-state="${group.stateKey}"
+                    data-explore-option-value="${escapeHtml(String(option.value))}"
+                    aria-pressed="${selected ? "true" : "false"}"
+                    title="${formatNumber(option.count, 0)} giochi compatibili">
+              <span>${escapeHtml(String(option.label))}</span>
+              <small>${formatNumber(option.count, 0)}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderExploreOptionalFilters(payload) {
+  const container = document.querySelector("#exploreFilterOptions");
+  if (!container) return;
+  const options = payload.options || {};
+  container.innerHTML = exploreOptionalGroups
+    .map((group) => exploreOptionalGroup(group, options[group.apiKey] || []))
+    .join("");
+
+  container.querySelectorAll("[data-explore-option-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const stateKey = button.dataset.exploreOptionState;
+      const value = String(button.dataset.exploreOptionValue || "");
+      exploreState[stateKey] = String(exploreState[stateKey] || "") === value ? "" : value;
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  });
+}
+
 function renderExplorePayload(payload) {
   currentExplorePayload = payload;
   const tabItems = exploreState.activeTab === "category"
@@ -3571,6 +3669,8 @@ function renderExplorePayload(payload) {
   resultMore.textContent = exploreState.expandedResults
     ? "Mostra meno"
     : `Mostra altri ${hiddenCount}`;
+
+  renderExploreOptionalFilters(payload);
 
   document.querySelectorAll("[data-explore-kind]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3647,21 +3747,6 @@ function bindExploreControls() {
     });
   });
 
-  for (const [id, key] of [
-    ["exploreSupportsPlayers", "supportsPlayers"],
-    ["exploreIdealPlayers", "idealPlayers"],
-    ["explorePlayerAge", "playerAge"],
-    ["exploreWeight", "weight"],
-    ["exploreMaxMinutes", "maxMinutes"],
-    ["exploreMinRating", "minRating"],
-  ]) {
-    document.querySelector(`#${id}`)?.addEventListener("change", (event) => {
-      exploreState[key] = String(event.target.value || "").trim();
-      exploreState.expandedResults = false;
-      refreshExplore();
-    });
-  }
-
   document.querySelector("#exploreResetOptional")?.addEventListener("click", () => {
     for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) {
       exploreState[key] = "";
@@ -3720,41 +3805,10 @@ async function renderExplore(initialTab = null) {
           <div><p class="eyebrow">Affina</p><h2>Altri parametri</h2></div>
           <span class="quiet-pill">Facoltativi</span>
         </div>
-        <p class="muted explore-filter-intro">Si combinano in AND con generi e meccaniche.</p>
+        <p class="muted explore-filter-intro">Le opzioni si aggiornano in base alla selezione corrente: non vengono proposti valori che porterebbero a zero giochi.</p>
 
-        <div class="explore-filter-fields">
-          <label>
-            <span>Giocabile in</span>
-            <input id="exploreSupportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(exploreState.supportsPlayers)}">
-            <small>Numero di giocatori supportato.</small>
-          </label>
-          <label>
-            <span>Ideale in</span>
-            <input id="exploreIdealPlayers" type="number" min="1" max="30" placeholder="es. 3" value="${escapeHtml(exploreState.idealPlayers)}">
-            <small>Usa “best/recommended players” BGG.</small>
-          </label>
-          <label>
-            <span>Età minima BGG ≤</span>
-            <input id="explorePlayerAge" type="number" min="3" max="99" placeholder="es. 10" value="${escapeHtml(exploreState.playerAge)}">
-            <small>Mostra giochi adatti a quell'età.</small>
-          </label>
-          <label>
-            <span>Durata massima</span>
-            <input id="exploreMaxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="${escapeHtml(exploreState.maxMinutes)}">
-          </label>
-          <label>
-            <span>Complessità</span>
-            <select id="exploreWeight">
-              <option value="">Qualsiasi</option>
-              <option value="light" ${exploreState.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
-              <option value="medium" ${exploreState.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
-              <option value="heavy" ${exploreState.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
-            </select>
-          </label>
-          <label>
-            <span>Rating BGG minimo</span>
-            <input id="exploreMinRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(exploreState.minRating)}">
-          </label>
+        <div class="explore-filter-options" id="exploreFilterOptions">
+          ${skeletons()}
         </div>
         <button class="button button-ghost explore-reset-optional" id="exploreResetOptional" type="button">Azzera parametri</button>
       </aside>
