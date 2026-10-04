@@ -639,7 +639,7 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         fantasy.click()
         expect(page.locator(".explore-selection-chip")).to_contain_text("Fantasy")
         expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 giochi corrispondenti"
+            "1 gioco corrispondente"
         )
 
         page.get_by_role("tab", name="Meccaniche").click()
@@ -647,13 +647,13 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         dice.click()
         expect(page.locator(".explore-selection-chip")).to_have_count(2)
         expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 giochi corrispondenti"
+            "1 gioco corrispondente"
         )
 
         page.locator("#exploreIdealPlayers").fill("2")
         page.locator("#exploreIdealPlayers").blur()
         expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 giochi corrispondenti"
+            "1 gioco corrispondente"
         )
     finally:
         context.close()
