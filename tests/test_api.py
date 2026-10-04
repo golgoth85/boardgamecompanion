@@ -94,6 +94,9 @@ def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: 
 
         database = get_database()
         with database.transaction(immediate=True) as connection:
+            connection.execute(
+                "UPDATE board_games SET max_players=6 WHERE bgg_id=900002"
+            )
             rows = connection.execute(
                 "SELECT id,bgg_id FROM board_games ORDER BY bgg_id"
             ).fetchall()
@@ -147,6 +150,13 @@ def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: 
             "https://example.test/alpha.jpg",
             "https://example.test/beta.jpg",
         ]
+        initial_player_options = {
+            str(item["label"]): item["count"]
+            for item in initial.json()["options"]["supports_players"]
+        }
+        assert initial_player_options["2"] == 2
+        assert initial_player_options["4"] == 2
+        assert initial_player_options["6+"] == 1
 
         filtered = client.get(
             "/api/catalog/explore",
@@ -170,6 +180,35 @@ def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: 
         )
         assert hand_management["count"] == 1
         assert hand_management["selected"] is False
+
+        filtered_player_labels = {
+            item["label"] for item in payload["options"]["supports_players"]
+        }
+        assert "2" in filtered_player_labels
+        assert "4" in filtered_player_labels
+        assert "6+" not in filtered_player_labels
+
+        self_excluding = client.get(
+            "/api/catalog/explore",
+            params=[
+                ("category", "Fantasy"),
+                ("supports_players", "6"),
+            ],
+        )
+        assert self_excluding.status_code == 200
+        self_payload = self_excluding.json()
+        assert self_payload["total"] == 1
+        six_plus = next(
+            item
+            for item in self_payload["options"]["supports_players"]
+            if item["label"] == "6+"
+        )
+        assert six_plus["selected"] is True
+        assert six_plus["count"] == 1
+        assert any(
+            item["label"] == "2"
+            for item in self_payload["options"]["supports_players"]
+        )
 
         incompatible = client.get(
             "/api/catalog/explore",
