@@ -733,6 +733,89 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         mobile_context.close()
 
 
+
+def test_ranking_covers_are_uniform_and_use_left_space(browser, live_server):
+    context, page = new_page(browser)
+
+    page.route(
+        "**/api/catalog/facets?**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"categories": [], "mechanics": []}),
+        ),
+    )
+
+    games = []
+    for index in range(4):
+        games.append(
+            {
+                "game": {
+                    "bgg_id": 910100 + index,
+                    "parent_bgg_id": None,
+                    "title": f"Ranked Game {index + 1}",
+                    "year_published": 2020,
+                    "item_type": "standalone",
+                    "players": {"min": 1, "max": 4},
+                    "play_time": {"playing": 60, "min": 45, "max": 90},
+                    "bgg": {
+                        "average": 8.0,
+                        "average_weight": 2.5,
+                        "rank": index + 1,
+                        "best_players": "2",
+                        "recommended_age": "12+",
+                        "min_age": "12+",
+                    },
+                    "collection": {"own": True},
+                    "bgg_metadata": {"cover_url": None},
+                    "gameplay_summary": "A turno si scelgono azioni e si sviluppa la propria strategia.",
+                },
+                "score": 90.0 - index,
+                "reason": "Synthetic ranking reason",
+                "factors": ["ideale in 2", "peso 2.5", "età 12+"],
+            }
+        )
+
+    page.route(
+        "**/api/catalog/rankings?**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "mode": "overall",
+                    "title": "Migliori in assoluto",
+                    "description": "Synthetic",
+                    "items": games,
+                    "total": 4,
+                    "filters": {},
+                }
+            ),
+        ),
+    )
+
+    try:
+        page.goto(f"{live_server}/rankings")
+        expect(page.locator(".ranking-result-row")).to_have_count(4)
+        expect(page.locator(".ranking-result-row.is-podium")).to_have_count(3)
+
+        first_cover = page.locator(".ranking-result-cover").nth(0).bounding_box()
+        fourth_cover = page.locator(".ranking-result-cover").nth(3).bounding_box()
+        assert first_cover is not None and fourth_cover is not None
+        assert abs(first_cover["width"] - fourth_cover["width"]) < 0.5
+        assert abs(first_cover["height"] - fourth_cover["height"]) < 0.5
+        assert first_cover["width"] >= 78
+
+        assert page.locator(".ranking-result-position").first.evaluate(
+            "(el) => getComputedStyle(el).position === 'absolute'"
+        )
+        assert page.locator(".ranking-result-row").first.evaluate(
+            "(el) => getComputedStyle(el).gridTemplateColumns.split(' ').length === 3"
+        )
+    finally:
+        context.close()
+
+
 def test_completed_trophy_room_and_home_showcase(browser, live_server):
     context, page = new_page(browser)
     try:
