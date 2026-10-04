@@ -526,6 +526,11 @@ def web_rankings() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/explore", include_in_schema=False)
+def web_explore() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/categories", include_in_schema=False)
 def web_categories() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -613,6 +618,33 @@ def list_games(
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
+    )
+
+
+@app.get("/api/catalog/explore", tags=["catalog"])
+def explore_catalog(
+    category: list[str] | None = Query(default=None, max_length=500),
+    mechanic: list[str] | None = Query(default=None, max_length=500),
+    supports_players: int | None = Query(default=None, ge=1, le=30),
+    ideal_players: int | None = Query(default=None, ge=1, le=30),
+    player_age: int | None = Query(default=None, ge=3, le=99),
+    weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
+    max_minutes: int | None = Query(default=None, ge=1, le=1440),
+    min_rating: float | None = Query(default=None, ge=0, le=10),
+    limit: int = Query(default=250, ge=1, le=250),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return Catalog(database).explore(
+        categories=category,
+        mechanics=mechanic,
+        supports_players=supports_players,
+        ideal_players=ideal_players,
+        player_age=player_age,
+        weight=weight,
+        max_minutes=max_minutes,
+        min_rating=min_rating,
+        limit=limit,
     )
 
 
