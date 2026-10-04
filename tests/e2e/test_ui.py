@@ -558,8 +558,9 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Da giocare")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Novità")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Completati")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Da giocare")).to_have_count(0)
+        expect(sidebar.get_by_role("link", name="Novità")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Meccaniche")).to_have_count(0)
         expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
@@ -609,8 +610,8 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         }
         titles = {
             "overall": "Migliori in assoluto",
-            "hidden_gems": "Gemme nascoste",
-            "neglected": "Capolavori trascurati",
+            "outside_top": "Fuori dalla Top 500",
+            "personal_favorites": "Preferiti personali",
         }
         route.fulfill(
             status=200,
@@ -654,22 +655,24 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         expect(page.locator(".ranking-result-score")).to_contain_text("88,4")
         expect(page.locator("#rankingFilters")).to_be_visible()
 
-        page.get_by_role("button", name="Gemme nascoste").click()
-        expect(page.locator("#rankingCurrentHeading")).to_have_text("Gemme nascoste")
-        assert ranking_requests[-1]["mode"] == ["hidden_gems"]
+        expect(page.locator(".ranking-result-row.is-podium")).to_have_count(1)
 
-        page.get_by_role("button", name="La mia ludoteca").click()
-        expect(page.get_by_role("button", name="Capolavori trascurati")).to_be_visible()
+        page.get_by_role("button", name="Fuori dalla Top 500").click()
+        expect(page.locator("#rankingCurrentHeading")).to_have_text("Fuori dalla Top 500")
+        assert ranking_requests[-1]["mode"] == ["outside_top"]
+
+        page.get_by_role("button", name="Personali").click()
+        expect(page.get_by_role("button", name="Preferiti personali")).to_be_visible()
         expect(page.locator("#rankingCurrentHeading")).to_have_text(
-            "Capolavori trascurati"
+            "Preferiti personali"
         )
-        assert ranking_requests[-1]["mode"] == ["neglected"]
+        assert ranking_requests[-1]["mode"] == ["personal_favorites"]
 
         page.locator(
             '[data-ranking-filter="idealPlayers"][data-ranking-value="2"]'
         ).click()
         expect(page.locator("#rankingCurrentHeading")).to_have_text(
-            "Capolavori trascurati"
+            "Preferiti personali"
         )
         assert ranking_requests[-1]["ideal_players"] == ["2"]
 
@@ -705,24 +708,41 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         mobile_context.close()
 
 
-def test_play_next_and_new_library_routes(browser, live_server):
+def test_completed_trophy_room_and_home_showcase(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
 
-        page.get_by_role("link", name="Da giocare").click()
-        expect(page).to_have_url(f"{live_server}/play-next")
-        expect(page.get_by_role("heading", name="Da giocare")).to_be_visible()
-        expect(page.locator(".ranking-result-row")).to_have_count(1)
+        page.goto(f"{live_server}/games/900001")
+        completed_button = page.get_by_role("button", name="Segna completato")
+        expect(completed_button).to_be_visible()
+        completed_button.click()
+        expect(page.get_by_role("button", name="♛ Completato")).to_be_visible()
 
-        page.get_by_role("link", name="Novità").click()
-        expect(page).to_have_url(f"{live_server}/new")
-        expect(page.get_by_role("heading", name="Novità")).to_be_visible()
-        expect(page.locator(".new-game-row")).to_have_count(1)
-        expect(page.locator(".new-game-date")).to_contain_text("15 gen 2026")
+        page.get_by_role("link", name="Completati").click()
+        expect(page).to_have_url(f"{live_server}/completed")
+        expect(page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
+        expect(page.locator(".trophy-card")).to_have_count(1)
+        expect(page.locator(".trophy-achievement")).to_contain_text("Completato")
+
+        page.goto(live_server)
+        expect(page.locator("#statsPanel")).to_contain_text("Completati")
+        expect(page.locator("#statsPanel")).not_to_contain_text("Posseduti")
+        expect(page.locator("#achievementShowcase")).to_be_visible()
+        expect(page.locator("#achievementShowcase .trophy-card")).to_have_count(1)
     finally:
         context.close()
 
+    mobile_context, mobile_page = new_page(browser, mobile=True)
+    try:
+        mobile_page.goto(f"{live_server}/completed")
+        expect(mobile_page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
+        expect(mobile_page.locator(".trophy-wall")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        mobile_context.close()
 
 def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_server):
     context, page = new_page(browser)
