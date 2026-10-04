@@ -292,6 +292,14 @@ function formatNumber(value, digits = 1) {
   return Number(value).toLocaleString("it-IT", { maximumFractionDigits: digits });
 }
 
+function runWhenIdle(callback, timeout = 1500) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(() => callback(), {timeout});
+    return;
+  }
+  window.setTimeout(callback, 250);
+}
+
 function playerText(game) {
   const min = game.players?.min;
   const max = game.players?.max;
@@ -1765,20 +1773,36 @@ async function renderCatalog() {
   bindCatalogControls();
   const requestedPath = window.location.pathname;
 
+  catalogRequestController?.abort();
+  const controller = new AbortController();
+  catalogRequestController = controller;
   try {
     const [stats, catalog] = await Promise.all([
-      api("/api/catalog/stats"),
-      loadCatalogData(),
+      api("/api/catalog/stats", {signal: controller.signal}),
+      loadCatalogData(controller.signal),
     ]);
-    if (window.location.pathname !== requestedPath) return;
+    if (
+      controller.signal.aborted
+      || window.location.pathname !== requestedPath
+    ) return;
     renderStats(stats);
     renderCatalogData(catalog);
-    backfillMissingMetadata();
-    checkBggCollectionSyncOnOpen();
+    runWhenIdle(() => {
+      void backfillMissingMetadata();
+      void checkBggCollectionSyncOnOpen();
+    });
   } catch (error) {
-    document.querySelector("#catalogGrid").innerHTML =
-      `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
+    if (error.name === "AbortError") return;
+    const grid = document.querySelector("#catalogGrid");
+    if (grid) {
+      grid.innerHTML =
+        `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
+    }
     showToast(error.message, true);
+  } finally {
+    if (catalogRequestController === controller) {
+      catalogRequestController = undefined;
+    }
   }
 }
 
@@ -3551,7 +3575,9 @@ function exploreFacetCard(item, kind) {
 }
 
 function exploreParams() {
-  const params = new URLSearchParams({limit: "250"});
+  const params = new URLSearchParams({
+    limit: exploreState.expandedResults ? "250" : "12",
+  });
   [...exploreState.categories].forEach((value) => params.append("category", value));
   [...exploreState.mechanics].forEach((value) => params.append("mechanic", value));
   for (const [key, value] of [
@@ -3738,7 +3764,7 @@ function renderExplorePayload(payload) {
     ? visibleGames.map((game) => gameCard(game, [])).join("")
     : '<div class="empty catalog-empty">Nessun gioco soddisfa contemporaneamente tutti i criteri.</div>';
 
-  const hiddenCount = Math.max(0, (payload.games || []).length - visibleGames.length);
+  const hiddenCount = Math.max(0, Number(payload.total || 0) - visibleGames.length);
   resultMore.hidden = hiddenCount === 0 && !exploreState.expandedResults;
   resultMore.textContent = exploreState.expandedResults
     ? "Mostra meno"
@@ -3778,7 +3804,12 @@ function renderExplorePayload(payload) {
   });
 
   resultMore.onclick = () => {
-    exploreState.expandedResults = !exploreState.expandedResults;
+    if (!exploreState.expandedResults) {
+      exploreState.expandedResults = true;
+      refreshExplore();
+      return;
+    }
+    exploreState.expandedResults = false;
     renderExplorePayload(payload);
   };
 }
@@ -3911,6 +3942,8 @@ async function renderExplore(initialTab = null) {
 }
 
 async function route() {
+  catalogRequestController?.abort();
+  exploreRequestController?.abort();
   closeSidebar();
   updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
