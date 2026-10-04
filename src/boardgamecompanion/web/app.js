@@ -190,6 +190,10 @@ const exploreState = {
   maxMinutes: "",
   minRating: "",
   expandedResults: false,
+  showRareFacets: {
+    category: false,
+    mechanic: false,
+  },
 };
 
 let exploreRequestController;
@@ -3633,9 +3637,16 @@ function renderExploreOptionalFilters(payload) {
 
 function renderExplorePayload(payload) {
   currentExplorePayload = payload;
-  const tabItems = exploreState.activeTab === "category"
+  const allTabItems = exploreState.activeTab === "category"
     ? payload.categories || []
     : payload.mechanics || [];
+  const showRare = Boolean(exploreState.showRareFacets[exploreState.activeTab]);
+  const rareItems = allTabItems.filter(
+    (item) => Number(item.count) <= 1 && !item.selected
+  );
+  const tabItems = showRare
+    ? allTabItems
+    : allTabItems.filter((item) => Number(item.count) > 1 || item.selected);
   const selectedCount = exploreState.categories.size + exploreState.mechanics.size;
   const visibleGames = exploreState.expandedResults
     ? (payload.games || [])
@@ -3643,10 +3654,15 @@ function renderExplorePayload(payload) {
 
   const selections = document.querySelector("#exploreSelections");
   const facets = document.querySelector("#exploreFacetGrid");
+  const facetSummary = document.querySelector("#exploreFacetSummary");
+  const rareToggle = document.querySelector("#exploreRareToggle");
   const resultCount = document.querySelector("#exploreResultCount");
   const resultGrid = document.querySelector("#exploreResultGrid");
   const resultMore = document.querySelector("#exploreResultMore");
-  if (!selections || !facets || !resultCount || !resultGrid || !resultMore) return;
+  if (
+    !selections || !facets || !facetSummary || !rareToggle
+    || !resultCount || !resultGrid || !resultMore
+  ) return;
 
   selections.innerHTML = `
     <div class="explore-selection-chips">${exploreSelectionChips()}</div>
@@ -3656,6 +3672,18 @@ function renderExplorePayload(payload) {
   facets.innerHTML = tabItems.length
     ? tabItems.map((item) => exploreFacetCard(item, exploreState.activeTab)).join("")
     : '<div class="empty explore-empty-facets">Nessun altro criterio compatibile con la selezione corrente.</div>';
+
+  const facetLabel = exploreState.activeTab === "category" ? "generi" : "meccaniche";
+  facetSummary.textContent = `${formatNumber(tabItems.length, 0)} ${facetLabel} mostrati`;
+  rareToggle.hidden = rareItems.length === 0;
+  rareToggle.textContent = showRare
+    ? "Nascondi rari"
+    : `Mostra tutti (+${formatNumber(rareItems.length, 0)})`;
+  rareToggle.setAttribute("aria-pressed", showRare ? "true" : "false");
+  rareToggle.onclick = () => {
+    exploreState.showRareFacets[exploreState.activeTab] = !showRare;
+    renderExplorePayload(payload);
+  };
 
   resultCount.textContent = Number(payload.total) === 1
     ? "1 gioco corrispondente"
@@ -3786,6 +3814,11 @@ async function renderExplore(initialTab = null) {
                   aria-selected="${exploreState.activeTab === "mechanic" ? "true" : "false"}">Meccaniche</button>
         </div>
 
+        <div class="explore-facet-toolbar">
+          <span id="exploreFacetSummary" class="muted"></span>
+          <button class="button button-ghost explore-rare-toggle" id="exploreRareToggle"
+                  type="button" aria-pressed="false" hidden>Mostra tutti</button>
+        </div>
         <section class="explore-facet-grid" id="exploreFacetGrid" aria-live="polite">${skeletons()}</section>
 
         <section class="explore-results-section" aria-labelledby="exploreGamesTitle">

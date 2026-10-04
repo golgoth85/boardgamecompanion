@@ -672,7 +672,16 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         ).to_be_visible()
 
         fantasy = page.locator('[data-explore-kind="category"][data-explore-name="Fantasy"]')
+        adventure = page.locator('[data-explore-kind="category"][data-explore-name="Adventure"]')
         expect(fantasy).to_contain_text("2 giochi")
+        expect(adventure).to_have_count(0)
+        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+1)")
+        page.locator("#exploreRareToggle").click()
+        expect(adventure).to_be_visible()
+        expect(page.locator("#exploreRareToggle")).to_contain_text("Nascondi rari")
+        page.locator("#exploreRareToggle").click()
+        expect(adventure).to_have_count(0)
+
         fantasy.click()
         expect(page.locator(".explore-selection-chip")).to_contain_text("Fantasy")
         expect(page.locator("#exploreResultCount")).to_have_text(
@@ -684,6 +693,15 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
 
         page.get_by_role("tab", name="Meccaniche").click()
         dice = page.locator('[data-explore-kind="mechanic"][data-explore-name="Dice Rolling"]')
+        hand_management = page.locator(
+            '[data-explore-kind="mechanic"][data-explore-name="Hand Management"]'
+        )
+        expect(hand_management).to_have_count(0)
+        expect(dice).to_have_count(0)
+        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+2)")
+        page.locator("#exploreRareToggle").click()
+        expect(dice).to_be_visible()
+        expect(hand_management).to_be_visible()
         dice.click()
         expect(page.locator(".explore-selection-chip")).to_have_count(2)
         expect(page.locator("#exploreResultCount")).to_have_text(
