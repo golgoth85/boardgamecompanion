@@ -673,8 +673,15 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         )
         assert ranking_requests[-1]["ideal_players"] == ["2"]
 
-        page.locator("#rankingCategory").select_option("Fantasy")
-        assert ranking_requests[-1]["category"] == ["Fantasy"]
+        with page.expect_request(
+            lambda request: (
+                "/api/catalog/rankings?" in request.url
+                and "category=Fantasy" in request.url
+            )
+        ) as category_request:
+            page.locator("#rankingCategory").select_option("Fantasy")
+        category_query = parse_qs(urlsplit(category_request.value.url).query)
+        assert category_query["category"] == ["Fantasy"]
     finally:
         context.close()
 
