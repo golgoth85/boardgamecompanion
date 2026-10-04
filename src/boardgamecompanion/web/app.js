@@ -181,6 +181,41 @@ const state = {
   mechanic: "",
 };
 
+const catalogColumnSorts = {
+  title: ["title", "title_desc"],
+  players: ["players_asc", "players_desc"],
+  age: ["age_asc", "age_desc"],
+  duration: ["duration_asc", "duration_desc"],
+  weight: ["weight_desc", "weight_asc"],
+  rating: ["rating_desc", "rating_asc"],
+};
+
+function catalogSortHeader(label, key) {
+  const [primary, secondary] = catalogColumnSorts[key];
+  const active = state.sort === primary || state.sort === secondary;
+  const ascending = state.sort.endsWith("_asc") || state.sort === "title";
+  const next = state.sort === primary ? secondary : primary;
+  const arrow = active ? (ascending ? "↑" : "↓") : "↕";
+  const direction = active ? (ascending ? "crescente" : "decrescente") : "non ordinato";
+  return `<button class="catalog-sort-button ${active ? "is-active" : ""}" type="button"
+                  data-catalog-sort="${key}" data-next-sort="${next}"
+                  aria-label="Ordina per ${escapeHtml(label)}: ${direction}">
+            <span>${escapeHtml(label)}</span><i aria-hidden="true">${arrow}</i>
+          </button>`;
+}
+
+function bindCatalogSortHeaders() {
+  document.querySelectorAll("[data-catalog-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.sort = button.dataset.nextSort || "title";
+      state.offset = 0;
+      const select = document.querySelector("#sortFilter");
+      if (select) select.value = state.sort;
+      refreshCatalog();
+    });
+  });
+}
+
 let searchTimer;
 let catalogRequestController;
 let importInProgress = false;
@@ -1628,11 +1663,30 @@ async function renderCatalog() {
         </label>
         <label class="field">
           <select id="sortFilter" aria-label="Ordina">
-            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG</option>
-            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Classifica BGG</option>
-            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità</option>
-            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            <optgroup label="Titolo">
+              <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
+              <option value="title_desc" ${state.sort === "title_desc" ? "selected" : ""}>Titolo Z–A</option>
+            </optgroup>
+            <optgroup label="Giocatori">
+              <option value="players_asc" ${state.sort === "players_asc" ? "selected" : ""}>Giocatori: meno → più</option>
+              <option value="players_desc" ${state.sort === "players_desc" ? "selected" : ""}>Giocatori: più → meno</option>
+            </optgroup>
+            <optgroup label="Età">
+              <option value="age_asc" ${state.sort === "age_asc" ? "selected" : ""}>Età: più bassa</option>
+              <option value="age_desc" ${state.sort === "age_desc" ? "selected" : ""}>Età: più alta</option>
+            </optgroup>
+            <optgroup label="Durata">
+              <option value="duration_asc" ${state.sort === "duration_asc" ? "selected" : ""}>Durata: più breve</option>
+              <option value="duration_desc" ${state.sort === "duration_desc" ? "selected" : ""}>Durata: più lunga</option>
+            </optgroup>
+            <optgroup label="Valutazione">
+              <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG: migliore</option>
+              <option value="rating_asc" ${state.sort === "rating_asc" ? "selected" : ""}>Rating BGG: peggiore</option>
+              <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Classifica BGG</option>
+              <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità: alta</option>
+              <option value="weight_asc" ${state.sort === "weight_asc" ? "selected" : ""}>Complessità: bassa</option>
+              <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+            </optgroup>
           </select>
         </label>
       </section>
@@ -1942,9 +1996,14 @@ function renderCatalogData(catalog) {
     const groups = groupCatalogItems(catalog.items);
     if (state.catalogView === "list") {
       grid.innerHTML = `
-        <div class="catalog-list-head" aria-hidden="true">
-          <span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span>
-          <span>Peso</span><span>BGG</span><span></span>
+        <div class="catalog-list-head" aria-label="Ordina la lista per colonna">
+          ${catalogSortHeader("Gioco", "title")}
+          ${catalogSortHeader("Giocatori", "players")}
+          ${catalogSortHeader("Età", "age")}
+          ${catalogSortHeader("Durata", "duration")}
+          ${catalogSortHeader("Peso", "weight")}
+          ${catalogSortHeader("BGG", "rating")}
+          <span aria-hidden="true"></span>
         </div>
         ${groups.map(({game, expansions}) => gameListRow(game, expansions)).join("")}
       `;
@@ -1952,6 +2011,7 @@ function renderCatalogData(catalog) {
       grid.innerHTML = groups.map(({game, expansions}) => gameCard(game, expansions)).join("");
     }
     bindExpansionToggles();
+    bindCatalogSortHeaders();
   }
   renderPagination();
 }
