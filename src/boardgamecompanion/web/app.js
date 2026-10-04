@@ -3674,7 +3674,7 @@ function rankingGameRow(item, index) {
     (factor) => `<span>${escapeHtml(factor)}</span>`
   ).join("");
   const rating = game.bgg?.average
-    ? `★ ${formatNumber(game.bgg.average, 1)}`
+    ? `BGG ${formatNumber(game.bgg.average, 1)}`
     : "BGG —";
   return `
     <a class="ranking-result-row ${index <= 3 ? `is-podium podium-${index}` : ""}" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
@@ -3690,7 +3690,7 @@ function rankingGameRow(item, index) {
       </span>
       <span class="ranking-result-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">
         <strong>${formatNumber(item.score, 1)}</strong>
-        <small>score</small>
+        <small>indice</small>
       </span>
     </a>
   `;
@@ -3889,7 +3889,7 @@ async function renderRankings() {
         <p class="eyebrow">Ludoteca</p>
         <h1>Classifiche</h1>
         <p class="page-lead">
-          Graduatorie deterministiche e spiegabili: il rating BGG è solo uno degli ingredienti.
+          BGG indica il voto medio della community; l'Indice 0–100 è il punteggio calcolato dalla classifica attiva.
         </p>
       </div>
       <div class="ranking-result-count" id="rankingResultCount">— giochi classificati</div>
@@ -3913,7 +3913,7 @@ async function renderRankings() {
             <h2 id="rankingCurrentHeading">Classifica</h2>
             <p class="muted" id="rankingCurrentDescription"></p>
           </div>
-          <span class="ranking-explainer-badge">0–100</span>
+          <span class="ranking-explainer-badge">Indice 0–100</span>
         </header>
         <div class="ranking-results" id="rankingResults">${skeletons()}</div>
       </div>
