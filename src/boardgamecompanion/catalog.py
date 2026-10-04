@@ -238,7 +238,6 @@ class Catalog:
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
             LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
             LEFT JOIN game_progress p ON p.board_game_id = g.id
-            LEFT JOIN board_game_gameplay_summaries gs ON gs.board_game_id = g.id
         """
 
     @staticmethod
@@ -255,8 +254,7 @@ class Catalog:
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
-                   e.metadata_json AS enriched_metadata_json,
-                   gs.summary_text AS gameplay_summary
+                   e.metadata_json AS enriched_metadata_json
         """
 
     def list_games(
