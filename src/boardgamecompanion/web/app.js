@@ -3573,26 +3573,372 @@ function browseGameRow(game, index) {
   `;
 }
 
+function rankingParams() {
+  const params = new URLSearchParams({
+    mode: rankingState.mode,
+    limit: "50",
+  });
+  for (const [key, value] of [
+    ["category", rankingState.category],
+    ["mechanic", rankingState.mechanic],
+    ["ideal_players", rankingState.idealPlayers],
+    ["max_minutes", rankingState.maxMinutes],
+    ["weight", rankingState.weight],
+  ]) {
+    if (String(value || "").trim()) params.set(key, String(value).trim());
+  }
+  return params;
+}
+
+function rankingModeButtons() {
+  const group = rankingGroups[rankingState.group] || rankingGroups.top;
+  return group.modes.map(([mode, label]) => `
+    <button class="ranking-mode-button ${rankingState.mode === mode ? "is-active" : ""}"
+            type="button" data-ranking-mode="${mode}">
+      ${escapeHtml(label)}
+    </button>
+  `).join("");
+}
+
+function rankingGameRow(item, index) {
+  const game = item.game;
+  const cover = game.bgg_metadata?.cover_url
+    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span>${escapeHtml(initials(game.title))}</span>`;
+  const factors = (item.factors || []).map(
+    (factor) => `<span>${escapeHtml(factor)}</span>`
+  ).join("");
+  const rating = game.bgg?.average
+    ? `★ ${formatNumber(game.bgg.average, 1)}`
+    : "BGG —";
+  return `
+    <a class="ranking-result-row" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+      <span class="ranking-result-position">#${index}</span>
+      <span class="ranking-result-cover">${cover}</span>
+      <span class="ranking-result-body">
+        <span class="ranking-result-title">
+          <strong>${escapeHtml(game.title)}</strong>
+          <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}</small>
+        </span>
+        <span class="ranking-result-reason">${escapeHtml(item.reason || "")}</span>
+        <span class="ranking-result-factors">${factors}</span>
+      </span>
+      <span class="ranking-result-score">
+        <strong>${formatNumber(item.score, 1)}</strong>
+        <small>score</small>
+      </span>
+    </a>
+  `;
+}
+
+function rankingSelectOptions(items, selected, placeholder) {
+  return `
+    <option value="">${escapeHtml(placeholder)}</option>
+    ${items.map((item) => `
+      <option value="${escapeHtml(item.name)}"
+              ${selected === item.name ? "selected" : ""}>
+        ${escapeHtml(item.name)} (${formatNumber(item.count, 0)})
+      </option>
+    `).join("")}
+  `;
+}
+
+function rankingFilterMarkup(facets) {
+  return `
+    <div class="ranking-filter-head">
+      <div>
+        <p class="eyebrow">Affina</p>
+        <h2>Contesto</h2>
+      </div>
+      <span class="quiet-pill">Facoltativo</span>
+    </div>
+    <p class="muted ranking-filter-intro">
+      I filtri non cambiano la formula: restringono il tavolo su cui la classifica viene calcolata.
+    </p>
+
+    <section class="ranking-filter-group">
+      <strong>Giocatori ideali</strong>
+      <div class="ranking-filter-chips">
+        ${["", "1", "2", "3", "4", "5", "6"].map((value) => `
+          <button class="ranking-filter-chip ${rankingState.idealPlayers === value ? "is-active" : ""}"
+                  type="button" data-ranking-filter="idealPlayers" data-ranking-value="${value}">
+            ${value ? (value === "6" ? "6+" : value) : "Tutti"}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <section class="ranking-filter-group">
+      <strong>Durata massima</strong>
+      <div class="ranking-filter-chips">
+        ${[
+          ["", "Tutte"], ["30", "30 min"], ["60", "60 min"],
+          ["90", "90 min"], ["120", "2 h"], ["180", "3 h"],
+        ].map(([value, label]) => `
+          <button class="ranking-filter-chip ${rankingState.maxMinutes === value ? "is-active" : ""}"
+                  type="button" data-ranking-filter="maxMinutes" data-ranking-value="${value}">
+            ${label}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <section class="ranking-filter-group">
+      <strong>Complessità</strong>
+      <div class="ranking-filter-chips">
+        ${[
+          ["", "Tutte"], ["light", "Semplice"],
+          ["medium", "Media"], ["heavy", "Impegnativa"],
+        ].map(([value, label]) => `
+          <button class="ranking-filter-chip ${rankingState.weight === value ? "is-active" : ""}"
+                  type="button" data-ranking-filter="weight" data-ranking-value="${value}">
+            ${label}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <label class="ranking-filter-field">
+      <span>Genere</span>
+      <select id="rankingCategory">
+        ${rankingSelectOptions(facets.categories || [], rankingState.category, "Tutti i generi")}
+      </select>
+    </label>
+
+    <label class="ranking-filter-field">
+      <span>Meccanica</span>
+      <select id="rankingMechanic">
+        ${rankingSelectOptions(facets.mechanics || [], rankingState.mechanic, "Tutte le meccaniche")}
+      </select>
+    </label>
+
+    <button class="button button-ghost ranking-reset-filters" id="rankingResetFilters" type="button">
+      Azzera filtri
+    </button>
+  `;
+}
+
+function bindRankingControls() {
+  document.querySelectorAll("[data-ranking-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      rankingState.group = button.dataset.rankingGroup;
+      const group = rankingGroups[rankingState.group] || rankingGroups.top;
+      if (!group.modes.some(([mode]) => mode === rankingState.mode)) {
+        rankingState.mode = group.modes[0][0];
+      }
+      renderRankings();
+    });
+  });
+
+  document.querySelectorAll("[data-ranking-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      rankingState.mode = button.dataset.rankingMode;
+      refreshRankings();
+    });
+  });
+
+  document.querySelectorAll("[data-ranking-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      rankingState[button.dataset.rankingFilter] = button.dataset.rankingValue || "";
+      refreshRankings();
+    });
+  });
+
+  document.querySelector("#rankingCategory")?.addEventListener("change", (event) => {
+    rankingState.category = event.target.value;
+    refreshRankings();
+  });
+  document.querySelector("#rankingMechanic")?.addEventListener("change", (event) => {
+    rankingState.mechanic = event.target.value;
+    refreshRankings();
+  });
+  document.querySelector("#rankingResetFilters")?.addEventListener("click", () => {
+    rankingState.category = "";
+    rankingState.mechanic = "";
+    rankingState.idealPlayers = "";
+    rankingState.maxMinutes = "";
+    rankingState.weight = "";
+    renderRankings();
+  });
+}
+
+async function refreshRankings() {
+  rankingRequestController?.abort();
+  const controller = new AbortController();
+  rankingRequestController = controller;
+  const results = document.querySelector("#rankingResults");
+  const heading = document.querySelector("#rankingCurrentHeading");
+  const description = document.querySelector("#rankingCurrentDescription");
+  const count = document.querySelector("#rankingResultCount");
+  if (!results || !heading || !description || !count) return;
+
+  results.classList.add("is-refreshing");
+  results.setAttribute("aria-busy", "true");
+  try {
+    const payload = await api(`/api/catalog/rankings?${rankingParams()}`, {
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted || !document.querySelector("#rankingResults")) return;
+    heading.textContent = payload.title;
+    description.textContent = payload.description;
+    count.textContent = payload.total === 1
+      ? "1 gioco classificato"
+      : `${formatNumber(payload.total, 0)} giochi classificati`;
+    results.innerHTML = payload.items.length
+      ? payload.items.map((item, index) => rankingGameRow(item, index + 1)).join("")
+      : '<div class="empty">Nessun gioco soddisfa questa classifica e i filtri selezionati.</div>';
+
+    document.querySelector("#rankingModes").innerHTML = rankingModeButtons();
+    document.querySelector("#rankingFilters").innerHTML = rankingFilterMarkup(
+      rankingFacetsCache || {categories: [], mechanics: []}
+    );
+    bindRankingControls();
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    results.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  } finally {
+    if (rankingRequestController === controller) {
+      rankingRequestController = undefined;
+      results.classList.remove("is-refreshing");
+      results.removeAttribute("aria-busy");
+    }
+  }
+}
+
 async function renderRankings() {
+  app.innerHTML = `
+    <section class="page-header browse-header rankings-header">
+      <div>
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Classifiche</h1>
+        <p class="page-lead">
+          Graduatorie deterministiche e spiegabili: il rating BGG è solo uno degli ingredienti.
+        </p>
+      </div>
+      <div class="ranking-result-count" id="rankingResultCount">— giochi classificati</div>
+    </section>
+
+    <nav class="ranking-groups" aria-label="Famiglie di classifiche">
+      ${Object.entries(rankingGroups).map(([key, group]) => `
+        <button class="ranking-group-button ${rankingState.group === key ? "is-active" : ""}"
+                type="button" data-ranking-group="${key}">
+          ${escapeHtml(group.label)}
+        </button>
+      `).join("")}
+    </nav>
+
+    <section class="rankings-layout">
+      <div class="rankings-main">
+        <div class="ranking-mode-strip" id="rankingModes">${rankingModeButtons()}</div>
+        <header class="ranking-current-head">
+          <div>
+            <p class="eyebrow">Algoritmo attivo</p>
+            <h2 id="rankingCurrentHeading">Classifica</h2>
+            <p class="muted" id="rankingCurrentDescription"></p>
+          </div>
+          <span class="ranking-explainer-badge">0–100</span>
+        </header>
+        <div class="ranking-results" id="rankingResults">${skeletons()}</div>
+      </div>
+
+      <aside class="ranking-filter-panel" id="rankingFilters" aria-label="Filtri classifica">
+        ${skeletons()}
+      </aside>
+    </section>
+  `;
+
+  document.title = "Classifiche · BoardGameCompanion";
+  bindRankingControls();
+
+  try {
+    if (!rankingFacetsCache) {
+      rankingFacetsCache = await api("/api/catalog/facets?limit=100");
+    }
+    const filters = document.querySelector("#rankingFilters");
+    if (filters) filters.innerHTML = rankingFilterMarkup(rankingFacetsCache);
+    bindRankingControls();
+    await refreshRankings();
+  } catch (error) {
+    const results = document.querySelector("#rankingResults");
+    if (results) results.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function renderPlayNext() {
   app.innerHTML = `
     <section class="page-header browse-header">
       <div>
-        <p class="eyebrow">Esplora</p>
-        <h1>Classifiche</h1>
-        <p class="page-lead">I giochi posseduti ordinati secondo la classifica generale BoardGameGeek.</p>
+        <p class="eyebrow">La mia ludoteca</p>
+        <h1>Da giocare</h1>
+        <p class="page-lead">
+          I giochi migliori che possiedi ma che stanno arrivando troppo poco al tavolo.
+        </p>
       </div>
     </section>
-    <section class="browse-panel" id="browseContent">${skeletons()}</section>
+    <section class="browse-panel" id="playNextContent">${skeletons()}</section>
   `;
   try {
-    const params = new URLSearchParams({owned: "true", item_type: "standalone", sort: "rank_asc", limit: "100", offset: "0"});
-    const catalog = await api(`/api/games?${params}`);
-    document.querySelector("#browseContent").innerHTML = catalog.items.length
-      ? `<div class="browse-game-list">${catalog.items.map((game, index) => browseGameRow(game, index + 1)).join("")}</div>`
-      : '<div class="empty">Nessun gioco classificato.</div>';
-    document.title = "Classifiche · BoardGameCompanion";
+    const payload = await api("/api/catalog/rankings?mode=neglected&limit=60");
+    const target = document.querySelector("#playNextContent");
+    target.innerHTML = payload.items.length
+      ? `<div class="ranking-results compact">${payload.items.map((item, index) => rankingGameRow(item, index + 1)).join("")}</div>`
+      : '<div class="empty">Non ci sono ancora abbastanza dati per suggerire giochi trascurati.</div>';
+    document.title = "Da giocare · BoardGameCompanion";
   } catch (error) {
-    document.querySelector("#browseContent").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    document.querySelector("#playNextContent").innerHTML =
+      `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function newGameRow(game) {
+  const rawDate = game.collection?.acquisition_date;
+  const acquired = rawDate
+    ? new Date(rawDate).toLocaleDateString("it-IT", {year: "numeric", month: "short", day: "numeric"})
+    : "Data acquisizione non disponibile";
+  const cover = game.bgg_metadata?.cover_url
+    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span>${escapeHtml(initials(game.title))}</span>`;
+  return `
+    <a class="new-game-row" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+      <span class="new-game-cover">${cover}</span>
+      <span class="new-game-body">
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
+      </span>
+      <span class="new-game-date">
+        <small>Acquistato</small><strong>${escapeHtml(acquired)}</strong>
+      </span>
+    </a>
+  `;
+}
+
+async function renderNewGames() {
+  app.innerHTML = `
+    <section class="page-header browse-header">
+      <div>
+        <p class="eyebrow">La mia ludoteca</p>
+        <h1>Novità</h1>
+        <p class="page-lead">Gli acquisti più recenti della tua collezione, ordinati per data di acquisizione.</p>
+      </div>
+    </section>
+    <section class="browse-panel" id="newGamesContent">${skeletons()}</section>
+  `;
+  try {
+    const params = new URLSearchParams({
+      owned: "true",
+      item_type: "standalone",
+      sort: "acquired_desc",
+      limit: "100",
+      offset: "0",
+    });
+    const catalog = await api(`/api/games?${params}`);
+    document.querySelector("#newGamesContent").innerHTML = catalog.items.length
+      ? `<div class="new-game-list">${catalog.items.map(newGameRow).join("")}</div>`
+      : '<div class="empty">Nessun gioco posseduto.</div>';
+    document.title = "Novità · BoardGameCompanion";
+  } catch (error) {
+    document.querySelector("#newGamesContent").innerHTML =
+      `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
