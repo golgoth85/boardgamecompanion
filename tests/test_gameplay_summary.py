@@ -73,9 +73,9 @@ def test_gameplay_summary_is_generated_once_and_cached(
                     {
                         "bgg_id": 123456,
                         "summary": (
-                            "I giocatori draftano carte, le combinano in set e costruiscono "
-                            "progressivamente il proprio motore per ottenere punti prima "
-                            "dell'esaurimento del mazzo."
+                            "A turno si draftano carte dal mercato condiviso e si combinano "
+                            "in set, costruendo progressivamente un motore capace di produrre "
+                            "più punti prima dell'esaurimento del mazzo."
                         ),
                     }
                 ]
@@ -94,7 +94,7 @@ def test_gameplay_summary_is_generated_once_and_cached(
     assert first["items"][0]["cached"] is False
     assert second["generated"] == 0
     assert second["cached"] == 1
-    assert second["items"][0]["summary"].startswith("I giocatori draftano carte")
+    assert second["items"][0]["summary"].startswith("A turno si draftano carte")
 
 
 def test_gameplay_summary_is_invalidated_when_source_changes(
@@ -141,6 +141,49 @@ def test_gameplay_summary_is_invalidated_when_source_changes(
                 board_game_id,
             ),
         )
+    second = service.ensure_many([123456])
+
+    assert first["items"][0]["summary"] != second["items"][0]["summary"]
+    assert second["generated"] == 1
+
+
+def test_gameplay_summary_style_version_invalidates_cached_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "bgc.sqlite3")
+    database.initialize()
+    _seed_game(
+        database,
+        description="Players choose cards simultaneously and resolve actions in initiative order.",
+    )
+    service = GameplaySummaryService(database)
+    fake_rag = SimpleNamespace(generation_provider="gemini")
+    monkeypatch.setattr(
+        "boardgamecompanion.gameplay_summary.resolve_rag_settings",
+        lambda _database: fake_rag,
+    )
+
+    generated = iter(
+        [
+            "A ogni round si scelgono carte simultaneamente, poi le azioni vengono risolte secondo l'iniziativa per creare combinazioni e anticipare le mosse avversarie.",
+            "La scelta simultanea delle carte apre ogni round; l'ordine di iniziativa decide poi come si concatenano le azioni e quali combinazioni riescono a prevalere.",
+        ]
+    )
+
+    def generate(_prompt: str, _rag):
+        return (
+            {"summaries": [{"bgg_id": 123456, "summary": next(generated)}]},
+            "gemini",
+            "test-model",
+        )
+
+    monkeypatch.setattr(service, "_generate_gemini", generate)
+    first = service.ensure_many([123456])
+    monkeypatch.setattr(
+        "boardgamecompanion.gameplay_summary.SUMMARY_STYLE_VERSION",
+        "gameplay-v3-test",
+    )
     second = service.ensure_many([123456])
 
     assert first["items"][0]["summary"] != second["items"][0]["summary"]
