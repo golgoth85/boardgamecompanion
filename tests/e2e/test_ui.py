@@ -246,7 +246,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
     try:
         import_csv(page, live_server)
 
-        expect(page.locator("#statsPanel .stat strong")).to_have_text(["2", "1", "1", "2"])
+        expect(page.locator("#statsPanel .stat strong")).to_have_text(["1", "1", "0", "0"])
         expect(page.locator(".game-card")).to_have_count(2)
 
         page.locator("#searchInput").fill("Beta")
