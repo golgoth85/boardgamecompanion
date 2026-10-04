@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import html
 import json
 import re
 from datetime import UTC, datetime
@@ -11,6 +9,7 @@ import httpx
 
 from boardgamecompanion.app_settings import resolve_rag_settings
 from boardgamecompanion.database import Database
+from boardgamecompanion.description_translation import _clean_source, _source_hash
 from boardgamecompanion.settings import settings
 
 MAX_BATCH = 8
@@ -34,26 +33,10 @@ class GameplaySummaryError(RuntimeError):
     pass
 
 
-def _clean_source(value: str) -> str:
-    text = html.unescape(value or "")
-    text = re.sub(r"(?i)<br\\s*/?>", "\\n", text)
-    text = re.sub(r"(?i)</p\\s*>", "\\n\\n", text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = text.replace("\\r\\n", "\\n").replace("\\r", "\\n")
-    text = re.sub(r"[ \\t]+", " ", text)
-    text = re.sub(r" *\\n *", "\\n", text)
-    text = re.sub(r"\\n{3,}", "\\n\\n", text)
-    return text.strip()[:MAX_SOURCE_CHARS]
-
-
-def _source_hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _validate_summary(value: Any) -> str:
     if not isinstance(value, str):
         raise GameplaySummaryError("Gameplay summary provider returned invalid text")
-    text = re.sub(r"\\s+", " ", value).strip()
+    text = re.sub(r"\s+", " ", value).strip()
     if len(text) < MIN_SUMMARY_CHARS:
         raise GameplaySummaryError("Gameplay summary is too short")
     if len(text) > MAX_SUMMARY_CHARS:
@@ -160,8 +143,8 @@ class GameplaySummaryService:
         text = str(value or "").strip()
         fence = chr(96) * 3
         if text.startswith(fence):
-            text = re.sub(r"^.{3}(?:json)?\\s*", "", text, flags=re.I)
-            text = re.sub(r"\\s*.{3}$", "", text)
+            text = re.sub(r"^.{3}(?:json)?\s*", "", text, flags=re.I)
+            text = re.sub(r"\s*.{3}$", "", text)
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
