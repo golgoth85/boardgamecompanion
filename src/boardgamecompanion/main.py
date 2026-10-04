@@ -675,7 +675,7 @@ def catalog_rankings(
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    return Catalog(database).rankings(
+    payload = Catalog(database).rankings(
         mode=mode,
         category=category,
         mechanic=mechanic,
@@ -684,6 +684,23 @@ def catalog_rankings(
         weight=weight,
         limit=limit,
     )
+    games = [
+        item.get("game", {})
+        for item in payload.get("items", [])
+        if isinstance(item, dict)
+    ]
+    bgg_ids = [
+        int(game["bgg_id"])
+        for game in games
+        if isinstance(game, dict) and game.get("bgg_id") is not None
+    ]
+    cached = GameplaySummaryService(database).get_cached_many(bgg_ids)
+    for game in games:
+        if not isinstance(game, dict) or game.get("bgg_id") is None:
+            continue
+        summary = cached.get(int(game["bgg_id"]))
+        game["gameplay_summary"] = summary["summary"] if summary else None
+    return payload
 
 
 @app.post("/api/catalog/gameplay-summaries/ensure", tags=["catalog"])

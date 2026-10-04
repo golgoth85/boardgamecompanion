@@ -605,6 +605,7 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                 "rank": 42,
                 "best_players": "3",
                 "recommended_age": "10+",
+                "min_age": "10+",
             },
             "collection": {"own": True, "num_plays": 3},
             "bgg_metadata": {
@@ -613,8 +614,9 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                 "mechanics": ["Deck Building", "Hand Management"],
             },
             "gameplay_summary": (
-                "I giocatori costruiscono una squadra, selezionano carte azione e "
-                "combinano le abilità dei personaggi per superare l'avversario."
+                "A turno si selezionano carte azione per costruire una squadra efficace, "
+                "combinando abilità e tempismo per mettere sotto pressione l'avversario "
+                "e raggiungere l'obiettivo dello scontro."
             ),
         }
         titles = {
@@ -635,7 +637,7 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                             "game": game,
                             "score": 88.4,
                             "reason": "Motivo deterministico",
-                            "factors": ["ideale in 3", "peso 2.2", "60 min"],
+                            "factors": ["ideale in 3", "peso 2.2", "età 10+"],
                         }
                     ],
                     "total": 1,
@@ -662,11 +664,18 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         )
         expect(page.locator(".ranking-result-row")).to_have_count(1)
         expect(page.locator(".ranking-result-score")).to_contain_text("88,4")
+        expect(page.locator(".ranking-result-score")).to_contain_text("indice")
+        expect(page.locator(".ranking-result-title small")).to_contain_text("BGG 7,8")
         expect(page.locator(".ranking-result-summary")).to_contain_text(
-            "I giocatori costruiscono una squadra"
+            "A turno si selezionano carte azione"
         )
         expect(page.locator(".ranking-result-factors")).to_contain_text("ideale in 3")
+        expect(page.locator(".ranking-result-factors")).to_contain_text("età 10+")
+        expect(page.locator(".ranking-result-factors")).not_to_contain_text("60 min")
         expect(page.locator(".ranking-result-factors")).not_to_contain_text("qualità")
+        assert page.locator(".ranking-result-summary").evaluate(
+            "(el) => getComputedStyle(el).webkitLineClamp === 'none'"
+        )
         expect(page.locator(".ranking-result-row")).not_to_contain_text("Motivo deterministico")
         expect(page.locator(".ranking-result-score")).to_have_attribute("title", "Motivo deterministico")
         expect(page.locator("#rankingFilters")).to_be_visible()
