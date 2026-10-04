@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from boardgamecompanion.main import app
+from boardgamecompanion.main import app, get_database
 from boardgamecompanion.settings import settings
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bgg_collection_sample.csv"
@@ -72,3 +73,110 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         )
         assert suitable_for_age_10.status_code == 200
         assert [item["bgg_id"] for item in suitable_for_age_10.json()["items"]] == [900001]
+
+
+def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: Path) -> None:
+    settings.config_dir = tmp_path / "config"
+    settings.import_dir = tmp_path / "import"
+    settings.manuals_dir = tmp_path / "manuals"
+
+    csv_payload = FIXTURE.read_text(encoding="utf-8").replace(
+        ",expansion,,,,,,,,1,,,,,English,2021,",
+        ",standalone,,,,,,,,1,,,,,English,2021,",
+    ).encode("utf-8")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/imports/bgg-csv",
+            files={"file": ("collection.csv", csv_payload, "text/csv")},
+        )
+        assert response.status_code == 200
+
+        database = get_database()
+        with database.transaction(immediate=True) as connection:
+            rows = connection.execute(
+                "SELECT id,bgg_id FROM board_games ORDER BY bgg_id"
+            ).fetchall()
+            ids = {int(row["bgg_id"]): int(row["id"]) for row in rows}
+            for bgg_id, metadata, cover in (
+                (
+                    900001,
+                    {
+                        "categories": ["Fantasy", "Adventure"],
+                        "mechanics": ["Dice Rolling", "Hand Management"],
+                    },
+                    "https://example.test/alpha.jpg",
+                ),
+                (
+                    900002,
+                    {
+                        "categories": ["Fantasy", "Science Fiction"],
+                        "mechanics": ["Dice Rolling", "Deck Building"],
+                    },
+                    "https://example.test/beta.jpg",
+                ),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO board_game_enrichments(
+                        board_game_id,source,external_id,title,cover_url,
+                        metadata_json,next_refresh_at,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        ids[bgg_id],
+                        "test",
+                        str(bgg_id),
+                        f"Game {bgg_id}",
+                        cover,
+                        json.dumps(metadata),
+                        "2099-01-01T00:00:00+00:00",
+                        "2026-01-01T00:00:00+00:00",
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                )
+
+        initial = client.get("/api/catalog/explore")
+        assert initial.status_code == 200
+        assert initial.json()["total"] == 2
+        fantasy = next(
+            item for item in initial.json()["categories"] if item["name"] == "Fantasy"
+        )
+        assert fantasy["count"] == 2
+        assert fantasy["covers"] == [
+            "https://example.test/alpha.jpg",
+            "https://example.test/beta.jpg",
+        ]
+
+        filtered = client.get(
+            "/api/catalog/explore",
+            params=[
+                ("category", "Fantasy"),
+                ("category", "Adventure"),
+                ("mechanic", "Dice Rolling"),
+            ],
+        )
+        assert filtered.status_code == 200
+        payload = filtered.json()
+        assert payload["total"] == 1
+        assert [game["bgg_id"] for game in payload["games"]] == [900001]
+        assert payload["filters"]["categories"] == ["Fantasy", "Adventure"]
+        assert payload["filters"]["mechanics"] == ["Dice Rolling"]
+
+        hand_management = next(
+            item
+            for item in payload["mechanics"]
+            if item["name"] == "Hand Management"
+        )
+        assert hand_management["count"] == 1
+        assert hand_management["selected"] is False
+
+        incompatible = client.get(
+            "/api/catalog/explore",
+            params=[
+                ("category", "Adventure"),
+                ("mechanic", "Deck Building"),
+            ],
+        )
+        assert incompatible.status_code == 200
+        assert incompatible.json()["total"] == 0
