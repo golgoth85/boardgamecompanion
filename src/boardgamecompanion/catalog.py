@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import Counter
 from functools import lru_cache
@@ -44,6 +45,10 @@ SORT_SQL = {
     "rank_asc": "g.bgg_rank IS NULL OR g.bgg_rank = 0, g.bgg_rank ASC, g.title COLLATE NOCASE ASC",
     "weight_desc": "g.bgg_average_weight IS NULL, g.bgg_average_weight DESC, g.title COLLATE NOCASE ASC",
     "weight_asc": "g.bgg_average_weight IS NULL, g.bgg_average_weight ASC, g.title COLLATE NOCASE ASC",
+    "acquired_desc": (
+        "c.acquisition_date IS NULL OR c.acquisition_date = '', "
+        "c.acquisition_date DESC, g.title COLLATE NOCASE ASC"
+    ),
 }
 
 
@@ -123,6 +128,11 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             "version_nickname": row["version_nickname"],
             "inventory_location": row["inventory_location"],
             "quantity": row["quantity"],
+            "acquisition_date": (
+                row["acquisition_date"]
+                if "acquisition_date" in row.keys()
+                else None
+            ),
         },
     }
     if "cover_url" in row.keys():
@@ -204,6 +214,7 @@ class Catalog:
                    c.wishlist_priority, c.barcode, c.version_languages,
                    c.version_publishers, c.version_year_published,
                    c.version_nickname, c.inventory_location, c.quantity,
+                   c.acquisition_date,
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
@@ -694,6 +705,332 @@ class Catalog:
                 {"name": name, "count": count}
                 for name, count in mechanics.most_common(cap)
             ],
+        }
+
+    def rankings(
+        self,
+        *,
+        mode: str = "overall",
+        category: str | None = None,
+        mechanic: str | None = None,
+        ideal_players: int | None = None,
+        max_minutes: int | None = None,
+        weight: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        modes = {
+            "overall": {
+                "title": "Migliori in assoluto",
+                "description": "Qualità BGG corretta con il Bayesian average quando disponibile.",
+            },
+            "hidden_gems": {
+                "title": "Gemme nascoste",
+                "description": "Qualità alta premiando i giochi meno diffusi, senza favorire titoli mediocri.",
+            },
+            "quality_time": {
+                "title": "Qualità / tempo",
+                "description": "Premia giochi solidi che offrono molto in una durata contenuta.",
+            },
+            "gateway": {
+                "title": "Gateway",
+                "description": "Qualità, accessibilità, durata ragionevole e versatilità al tavolo.",
+            },
+            "expert": {
+                "title": "Per esperti",
+                "description": "Titoli di qualità con maggiore profondità e complessità.",
+            },
+            "safe_choice": {
+                "title": "Scelta sicura",
+                "description": "Giochi affidabili, versatili e poco rischiosi quando non sai cosa scegliere.",
+            },
+            "neglected": {
+                "title": "Capolavori trascurati",
+                "description": "Ottimi giochi posseduti che hai giocato pochissimo o mai.",
+            },
+            "most_played": {
+                "title": "Più giocati",
+                "description": "Le tue abitudini reali, con la qualità usata solo come correttivo.",
+            },
+            "personal_favorites": {
+                "title": "Preferiti personali",
+                "description": "Il tuo voto personale domina, con BGG come tie-break ragionato.",
+            },
+        }
+        selected_mode = mode if mode in modes else "overall"
+
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                {self._select_sql()}
+                {self._from_sql()}
+                WHERE COALESCE(c.own,0)=1
+                  AND COALESCE(g.item_type,'standalone') != 'expansion'
+                ORDER BY g.title COLLATE NOCASE,g.bgg_id
+                """
+            ).fetchall()
+
+        # Multiple physical copies must not produce duplicate ranking entries.
+        unique: dict[int, Any] = {}
+        for row in rows:
+            unique.setdefault(int(row["bgg_id"]), row)
+        rows = list(unique.values())
+
+        wanted_category = str(category or "").strip().casefold()
+        wanted_mechanic = str(mechanic or "").strip().casefold()
+
+        def minutes(row) -> int | None:
+            raw = row["playing_time"]
+            if raw is None:
+                raw = row["max_play_time"]
+            if raw is None:
+                raw = row["min_play_time"]
+            try:
+                value = int(raw) if raw is not None else 0
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+
+        def quality(row) -> float:
+            bayes = row["bgg_bayes_average"]
+            average = row["bgg_average"]
+            raw = bayes if bayes is not None and float(bayes) > 0 else average
+            if raw is None:
+                return 0.0
+            return max(0.0, min(100.0, float(raw) * 10.0))
+
+        def broad_player_score(row) -> float:
+            minimum = row["min_players"]
+            maximum = row["max_players"]
+            if minimum is None or maximum is None:
+                return 35.0
+            span = max(0, int(maximum) - int(minimum))
+            return max(25.0, min(100.0, 45.0 + span * 14.0))
+
+        def duration_score(row, *, target: int = 75) -> float:
+            value = minutes(row)
+            if value is None:
+                return 45.0
+            delta = abs(value - target)
+            return max(20.0, 100.0 - min(80.0, delta * 0.75))
+
+        def accessibility_score(row) -> float:
+            raw_weight = row["bgg_average_weight"]
+            weight_value = float(raw_weight) if raw_weight is not None else 2.5
+            weight_score = max(20.0, 100.0 - abs(weight_value - 2.0) * 34.0)
+            duration = duration_score(row, target=60)
+            player = broad_player_score(row)
+            return weight_score * 0.45 + duration * 0.35 + player * 0.20
+
+        def expert_score(row) -> float:
+            raw_weight = row["bgg_average_weight"]
+            if raw_weight is None:
+                return 35.0
+            value = float(raw_weight)
+            return max(20.0, min(100.0, 25.0 + (value - 2.0) * 30.0))
+
+        def facet_match(row) -> bool:
+            metadata = _metadata_from_row(row)
+            if wanted_category:
+                categories = {
+                    value.casefold()
+                    for value in _metadata_list(metadata, "categories")
+                }
+                if wanted_category not in categories:
+                    return False
+            if wanted_mechanic:
+                mechanics = {
+                    value.casefold()
+                    for value in _metadata_list(metadata, "mechanics")
+                }
+                if wanted_mechanic not in mechanics:
+                    return False
+            return True
+
+        candidates: list[Any] = []
+        for row in rows:
+            if not facet_match(row):
+                continue
+            if ideal_players is not None and not _ideal_players_match(row, ideal_players):
+                continue
+            if max_minutes is not None:
+                value = minutes(row)
+                if value is None or value > int(max_minutes):
+                    continue
+            if weight:
+                raw_weight = row["bgg_average_weight"]
+                if raw_weight is None:
+                    continue
+                numeric = float(raw_weight)
+                if weight == "light" and numeric > 2.30:
+                    continue
+                if weight == "medium" and not (2.30 < numeric <= 3.50):
+                    continue
+                if weight == "heavy" and numeric <= 3.50:
+                    continue
+            candidates.append(row)
+
+        max_owned_log = max(
+            [
+                math.log1p(max(0, int(row["bgg_num_owned"] or 0)))
+                for row in candidates
+            ]
+            or [1.0]
+        )
+        max_plays_log = max(
+            [
+                math.log1p(max(0, int(row["num_plays"] or 0)))
+                for row in candidates
+            ]
+            or [1.0]
+        )
+
+        def calculate(row) -> tuple[float, str, list[str]] | None:
+            q = quality(row)
+            plays = max(0, int(row["num_plays"] or 0))
+            user_rating = (
+                float(row["user_rating"])
+                if row["user_rating"] is not None
+                else None
+            )
+            raw_weight = row["bgg_average_weight"]
+            weight_value = float(raw_weight) if raw_weight is not None else None
+            duration = minutes(row)
+            factors: list[str] = []
+
+            if selected_mode == "overall":
+                if q <= 0:
+                    return None
+                score = q
+                factors.append(f"qualità {q:.0f}/100")
+                reason = "Bayesian average BGG" if row["bgg_bayes_average"] else "rating BGG"
+
+            elif selected_mode == "hidden_gems":
+                if q < 65:
+                    return None
+                owned_log = math.log1p(max(0, int(row["bgg_num_owned"] or 0)))
+                rarity = 100.0 * (1.0 - owned_log / max(max_owned_log, 1.0))
+                score = q * 0.84 + rarity * 0.16
+                factors.extend([f"qualità {q:.0f}", f"rarità {rarity:.0f}"])
+                reason = "qualità alta con diffusione relativamente contenuta"
+
+            elif selected_mode == "quality_time":
+                if q <= 0 or duration is None:
+                    return None
+                efficiency = 100.0 / (1.0 + max(0, duration - 30) / 120.0)
+                score = q * 0.82 + efficiency * 0.18
+                factors.extend([f"qualità {q:.0f}", f"{duration} min"])
+                reason = "molta qualità per il tempo richiesto"
+
+            elif selected_mode == "gateway":
+                if q <= 0:
+                    return None
+                access = accessibility_score(row)
+                score = q * 0.67 + access * 0.33
+                factors.extend(
+                    [
+                        f"qualità {q:.0f}",
+                        f"accessibilità {access:.0f}",
+                    ]
+                )
+                reason = "buon equilibrio tra qualità, semplicità, durata e versatilità"
+
+            elif selected_mode == "expert":
+                if q <= 0:
+                    return None
+                depth = expert_score(row)
+                if depth < 45:
+                    return None
+                score = q * 0.76 + depth * 0.24
+                factors.extend([f"qualità {q:.0f}", f"profondità {depth:.0f}"])
+                reason = "qualità elevata con complessità adatta a giocatori esperti"
+
+            elif selected_mode == "safe_choice":
+                if q <= 0:
+                    return None
+                versatility = (
+                    broad_player_score(row) * 0.55
+                    + duration_score(row, target=75) * 0.25
+                    + accessibility_score(row) * 0.20
+                )
+                score = q * 0.70 + versatility * 0.30
+                factors.extend([f"qualità {q:.0f}", f"versatilità {versatility:.0f}"])
+                reason = "qualità solida e buona adattabilità a tavoli diversi"
+
+            elif selected_mode == "neglected":
+                if q <= 0 or plays > 3:
+                    return None
+                neglect = {0: 100.0, 1: 85.0, 2: 70.0, 3: 55.0}.get(plays, 40.0)
+                if bool(row["want_to_play"]):
+                    neglect = min(100.0, neglect + 8.0)
+                score = q * 0.84 + neglect * 0.16
+                factors.extend([f"qualità {q:.0f}", f"{plays} partite"])
+                reason = "ottimo potenziale ma quasi mai arrivato al tavolo"
+
+            elif selected_mode == "most_played":
+                if plays <= 0:
+                    return None
+                play_score = (
+                    100.0 * math.log1p(plays) / max(max_plays_log, 1.0)
+                )
+                score = play_score * 0.78 + q * 0.22
+                factors.extend([f"{plays} partite", f"qualità {q:.0f}"])
+                reason = "frequenza di gioco reale, corretta per la qualità"
+
+            elif selected_mode == "personal_favorites":
+                if user_rating is None or user_rating <= 0:
+                    return None
+                personal = max(0.0, min(100.0, user_rating * 10.0))
+                score = personal * 0.84 + q * 0.16
+                factors.extend([f"tuo voto {user_rating:.1f}", f"BGG {q:.0f}"])
+                reason = "il tuo voto personale domina la posizione"
+
+            else:
+                return None
+
+            if ideal_players is not None:
+                factors.append(f"ideale in {ideal_players}")
+            if weight_value is not None:
+                factors.append(f"peso {weight_value:.1f}")
+            if duration is not None and selected_mode not in {"quality_time"}:
+                factors.append(f"{duration} min")
+            return max(0.0, min(100.0, score)), reason, factors[:4]
+
+        ranked: list[dict[str, Any]] = []
+        for row in candidates:
+            calculated = calculate(row)
+            if calculated is None:
+                continue
+            score, reason, factors = calculated
+            ranked.append(
+                {
+                    "game": _game_dict(row),
+                    "score": round(score, 1),
+                    "reason": reason,
+                    "factors": factors,
+                }
+            )
+
+        ranked.sort(
+            key=lambda item: (
+                -float(item["score"]),
+                str(item["game"]["title"]).casefold(),
+                int(item["game"]["bgg_id"]),
+            )
+        )
+        cap = max(1, min(int(limit), 100))
+        return {
+            "mode": selected_mode,
+            "title": modes[selected_mode]["title"],
+            "description": modes[selected_mode]["description"],
+            "items": ranked[:cap],
+            "total": len(ranked),
+            "filters": {
+                "category": category,
+                "mechanic": mechanic,
+                "ideal_players": ideal_players,
+                "max_minutes": max_minutes,
+                "weight": weight,
+            },
         }
 
     def assistant_candidates(self, *, limit: int = 220) -> list[dict[str, Any]]:
