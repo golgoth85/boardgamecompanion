@@ -8,8 +8,7 @@ const shellSectionLabels = {
   catalog: "Ludoteca",
   rankings: "Classifiche",
   explore: "Esplora",
-  "play-next": "Da giocare",
-  new: "Novità",
+  completed: "Completati",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
@@ -17,8 +16,7 @@ const shellSectionLabels = {
 
 function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
-  if (/^\/play-next\/?$/.test(pathname)) return "play-next";
-  if (/^\/new\/?$/.test(pathname)) return "new";
+  if (/^\/completed\/?$/.test(pathname)) return "completed";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
   if (/^\/updates\/?$/.test(pathname)) return "updates";
@@ -221,7 +219,7 @@ const rankingGroups = {
     label: "Top",
     modes: [
       ["overall", "Migliori in assoluto"],
-      ["hidden_gems", "Gemme nascoste"],
+      ["outside_top", "Fuori dalla Top 500"],
       ["quality_time", "Qualità / tempo"],
       ["safe_choice", "Scelta sicura"],
     ],
@@ -231,27 +229,25 @@ const rankingGroups = {
     modes: [
       ["gateway", "Gateway"],
       ["expert", "Per esperti"],
-      ["safe_choice", "Scelta sicura"],
       ["quality_time", "Qualità / tempo"],
+      ["safe_choice", "Scelta sicura"],
     ],
   },
   facets: {
     label: "Generi & Meccaniche",
     modes: [
       ["overall", "Migliori"],
-      ["hidden_gems", "Gemme nascoste"],
+      ["outside_top", "Fuori dalla Top 500"],
       ["safe_choice", "Scelta sicura"],
     ],
   },
   personal: {
-    label: "La mia ludoteca",
+    label: "Personali",
     modes: [
-      ["neglected", "Capolavori trascurati"],
-      ["most_played", "Più giocati"],
       ["personal_favorites", "Preferiti personali"],
     ],
   },
-};
+}
 
 const catalogColumnSorts = {
   title: ["title", "title_desc"],
@@ -1724,11 +1720,19 @@ async function renderCatalog() {
       </div>
     </section>
 
-    <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Statistiche catalogo">
-      <div class="stat"><strong>—</strong><span>Totale</span></div>
+    <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Riepilogo ludoteca">
       <div class="stat"><strong>—</strong><span>Giochi base</span></div>
       <div class="stat"><strong>—</strong><span>Espansioni</span></div>
-      <div class="stat"><strong>—</strong><span>Posseduti</span></div>
+      <div class="stat"><strong>—</strong><span>Completati</span></div>
+      <div class="stat"><strong>—</strong><span>Regolamenti</span></div>
+    </section>
+
+    <section class="achievement-showcase" id="achievementShowcase" hidden>
+      <div class="achievement-showcase-head">
+        <div><p class="eyebrow">Ultimi traguardi</p><h2>Dalla Sala dei trofei</h2></div>
+        <a class="button button-ghost" href="/completed" data-nav>Vedi tutti</a>
+      </div>
+      <div class="achievement-showcase-grid" id="achievementShowcaseGrid"></div>
     </section>
 
     <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
@@ -1842,6 +1846,7 @@ async function renderCatalog() {
     renderStats(stats);
     renderCatalogData(catalog);
     runWhenIdle(() => {
+      void refreshAchievementShowcase();
       void backfillMissingMetadata();
       void checkBggCollectionSyncOnOpen();
     });
@@ -2112,10 +2117,10 @@ async function backfillMissingMetadata() {
 
 function renderStats(stats) {
   const values = [
-    [stats.total, "Totale"],
-    [stats.standalone, "Giochi base"],
-    [stats.expansions, "Espansioni"],
-    [stats.owned, "Posseduti"],
+    [stats.standalone_owned, "Giochi base"],
+    [stats.expansions_owned, "Espansioni"],
+    [stats.completed, "Completati"],
+    [stats.rulebooks, "Regolamenti"],
   ];
   document.querySelector("#statsPanel").innerHTML = values.map(([value, label]) =>
     `<div class="stat"><strong>${formatNumber(value, 0)}</strong><span>${label}</span></div>`
@@ -2779,6 +2784,11 @@ async function renderDetail(bggId) {
                 : ""}
             </div>
             <div class="game-primary-actions">
+              <button class="button ${game.progress?.completed ? "completion-button is-completed" : "button-ghost completion-button"}"
+                      id="toggleCompleted" type="button"
+                      aria-pressed="${game.progress?.completed ? "true" : "false"}">
+                ${game.progress?.completed ? "♛ Completato" : "Segna completato"}
+              </button>
               <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
             </div>
           </header>
@@ -2875,6 +2885,23 @@ async function renderDetail(bggId) {
     `;
 
     const openCopy = () => openCopyEditor(game.bgg_id, game.title);
+    document.querySelector("#toggleCompleted")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const next = !Boolean(game.progress?.completed);
+        await api(`/api/games/${game.bgg_id}/completion`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({completed: next}),
+        });
+        showToast(next ? "Gioco aggiunto alla Sala dei trofei." : "Gioco rimosso dai completati.");
+        await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
     document.querySelector("#addPhysicalCopy")?.addEventListener("click", openCopy);
     document.querySelector("#addPhysicalCopySecondary")?.addEventListener("click", openCopy);
     document.querySelectorAll(".edit-copy").forEach((button) => {
@@ -3612,7 +3639,7 @@ function rankingGameRow(item, index) {
     ? `★ ${formatNumber(game.bgg.average, 1)}`
     : "BGG —";
   return `
-    <a class="ranking-result-row" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+    <a class="ranking-result-row ${index <= 3 ? `is-podium podium-${index}` : ""}" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
       <span class="ranking-result-position">#${index}</span>
       <span class="ranking-result-cover">${cover}</span>
       <span class="ranking-result-body">
@@ -3873,80 +3900,91 @@ async function renderRankings() {
   }
 }
 
-async function renderPlayNext() {
-  app.innerHTML = `
-    <section class="page-header browse-header">
-      <div>
-        <p class="eyebrow">La mia ludoteca</p>
-        <h1>Da giocare</h1>
-        <p class="page-lead">
-          I giochi migliori che possiedi ma che stanno arrivando troppo poco al tavolo.
-        </p>
-      </div>
-    </section>
-    <section class="browse-panel" id="playNextContent">${skeletons()}</section>
-  `;
-  try {
-    const payload = await api("/api/catalog/rankings?mode=neglected&limit=60");
-    const target = document.querySelector("#playNextContent");
-    target.innerHTML = payload.items.length
-      ? `<div class="ranking-results compact">${payload.items.map((item, index) => rankingGameRow(item, index + 1)).join("")}</div>`
-      : '<div class="empty">Non ci sono ancora abbastanza dati per suggerire giochi trascurati.</div>';
-    document.title = "Da giocare · BoardGameCompanion";
-  } catch (error) {
-    document.querySelector("#playNextContent").innerHTML =
-      `<div class="empty">${escapeHtml(error.message)}</div>`;
-  }
+function completionAchievementMarkup(game) {
+  const achievements = [{icon: "♛", label: "Completato"}];
+  const weight = Number(game.bgg?.average_weight || 0);
+  const minutes = Number(
+    game.play_time?.max || game.play_time?.playing || game.play_time?.min || 0
+  );
+  if (weight >= 3.5) achievements.push({icon: "◆", label: "Impresa"});
+  if (minutes >= 120) achievements.push({icon: "⌛", label: "Maratona"});
+  return achievements.map((item) =>
+    `<span class="trophy-achievement"><i aria-hidden="true">${item.icon}</i>${escapeHtml(item.label)}</span>`
+  ).join("");
 }
 
-function newGameRow(game) {
-  const rawDate = game.collection?.acquisition_date;
-  const acquired = rawDate
-    ? new Date(rawDate).toLocaleDateString("it-IT", {year: "numeric", month: "short", day: "numeric"})
-    : "Data acquisizione non disponibile";
+function trophyGameCard(game, {compact = false} = {}) {
   const cover = game.bgg_metadata?.cover_url
     ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    : `<span>${escapeHtml(initials(game.title))}</span>`;
+    : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`;
+  const completedAt = game.progress?.completed_at
+    ? new Date(game.progress.completed_at + "T12:00:00").toLocaleDateString("it-IT", {
+        year: "numeric", month: "short", day: "numeric",
+      })
+    : null;
   return `
-    <a class="new-game-row" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
-      <span class="new-game-cover">${cover}</span>
-      <span class="new-game-body">
+    <a class="trophy-card ${compact ? "is-compact" : ""}"
+       href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+      <span class="trophy-crown" aria-hidden="true">♛</span>
+      <span class="trophy-cover">${cover}</span>
+      <span class="trophy-card-body">
         <strong>${escapeHtml(game.title)}</strong>
-        <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
-      </span>
-      <span class="new-game-date">
-        <small>Acquistato</small><strong>${escapeHtml(acquired)}</strong>
+        <small>${completedAt ? `Registrato il ${escapeHtml(completedAt)}` : "Completato"}</small>
+        <span class="trophy-achievements">${completionAchievementMarkup(game)}</span>
       </span>
     </a>
   `;
 }
 
-async function renderNewGames() {
+async function refreshAchievementShowcase() {
+  const showcase = document.querySelector("#achievementShowcase");
+  const grid = document.querySelector("#achievementShowcaseGrid");
+  if (!showcase || !grid) return;
+  try {
+    const payload = await api(
+      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=4&offset=0"
+    );
+    if (!showcase.isConnected || !grid.isConnected) return;
+    if (!payload.items.length) {
+      showcase.hidden = true;
+      return;
+    }
+    showcase.hidden = false;
+    grid.innerHTML = payload.items.map((game) => trophyGameCard(game, {compact: true})).join("");
+  } catch (_) {
+    showcase.hidden = true;
+  }
+}
+
+async function renderCompleted() {
   app.innerHTML = `
-    <section class="page-header browse-header">
+    <section class="trophy-hero">
       <div>
         <p class="eyebrow">La mia ludoteca</p>
-        <h1>Novità</h1>
-        <p class="page-lead">Gli acquisti più recenti della tua collezione, ordinati per data di acquisizione.</p>
+        <h1>Sala dei trofei</h1>
+        <p class="page-lead">
+          I giochi che hai portato fino in fondo. Nessun punteggio: solo traguardi personali.
+        </p>
       </div>
+      <span class="trophy-hero-mark" aria-hidden="true">♛</span>
     </section>
-    <section class="browse-panel" id="newGamesContent">${skeletons()}</section>
+    <section class="trophy-wall" id="trophyWall">${skeletons()}</section>
   `;
   try {
-    const params = new URLSearchParams({
-      owned: "true",
-      item_type: "standalone",
-      sort: "acquired_desc",
-      limit: "100",
-      offset: "0",
-    });
-    const catalog = await api(`/api/games?${params}`);
-    document.querySelector("#newGamesContent").innerHTML = catalog.items.length
-      ? `<div class="new-game-list">${catalog.items.map(newGameRow).join("")}</div>`
-      : '<div class="empty">Nessun gioco posseduto.</div>';
-    document.title = "Novità · BoardGameCompanion";
+    const payload = await api(
+      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=250&offset=0"
+    );
+    const target = document.querySelector("#trophyWall");
+    if (!target) return;
+    target.innerHTML = payload.items.length
+      ? payload.items.map((game) => trophyGameCard(game)).join("")
+      : `<div class="empty trophy-empty">
+          <strong>La Sala dei trofei è ancora vuota.</strong>
+          <span>Apri la scheda di un gioco e usa “Segna completato” quando vuoi esporlo qui.</span>
+        </div>`;
+    document.title = "Completati · BoardGameCompanion";
   } catch (error) {
-    document.querySelector("#newGamesContent").innerHTML =
+    document.querySelector("#trophyWall").innerHTML =
       `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
@@ -4375,13 +4413,12 @@ async function route() {
     await renderRankings();
     return;
   }
-  if (/^\/play-next\/?$/.test(window.location.pathname)) {
-    await renderPlayNext();
+  if (/^\/completed\/?$/.test(window.location.pathname)) {
+    await renderCompleted();
     return;
   }
-  if (/^\/new\/?$/.test(window.location.pathname)) {
-    await renderNewGames();
-    return;
+  if (/^\/play-next\/?$/.test(window.location.pathname) || /^\/new\/?$/.test(window.location.pathname)) {
+    history.replaceState({}, "", "/");
   }
   if (/^\/explore\/?$/.test(window.location.pathname)) {
     await renderExplore();
