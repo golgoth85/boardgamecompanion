@@ -23,7 +23,16 @@ def test_import_is_idempotent(tmp_path: Path) -> None:
     assert second.unchanged_count == 2
 
     stats = Catalog(database).stats()
-    assert stats == {"total": 2, "standalone": 1, "expansions": 1, "owned": 2}
+    assert stats == {
+        "total": 2,
+        "standalone": 1,
+        "expansions": 1,
+        "owned": 2,
+        "standalone_owned": 1,
+        "expansions_owned": 1,
+        "completed": 0,
+        "rulebooks": 0,
+    }
 
 
 def test_catalog_preserves_bgg_and_collection_fields(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -247,6 +248,14 @@ class PhysicalCopyPayload(BaseModel):
 
 class BarcodeLookupRequest(BaseModel):
     barcode: str = Field(min_length=1, max_length=128)
+
+
+class GameCompletionPayload(BaseModel):
+    completed: bool
+    completed_at: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    )
 
 
 class CatalogAssistantPayload(BaseModel):
@@ -536,6 +545,11 @@ def web_new() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/completed", include_in_schema=False)
+def web_completed() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -607,6 +621,7 @@ def list_games(
     min_rating: float | None = Query(default=None, ge=0, le=10),
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
+    completed: bool | None = Query(default=None),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0),
@@ -625,6 +640,7 @@ def list_games(
         min_rating=min_rating,
         category=category,
         mechanic=mechanic,
+        completed=completed,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
@@ -635,13 +651,11 @@ def list_games(
 def catalog_rankings(
     mode: Literal[
         "overall",
-        "hidden_gems",
+        "outside_top",
         "quality_time",
         "gateway",
         "expert",
         "safe_choice",
-        "neglected",
-        "most_played",
         "personal_favorites",
     ] = Query(default="overall"),
     category: str | None = Query(default=None, min_length=1, max_length=500),
@@ -725,6 +739,50 @@ def get_game(bgg_id: int) -> dict[str, object]:
         cached_translation["translated_text"] if cached_translation else None
     )
     return game
+
+
+@app.put("/api/games/{bgg_id}/completion", tags=["catalog"])
+def update_game_completion(
+    bgg_id: int,
+    payload: GameCompletionPayload,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    now = datetime.now(UTC).isoformat()
+    with database.transaction(immediate=True) as connection:
+        row = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=?",
+            (bgg_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Board game not found")
+        board_game_id = int(row["id"])
+        if payload.completed:
+            completed_at = payload.completed_at or datetime.now(UTC).date().isoformat()
+            connection.execute(
+                """
+                INSERT INTO game_progress(
+                    board_game_id,completed_at,created_at,updated_at
+                ) VALUES(?,?,?,?)
+                ON CONFLICT(board_game_id) DO UPDATE SET
+                    completed_at=excluded.completed_at,
+                    updated_at=excluded.updated_at
+                """,
+                (board_game_id, completed_at, now, now),
+            )
+        else:
+            connection.execute(
+                "DELETE FROM game_progress WHERE board_game_id=?",
+                (board_game_id,),
+            )
+
+    game = Catalog(database).get_game(bgg_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Board game not found")
+    return {
+        "bgg_id": bgg_id,
+        "progress": game["progress"],
+    }
 
 
 @app.get("/api/games/{bgg_id}/description-it", tags=["catalog"])

@@ -1262,6 +1262,35 @@ def _bgg_collection_sync_state(connection: sqlite3.Connection) -> None:
     )
 
 
+def _personal_collection_progress(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(collection_entries)").fetchall()
+    }
+    if "first_seen_at" not in columns:
+        connection.execute(
+            "ALTER TABLE collection_entries ADD COLUMN first_seen_at TEXT"
+        )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_progress (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            completed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_progress_completed
+        ON game_progress(completed_at)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1277,6 +1306,7 @@ MIGRATIONS = (
     Migration(12, "discovery-dedup-and-rate-limits", _discovery_dedup_and_rate_limits),
     Migration(13, "description-translations", _description_translations),
     Migration(14, "bgg-collection-sync-state", _bgg_collection_sync_state),
+    Migration(15, "personal-collection-progress", _personal_collection_progress),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

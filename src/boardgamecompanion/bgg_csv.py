@@ -255,11 +255,12 @@ class BggCsvImporter:
         )
 
         if existing_entry is None:
-            columns = ", ".join(collection_values)
-            placeholders = ", ".join("?" for _ in collection_values)
+            inserted_collection = {**collection_values, "first_seen_at": now}
+            columns = ", ".join(inserted_collection)
+            placeholders = ", ".join("?" for _ in inserted_collection)
             cursor = connection.execute(
                 f"INSERT INTO collection_entries ({columns}, created_at, updated_at) VALUES ({placeholders}, ?, ?)",
-                (*collection_values.values(), now, now),
+                (*inserted_collection.values(), now, now),
             )
             ensure_physical_copies_for_collection_entry(
                 connection,

@@ -106,6 +106,9 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
                 """,
                 (ids[900002],),
             )
+            connection.execute(
+                "UPDATE board_games SET bgg_rank=1200,bgg_bayes_average=7.2 WHERE bgg_id=900002"
+            )
             for bgg_id, metadata in (
                 (
                     900001,
@@ -145,18 +148,21 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
         overall = client.get("/api/catalog/rankings", params={"mode": "overall"})
         assert overall.status_code == 200
         assert overall.json()["mode"] == "overall"
-        assert overall.json()["items"][0]["game"]["bgg_id"] == 900001
         assert overall.json()["items"][0]["score"] > 0
         assert overall.json()["items"][0]["reason"]
+        assert [
+            item["score"] for item in overall.json()["items"]
+        ] == sorted(
+            [item["score"] for item in overall.json()["items"]],
+            reverse=True,
+        )
 
         for mode in (
-            "hidden_gems",
+            "outside_top",
             "quality_time",
             "gateway",
             "expert",
             "safe_choice",
-            "neglected",
-            "most_played",
             "personal_favorites",
         ):
             ranked = client.get("/api/catalog/rankings", params={"mode": mode})
@@ -171,6 +177,19 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
         )
         assert personal.status_code == 200
         assert personal.json()["items"][0]["game"]["bgg_id"] == 900002
+
+        outside = client.get(
+            "/api/catalog/rankings",
+            params={"mode": "outside_top"},
+        )
+        assert outside.status_code == 200
+        assert outside.json()["title"] == "Fuori dalla Top 500"
+        assert outside.json()["items"]
+        assert all(
+            int(item["game"]["bgg"]["rank"] or 0) > 500
+            for item in outside.json()["items"]
+        )
+        assert all("rarità" not in item["reason"].casefold() for item in outside.json()["items"])
 
         fantasy = client.get(
             "/api/catalog/rankings",
@@ -190,6 +209,49 @@ def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None
         assert newest.status_code == 200
         assert newest.json()["items"][0]["bgg_id"] == 900002
         assert newest.json()["items"][0]["collection"]["acquisition_date"] == "2026-10-01"
+
+        completed = client.put(
+            "/api/games/900001/completion",
+            json={"completed": True, "completed_at": "2026-09-30"},
+        )
+        assert completed.status_code == 200
+        assert completed.json()["progress"] == {
+            "completed": True,
+            "completed_at": "2026-09-30",
+        }
+
+        trophy = client.get(
+            "/api/games",
+            params={
+                "owned": "true",
+                "item_type": "standalone",
+                "completed": "true",
+                "sort": "completed_desc",
+            },
+        )
+        assert trophy.status_code == 200
+        assert [item["bgg_id"] for item in trophy.json()["items"]] == [900001]
+        assert trophy.json()["items"][0]["progress"]["completed_at"] == "2026-09-30"
+
+        stats = client.get("/api/catalog/stats")
+        assert stats.status_code == 200
+        assert stats.json()["completed"] == 1
+        assert stats.json()["standalone_owned"] >= 1
+        assert stats.json()["expansions_owned"] >= 0
+        assert "rulebooks" in stats.json()
+
+        uncompleted = client.put(
+            "/api/games/900001/completion",
+            json={"completed": False},
+        )
+        assert uncompleted.status_code == 200
+        assert uncompleted.json()["progress"] == {
+            "completed": False,
+            "completed_at": None,
+        }
+        trophy_after = client.get("/api/games", params={"completed": "true"})
+        assert trophy_after.status_code == 200
+        assert trophy_after.json()["items"] == []
 
 
 def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: Path) -> None:

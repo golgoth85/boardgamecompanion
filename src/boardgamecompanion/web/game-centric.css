@@ -166,3 +166,108 @@
 
 @media(max-width:900px){.rankings-layout{grid-template-columns:1fr}.ranking-filter-panel{position:static;grid-row:1;max-height:none}.ranking-filter-panel{grid-template-columns:repeat(2,minmax(0,1fr))}.ranking-filter-head,.ranking-filter-intro,.ranking-reset-filters{grid-column:1/-1}}
 @media(max-width:640px){.rankings-header{align-items:stretch}.ranking-result-count{align-self:flex-start}.ranking-groups{display:grid;grid-template-columns:1fr 1fr}.ranking-group-button{min-width:0}.ranking-result-row{grid-template-columns:2rem 3.1rem minmax(0,1fr)}.ranking-result-cover{width:3.1rem;height:3.1rem}.ranking-result-score{grid-column:3;justify-self:start;display:inline-grid;grid-template-columns:auto auto;align-items:center;gap:.28rem;padding:.24rem .38rem}.ranking-result-score small{font-size:.48rem}.ranking-filter-panel{grid-template-columns:1fr}.ranking-filter-head,.ranking-filter-intro,.ranking-reset-filters{grid-column:auto}.new-game-row{grid-template-columns:3.2rem minmax(0,1fr)}.new-game-date{grid-column:2;justify-items:start;min-width:0}}
+
+
+/* Personal progress and trophy room */
+.nav-completed .nav-icon{font-size:.92rem}
+.completion-button{min-width:8.8rem}
+.completion-button.is-completed{
+  border:1px solid rgba(232,191,93,.5);
+  color:#f5df9a;
+  background:linear-gradient(135deg,rgba(232,191,93,.16),rgba(232,191,93,.05));
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.025);
+}
+.trophy-hero{
+  position:relative;display:flex;align-items:center;justify-content:space-between;gap:1.4rem;
+  overflow:hidden;margin-bottom:1rem;padding:1.35rem 1.45rem;border:1px solid rgba(232,191,93,.24);
+  border-radius:18px;background:
+    radial-gradient(circle at 90% 10%,rgba(232,191,93,.12),transparent 34%),
+    linear-gradient(135deg,rgba(18,24,38,.9),rgba(11,15,23,.72));
+}
+.trophy-hero h1{margin:.08rem 0 .3rem;font-size:clamp(1.65rem,3vw,2.35rem)}
+.trophy-hero .page-lead{max-width:50rem;margin:0}
+.trophy-hero-mark{
+  flex:0 0 auto;display:grid;width:5.4rem;height:5.4rem;place-items:center;
+  border:1px solid rgba(232,191,93,.25);border-radius:50%;
+  color:#f4d982;background:rgba(232,191,93,.07);font-size:2.25rem;
+  box-shadow:0 18px 50px rgba(0,0,0,.24),inset 0 0 24px rgba(232,191,93,.05)
+}
+.trophy-wall{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:.85rem;
+}
+.trophy-card{
+  position:relative;display:grid;grid-template-rows:auto 1fr;min-width:0;overflow:hidden;
+  border:1px solid rgba(232,191,93,.16);border-radius:15px;color:var(--text);
+  background:linear-gradient(180deg,rgba(24,30,44,.88),rgba(13,18,28,.82));
+  text-decoration:none;box-shadow:0 14px 34px rgba(0,0,0,.16);
+  transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease;
+}
+.trophy-card:hover{
+  transform:translateY(-2px);border-color:rgba(232,191,93,.42);
+  box-shadow:0 18px 42px rgba(0,0,0,.24);
+}
+.trophy-crown{
+  position:absolute;z-index:2;top:.55rem;right:.55rem;display:grid;width:2rem;height:2rem;
+  place-items:center;border:1px solid rgba(232,191,93,.42);border-radius:999px;
+  color:#f4d982;background:rgba(12,16,25,.82);font-size:.9rem;
+  backdrop-filter:blur(7px)
+}
+.trophy-cover{display:grid;aspect-ratio:3/4;overflow:hidden;background:rgba(73,190,132,.06)}
+.trophy-cover img{width:100%;height:100%;object-fit:cover}
+.trophy-cover-fallback{align-self:center;justify-self:center;color:#9fb0c7;font-size:1.5rem;font-weight:900}
+.trophy-card-body{display:grid;gap:.32rem;padding:.72rem .75rem .78rem}
+.trophy-card-body>strong{overflow:hidden;font-size:.82rem;text-overflow:ellipsis;white-space:nowrap}
+.trophy-card-body>small{color:var(--muted);font-size:.58rem}
+.trophy-achievements{display:flex;gap:.28rem;flex-wrap:wrap;margin-top:.1rem}
+.trophy-achievement{
+  display:inline-flex;align-items:center;gap:.23rem;padding:.22rem .34rem;
+  border:1px solid rgba(232,191,93,.18);border-radius:999px;color:#d8c891;
+  background:rgba(232,191,93,.055);font-size:.52rem;font-weight:800
+}
+.trophy-achievement i{font-style:normal;color:#f4d982}
+.trophy-empty{grid-column:1/-1;display:grid;gap:.28rem;justify-items:start}
+.trophy-empty strong{font-size:.85rem}.trophy-empty span{color:var(--muted);font-size:.68rem}
+
+.achievement-showcase{
+  margin:.8rem 0 1rem;padding:.82rem;border:1px solid rgba(232,191,93,.14);
+  border-radius:15px;background:linear-gradient(135deg,rgba(232,191,93,.04),rgba(18,24,38,.42));
+}
+.achievement-showcase-head{
+  display:flex;align-items:center;justify-content:space-between;gap:.8rem;margin-bottom:.65rem
+}
+.achievement-showcase-head h2{margin:.05rem 0 0;font-size:1rem}
+.achievement-showcase-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem}
+.trophy-card.is-compact{grid-template-columns:3.2rem minmax(0,1fr);grid-template-rows:1fr;min-height:4.25rem}
+.trophy-card.is-compact .trophy-cover{width:3.2rem;height:100%;min-height:4.25rem;aspect-ratio:auto}
+.trophy-card.is-compact .trophy-card-body{align-content:center;padding:.5rem .58rem}
+.trophy-card.is-compact .trophy-crown{display:none}
+.trophy-card.is-compact .trophy-achievements{display:none}
+
+.ranking-result-row.is-podium{
+  min-height:5.7rem;border-color:rgba(232,191,93,.2);
+  background:linear-gradient(90deg,rgba(232,191,93,.055),rgba(18,24,38,.52));
+}
+.ranking-result-row.is-podium .ranking-result-cover{width:4rem;height:4rem}
+.ranking-result-row.podium-1{
+  border-color:rgba(232,191,93,.34);
+  box-shadow:0 12px 30px rgba(0,0,0,.13)
+}
+.ranking-result-row.podium-1 .ranking-result-position{color:#f4d982;font-size:.82rem}
+.ranking-result-row.podium-2 .ranking-result-position,
+.ranking-result-row.podium-3 .ranking-result-position{color:#c8ced8}
+.ranking-result-row.is-podium .ranking-result-score{
+  border-color:rgba(232,191,93,.14);background:rgba(232,191,93,.035)
+}
+.ranking-result-row.is-podium .ranking-result-score strong{color:#e9e0c2}
+
+@media(max-width:900px){
+  .achievement-showcase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .trophy-hero{align-items:flex-start;padding:1rem}
+  .trophy-hero-mark{width:3.6rem;height:3.6rem;font-size:1.45rem}
+  .trophy-wall{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
+  .trophy-card-body{padding:.58rem}
+  .achievement-showcase-grid{grid-template-columns:1fr}
+  .ranking-result-row.is-podium .ranking-result-cover{width:3.35rem;height:3.35rem}
+}
