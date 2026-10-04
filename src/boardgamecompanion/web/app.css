@@ -2736,9 +2736,9 @@ a { color: inherit; text-decoration: none; }
   .catalog-list-row {
     grid-template-columns: minmax(230px, 2fr) repeat(3, minmax(66px, .55fr)) 70px 62px;
   }
-  .catalog-list-head span:nth-child(5),
+  .catalog-list-head .catalog-sort-button:nth-child(5),
   .catalog-list-row .list-stat:nth-of-type(4),
-  .catalog-list-head span:nth-child(6),
+  .catalog-list-head .catalog-sort-button:nth-child(6),
   .catalog-list-row .list-stat:nth-of-type(5) {
     display: none;
   }
