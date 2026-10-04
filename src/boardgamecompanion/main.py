@@ -64,6 +64,10 @@ from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
 )
+from boardgamecompanion.gameplay_summary import (
+    GameplaySummaryError,
+    GameplaySummaryService,
+)
 from boardgamecompanion.documents import (
     BoardGameDocumentNotFound,
     DocumentError,
@@ -260,6 +264,10 @@ class GameCompletionPayload(BaseModel):
 
 class CatalogAssistantPayload(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
+
+
+class GameplaySummaryBatchPayload(BaseModel):
+    bgg_ids: list[int] = Field(min_length=1, max_length=8)
 
 
 class BggSettingsUpdate(BaseModel):
@@ -676,6 +684,18 @@ def catalog_rankings(
         weight=weight,
         limit=limit,
     )
+
+
+@app.post("/api/catalog/gameplay-summaries/ensure", tags=["catalog"])
+def ensure_gameplay_summaries(
+    payload: GameplaySummaryBatchPayload,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return GameplaySummaryService(database).ensure_many(payload.bgg_ids)
+    except GameplaySummaryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/catalog/explore", tags=["catalog"])
