@@ -1053,7 +1053,13 @@ class Catalog:
                 """
             ).fetchone()
             completed = connection.execute(
-                "SELECT COUNT(*) AS count FROM game_progress WHERE completed_at IS NOT NULL"
+                """
+                SELECT COUNT(*) AS count
+                FROM game_progress p
+                JOIN board_games g ON g.id = p.board_game_id
+                WHERE p.completed_at IS NOT NULL
+                  AND COALESCE(g.item_type,'standalone') != 'expansion'
+                """
             ).fetchone()["count"]
             rulebooks = connection.execute(
                 """
