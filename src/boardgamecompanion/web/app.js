@@ -237,7 +237,6 @@ function bindCatalogSortHeaders() {
 let searchTimer;
 let catalogRequestController;
 let currentCatalogData = null;
-let currentCatalogStats = null;
 let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
@@ -1622,6 +1621,7 @@ function rerenderCurrentCatalog() {
 }
 
 async function renderCatalog() {
+  currentCatalogData = null;
   const activeFacet = state.category
     ? `Genere: ${state.category}`
     : state.mechanic
@@ -1771,7 +1771,6 @@ async function renderCatalog() {
       loadCatalogData(),
     ]);
     if (window.location.pathname !== requestedPath) return;
-    currentCatalogStats = stats;
     renderStats(stats);
     renderCatalogData(catalog);
     backfillMissingMetadata();
@@ -3830,6 +3829,7 @@ function bindExploreControls() {
 }
 
 async function renderExplore(initialTab = null) {
+  currentExplorePayload = null;
   if (initialTab === "category" || initialTab === "mechanic") {
     exploreState.activeTab = initialTab;
   }
