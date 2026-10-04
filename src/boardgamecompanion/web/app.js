@@ -3627,6 +3627,38 @@ function rankingModeButtons() {
   `).join("");
 }
 
+function rankingGameSummary(game) {
+  const categories = Array.isArray(game.bgg_metadata?.categories)
+    ? game.bgg_metadata.categories.filter(Boolean).slice(0, 2)
+    : [];
+  const mechanics = Array.isArray(game.bgg_metadata?.mechanics)
+    ? game.bgg_metadata.mechanics.filter(Boolean).slice(0, 2)
+    : [];
+
+  const weight = Number(game.bgg?.average_weight);
+  let complexity = "";
+  if (Number.isFinite(weight) && weight > 0) {
+    if (weight <= 1.8) complexity = "molto accessibile";
+    else if (weight <= 2.6) complexity = "complessità leggera";
+    else if (weight <= 3.4) complexity = "complessità media";
+    else if (weight <= 4.1) complexity = "impegnativo";
+    else complexity = "molto impegnativo";
+  }
+
+  const parts = [];
+  if (categories.length) parts.push(categories.join(" / "));
+  if (mechanics.length) parts.push(mechanics.join(" + "));
+  if (complexity) parts.push(complexity);
+
+  if (!parts.length) {
+    const fallback = [];
+    if (playerText(game) !== "—") fallback.push(`${playerText(game)} giocatori`);
+    if (timeText(game) !== "—") fallback.push(timeText(game));
+    return fallback.join(" · ") || "Caratteristiche non ancora disponibili";
+  }
+  return parts.join(" · ");
+}
+
 function rankingGameRow(item, index) {
   const game = item.game;
   const cover = game.bgg_metadata?.cover_url
@@ -3647,10 +3679,10 @@ function rankingGameRow(item, index) {
           <strong>${escapeHtml(game.title)}</strong>
           <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}</small>
         </span>
-        <span class="ranking-result-reason">${escapeHtml(item.reason || "")}</span>
+        <span class="ranking-result-summary">${escapeHtml(rankingGameSummary(game))}</span>
         <span class="ranking-result-factors">${factors}</span>
       </span>
-      <span class="ranking-result-score">
+      <span class="ranking-result-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">
         <strong>${formatNumber(item.score, 1)}</strong>
         <small>score</small>
       </span>
