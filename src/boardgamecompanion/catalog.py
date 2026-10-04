@@ -404,73 +404,39 @@ class Catalog:
         min_rating: float | None = None,
         limit: int = 250,
     ) -> dict[str, Any]:
-        selected_categories = [str(value).strip() for value in (categories or []) if str(value).strip()]
-        selected_mechanics = [str(value).strip() for value in (mechanics or []) if str(value).strip()]
+        selected_categories = [
+            str(value).strip()
+            for value in (categories or [])
+            if str(value).strip()
+        ]
+        selected_mechanics = [
+            str(value).strip()
+            for value in (mechanics or [])
+            if str(value).strip()
+        ]
         wanted_categories = {value.casefold() for value in selected_categories}
         wanted_mechanics = {value.casefold() for value in selected_mechanics}
-
-        where = [
-            "COALESCE(c.own,0)=1",
-            "COALESCE(g.item_type,'standalone') != 'expansion'",
-        ]
-        params: list[Any] = []
-        if supports_players is not None:
-            where.append(
-                "g.min_players IS NOT NULL AND g.max_players IS NOT NULL "
-                "AND g.min_players <= ? AND g.max_players >= ?"
-            )
-            params.extend([supports_players, supports_players])
-        if player_age is not None:
-            where.append(
-                "g.bgg_recommended_age IS NOT NULL "
-                "AND CAST(g.bgg_recommended_age AS INTEGER) > 0 "
-                "AND CAST(g.bgg_recommended_age AS INTEGER) <= ?"
-            )
-            params.append(player_age)
-        if weight == "light":
-            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight <= 2.30")
-        elif weight == "medium":
-            where.append(
-                "g.bgg_average_weight IS NOT NULL "
-                "AND g.bgg_average_weight > 2.30 AND g.bgg_average_weight <= 3.50"
-            )
-        elif weight == "heavy":
-            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight > 3.50")
-        if max_minutes is not None:
-            where.append(
-                "COALESCE(g.max_play_time, g.playing_time, g.min_play_time) IS NOT NULL "
-                "AND COALESCE(g.max_play_time, g.playing_time, g.min_play_time) <= ?"
-            )
-            params.append(max_minutes)
-        if min_rating is not None:
-            where.append("g.bgg_average IS NOT NULL AND g.bgg_average >= ?")
-            params.append(min_rating)
 
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
                 {self._select_sql()}
                 {self._from_sql()}
-                WHERE {' AND '.join(where)}
+                WHERE COALESCE(c.own,0)=1
+                  AND COALESCE(g.item_type,'standalone') != 'expansion'
                 ORDER BY
                     g.bgg_average IS NULL,
                     g.bgg_average DESC,
                     g.title COLLATE NOCASE,
                     g.bgg_id
-                """,
-                params,
+                """
             ).fetchall()
 
-        # Multiple physical copies must not inflate facet counts.
+        # Multiple physical copies must not inflate either result or facet counts.
         by_bgg_id: dict[int, Any] = {}
         for row in rows:
             by_bgg_id.setdefault(int(row["bgg_id"]), row)
         candidates = list(by_bgg_id.values())
-
-        if ideal_players is not None:
-            candidates = [
-                row for row in candidates if _ideal_players_match(row, ideal_players)
-            ]
 
         def row_facets(row, key: str) -> tuple[set[str], dict[str, str]]:
             metadata = _metadata_from_row(row)
@@ -478,8 +444,8 @@ class Catalog:
             canonical = {value.casefold(): value for value in values}
             return set(canonical), canonical
 
-        matched: list[Any] = []
         row_metadata: dict[int, tuple[dict[str, str], dict[str, str]]] = {}
+        faceted: list[Any] = []
         for row in candidates:
             category_keys, category_names = row_facets(row, "categories")
             mechanic_keys, mechanic_names = row_facets(row, "mechanics")
@@ -487,8 +453,87 @@ class Catalog:
                 continue
             if not wanted_mechanics.issubset(mechanic_keys):
                 continue
-            matched.append(row)
+            faceted.append(row)
             row_metadata[int(row["bgg_id"])] = (category_names, mechanic_names)
+
+        def recommended_age(row) -> int | None:
+            raw = str(row["bgg_recommended_age"] or "").strip()
+            match = re.search(r"\d{1,2}", raw)
+            value = int(match.group(0)) if match else 0
+            return value if value > 0 else None
+
+        def play_minutes(row) -> int | None:
+            raw = row["max_play_time"]
+            if raw is None:
+                raw = row["playing_time"]
+            if raw is None:
+                raw = row["min_play_time"]
+            try:
+                value = int(raw) if raw is not None else 0
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+
+        def supports_count(row, player_count: int) -> bool:
+            minimum = row["min_players"]
+            maximum = row["max_players"]
+            if minimum is None or maximum is None:
+                return False
+            if player_count >= 6:
+                return int(maximum) >= 6
+            return int(minimum) <= player_count <= int(maximum)
+
+        def ideal_count(row, player_count: int) -> bool:
+            if player_count >= 6:
+                return any(_ideal_players_match(row, value) for value in range(6, 31))
+            return _ideal_players_match(row, player_count)
+
+        def optional_match(row, key: str, value: Any) -> bool:
+            if key == "supports_players":
+                return supports_count(row, int(value))
+            if key == "ideal_players":
+                return ideal_count(row, int(value))
+            if key == "player_age":
+                age = recommended_age(row)
+                return age is not None and age <= int(value)
+            if key == "weight":
+                raw = row["bgg_average_weight"]
+                if raw is None:
+                    return False
+                numeric = float(raw)
+                if value == "light":
+                    return numeric <= 2.30
+                if value == "medium":
+                    return 2.30 < numeric <= 3.50
+                if value == "heavy":
+                    return numeric > 3.50
+                return True
+            if key == "max_minutes":
+                minutes = play_minutes(row)
+                return minutes is not None and minutes <= int(value)
+            if key == "min_rating":
+                raw = row["bgg_average"]
+                return raw is not None and float(raw) >= float(value)
+            return True
+
+        active_optional: dict[str, Any] = {
+            "supports_players": supports_players,
+            "ideal_players": ideal_players,
+            "player_age": player_age,
+            "weight": weight,
+            "max_minutes": max_minutes,
+            "min_rating": min_rating,
+        }
+
+        def matches_optional(row, *, skip: str | None = None) -> bool:
+            for key, value in active_optional.items():
+                if key == skip or value is None or value == "":
+                    continue
+                if not optional_match(row, key, value):
+                    return False
+            return True
+
+        matched = [row for row in faceted if matches_optional(row)]
 
         def build_facets(
             key_index: int,
@@ -530,6 +575,58 @@ class Catalog:
             )
             return items
 
+        option_specs: dict[str, list[tuple[Any, str]]] = {
+            "supports_players": [
+                (1, "1"), (2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6+"),
+            ],
+            "ideal_players": [
+                (1, "1"), (2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6+"),
+            ],
+            "player_age": [
+                (6, "6"), (8, "8"), (10, "10"), (12, "12"),
+                (14, "14"), (16, "16+"),
+            ],
+            "max_minutes": [
+                (30, "≤30"), (45, "≤45"), (60, "≤60"),
+                (90, "≤90"), (120, "≤120"), (180, "≤180"),
+            ],
+            "weight": [
+                ("light", "Semplice"),
+                ("medium", "Media"),
+                ("heavy", "Impegnativa"),
+            ],
+            "min_rating": [
+                (6.0, "6+"), (6.5, "6,5+"), (7.0, "7+"),
+                (7.5, "7,5+"), (8.0, "8+"), (8.5, "8,5+"),
+            ],
+        }
+
+        def contextual_options(key: str) -> list[dict[str, Any]]:
+            # Self-excluding facet calculation: other active filters stay in
+            # force, while this group is temporarily removed so valid
+            # alternatives remain visible.
+            source = [row for row in faceted if matches_optional(row, skip=key)]
+            current = active_optional[key]
+            items: list[dict[str, Any]] = []
+            for value, label in option_specs[key]:
+                count = sum(1 for row in source if optional_match(row, key, value))
+                selected = (
+                    str(current) == str(value)
+                    if current is not None and current != ""
+                    else False
+                )
+                if count <= 0 and not selected:
+                    continue
+                items.append(
+                    {
+                        "value": value,
+                        "label": label,
+                        "count": count,
+                        "selected": selected,
+                    }
+                )
+            return items
+
         capped = max(1, min(int(limit), 250))
         return {
             "total": len(matched),
@@ -540,12 +637,11 @@ class Catalog:
             "filters": {
                 "categories": selected_categories,
                 "mechanics": selected_mechanics,
-                "supports_players": supports_players,
-                "ideal_players": ideal_players,
-                "player_age": player_age,
-                "weight": weight,
-                "max_minutes": max_minutes,
-                "min_rating": min_rating,
+                **active_optional,
+            },
+            "options": {
+                key: contextual_options(key)
+                for key in option_specs
             },
         }
 
