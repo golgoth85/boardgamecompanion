@@ -697,7 +697,11 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
             '[data-explore-kind="mechanic"][data-explore-name="Hand Management"]'
         )
         expect(hand_management).to_have_count(0)
-        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+1)")
+        expect(dice).to_have_count(0)
+        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+2)")
+        page.locator("#exploreRareToggle").click()
+        expect(dice).to_be_visible()
+        expect(hand_management).to_be_visible()
         dice.click()
         expect(page.locator(".explore-selection-chip")).to_have_count(2)
         expect(page.locator("#exploreResultCount")).to_have_text(
