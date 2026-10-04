@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from collections import Counter
 from functools import lru_cache
@@ -46,8 +45,12 @@ SORT_SQL = {
     "weight_desc": "g.bgg_average_weight IS NULL, g.bgg_average_weight DESC, g.title COLLATE NOCASE ASC",
     "weight_asc": "g.bgg_average_weight IS NULL, g.bgg_average_weight ASC, g.title COLLATE NOCASE ASC",
     "acquired_desc": (
-        "c.acquisition_date IS NULL OR c.acquisition_date = '', "
-        "c.acquisition_date DESC, g.title COLLATE NOCASE ASC"
+        "COALESCE(NULLIF(c.acquisition_date,''),c.first_seen_at) IS NULL, "
+        "COALESCE(NULLIF(c.acquisition_date,''),c.first_seen_at) DESC, "
+        "g.title COLLATE NOCASE ASC"
+    ),
+    "completed_desc": (
+        "p.completed_at IS NULL, p.completed_at DESC, g.title COLLATE NOCASE ASC"
     ),
 }
 
@@ -133,6 +136,15 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
                 if "acquisition_date" in row.keys()
                 else None
             ),
+            "first_seen_at": (
+                row["first_seen_at"]
+                if "first_seen_at" in row.keys()
+                else None
+            ),
+        },
+        "progress": {
+            "completed": bool(row["completed_at"]) if "completed_at" in row.keys() else False,
+            "completed_at": row["completed_at"] if "completed_at" in row.keys() else None,
         },
     }
     if "cover_url" in row.keys():
@@ -203,6 +215,7 @@ class Catalog:
             FROM board_games g
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
             LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
+            LEFT JOIN game_progress p ON p.board_game_id = g.id
         """
 
     @staticmethod
@@ -214,7 +227,8 @@ class Catalog:
                    c.wishlist_priority, c.barcode, c.version_languages,
                    c.version_publishers, c.version_year_published,
                    c.version_nickname, c.inventory_location, c.quantity,
-                   c.acquisition_date,
+                   c.acquisition_date, c.first_seen_at,
+                   p.completed_at,
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
@@ -235,6 +249,7 @@ class Catalog:
         min_rating: float | None = None,
         category: str | None = None,
         mechanic: str | None = None,
+        completed: bool | None = None,
         sort: str = "title",
         limit: int = 50,
         offset: int = 0,
@@ -282,6 +297,8 @@ class Catalog:
         if min_rating is not None:
             where.append("g.bgg_average IS NOT NULL AND g.bgg_average >= ?")
             params.append(min_rating)
+        if completed is not None:
+            where.append("p.completed_at IS NOT NULL" if completed else "p.completed_at IS NULL")
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
@@ -723,9 +740,12 @@ class Catalog:
                 "title": "Migliori in assoluto",
                 "description": "Qualità BGG corretta con il Bayesian average quando disponibile.",
             },
-            "hidden_gems": {
-                "title": "Gemme nascoste",
-                "description": "Qualità alta premiando i giochi meno diffusi, senza favorire titoli mediocri.",
+            "outside_top": {
+                "title": "Fuori dalla Top 500",
+                "description": (
+                    "I migliori giochi della tua ludoteca oltre la posizione 500 BGG, "
+                    "ordinati per Bayesian average: criterio esplicito, non una stima di popolarità."
+                ),
             },
             "quality_time": {
                 "title": "Qualità / tempo",
@@ -742,14 +762,6 @@ class Catalog:
             "safe_choice": {
                 "title": "Scelta sicura",
                 "description": "Giochi affidabili, versatili e poco rischiosi quando non sai cosa scegliere.",
-            },
-            "neglected": {
-                "title": "Capolavori trascurati",
-                "description": "Ottimi giochi posseduti che hai giocato pochissimo o mai.",
-            },
-            "most_played": {
-                "title": "Più giocati",
-                "description": "Le tue abitudini reali, con la qualità usata solo come correttivo.",
             },
             "personal_favorites": {
                 "title": "Preferiti personali",
@@ -769,7 +781,6 @@ class Catalog:
                 """
             ).fetchall()
 
-        # Multiple physical copies must not produce duplicate ranking entries.
         unique: dict[int, Any] = {}
         for row in rows:
             unique.setdefault(int(row["bgg_id"]), row)
@@ -831,17 +842,11 @@ class Catalog:
         def facet_match(row) -> bool:
             metadata = _metadata_from_row(row)
             if wanted_category:
-                categories = {
-                    value.casefold()
-                    for value in _metadata_list(metadata, "categories")
-                }
+                categories = {value.casefold() for value in _metadata_list(metadata, "categories")}
                 if wanted_category not in categories:
                     return False
             if wanted_mechanic:
-                mechanics = {
-                    value.casefold()
-                    for value in _metadata_list(metadata, "mechanics")
-                }
+                mechanics = {value.casefold() for value in _metadata_list(metadata, "mechanics")}
                 if wanted_mechanic not in mechanics:
                     return False
             return True
@@ -869,32 +874,13 @@ class Catalog:
                     continue
             candidates.append(row)
 
-        max_owned_log = max(
-            [
-                math.log1p(max(0, int(row["bgg_num_owned"] or 0)))
-                for row in candidates
-            ]
-            or [1.0]
-        )
-        max_plays_log = max(
-            [
-                math.log1p(max(0, int(row["num_plays"] or 0)))
-                for row in candidates
-            ]
-            or [1.0]
-        )
-
         def calculate(row) -> tuple[float, str, list[str]] | None:
             q = quality(row)
-            plays = max(0, int(row["num_plays"] or 0))
-            user_rating = (
-                float(row["user_rating"])
-                if row["user_rating"] is not None
-                else None
-            )
+            user_rating = float(row["user_rating"]) if row["user_rating"] is not None else None
             raw_weight = row["bgg_average_weight"]
             weight_value = float(raw_weight) if raw_weight is not None else None
             duration = minutes(row)
+            rank = int(row["bgg_rank"] or 0)
             factors: list[str] = []
 
             if selected_mode == "overall":
@@ -904,14 +890,12 @@ class Catalog:
                 factors.append(f"qualità {q:.0f}/100")
                 reason = "Bayesian average BGG" if row["bgg_bayes_average"] else "rating BGG"
 
-            elif selected_mode == "hidden_gems":
-                if q < 65:
+            elif selected_mode == "outside_top":
+                if q < 60 or rank <= 500:
                     return None
-                owned_log = math.log1p(max(0, int(row["bgg_num_owned"] or 0)))
-                rarity = 100.0 * (1.0 - owned_log / max(max_owned_log, 1.0))
-                score = q * 0.84 + rarity * 0.16
-                factors.extend([f"qualità {q:.0f}", f"rarità {rarity:.0f}"])
-                reason = "qualità alta con diffusione relativamente contenuta"
+                score = q
+                factors.extend([f"qualità {q:.0f}", f"BGG #{rank}"])
+                reason = "qualità solida pur essendo fuori dalla Top 500 BGG"
 
             elif selected_mode == "quality_time":
                 if q <= 0 or duration is None:
@@ -926,12 +910,7 @@ class Catalog:
                     return None
                 access = accessibility_score(row)
                 score = q * 0.67 + access * 0.33
-                factors.extend(
-                    [
-                        f"qualità {q:.0f}",
-                        f"accessibilità {access:.0f}",
-                    ]
-                )
+                factors.extend([f"qualità {q:.0f}", f"accessibilità {access:.0f}"])
                 reason = "buon equilibrio tra qualità, semplicità, durata e versatilità"
 
             elif selected_mode == "expert":
@@ -956,26 +935,6 @@ class Catalog:
                 factors.extend([f"qualità {q:.0f}", f"versatilità {versatility:.0f}"])
                 reason = "qualità solida e buona adattabilità a tavoli diversi"
 
-            elif selected_mode == "neglected":
-                if q <= 0 or plays > 3:
-                    return None
-                neglect = {0: 100.0, 1: 85.0, 2: 70.0, 3: 55.0}.get(plays, 40.0)
-                if bool(row["want_to_play"]):
-                    neglect = min(100.0, neglect + 8.0)
-                score = q * 0.84 + neglect * 0.16
-                factors.extend([f"qualità {q:.0f}", f"{plays} partite"])
-                reason = "ottimo potenziale ma quasi mai arrivato al tavolo"
-
-            elif selected_mode == "most_played":
-                if plays <= 0:
-                    return None
-                play_score = (
-                    100.0 * math.log1p(plays) / max(max_plays_log, 1.0)
-                )
-                score = play_score * 0.78 + q * 0.22
-                factors.extend([f"{plays} partite", f"qualità {q:.0f}"])
-                reason = "frequenza di gioco reale, corretta per la qualità"
-
             elif selected_mode == "personal_favorites":
                 if user_rating is None or user_rating <= 0:
                     return None
@@ -991,7 +950,7 @@ class Catalog:
                 factors.append(f"ideale in {ideal_players}")
             if weight_value is not None:
                 factors.append(f"peso {weight_value:.1f}")
-            if duration is not None and selected_mode not in {"quality_time"}:
+            if duration is not None and selected_mode != "quality_time":
                 factors.append(f"{duration} min")
             return max(0.0, min(100.0, score)), reason, factors[:4]
 
@@ -1081,9 +1040,36 @@ class Catalog:
             owned = connection.execute(
                 "SELECT COUNT(*) AS count FROM collection_entries WHERE own = 1"
             ).fetchone()["count"]
+            owned_types = connection.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN COALESCE(g.item_type,'standalone') != 'expansion' THEN 1 ELSE 0 END)
+                        AS standalone_owned,
+                    SUM(CASE WHEN g.item_type = 'expansion' THEN 1 ELSE 0 END)
+                        AS expansions_owned
+                FROM collection_entries c
+                JOIN board_games g ON g.id = c.board_game_id
+                WHERE c.own = 1
+                """
+            ).fetchone()
+            completed = connection.execute(
+                "SELECT COUNT(*) AS count FROM game_progress WHERE completed_at IS NOT NULL"
+            ).fetchone()["count"]
+            rulebooks = connection.execute(
+                """
+                SELECT COUNT(DISTINCT board_game_id) AS count
+                FROM game_documents
+                WHERE document_type='rulebook'
+                """
+            ).fetchone()["count"]
         return {
             "total": row["total"] or 0,
             "standalone": row["standalone"] or 0,
             "expansions": row["expansions"] or 0,
             "owned": owned or 0,
+            "standalone_owned": owned_types["standalone_owned"] or 0,
+            "expansions_owned": owned_types["expansions_owned"] or 0,
+            "completed": completed or 0,
+            "rulebooks": rulebooks or 0,
         }
+
