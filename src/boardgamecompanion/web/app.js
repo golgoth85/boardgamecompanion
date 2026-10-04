@@ -236,6 +236,7 @@ function bindCatalogSortHeaders() {
 
 let searchTimer;
 let catalogRequestController;
+let currentCatalogData = null;
 let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
@@ -289,6 +290,14 @@ function initials(title) {
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString("it-IT", { maximumFractionDigits: digits });
+}
+
+function runWhenIdle(callback, timeout = 1500) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(() => callback(), {timeout});
+    return;
+  }
+  window.setTimeout(callback, 250);
 }
 
 function playerText(game) {
@@ -1597,7 +1606,30 @@ function skeletons() {
   return Array.from({length: 12}, () => '<div class="skeleton"></div>').join("");
 }
 
+function syncCatalogViewControls() {
+  for (const [id, view] of [
+    ["cardViewButton", "cards"],
+    ["listViewButton", "list"],
+  ]) {
+    const button = document.querySelector(`#${id}`);
+    if (!button) continue;
+    const active = state.catalogView === view;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function rerenderCurrentCatalog() {
+  if (!currentCatalogData) {
+    void refreshCatalog();
+    return;
+  }
+  syncCatalogViewControls();
+  renderCatalogData(currentCatalogData);
+}
+
 async function renderCatalog() {
+  currentCatalogData = null;
   const activeFacet = state.category
     ? `Genere: ${state.category}`
     : state.mechanic
@@ -1741,20 +1773,36 @@ async function renderCatalog() {
   bindCatalogControls();
   const requestedPath = window.location.pathname;
 
+  catalogRequestController?.abort();
+  const controller = new AbortController();
+  catalogRequestController = controller;
   try {
     const [stats, catalog] = await Promise.all([
-      api("/api/catalog/stats"),
-      loadCatalogData(),
+      api("/api/catalog/stats", {signal: controller.signal}),
+      loadCatalogData(controller.signal),
     ]);
-    if (window.location.pathname !== requestedPath) return;
+    if (
+      controller.signal.aborted
+      || window.location.pathname !== requestedPath
+    ) return;
     renderStats(stats);
     renderCatalogData(catalog);
-    backfillMissingMetadata();
-    checkBggCollectionSyncOnOpen();
+    runWhenIdle(() => {
+      void backfillMissingMetadata();
+      void checkBggCollectionSyncOnOpen();
+    });
   } catch (error) {
-    document.querySelector("#catalogGrid").innerHTML =
-      `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
+    if (error.name === "AbortError") return;
+    const grid = document.querySelector("#catalogGrid");
+    if (grid) {
+      grid.innerHTML =
+        `<div class="empty catalog-empty">Impossibile caricare il catalogo: ${escapeHtml(error.message)}</div>`;
+    }
     showToast(error.message, true);
+  } finally {
+    if (catalogRequestController === controller) {
+      catalogRequestController = undefined;
+    }
   }
 }
 
@@ -1785,16 +1833,28 @@ function bindCatalogControls() {
   }
 
   document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
-    for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) state[key] = "";
+    for (const [id, key] of [
+      ["supportsPlayers", "supportsPlayers"],
+      ["idealPlayers", "idealPlayers"],
+      ["playerAge", "playerAge"],
+      ["weightFilter", "weight"],
+      ["maxMinutes", "maxMinutes"],
+      ["minRating", "minRating"],
+    ]) {
+      state[key] = "";
+      const control = document.querySelector(`#${id}`);
+      if (control) control.value = "";
+    }
     state.offset = 0;
-    renderCatalog();
+    refreshCatalog();
   });
 
-  document.querySelector("#clearFacet")?.addEventListener("click", () => {
+  document.querySelector("#clearFacet")?.addEventListener("click", (event) => {
     state.category = "";
     state.mechanic = "";
     state.offset = 0;
-    renderCatalog();
+    event.currentTarget.remove();
+    refreshCatalog();
   });
 
   document.querySelector("#catalogAssistantHome")?.addEventListener("click", () => {
@@ -1809,20 +1869,20 @@ function bindCatalogControls() {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
     window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
-    refreshCatalog();
+    rerenderCurrentCatalog();
   });
 
   document.querySelector("#cardViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "cards") return;
     state.catalogView = "cards";
     window.localStorage.setItem("bgc.catalogView", "cards");
-    renderCatalog();
+    rerenderCurrentCatalog();
   });
   document.querySelector("#listViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "list") return;
     state.catalogView = "list";
     window.localStorage.setItem("bgc.catalogView", "list");
-    renderCatalog();
+    rerenderCurrentCatalog();
   });
 }
 
@@ -1952,8 +2012,10 @@ async function refreshCatalog() {
   const controller = new AbortController();
   catalogRequestController = controller;
 
-  grid.innerHTML = skeletons();
-  count.textContent = "Caricamento…";
+  grid.classList.add("is-refreshing");
+  grid.setAttribute("aria-busy", "true");
+  count.textContent = currentCatalogData ? "Aggiornamento…" : "Caricamento…";
+  if (!currentCatalogData) grid.innerHTML = skeletons();
   try {
     const catalog = await loadCatalogData(controller.signal);
     if (controller.signal.aborted || !document.querySelector("#catalogGrid")) return;
@@ -1967,6 +2029,9 @@ async function refreshCatalog() {
   } finally {
     if (catalogRequestController === controller) {
       catalogRequestController = undefined;
+      const liveGrid = document.querySelector("#catalogGrid");
+      liveGrid?.classList.remove("is-refreshing");
+      liveGrid?.removeAttribute("aria-busy");
     }
   }
 }
@@ -1974,10 +2039,14 @@ async function refreshCatalog() {
 async function backfillMissingMetadata() {
   if (navigator.webdriver || metadataBackfillRunning || window.location.pathname !== "/") return;
   metadataBackfillRunning = true;
+  let updatedAny = false;
   try {
     for (let batch = 0; batch < 10 && window.location.pathname === "/"; batch += 1) {
       const result = await api("/api/catalog/bgg-metadata/refresh-missing?limit=20", {method: "POST"});
+      updatedAny = updatedAny || Boolean(result.updated);
       if (!result.updated || !result.remaining) break;
+    }
+    if (updatedAny && window.location.pathname === "/") {
       await refreshCatalog();
     }
   } catch (_) {
@@ -2000,6 +2069,7 @@ function renderStats(stats) {
 }
 
 function renderCatalogData(catalog) {
+  currentCatalogData = catalog;
   state.total = catalog.total;
   const grid = document.querySelector("#catalogGrid");
   const count = document.querySelector("#resultCount");
@@ -3505,7 +3575,9 @@ function exploreFacetCard(item, kind) {
 }
 
 function exploreParams() {
-  const params = new URLSearchParams({limit: "250"});
+  const params = new URLSearchParams({
+    limit: exploreState.expandedResults ? "250" : "12",
+  });
   [...exploreState.categories].forEach((value) => params.append("category", value));
   [...exploreState.mechanics].forEach((value) => params.append("mechanic", value));
   for (const [key, value] of [
@@ -3692,7 +3764,7 @@ function renderExplorePayload(payload) {
     ? visibleGames.map((game) => gameCard(game, [])).join("")
     : '<div class="empty catalog-empty">Nessun gioco soddisfa contemporaneamente tutti i criteri.</div>';
 
-  const hiddenCount = Math.max(0, (payload.games || []).length - visibleGames.length);
+  const hiddenCount = Math.max(0, Number(payload.total || 0) - visibleGames.length);
   resultMore.hidden = hiddenCount === 0 && !exploreState.expandedResults;
   resultMore.textContent = exploreState.expandedResults
     ? "Mostra meno"
@@ -3732,7 +3804,12 @@ function renderExplorePayload(payload) {
   });
 
   resultMore.onclick = () => {
-    exploreState.expandedResults = !exploreState.expandedResults;
+    if (!exploreState.expandedResults) {
+      exploreState.expandedResults = true;
+      refreshExplore();
+      return;
+    }
+    exploreState.expandedResults = false;
     renderExplorePayload(payload);
   };
 }
@@ -3745,8 +3822,13 @@ async function refreshExplore() {
   exploreRequestController?.abort();
   const controller = new AbortController();
   exploreRequestController = controller;
-  facets.innerHTML = skeletons();
-  resultGrid.innerHTML = skeletons();
+  const layout = document.querySelector(".explore-layout");
+  layout?.classList.add("is-refreshing");
+  layout?.setAttribute("aria-busy", "true");
+  if (!currentExplorePayload) {
+    facets.innerHTML = skeletons();
+    resultGrid.innerHTML = skeletons();
+  }
 
   try {
     const payload = await api(`/api/catalog/explore?${exploreParams()}`, {signal: controller.signal});
@@ -3758,7 +3840,12 @@ async function refreshExplore() {
     resultGrid.innerHTML = "";
     showToast(error.message, true);
   } finally {
-    if (exploreRequestController === controller) exploreRequestController = undefined;
+    if (exploreRequestController === controller) {
+      exploreRequestController = undefined;
+      const liveLayout = document.querySelector(".explore-layout");
+      liveLayout?.classList.remove("is-refreshing");
+      liveLayout?.removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -3785,6 +3872,7 @@ function bindExploreControls() {
 }
 
 async function renderExplore(initialTab = null) {
+  currentExplorePayload = null;
   if (initialTab === "category" || initialTab === "mechanic") {
     exploreState.activeTab = initialTab;
   }
@@ -3854,6 +3942,8 @@ async function renderExplore(initialTab = null) {
 }
 
 async function route() {
+  catalogRequestController?.abort();
+  exploreRequestController?.abort();
   closeSidebar();
   updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {

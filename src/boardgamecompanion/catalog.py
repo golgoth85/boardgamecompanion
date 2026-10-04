@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from functools import lru_cache
 from typing import Any
 
 from boardgamecompanion.database import Database
@@ -46,17 +47,22 @@ SORT_SQL = {
 }
 
 
+@lru_cache(maxsize=4096)
+def _metadata_from_json(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _metadata_from_row(row) -> dict[str, Any]:
     if "enriched_metadata_json" not in row.keys():
         return {}
     raw = row["enriched_metadata_json"]
     if not raw:
         return {}
-    try:
-        value = json.loads(raw)
-    except (TypeError, ValueError, RecursionError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return _metadata_from_json(str(raw))
 
 
 def _metadata_list(metadata: dict[str, Any], key: str) -> list[str]:
@@ -70,8 +76,9 @@ def _metadata_list(metadata: dict[str, Any], key: str) -> list[str]:
     ]
 
 
-def _game_dict(row) -> dict[str, Any]:
-    metadata = _metadata_from_row(row)
+def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    if metadata is None:
+        metadata = _metadata_from_row(row)
     result = {
         "bgg_id": row["bgg_id"],
         "parent_bgg_id": metadata.get("parent_bgg_id"),
@@ -438,23 +445,31 @@ class Catalog:
             by_bgg_id.setdefault(int(row["bgg_id"]), row)
         candidates = list(by_bgg_id.values())
 
-        def row_facets(row, key: str) -> tuple[set[str], dict[str, str]]:
-            metadata = _metadata_from_row(row)
-            values = _metadata_list(metadata, key)
-            canonical = {value.casefold(): value for value in values}
-            return set(canonical), canonical
-
-        row_metadata: dict[int, tuple[dict[str, str], dict[str, str]]] = {}
+        row_metadata: dict[
+            int,
+            tuple[dict[str, str], dict[str, str], dict[str, Any]],
+        ] = {}
         faceted: list[Any] = []
         for row in candidates:
-            category_keys, category_names = row_facets(row, "categories")
-            mechanic_keys, mechanic_names = row_facets(row, "mechanics")
-            if not wanted_categories.issubset(category_keys):
+            metadata = _metadata_from_row(row)
+            category_names = {
+                value.casefold(): value
+                for value in _metadata_list(metadata, "categories")
+            }
+            mechanic_names = {
+                value.casefold(): value
+                for value in _metadata_list(metadata, "mechanics")
+            }
+            if not wanted_categories.issubset(category_names):
                 continue
-            if not wanted_mechanics.issubset(mechanic_keys):
+            if not wanted_mechanics.issubset(mechanic_names):
                 continue
             faceted.append(row)
-            row_metadata[int(row["bgg_id"])] = (category_names, mechanic_names)
+            row_metadata[int(row["bgg_id"])] = (
+                category_names,
+                mechanic_names,
+                metadata,
+            )
 
         def recommended_age(row) -> int | None:
             raw = str(row["bgg_recommended_age"] or "").strip()
@@ -632,7 +647,13 @@ class Catalog:
             "total": len(matched),
             "categories": build_facets(0, selected_categories),
             "mechanics": build_facets(1, selected_mechanics),
-            "games": [_game_dict(row) for row in matched[:capped]],
+            "games": [
+                _game_dict(
+                    row,
+                    metadata=row_metadata[int(row["bgg_id"])][2],
+                )
+                for row in matched[:capped]
+            ],
             "limit": capped,
             "filters": {
                 "categories": selected_categories,

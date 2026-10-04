@@ -296,11 +296,25 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         expect(page.locator(".catalog-results-cards")).to_be_visible()
         expect(page.locator(".game-card")).to_have_count(2)
 
+        catalog_requests = []
+        page.on(
+            "request",
+            lambda request: (
+                catalog_requests.append(request.url)
+                if "/api/games?" in request.url
+                else None
+            ),
+        )
+
         page.get_by_role("button", name="☷ Lista").click()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator(".catalog-list-row")).to_have_count(2)
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
+        page.get_by_role("button", name="▦ Card").click()
+        expect(page.locator(".catalog-results-cards")).to_be_visible()
+        assert catalog_requests == []
 
+        page.get_by_role("button", name="☷ Lista").click()
         page.reload()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
@@ -730,6 +744,66 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         )
     finally:
         mobile_context.close()
+
+
+def test_explore_lazy_loads_game_results(browser, live_server):
+    context, page = new_page(browser)
+    requested_limits = []
+
+    def explore_payload(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        limit = int(query.get("limit", ["12"])[0])
+        requested_limits.append(limit)
+        games = []
+        for index in range(min(limit, 20)):
+            games.append(
+                {
+                    "bgg_id": 910000 + index,
+                    "parent_bgg_id": None,
+                    "title": f"Explore Game {index + 1}",
+                    "year_published": 2020,
+                    "item_type": "standalone",
+                    "players": {"min": 2, "max": 4},
+                    "play_time": {"playing": 45, "min": 30, "max": 60},
+                    "bgg": {
+                        "average": 7.5,
+                        "average_weight": 2.3,
+                        "rank": index + 1,
+                        "recommended_age": "10+",
+                    },
+                    "collection": {"own": True},
+                    "bgg_metadata": {"cover_url": None},
+                }
+            )
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "total": 20,
+                    "categories": [],
+                    "mechanics": [],
+                    "games": games,
+                    "limit": limit,
+                    "filters": {},
+                    "options": {},
+                }
+            ),
+        )
+
+    page.route("**/api/catalog/explore?**", explore_payload)
+    try:
+        page.goto(f"{live_server}/explore")
+        expect(page.locator(".explore-result-grid .game-card")).to_have_count(12)
+        expect(page.locator("#exploreResultMore")).to_have_text("Mostra altri 8")
+        assert requested_limits == [12]
+
+        page.locator("#exploreResultMore").click()
+        expect(page.locator(".explore-result-grid .game-card")).to_have_count(20)
+        expect(page.locator("#exploreResultMore")).to_have_text("Mostra meno")
+        assert requested_limits == [12, 250]
+    finally:
+        context.close()
 
 
 def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
