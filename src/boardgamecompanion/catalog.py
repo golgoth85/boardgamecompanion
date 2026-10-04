@@ -146,6 +146,11 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             "completed": bool(row["completed_at"]) if "completed_at" in row.keys() else False,
             "completed_at": row["completed_at"] if "completed_at" in row.keys() else None,
         },
+        "gameplay_summary": (
+            row["gameplay_summary"]
+            if "gameplay_summary" in row.keys()
+            else None
+        ),
     }
     if "cover_url" in row.keys():
         result["bgg_metadata"] = {
@@ -192,6 +197,13 @@ def _ideal_players_match(row, player_count: int) -> bool:
     )
 
 
+def _ideal_players_label(row) -> str | None:
+    raw = str(row["bgg_best_players"] or "").strip()
+    if not raw:
+        return None
+    return raw.replace("-", "–")
+
+
 def _facet_match(row, *, category: str | None, mechanic: str | None) -> bool:
     metadata = _metadata_from_row(row)
     if category:
@@ -216,6 +228,7 @@ class Catalog:
             LEFT JOIN collection_entries c ON c.board_game_id = g.id
             LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
             LEFT JOIN game_progress p ON p.board_game_id = g.id
+            LEFT JOIN board_game_gameplay_summaries gs ON gs.board_game_id = g.id
         """
 
     @staticmethod
@@ -232,7 +245,8 @@ class Catalog:
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
-                   e.metadata_json AS enriched_metadata_json
+                   e.metadata_json AS enriched_metadata_json,
+                   gs.summary_text AS gameplay_summary
         """
 
     def list_games(
@@ -887,14 +901,13 @@ class Catalog:
                 if q <= 0:
                     return None
                 score = q
-                factors.append(f"qualità {q:.0f}/100")
                 reason = "Bayesian average BGG" if row["bgg_bayes_average"] else "rating BGG"
 
             elif selected_mode == "outside_top":
                 if q < 60 or rank <= 500:
                     return None
                 score = q
-                factors.extend([f"qualità {q:.0f}", f"BGG #{rank}"])
+                factors.append(f"BGG #{rank}")
                 reason = "qualità solida pur essendo fuori dalla Top 500 BGG"
 
             elif selected_mode == "quality_time":
@@ -902,7 +915,7 @@ class Catalog:
                     return None
                 efficiency = 100.0 / (1.0 + max(0, duration - 30) / 120.0)
                 score = q * 0.82 + efficiency * 0.18
-                factors.extend([f"qualità {q:.0f}", f"{duration} min"])
+                factors.append(f"{duration} min")
                 reason = "molta qualità per il tempo richiesto"
 
             elif selected_mode == "gateway":
@@ -910,7 +923,7 @@ class Catalog:
                     return None
                 access = accessibility_score(row)
                 score = q * 0.67 + access * 0.33
-                factors.extend([f"qualità {q:.0f}", f"accessibilità {access:.0f}"])
+                factors.append(f"accessibilità {access:.0f}")
                 reason = "buon equilibrio tra qualità, semplicità, durata e versatilità"
 
             elif selected_mode == "expert":
@@ -920,7 +933,7 @@ class Catalog:
                 if depth < 45:
                     return None
                 score = q * 0.76 + depth * 0.24
-                factors.extend([f"qualità {q:.0f}", f"profondità {depth:.0f}"])
+                factors.append(f"profondità {depth:.0f}")
                 reason = "qualità elevata con complessità adatta a giocatori esperti"
 
             elif selected_mode == "safe_choice":
@@ -932,7 +945,7 @@ class Catalog:
                     + accessibility_score(row) * 0.20
                 )
                 score = q * 0.70 + versatility * 0.30
-                factors.extend([f"qualità {q:.0f}", f"versatilità {versatility:.0f}"])
+                factors.append(f"versatilità {versatility:.0f}")
                 reason = "qualità solida e buona adattabilità a tavoli diversi"
 
             elif selected_mode == "personal_favorites":
@@ -940,14 +953,15 @@ class Catalog:
                     return None
                 personal = max(0.0, min(100.0, user_rating * 10.0))
                 score = personal * 0.84 + q * 0.16
-                factors.extend([f"tuo voto {user_rating:.1f}", f"BGG {q:.0f}"])
+                factors.append(f"tuo voto {user_rating:.1f}")
                 reason = "il tuo voto personale domina la posizione"
 
             else:
                 return None
 
-            if ideal_players is not None:
-                factors.append(f"ideale in {ideal_players}")
+            ideal_label = _ideal_players_label(row)
+            if ideal_label:
+                factors.insert(0, f"ideale in {ideal_label}")
             if weight_value is not None:
                 factors.append(f"peso {weight_value:.1f}")
             if duration is not None and selected_mode != "quality_time":
