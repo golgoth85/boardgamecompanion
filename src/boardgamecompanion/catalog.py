@@ -391,6 +391,164 @@ class Catalog:
             ).fetchone()
         return int(row["count"] or 0)
 
+    def explore(
+        self,
+        *,
+        categories: list[str] | None = None,
+        mechanics: list[str] | None = None,
+        supports_players: int | None = None,
+        ideal_players: int | None = None,
+        player_age: int | None = None,
+        weight: str | None = None,
+        max_minutes: int | None = None,
+        min_rating: float | None = None,
+        limit: int = 250,
+    ) -> dict[str, Any]:
+        selected_categories = [str(value).strip() for value in (categories or []) if str(value).strip()]
+        selected_mechanics = [str(value).strip() for value in (mechanics or []) if str(value).strip()]
+        wanted_categories = {value.casefold() for value in selected_categories}
+        wanted_mechanics = {value.casefold() for value in selected_mechanics}
+
+        where = [
+            "COALESCE(c.own,0)=1",
+            "COALESCE(g.item_type,'standalone') != 'expansion'",
+        ]
+        params: list[Any] = []
+        if supports_players is not None:
+            where.append(
+                "g.min_players IS NOT NULL AND g.max_players IS NOT NULL "
+                "AND g.min_players <= ? AND g.max_players >= ?"
+            )
+            params.extend([supports_players, supports_players])
+        if player_age is not None:
+            where.append(
+                "g.bgg_recommended_age IS NOT NULL "
+                "AND CAST(g.bgg_recommended_age AS INTEGER) > 0 "
+                "AND CAST(g.bgg_recommended_age AS INTEGER) <= ?"
+            )
+            params.append(player_age)
+        if weight == "light":
+            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight <= 2.30")
+        elif weight == "medium":
+            where.append(
+                "g.bgg_average_weight IS NOT NULL "
+                "AND g.bgg_average_weight > 2.30 AND g.bgg_average_weight <= 3.50"
+            )
+        elif weight == "heavy":
+            where.append("g.bgg_average_weight IS NOT NULL AND g.bgg_average_weight > 3.50")
+        if max_minutes is not None:
+            where.append(
+                "COALESCE(g.max_play_time, g.playing_time, g.min_play_time) IS NOT NULL "
+                "AND COALESCE(g.max_play_time, g.playing_time, g.min_play_time) <= ?"
+            )
+            params.append(max_minutes)
+        if min_rating is not None:
+            where.append("g.bgg_average IS NOT NULL AND g.bgg_average >= ?")
+            params.append(min_rating)
+
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                {self._select_sql()}
+                {self._from_sql()}
+                WHERE {' AND '.join(where)}
+                ORDER BY
+                    g.bgg_average IS NULL,
+                    g.bgg_average DESC,
+                    g.title COLLATE NOCASE,
+                    g.bgg_id
+                """,
+                params,
+            ).fetchall()
+
+        # Multiple physical copies must not inflate facet counts.
+        by_bgg_id: dict[int, Any] = {}
+        for row in rows:
+            by_bgg_id.setdefault(int(row["bgg_id"]), row)
+        candidates = list(by_bgg_id.values())
+
+        if ideal_players is not None:
+            candidates = [
+                row for row in candidates if _ideal_players_match(row, ideal_players)
+            ]
+
+        def row_facets(row, key: str) -> tuple[set[str], dict[str, str]]:
+            metadata = _metadata_from_row(row)
+            values = _metadata_list(metadata, key)
+            canonical = {value.casefold(): value for value in values}
+            return set(canonical), canonical
+
+        matched: list[Any] = []
+        row_metadata: dict[int, tuple[dict[str, str], dict[str, str]]] = {}
+        for row in candidates:
+            category_keys, category_names = row_facets(row, "categories")
+            mechanic_keys, mechanic_names = row_facets(row, "mechanics")
+            if not wanted_categories.issubset(category_keys):
+                continue
+            if not wanted_mechanics.issubset(mechanic_keys):
+                continue
+            matched.append(row)
+            row_metadata[int(row["bgg_id"])] = (category_names, mechanic_names)
+
+        def build_facets(
+            key_index: int,
+            selected: list[str],
+        ) -> list[dict[str, Any]]:
+            counts: Counter[str] = Counter()
+            display_names: dict[str, str] = {}
+            covers: dict[str, list[str]] = {}
+            for row in matched:
+                names = row_metadata[int(row["bgg_id"])][key_index]
+                cover = str(row["cover_url"] or "").strip()
+                for folded, display in names.items():
+                    counts[folded] += 1
+                    display_names.setdefault(folded, display)
+                    if cover:
+                        bucket = covers.setdefault(folded, [])
+                        if cover not in bucket and len(bucket) < 4:
+                            bucket.append(cover)
+
+            selected_map = {value.casefold(): value for value in selected}
+            all_keys = set(counts) | set(selected_map)
+            items: list[dict[str, Any]] = []
+            for folded in all_keys:
+                name = display_names.get(folded, selected_map.get(folded, folded))
+                items.append(
+                    {
+                        "name": name,
+                        "count": int(counts.get(folded, 0)),
+                        "covers": covers.get(folded, []),
+                        "selected": folded in selected_map,
+                    }
+                )
+            items.sort(
+                key=lambda item: (
+                    not bool(item["selected"]),
+                    -int(item["count"]),
+                    str(item["name"]).casefold(),
+                )
+            )
+            return items
+
+        capped = max(1, min(int(limit), 250))
+        return {
+            "total": len(matched),
+            "categories": build_facets(0, selected_categories),
+            "mechanics": build_facets(1, selected_mechanics),
+            "games": [_game_dict(row) for row in matched[:capped]],
+            "limit": capped,
+            "filters": {
+                "categories": selected_categories,
+                "mechanics": selected_mechanics,
+                "supports_players": supports_players,
+                "ideal_players": ideal_players,
+                "player_age": player_age,
+                "weight": weight,
+                "max_minutes": max_minutes,
+                "min_rating": min_rating,
+            },
+        }
+
     def facets(self, *, owned_only: bool = True, limit: int = 40) -> dict[str, Any]:
         where = "WHERE COALESCE(c.own,0)=1" if owned_only else ""
         with self.database.connect() as connection:
