@@ -526,6 +526,16 @@ def web_rankings() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/play-next", include_in_schema=False)
+def web_play_next() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/new", include_in_schema=False)
+def web_new() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -618,6 +628,39 @@ def list_games(
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
+    )
+
+
+@app.get("/api/catalog/rankings", tags=["catalog"])
+def catalog_rankings(
+    mode: Literal[
+        "overall",
+        "hidden_gems",
+        "quality_time",
+        "gateway",
+        "expert",
+        "safe_choice",
+        "neglected",
+        "most_played",
+        "personal_favorites",
+    ] = Query(default="overall"),
+    category: str | None = Query(default=None, min_length=1, max_length=500),
+    mechanic: str | None = Query(default=None, min_length=1, max_length=500),
+    ideal_players: int | None = Query(default=None, ge=1, le=30),
+    max_minutes: int | None = Query(default=None, ge=1, le=1440),
+    weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return Catalog(database).rankings(
+        mode=mode,
+        category=category,
+        mechanic=mechanic,
+        ideal_players=ideal_players,
+        max_minutes=max_minutes,
+        weight=weight,
+        limit=limit,
     )
 
 
