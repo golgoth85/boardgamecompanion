@@ -10,10 +10,39 @@ from boardgamecompanion.database import Database
 
 SORT_SQL = {
     "title": "g.title COLLATE NOCASE ASC, g.bgg_id ASC",
+    "title_desc": "g.title COLLATE NOCASE DESC, g.bgg_id DESC",
+    "players_asc": (
+        "g.min_players IS NULL, g.min_players ASC, "
+        "g.max_players IS NULL, g.max_players ASC, g.title COLLATE NOCASE ASC"
+    ),
+    "players_desc": (
+        "g.min_players IS NULL, g.min_players DESC, "
+        "g.max_players IS NULL, g.max_players DESC, g.title COLLATE NOCASE ASC"
+    ),
+    "age_asc": (
+        "g.bgg_recommended_age IS NULL OR CAST(g.bgg_recommended_age AS INTEGER) = 0, "
+        "CAST(g.bgg_recommended_age AS INTEGER) ASC, g.title COLLATE NOCASE ASC"
+    ),
+    "age_desc": (
+        "g.bgg_recommended_age IS NULL OR CAST(g.bgg_recommended_age AS INTEGER) = 0, "
+        "CAST(g.bgg_recommended_age AS INTEGER) DESC, g.title COLLATE NOCASE ASC"
+    ),
+    "duration_asc": (
+        "COALESCE(g.playing_time, g.max_play_time, g.min_play_time) IS NULL, "
+        "COALESCE(g.playing_time, g.max_play_time, g.min_play_time) ASC, "
+        "g.title COLLATE NOCASE ASC"
+    ),
+    "duration_desc": (
+        "COALESCE(g.playing_time, g.max_play_time, g.min_play_time) IS NULL, "
+        "COALESCE(g.playing_time, g.max_play_time, g.min_play_time) DESC, "
+        "g.title COLLATE NOCASE ASC"
+    ),
     "year_desc": "g.year_published IS NULL, g.year_published DESC, g.title COLLATE NOCASE ASC",
     "rating_desc": "g.bgg_average IS NULL, g.bgg_average DESC, g.title COLLATE NOCASE ASC",
+    "rating_asc": "g.bgg_average IS NULL, g.bgg_average ASC, g.title COLLATE NOCASE ASC",
     "rank_asc": "g.bgg_rank IS NULL OR g.bgg_rank = 0, g.bgg_rank ASC, g.title COLLATE NOCASE ASC",
     "weight_desc": "g.bgg_average_weight IS NULL, g.bgg_average_weight DESC, g.title COLLATE NOCASE ASC",
+    "weight_asc": "g.bgg_average_weight IS NULL, g.bgg_average_weight ASC, g.title COLLATE NOCASE ASC",
 }
 
 

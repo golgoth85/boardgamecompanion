@@ -2559,6 +2559,48 @@ a { color: inherit; text-decoration: none; }
 .catalog-list-head span:not(:first-child) {
   text-align: center;
 }
+.catalog-sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .28rem;
+  min-width: 0;
+  padding: .3rem .15rem;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+.catalog-sort-button:not(:first-child) {
+  justify-self: center;
+  justify-content: center;
+  text-align: center;
+}
+.catalog-sort-button:hover,
+.catalog-sort-button:focus-visible {
+  color: var(--text);
+}
+.catalog-sort-button:focus-visible {
+  outline: 2px solid rgba(73, 190, 132, .55);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.catalog-sort-button i {
+  color: rgba(151, 163, 182, .7);
+  font-size: .72rem;
+  font-style: normal;
+  line-height: 1;
+}
+.catalog-sort-button.is-active {
+  color: #b7f2d0;
+}
+.catalog-sort-button.is-active i {
+  color: var(--accent);
+}
 .catalog-list-row {
   min-height: 4.7rem;
   padding: .42rem .55rem;
@@ -2694,9 +2736,9 @@ a { color: inherit; text-decoration: none; }
   .catalog-list-row {
     grid-template-columns: minmax(230px, 2fr) repeat(3, minmax(66px, .55fr)) 70px 62px;
   }
-  .catalog-list-head span:nth-child(5),
+  .catalog-list-head .catalog-sort-button:nth-child(5),
   .catalog-list-row .list-stat:nth-of-type(4),
-  .catalog-list-head span:nth-child(6),
+  .catalog-list-head .catalog-sort-button:nth-child(6),
   .catalog-list-row .list-stat:nth-of-type(5) {
     display: none;
   }
