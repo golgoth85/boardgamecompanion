@@ -558,6 +558,8 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Da giocare")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Novità")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Meccaniche")).to_have_count(0)
         expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
@@ -565,6 +567,159 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         expect(sidebar.get_by_role("button", name="Impostazioni")).to_be_visible()
         expect(sidebar.get_by_text("Amministrazione", exact=True)).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_have_count(0)
+    finally:
+        context.close()
+
+
+def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser, live_server):
+    context, page = new_page(browser)
+    ranking_requests = []
+
+    facets_payload = {
+        "categories": [
+            {"name": "Fantasy", "count": 12},
+            {"name": "Science Fiction", "count": 8},
+        ],
+        "mechanics": [
+            {"name": "Deck Building", "count": 7},
+            {"name": "Dice Rolling", "count": 10},
+        ],
+    }
+
+    def ranking_route(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        mode = query.get("mode", ["overall"])[0]
+        ranking_requests.append(query)
+        game = {
+            "bgg_id": 900001,
+            "parent_bgg_id": None,
+            "title": "Synthetic Alpha",
+            "year_published": 2020,
+            "item_type": "standalone",
+            "players": {"min": 2, "max": 4},
+            "play_time": {"playing": 60, "min": 45, "max": 90},
+            "bgg": {
+                "average": 7.8,
+                "average_weight": 2.2,
+                "rank": 42,
+                "recommended_age": "10+",
+            },
+            "collection": {"own": True, "num_plays": 3},
+            "bgg_metadata": {"cover_url": None},
+        }
+        titles = {
+            "overall": "Migliori in assoluto",
+            "hidden_gems": "Gemme nascoste",
+            "neglected": "Capolavori trascurati",
+        }
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "mode": mode,
+                    "title": titles.get(mode, mode.replace("_", " ").title()),
+                    "description": f"Descrizione {mode}",
+                    "items": [
+                        {
+                            "game": game,
+                            "score": 88.4,
+                            "reason": "Motivo deterministico",
+                            "factors": ["qualità 84", "60 min"],
+                        }
+                    ],
+                    "total": 1,
+                    "filters": {},
+                }
+            ),
+        )
+
+    page.route(
+        "**/api/catalog/facets?**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(facets_payload),
+        ),
+    )
+    page.route("**/api/catalog/rankings?**", ranking_route)
+
+    try:
+        page.goto(f"{live_server}/rankings")
+        expect(page.get_by_role("heading", name="Classifiche")).to_be_visible()
+        expect(page.locator("#rankingCurrentHeading")).to_have_text(
+            "Migliori in assoluto"
+        )
+        expect(page.locator(".ranking-result-row")).to_have_count(1)
+        expect(page.locator(".ranking-result-score")).to_contain_text("88,4")
+        expect(page.locator("#rankingFilters")).to_be_visible()
+
+        page.get_by_role("button", name="Gemme nascoste").click()
+        expect(page.locator("#rankingCurrentHeading")).to_have_text("Gemme nascoste")
+        assert ranking_requests[-1]["mode"] == ["hidden_gems"]
+
+        page.get_by_role("button", name="La mia ludoteca").click()
+        expect(page.get_by_role("button", name="Capolavori trascurati")).to_be_visible()
+        expect(page.locator("#rankingCurrentHeading")).to_have_text(
+            "Capolavori trascurati"
+        )
+        assert ranking_requests[-1]["mode"] == ["neglected"]
+
+        page.locator(
+            '[data-ranking-filter="idealPlayers"][data-ranking-value="2"]'
+        ).click()
+        expect(page.locator("#rankingCurrentHeading")).to_have_text(
+            "Capolavori trascurati"
+        )
+        assert ranking_requests[-1]["ideal_players"] == ["2"]
+
+        with page.expect_request(
+            lambda request: (
+                "/api/catalog/rankings?" in request.url
+                and "category=Fantasy" in request.url
+            )
+        ) as category_request:
+            page.locator("#rankingCategory").select_option("Fantasy")
+        category_query = parse_qs(urlsplit(category_request.value.url).query)
+        assert category_query["category"] == ["Fantasy"]
+    finally:
+        context.close()
+
+    mobile_context, mobile_page = new_page(browser, mobile=True)
+    mobile_page.route(
+        "**/api/catalog/facets?**",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(facets_payload),
+        ),
+    )
+    mobile_page.route("**/api/catalog/rankings?**", ranking_route)
+    try:
+        mobile_page.goto(f"{live_server}/rankings")
+        expect(mobile_page.locator(".ranking-filter-panel")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        mobile_context.close()
+
+
+def test_play_next_and_new_library_routes(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+
+        page.get_by_role("link", name="Da giocare").click()
+        expect(page).to_have_url(f"{live_server}/play-next")
+        expect(page.get_by_role("heading", name="Da giocare")).to_be_visible()
+        expect(page.locator(".ranking-result-row")).to_have_count(1)
+
+        page.get_by_role("link", name="Novità").click()
+        expect(page).to_have_url(f"{live_server}/new")
+        expect(page.get_by_role("heading", name="Novità")).to_be_visible()
+        expect(page.locator(".new-game-row")).to_have_count(1)
+        expect(page.locator(".new-game-date")).to_contain_text("15 gen 2026")
     finally:
         context.close()
 
