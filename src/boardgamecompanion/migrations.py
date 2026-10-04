@@ -1291,6 +1291,23 @@ def _personal_collection_progress(connection: sqlite3.Connection) -> None:
     )
 
 
+def _gameplay_summaries(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS board_game_gameplay_summaries (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            source_sha256 TEXT NOT NULL,
+            summary_text TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            generated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1307,6 +1324,7 @@ MIGRATIONS = (
     Migration(13, "description-translations", _description_translations),
     Migration(14, "bgg-collection-sync-state", _bgg_collection_sync_state),
     Migration(15, "personal-collection-progress", _personal_collection_progress),
+    Migration(16, "gameplay-summaries", _gameplay_summaries),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

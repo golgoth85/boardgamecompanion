@@ -603,6 +603,7 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                 "average": 7.8,
                 "average_weight": 2.2,
                 "rank": 42,
+                "best_players": "3",
                 "recommended_age": "10+",
             },
             "collection": {"own": True, "num_plays": 3},
@@ -611,6 +612,10 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                 "categories": ["Fantasy", "Adventure"],
                 "mechanics": ["Deck Building", "Hand Management"],
             },
+            "gameplay_summary": (
+                "I giocatori costruiscono una squadra, selezionano carte azione e "
+                "combinano le abilità dei personaggi per superare l'avversario."
+            ),
         }
         titles = {
             "overall": "Migliori in assoluto",
@@ -630,7 +635,7 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
                             "game": game,
                             "score": 88.4,
                             "reason": "Motivo deterministico",
-                            "factors": ["qualità 84", "60 min"],
+                            "factors": ["ideale in 3", "peso 2.2", "60 min"],
                         }
                     ],
                     "total": 1,
@@ -657,9 +662,11 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         )
         expect(page.locator(".ranking-result-row")).to_have_count(1)
         expect(page.locator(".ranking-result-score")).to_contain_text("88,4")
-        expect(page.locator(".ranking-result-summary")).to_contain_text("Fantasy / Adventure")
-        expect(page.locator(".ranking-result-summary")).to_contain_text("Deck Building + Hand Management")
-        expect(page.locator(".ranking-result-summary")).to_contain_text("complessità leggera")
+        expect(page.locator(".ranking-result-summary")).to_contain_text(
+            "I giocatori costruiscono una squadra"
+        )
+        expect(page.locator(".ranking-result-factors")).to_contain_text("ideale in 3")
+        expect(page.locator(".ranking-result-factors")).not_to_contain_text("qualità")
         expect(page.locator(".ranking-result-row")).not_to_contain_text("Motivo deterministico")
         expect(page.locator(".ranking-result-score")).to_have_attribute("title", "Motivo deterministico")
         expect(page.locator("#rankingFilters")).to_be_visible()

@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 15
+    assert first_version == LATEST_SCHEMA_VERSION == 16
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -52,6 +52,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (13, "description-translations"),
         (14, "bgg-collection-sync-state"),
         (15, "personal-collection-progress"),
+        (16, "gameplay-summaries"),
     ]
     assert {
         "board_games",
@@ -80,6 +81,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "board_game_description_translations",
         "bgg_collection_sync_state",
         "game_progress",
+        "board_game_gameplay_summaries",
         "schema_migrations",
     } <= tables
 
