@@ -3720,46 +3720,55 @@ function rankingFilterMarkup(facets) {
 
 function bindRankingControls() {
   document.querySelectorAll("[data-ranking-group]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.onclick = () => {
       rankingState.group = button.dataset.rankingGroup;
       const group = rankingGroups[rankingState.group] || rankingGroups.top;
       if (!group.modes.some(([mode]) => mode === rankingState.mode)) {
         rankingState.mode = group.modes[0][0];
       }
       renderRankings();
-    });
+    };
   });
 
   document.querySelectorAll("[data-ranking-mode]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.onclick = () => {
       rankingState.mode = button.dataset.rankingMode;
       refreshRankings();
-    });
+    };
   });
 
   document.querySelectorAll("[data-ranking-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.onclick = () => {
       rankingState[button.dataset.rankingFilter] = button.dataset.rankingValue || "";
       refreshRankings();
-    });
+    };
   });
 
-  document.querySelector("#rankingCategory")?.addEventListener("change", (event) => {
-    rankingState.category = event.target.value;
-    refreshRankings();
-  });
-  document.querySelector("#rankingMechanic")?.addEventListener("change", (event) => {
-    rankingState.mechanic = event.target.value;
-    refreshRankings();
-  });
-  document.querySelector("#rankingResetFilters")?.addEventListener("click", () => {
-    rankingState.category = "";
-    rankingState.mechanic = "";
-    rankingState.idealPlayers = "";
-    rankingState.maxMinutes = "";
-    rankingState.weight = "";
-    renderRankings();
-  });
+  const category = document.querySelector("#rankingCategory");
+  if (category) {
+    category.onchange = (event) => {
+      rankingState.category = event.target.value;
+      refreshRankings();
+    };
+  }
+  const mechanic = document.querySelector("#rankingMechanic");
+  if (mechanic) {
+    mechanic.onchange = (event) => {
+      rankingState.mechanic = event.target.value;
+      refreshRankings();
+    };
+  }
+  const reset = document.querySelector("#rankingResetFilters");
+  if (reset) {
+    reset.onclick = () => {
+      rankingState.category = "";
+      rankingState.mechanic = "";
+      rankingState.idealPlayers = "";
+      rankingState.maxMinutes = "";
+      rankingState.weight = "";
+      renderRankings();
+    };
+  }
 }
 
 async function refreshRankings() {
