@@ -296,11 +296,25 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         expect(page.locator(".catalog-results-cards")).to_be_visible()
         expect(page.locator(".game-card")).to_have_count(2)
 
+        catalog_requests = []
+        page.on(
+            "request",
+            lambda request: (
+                catalog_requests.append(request.url)
+                if "/api/games?" in request.url
+                else None
+            ),
+        )
+
         page.get_by_role("button", name="☷ Lista").click()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator(".catalog-list-row")).to_have_count(2)
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
+        page.get_by_role("button", name="▦ Card").click()
+        expect(page.locator(".catalog-results-cards")).to_be_visible()
+        assert catalog_requests == []
 
+        page.get_by_role("button", name="☷ Lista").click()
         page.reload()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
