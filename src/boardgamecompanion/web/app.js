@@ -8,6 +8,8 @@ const shellSectionLabels = {
   catalog: "Ludoteca",
   rankings: "Classifiche",
   explore: "Esplora",
+  "play-next": "Da giocare",
+  new: "Novità",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
@@ -15,6 +17,8 @@ const shellSectionLabels = {
 
 function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
+  if (/^\/play-next\/?$/.test(pathname)) return "play-next";
+  if (/^\/new\/?$/.test(pathname)) return "new";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
   if (/^\/updates\/?$/.test(pathname)) return "updates";
@@ -198,6 +202,56 @@ const exploreState = {
 
 let exploreRequestController;
 let currentExplorePayload = null;
+
+const rankingState = {
+  group: "top",
+  mode: "overall",
+  category: "",
+  mechanic: "",
+  idealPlayers: "",
+  maxMinutes: "",
+  weight: "",
+};
+
+let rankingRequestController;
+let rankingFacetsCache = null;
+
+const rankingGroups = {
+  top: {
+    label: "Top",
+    modes: [
+      ["overall", "Migliori in assoluto"],
+      ["hidden_gems", "Gemme nascoste"],
+      ["quality_time", "Qualità / tempo"],
+      ["safe_choice", "Scelta sicura"],
+    ],
+  },
+  situation: {
+    label: "Per situazione",
+    modes: [
+      ["gateway", "Gateway"],
+      ["expert", "Per esperti"],
+      ["safe_choice", "Scelta sicura"],
+      ["quality_time", "Qualità / tempo"],
+    ],
+  },
+  facets: {
+    label: "Generi & Meccaniche",
+    modes: [
+      ["overall", "Migliori"],
+      ["hidden_gems", "Gemme nascoste"],
+      ["safe_choice", "Scelta sicura"],
+    ],
+  },
+  personal: {
+    label: "La mia ludoteca",
+    modes: [
+      ["neglected", "Capolavori trascurati"],
+      ["most_played", "Più giocati"],
+      ["personal_favorites", "Preferiti personali"],
+    ],
+  },
+};
 
 const catalogColumnSorts = {
   title: ["title", "title_desc"],
