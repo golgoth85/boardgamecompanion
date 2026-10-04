@@ -614,6 +614,39 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
             "games": [game],
             "limit": 250,
             "filters": {},
+            "options": {
+                "supports_players": [
+                    {"value": 2, "label": "2", "count": total, "selected": False},
+                    {"value": 4, "label": "4", "count": total, "selected": False},
+                    *(
+                        []
+                        if categories or mechanics
+                        else [{"value": 6, "label": "6+", "count": 1, "selected": False}]
+                    ),
+                ],
+                "ideal_players": [
+                    {
+                        "value": 2,
+                        "label": "2",
+                        "count": total,
+                        "selected": "2" in query.get("ideal_players", []),
+                    }
+                ],
+                "player_age": [
+                    {"value": 10, "label": "10", "count": total, "selected": False},
+                    {"value": 12, "label": "12", "count": total, "selected": False},
+                ],
+                "max_minutes": [
+                    {"value": 60, "label": "≤60", "count": total, "selected": False},
+                    {"value": 90, "label": "≤90", "count": total, "selected": False},
+                ],
+                "weight": [
+                    {"value": "light", "label": "Semplice", "count": total, "selected": False}
+                ],
+                "min_rating": [
+                    {"value": 7.0, "label": "7+", "count": total, "selected": False}
+                ],
+            },
         }
         route.fulfill(
             status=200,
@@ -634,6 +667,10 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
             "2 giochi corrispondenti"
         )
 
+        expect(
+            page.locator('[data-explore-option-key="supports_players"][data-explore-option-value="6"]')
+        ).to_be_visible()
+
         fantasy = page.locator('[data-explore-kind="category"][data-explore-name="Fantasy"]')
         expect(fantasy).to_contain_text("2 giochi")
         fantasy.click()
@@ -641,6 +678,9 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         expect(page.locator("#exploreResultCount")).to_have_text(
             "1 gioco corrispondente"
         )
+        expect(
+            page.locator('[data-explore-option-key="supports_players"][data-explore-option-value="6"]')
+        ).to_have_count(0)
 
         page.get_by_role("tab", name="Meccaniche").click()
         dice = page.locator('[data-explore-kind="mechanic"][data-explore-name="Dice Rolling"]')
@@ -650,8 +690,12 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
             "1 gioco corrispondente"
         )
 
-        page.locator("#exploreIdealPlayers").fill("2")
-        page.locator("#exploreIdealPlayers").blur()
+        ideal_two = page.locator(
+            '[data-explore-option-key="ideal_players"][data-explore-option-value="2"]'
+        )
+        expect(ideal_two).to_be_visible()
+        ideal_two.click()
+        expect(ideal_two).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#exploreResultCount")).to_have_text(
             "1 gioco corrispondente"
         )
