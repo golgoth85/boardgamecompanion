@@ -75,6 +75,123 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         assert [item["bgg_id"] for item in suitable_for_age_10.json()["items"]] == [900001]
 
 
+def test_rankings_api_modes_filters_and_acquisition_sort(tmp_path: Path) -> None:
+    settings.config_dir = tmp_path / "config"
+    settings.import_dir = tmp_path / "import"
+    settings.manuals_dir = tmp_path / "manuals"
+
+    csv_payload = FIXTURE.read_text(encoding="utf-8").replace(
+        ",expansion,,,,,,,,1,,,,,English,2021,",
+        ",standalone,,,,,,,,1,,,,,English,2021,",
+    ).encode("utf-8")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/imports/bgg-csv",
+            files={"file": ("collection.csv", csv_payload, "text/csv")},
+        )
+        assert response.status_code == 200
+
+        database = get_database()
+        with database.transaction(immediate=True) as connection:
+            rows = connection.execute(
+                "SELECT id,bgg_id FROM board_games ORDER BY bgg_id"
+            ).fetchall()
+            ids = {int(row["bgg_id"]): int(row["id"]) for row in rows}
+            connection.execute(
+                """
+                UPDATE collection_entries
+                SET acquisition_date='2026-10-01',user_rating=9.0,num_plays=0
+                WHERE board_game_id=?
+                """,
+                (ids[900002],),
+            )
+            for bgg_id, metadata in (
+                (
+                    900001,
+                    {
+                        "categories": ["Fantasy", "Adventure"],
+                        "mechanics": ["Dice Rolling", "Hand Management"],
+                    },
+                ),
+                (
+                    900002,
+                    {
+                        "categories": ["Science Fiction"],
+                        "mechanics": ["Deck Building"],
+                    },
+                ),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO board_game_enrichments(
+                        board_game_id,source,external_id,title,cover_url,
+                        metadata_json,next_refresh_at,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        ids[bgg_id],
+                        "test",
+                        str(bgg_id),
+                        f"Game {bgg_id}",
+                        None,
+                        json.dumps(metadata),
+                        "2099-01-01T00:00:00+00:00",
+                        "2026-01-01T00:00:00+00:00",
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                )
+
+        overall = client.get("/api/catalog/rankings", params={"mode": "overall"})
+        assert overall.status_code == 200
+        assert overall.json()["mode"] == "overall"
+        assert overall.json()["items"][0]["game"]["bgg_id"] == 900001
+        assert overall.json()["items"][0]["score"] > 0
+        assert overall.json()["items"][0]["reason"]
+
+        for mode in (
+            "hidden_gems",
+            "quality_time",
+            "gateway",
+            "expert",
+            "safe_choice",
+            "neglected",
+            "most_played",
+            "personal_favorites",
+        ):
+            ranked = client.get("/api/catalog/rankings", params={"mode": mode})
+            assert ranked.status_code == 200
+            assert ranked.json()["mode"] == mode
+            assert "description" in ranked.json()
+            assert "items" in ranked.json()
+
+        personal = client.get(
+            "/api/catalog/rankings",
+            params={"mode": "personal_favorites"},
+        )
+        assert personal.status_code == 200
+        assert personal.json()["items"][0]["game"]["bgg_id"] == 900002
+
+        fantasy = client.get(
+            "/api/catalog/rankings",
+            params={"mode": "overall", "category": "Fantasy"},
+        )
+        assert fantasy.status_code == 200
+        assert [item["game"]["bgg_id"] for item in fantasy.json()["items"]] == [900001]
+
+        newest = client.get(
+            "/api/games",
+            params={
+                "owned": "true",
+                "item_type": "standalone",
+                "sort": "acquired_desc",
+            },
+        )
+        assert newest.status_code == 200
+        assert newest.json()["items"][0]["bgg_id"] == 900002
+        assert newest.json()["items"][0]["collection"]["acquisition_date"] == "2026-10-01"
+
+
 def test_explore_api_intersects_multiple_facets_and_contextual_counts(tmp_path: Path) -> None:
     settings.config_dir = tmp_path / "config"
     settings.import_dir = tmp_path / "import"
