@@ -236,6 +236,8 @@ function bindCatalogSortHeaders() {
 
 let searchTimer;
 let catalogRequestController;
+let currentCatalogData = null;
+let currentCatalogStats = null;
 let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
@@ -1597,6 +1599,28 @@ function skeletons() {
   return Array.from({length: 12}, () => '<div class="skeleton"></div>').join("");
 }
 
+function syncCatalogViewControls() {
+  for (const [id, view] of [
+    ["cardViewButton", "cards"],
+    ["listViewButton", "list"],
+  ]) {
+    const button = document.querySelector(`#${id}`);
+    if (!button) continue;
+    const active = state.catalogView === view;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+function rerenderCurrentCatalog() {
+  if (!currentCatalogData) {
+    void refreshCatalog();
+    return;
+  }
+  syncCatalogViewControls();
+  renderCatalogData(currentCatalogData);
+}
+
 async function renderCatalog() {
   const activeFacet = state.category
     ? `Genere: ${state.category}`
@@ -1747,6 +1771,7 @@ async function renderCatalog() {
       loadCatalogData(),
     ]);
     if (window.location.pathname !== requestedPath) return;
+    currentCatalogStats = stats;
     renderStats(stats);
     renderCatalogData(catalog);
     backfillMissingMetadata();
@@ -1809,20 +1834,20 @@ function bindCatalogControls() {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
     window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
-    refreshCatalog();
+    rerenderCurrentCatalog();
   });
 
   document.querySelector("#cardViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "cards") return;
     state.catalogView = "cards";
     window.localStorage.setItem("bgc.catalogView", "cards");
-    renderCatalog();
+    rerenderCurrentCatalog();
   });
   document.querySelector("#listViewButton")?.addEventListener("click", () => {
     if (state.catalogView === "list") return;
     state.catalogView = "list";
     window.localStorage.setItem("bgc.catalogView", "list");
-    renderCatalog();
+    rerenderCurrentCatalog();
   });
 }
 
@@ -1952,8 +1977,10 @@ async function refreshCatalog() {
   const controller = new AbortController();
   catalogRequestController = controller;
 
-  grid.innerHTML = skeletons();
-  count.textContent = "Caricamento…";
+  grid.classList.add("is-refreshing");
+  grid.setAttribute("aria-busy", "true");
+  count.textContent = currentCatalogData ? "Aggiornamento…" : "Caricamento…";
+  if (!currentCatalogData) grid.innerHTML = skeletons();
   try {
     const catalog = await loadCatalogData(controller.signal);
     if (controller.signal.aborted || !document.querySelector("#catalogGrid")) return;
@@ -1967,6 +1994,9 @@ async function refreshCatalog() {
   } finally {
     if (catalogRequestController === controller) {
       catalogRequestController = undefined;
+      const liveGrid = document.querySelector("#catalogGrid");
+      liveGrid?.classList.remove("is-refreshing");
+      liveGrid?.removeAttribute("aria-busy");
     }
   }
 }
@@ -1974,10 +2004,14 @@ async function refreshCatalog() {
 async function backfillMissingMetadata() {
   if (navigator.webdriver || metadataBackfillRunning || window.location.pathname !== "/") return;
   metadataBackfillRunning = true;
+  let updatedAny = false;
   try {
     for (let batch = 0; batch < 10 && window.location.pathname === "/"; batch += 1) {
       const result = await api("/api/catalog/bgg-metadata/refresh-missing?limit=20", {method: "POST"});
+      updatedAny = updatedAny || Boolean(result.updated);
       if (!result.updated || !result.remaining) break;
+    }
+    if (updatedAny && window.location.pathname === "/") {
       await refreshCatalog();
     }
   } catch (_) {
@@ -2000,6 +2034,7 @@ function renderStats(stats) {
 }
 
 function renderCatalogData(catalog) {
+  currentCatalogData = catalog;
   state.total = catalog.total;
   const grid = document.querySelector("#catalogGrid");
   const count = document.querySelector("#resultCount");
@@ -3745,8 +3780,13 @@ async function refreshExplore() {
   exploreRequestController?.abort();
   const controller = new AbortController();
   exploreRequestController = controller;
-  facets.innerHTML = skeletons();
-  resultGrid.innerHTML = skeletons();
+  const layout = document.querySelector(".explore-layout");
+  layout?.classList.add("is-refreshing");
+  layout?.setAttribute("aria-busy", "true");
+  if (!currentExplorePayload) {
+    facets.innerHTML = skeletons();
+    resultGrid.innerHTML = skeletons();
+  }
 
   try {
     const payload = await api(`/api/catalog/explore?${exploreParams()}`, {signal: controller.signal});
@@ -3758,7 +3798,12 @@ async function refreshExplore() {
     resultGrid.innerHTML = "";
     showToast(error.message, true);
   } finally {
-    if (exploreRequestController === controller) exploreRequestController = undefined;
+    if (exploreRequestController === controller) {
+      exploreRequestController = undefined;
+      const liveLayout = document.querySelector(".explore-layout");
+      liveLayout?.classList.remove("is-refreshing");
+      liveLayout?.removeAttribute("aria-busy");
+    }
   }
 }
 
