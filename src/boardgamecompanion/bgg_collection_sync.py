@@ -553,11 +553,12 @@ class BggCollectionSyncService:
             "source_metadata_json": source_json,
         }
         if existing is None:
-            names = ", ".join(incoming)
-            placeholders = ", ".join("?" for _ in incoming)
+            inserted = {**incoming, "first_seen_at": now}
+            names = ", ".join(inserted)
+            placeholders = ", ".join("?" for _ in inserted)
             cursor = connection.execute(
                 f"INSERT INTO collection_entries({names},created_at,updated_at) VALUES ({placeholders},?,?)",
-                (*incoming.values(), now, now),
+                (*inserted.values(), now, now),
             )
             return True, int(cursor.lastrowid)
 
