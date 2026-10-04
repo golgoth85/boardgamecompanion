@@ -1809,16 +1809,28 @@ function bindCatalogControls() {
   }
 
   document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
-    for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) state[key] = "";
+    for (const [id, key] of [
+      ["supportsPlayers", "supportsPlayers"],
+      ["idealPlayers", "idealPlayers"],
+      ["playerAge", "playerAge"],
+      ["weightFilter", "weight"],
+      ["maxMinutes", "maxMinutes"],
+      ["minRating", "minRating"],
+    ]) {
+      state[key] = "";
+      const control = document.querySelector(`#${id}`);
+      if (control) control.value = "";
+    }
     state.offset = 0;
-    renderCatalog();
+    refreshCatalog();
   });
 
-  document.querySelector("#clearFacet")?.addEventListener("click", () => {
+  document.querySelector("#clearFacet")?.addEventListener("click", (event) => {
     state.category = "";
     state.mechanic = "";
     state.offset = 0;
-    renderCatalog();
+    event.currentTarget.remove();
+    refreshCatalog();
   });
 
   document.querySelector("#catalogAssistantHome")?.addEventListener("click", () => {
