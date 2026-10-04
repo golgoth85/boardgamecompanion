@@ -109,6 +109,7 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             "best_players": row["bgg_best_players"],
             "recommended_players": row["bgg_recommended_players"],
             "recommended_age": row["bgg_recommended_age"],
+            "min_age": row["bgg_recommended_age"],
             "language_dependence": row["bgg_language_dependence"],
         },
         "collection": {
@@ -202,6 +203,15 @@ def _ideal_players_label(row) -> str | None:
     if not raw:
         return None
     return raw.replace("-", "–")
+
+
+def _box_age_label(row) -> str | None:
+    raw = str(row["bgg_recommended_age"] or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        return f"{raw}+"
+    return raw
 
 
 def _facet_match(row, *, category: str | None, mechanic: str | None) -> bool:
@@ -915,7 +925,7 @@ class Catalog:
                     return None
                 efficiency = 100.0 / (1.0 + max(0, duration - 30) / 120.0)
                 score = q * 0.82 + efficiency * 0.18
-                factors.append(f"{duration} min")
+                factors.append(f"efficienza {efficiency:.0f}")
                 reason = "molta qualità per il tempo richiesto"
 
             elif selected_mode == "gateway":
@@ -964,8 +974,9 @@ class Catalog:
                 factors.insert(0, f"ideale in {ideal_label}")
             if weight_value is not None:
                 factors.append(f"peso {weight_value:.1f}")
-            if duration is not None and selected_mode != "quality_time":
-                factors.append(f"{duration} min")
+            age_label = _box_age_label(row)
+            if age_label:
+                factors.append(f"età {age_label}")
             return max(0.0, min(100.0, score)), reason, factors[:4]
 
         ranked: list[dict[str, Any]] = []
