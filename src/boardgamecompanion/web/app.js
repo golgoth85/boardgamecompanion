@@ -7,8 +7,7 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 const shellSectionLabels = {
   catalog: "Ludoteca",
   rankings: "Classifiche",
-  categories: "Generi",
-  mechanics: "Meccaniche",
+  explore: "Esplora",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
@@ -16,8 +15,7 @@ const shellSectionLabels = {
 
 function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
-  if (/^\/categories\/?$/.test(pathname)) return "categories";
-  if (/^\/mechanics\/?$/.test(pathname)) return "mechanics";
+  if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
   if (/^\/updates\/?$/.test(pathname)) return "updates";
   if (/^\/discovery\/?$/.test(pathname)) return "discovery";
@@ -180,6 +178,22 @@ const state = {
   category: "",
   mechanic: "",
 };
+
+const exploreState = {
+  activeTab: "category",
+  categories: new Set(),
+  mechanics: new Set(),
+  supportsPlayers: "",
+  idealPlayers: "",
+  playerAge: "",
+  weight: "",
+  maxMinutes: "",
+  minRating: "",
+  expandedResults: false,
+};
+
+let exploreRequestController;
+let currentExplorePayload = null;
 
 const catalogColumnSorts = {
   title: ["title", "title_desc"],
@@ -3454,50 +3468,300 @@ async function renderRankings() {
   }
 }
 
-function facetCard(item, kind) {
+function exploreFacetMosaic(item, kind) {
+  const covers = Array.isArray(item.covers) ? item.covers.slice(0, 4) : [];
   const icon = kind === "category" ? "◫" : "⌘";
+  if (!covers.length) {
+    return `<div class="explore-facet-mosaic is-empty" aria-hidden="true">
+      <span>${icon}</span>
+    </div>`;
+  }
+  return `<div class="explore-facet-mosaic has-${covers.length}" aria-hidden="true">
+    ${covers.map((url) =>
+      `<img src="${escapeHtml(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ).join("")}
+  </div>`;
+}
+
+function exploreFacetCard(item, kind) {
+  const selected = Boolean(item.selected);
   return `
-    <button class="facet-card" type="button" data-facet-kind="${kind}" data-facet-name="${escapeHtml(item.name)}">
-      <span class="facet-icon" aria-hidden="true">${icon}</span>
-      <span><strong>${escapeHtml(item.name)}</strong><small>${formatNumber(item.count, 0)} giochi</small></span>
-      <span aria-hidden="true">→</span>
+    <button class="explore-facet-card ${selected ? "is-selected" : ""}" type="button"
+            data-explore-kind="${kind}" data-explore-name="${escapeHtml(item.name)}"
+            aria-pressed="${selected ? "true" : "false"}">
+      <span class="explore-facet-count">${formatNumber(item.count, 0)} giochi</span>
+      ${exploreFacetMosaic(item, kind)}
+      <span class="explore-facet-label">
+        <strong>${escapeHtml(item.name)}</strong>
+        <small>${kind === "category" ? "Genere" : "Meccanica"}${selected ? " · selezionata" : ""}</small>
+      </span>
+      <span class="explore-facet-check" aria-hidden="true">${selected ? "✓" : "+"}</span>
     </button>
   `;
 }
 
-async function renderFacets(kind) {
-  const isCategory = kind === "category";
+function exploreParams() {
+  const params = new URLSearchParams({limit: "250"});
+  [...exploreState.categories].forEach((value) => params.append("category", value));
+  [...exploreState.mechanics].forEach((value) => params.append("mechanic", value));
+  for (const [key, value] of [
+    ["supports_players", exploreState.supportsPlayers],
+    ["ideal_players", exploreState.idealPlayers],
+    ["player_age", exploreState.playerAge],
+    ["weight", exploreState.weight],
+    ["max_minutes", exploreState.maxMinutes],
+    ["min_rating", exploreState.minRating],
+  ]) {
+    if (String(value || "").trim()) params.set(key, String(value).trim());
+  }
+  return params;
+}
+
+function exploreSelectionChips() {
+  const chips = [
+    ...[...exploreState.categories].map((name) => ({kind: "category", name, label: "Genere"})),
+    ...[...exploreState.mechanics].map((name) => ({kind: "mechanic", name, label: "Meccanica"})),
+  ];
+  if (!chips.length) {
+    return '<span class="explore-selection-empty">Nessun genere o meccanica selezionati.</span>';
+  }
+  return chips.map((item) => `
+    <button class="explore-selection-chip" type="button"
+            data-explore-remove-kind="${item.kind}" data-explore-remove-name="${escapeHtml(item.name)}">
+      <small>${item.label}</small><strong>${escapeHtml(item.name)}</strong><span aria-hidden="true">×</span>
+    </button>
+  `).join("");
+}
+
+function renderExplorePayload(payload) {
+  currentExplorePayload = payload;
+  const tabItems = exploreState.activeTab === "category"
+    ? payload.categories || []
+    : payload.mechanics || [];
+  const selectedCount = exploreState.categories.size + exploreState.mechanics.size;
+  const visibleGames = exploreState.expandedResults
+    ? (payload.games || [])
+    : (payload.games || []).slice(0, 12);
+
+  const selections = document.querySelector("#exploreSelections");
+  const facets = document.querySelector("#exploreFacetGrid");
+  const resultCount = document.querySelector("#exploreResultCount");
+  const resultGrid = document.querySelector("#exploreResultGrid");
+  const resultMore = document.querySelector("#exploreResultMore");
+  if (!selections || !facets || !resultCount || !resultGrid || !resultMore) return;
+
+  selections.innerHTML = `
+    <div class="explore-selection-chips">${exploreSelectionChips()}</div>
+    ${selectedCount ? '<button class="button button-ghost explore-clear-selections" id="exploreClearSelections" type="button">Azzera selezioni</button>' : ""}
+  `;
+
+  facets.innerHTML = tabItems.length
+    ? tabItems.map((item) => exploreFacetCard(item, exploreState.activeTab)).join("")
+    : '<div class="empty explore-empty-facets">Nessun altro criterio compatibile con la selezione corrente.</div>';
+
+  resultCount.textContent = `${formatNumber(payload.total, 0)} giochi corrispondenti`;
+  resultGrid.innerHTML = visibleGames.length
+    ? visibleGames.map((game) => gameCard(game, [])).join("")
+    : '<div class="empty catalog-empty">Nessun gioco soddisfa contemporaneamente tutti i criteri.</div>';
+
+  const hiddenCount = Math.max(0, (payload.games || []).length - visibleGames.length);
+  resultMore.hidden = hiddenCount === 0 && !exploreState.expandedResults;
+  resultMore.textContent = exploreState.expandedResults
+    ? "Mostra meno"
+    : `Mostra altri ${hiddenCount}`;
+
+  document.querySelectorAll("[data-explore-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.exploreKind === "category"
+        ? exploreState.categories
+        : exploreState.mechanics;
+      const name = button.dataset.exploreName;
+      if (target.has(name)) target.delete(name);
+      else target.add(name);
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  });
+
+  document.querySelectorAll("[data-explore-remove-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.exploreRemoveKind === "category"
+        ? exploreState.categories
+        : exploreState.mechanics;
+      target.delete(button.dataset.exploreRemoveName);
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  });
+
+  document.querySelector("#exploreClearSelections")?.addEventListener("click", () => {
+    exploreState.categories.clear();
+    exploreState.mechanics.clear();
+    exploreState.expandedResults = false;
+    refreshExplore();
+  });
+
+  resultMore.onclick = () => {
+    exploreState.expandedResults = !exploreState.expandedResults;
+    renderExplorePayload(payload);
+  };
+}
+
+async function refreshExplore() {
+  const facets = document.querySelector("#exploreFacetGrid");
+  const resultGrid = document.querySelector("#exploreResultGrid");
+  if (!facets || !resultGrid) return;
+
+  exploreRequestController?.abort();
+  const controller = new AbortController();
+  exploreRequestController = controller;
+  facets.innerHTML = skeletons();
+  resultGrid.innerHTML = skeletons();
+
+  try {
+    const payload = await api(`/api/catalog/explore?${exploreParams()}`, {signal: controller.signal});
+    if (controller.signal.aborted || !document.querySelector("#exploreFacetGrid")) return;
+    renderExplorePayload(payload);
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    facets.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    resultGrid.innerHTML = "";
+    showToast(error.message, true);
+  } finally {
+    if (exploreRequestController === controller) exploreRequestController = undefined;
+  }
+}
+
+function bindExploreControls() {
+  document.querySelectorAll("[data-explore-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      exploreState.activeTab = button.dataset.exploreTab;
+      document.querySelectorAll("[data-explore-tab]").forEach((item) => {
+        const active = item.dataset.exploreTab === exploreState.activeTab;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      if (currentExplorePayload) renderExplorePayload(currentExplorePayload);
+    });
+  });
+
+  for (const [id, key] of [
+    ["exploreSupportsPlayers", "supportsPlayers"],
+    ["exploreIdealPlayers", "idealPlayers"],
+    ["explorePlayerAge", "playerAge"],
+    ["exploreWeight", "weight"],
+    ["exploreMaxMinutes", "maxMinutes"],
+    ["exploreMinRating", "minRating"],
+  ]) {
+    document.querySelector(`#${id}`)?.addEventListener("change", (event) => {
+      exploreState[key] = String(event.target.value || "").trim();
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  }
+
+  document.querySelector("#exploreResetOptional")?.addEventListener("click", () => {
+    for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) {
+      exploreState[key] = "";
+    }
+    exploreState.expandedResults = false;
+    renderExplore();
+  });
+}
+
+async function renderExplore(initialTab = null) {
+  if (initialTab === "category" || initialTab === "mechanic") {
+    exploreState.activeTab = initialTab;
+  }
   app.innerHTML = `
-    <section class="page-header browse-header">
+    <section class="page-header browse-header explore-page-header">
       <div>
-        <p class="eyebrow">Esplora</p>
-        <h1>${isCategory ? "Generi" : "Meccaniche"}</h1>
-        <p class="page-lead">${isCategory
-          ? "Sfoglia la ludoteca per genere e ambientazione."
-          : "Parti dalla meccanica che vuoi portare al tavolo."}</p>
+        <p class="eyebrow">Ludoteca</p>
+        <h1>Esplora</h1>
+        <p class="page-lead">Combina liberamente generi, meccaniche e parametri di gioco. Ogni scelta restringe l'intersezione dei titoli posseduti.</p>
+      </div>
+      <div class="explore-header-result">
+        <strong id="exploreResultCount">— giochi corrispondenti</strong>
+        <small>Solo giochi base posseduti</small>
       </div>
     </section>
-    <section class="browse-panel" id="browseContent">${skeletons()}</section>
+
+    <section class="explore-layout">
+      <div class="explore-main">
+        <section class="explore-selection-bar" id="exploreSelections" aria-label="Criteri selezionati"></section>
+
+        <div class="explore-tabs" role="tablist" aria-label="Tipo di criterio">
+          <button class="explore-tab ${exploreState.activeTab === "category" ? "is-active" : ""}"
+                  type="button" role="tab" data-explore-tab="category"
+                  aria-selected="${exploreState.activeTab === "category" ? "true" : "false"}">Generi</button>
+          <button class="explore-tab ${exploreState.activeTab === "mechanic" ? "is-active" : ""}"
+                  type="button" role="tab" data-explore-tab="mechanic"
+                  aria-selected="${exploreState.activeTab === "mechanic" ? "true" : "false"}">Meccaniche</button>
+        </div>
+
+        <section class="explore-facet-grid" id="exploreFacetGrid" aria-live="polite">${skeletons()}</section>
+
+        <section class="explore-results-section" aria-labelledby="exploreGamesTitle">
+          <div class="explore-results-head">
+            <div>
+              <p class="eyebrow">Intersezione</p>
+              <h2 id="exploreGamesTitle">Giochi corrispondenti</h2>
+            </div>
+            <button class="button button-ghost" id="exploreResultMore" type="button" hidden>Mostra altri</button>
+          </div>
+          <div class="catalog-results catalog-results-cards explore-result-grid" id="exploreResultGrid">${skeletons()}</div>
+        </section>
+      </div>
+
+      <aside class="explore-filter-panel" aria-label="Parametri facoltativi">
+        <div class="explore-filter-head">
+          <div><p class="eyebrow">Affina</p><h2>Altri parametri</h2></div>
+          <span class="quiet-pill">Facoltativi</span>
+        </div>
+        <p class="muted explore-filter-intro">Si combinano in AND con generi e meccaniche.</p>
+
+        <div class="explore-filter-fields">
+          <label>
+            <span>Giocabile in</span>
+            <input id="exploreSupportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(exploreState.supportsPlayers)}">
+            <small>Numero di giocatori supportato.</small>
+          </label>
+          <label>
+            <span>Ideale in</span>
+            <input id="exploreIdealPlayers" type="number" min="1" max="30" placeholder="es. 3" value="${escapeHtml(exploreState.idealPlayers)}">
+            <small>Usa “best/recommended players” BGG.</small>
+          </label>
+          <label>
+            <span>Età minima BGG ≤</span>
+            <input id="explorePlayerAge" type="number" min="3" max="99" placeholder="es. 10" value="${escapeHtml(exploreState.playerAge)}">
+            <small>Mostra giochi adatti a quell'età.</small>
+          </label>
+          <label>
+            <span>Durata massima</span>
+            <input id="exploreMaxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="${escapeHtml(exploreState.maxMinutes)}">
+          </label>
+          <label>
+            <span>Complessità</span>
+            <select id="exploreWeight">
+              <option value="">Qualsiasi</option>
+              <option value="light" ${exploreState.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
+              <option value="medium" ${exploreState.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
+              <option value="heavy" ${exploreState.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
+            </select>
+          </label>
+          <label>
+            <span>Rating BGG minimo</span>
+            <input id="exploreMinRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(exploreState.minRating)}">
+          </label>
+        </div>
+        <button class="button button-ghost explore-reset-optional" id="exploreResetOptional" type="button">Azzera parametri</button>
+      </aside>
+    </section>
   `;
-  try {
-    const facets = await api("/api/catalog/facets?limit=100");
-    const items = isCategory ? facets.categories : facets.mechanics;
-    document.querySelector("#browseContent").innerHTML = items.length
-      ? `<div class="facet-grid">${items.map((item) => facetCard(item, kind)).join("")}</div>`
-      : '<div class="empty">Metadati non ancora disponibili.</div>';
-    document.querySelectorAll("[data-facet-kind]").forEach((button) => {
-      button.addEventListener("click", () => {
-        state.category = button.dataset.facetKind === "category" ? button.dataset.facetName : "";
-        state.mechanic = button.dataset.facetKind === "mechanic" ? button.dataset.facetName : "";
-        state.offset = 0;
-        history.pushState({}, "", "/");
-        route();
-      });
-    });
-    document.title = `${isCategory ? "Generi" : "Meccaniche"} · BoardGameCompanion`;
-  } catch (error) {
-    document.querySelector("#browseContent").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-  }
+
+  bindExploreControls();
+  document.title = "Esplora · BoardGameCompanion";
+  await refreshExplore();
 }
 
 async function route() {
@@ -3522,12 +3786,16 @@ async function route() {
     await renderRankings();
     return;
   }
+  if (/^\/explore\/?$/.test(window.location.pathname)) {
+    await renderExplore();
+    return;
+  }
   if (/^\/categories\/?$/.test(window.location.pathname)) {
-    await renderFacets("category");
+    await renderExplore("category");
     return;
   }
   if (/^\/mechanics\/?$/.test(window.location.pathname)) {
-    await renderFacets("mechanic");
+    await renderExplore("mechanic");
     return;
   }
 
