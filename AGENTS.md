@@ -211,3 +211,12 @@ The hardened control agent can perform controlled Docker list/inspect/logs/start
 6. CloudCLI still requires explicit prior user authorization.
 7. Never let bridge capabilities bypass an independent-review read-only mandate, no-deploy/no-merge instruction, or explicit phase gate.
 
+
+## Mandatory Local CI policy
+
+- This repository must follow `LOCAL_CI.md` and the canonical policy in `golgoth85/local-ci-lab/docs/LOCAL-CI-ADOPTION-POLICY.md`.
+- Local CI is the default path for ordinary development tests and validation. Do not add or restore automatic GitHub-hosted development CI without an explicit documented exception.
+- During migration, retained hosted development workflows are manual-only fallbacks. Unknown or unavailable Local CI profiles fail closed; do not silently substitute `ubuntu-latest`.
+- Untrusted PR/source code must not execute directly on persistent credential-bearing self-hosted runners. Use the disposable I3 sandbox.
+- Release/publish/deploy jobs requiring credentials are a separate trusted boundary and do not replace Local CI validation.
+- New application repositories must be registered in the Local CI repository registry and contain `LOCAL_CI.md` before CI is considered configured.
