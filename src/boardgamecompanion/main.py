@@ -24,8 +24,10 @@ from boardgamecompanion.app_settings import (
     activate_embedding_provider,
     resolve_bgg_settings,
     resolve_rag_settings,
+    resolve_youtube_settings,
     save_bgg_settings,
     save_rag_settings,
+    save_youtube_settings,
 )
 from boardgamecompanion.bgg_collection_sync import (
     BggCollectionClient,
@@ -128,6 +130,12 @@ from boardgamecompanion.rulebook_updates import (
     RulebookUpdateService,
 )
 from boardgamecompanion.settings import settings
+from boardgamecompanion.tutorial_videos import (
+    TutorialVideoError,
+    TutorialVideoGameNotFound,
+    TutorialVideoNotConfigured,
+    YouTubeTutorialService,
+)
 
 WEB_DIR = Path(__file__).parent / "web"
 LOGGER = logging.getLogger(__name__)
@@ -204,6 +212,18 @@ def get_description_translation_service() -> DescriptionTranslationService:
     return DescriptionTranslationService(database)
 
 
+def get_youtube_tutorial_service() -> YouTubeTutorialService:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_youtube_settings(database)
+    return YouTubeTutorialService(
+        database,
+        api_key=resolved.api_key,
+        timeout_seconds=resolved.timeout_seconds,
+        search_results=resolved.search_results,
+    )
+
+
 def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     database = get_database()
     database.initialize()
@@ -274,6 +294,11 @@ class BggSettingsUpdate(BaseModel):
     application_token: str | None = Field(default=None, max_length=4096)
     clear_application_token: bool = False
     username: str | None = Field(default=None, max_length=128)
+
+
+class YouTubeSettingsUpdate(BaseModel):
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_api_key: bool = False
 
 
 class RagSettingsUpdate(BaseModel):
@@ -908,6 +933,26 @@ def list_game_documents(bgg_id: int) -> dict[str, object]:
     documents = DocumentStore(database, settings.manuals_dir).list_for_game(bgg_id)
     return {"bgg_id": bgg_id, "count": len(documents), "items": documents}
 
+
+
+@app.get("/api/games/{bgg_id}/tutorial-videos", tags=["tutorials"])
+def list_game_tutorial_videos(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_youtube_tutorial_service().list_for_game(bgg_id)
+    except TutorialVideoGameNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/games/{bgg_id}/tutorial-videos/discover", tags=["tutorials"])
+def discover_game_tutorial_videos(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_youtube_tutorial_service().discover(bgg_id)
+    except TutorialVideoNotConfigured as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TutorialVideoGameNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TutorialVideoError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/games/{bgg_id}/documents", tags=["documents"])
@@ -1850,6 +1895,25 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return resolved.public_dict()
+
+
+@app.get("/api/settings/youtube", tags=["settings"])
+def get_youtube_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return resolve_youtube_settings(database).public_dict()
+
+
+@app.put("/api/settings/youtube", tags=["settings"])
+def update_youtube_settings(payload: YouTubeSettingsUpdate) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = save_youtube_settings(
+        database,
+        api_key=payload.api_key,
+        clear_api_key=payload.clear_api_key,
+    )
     return resolved.public_dict()
 
 
