@@ -29,7 +29,7 @@ def _database(tmp_path: Path) -> Database:
         connection.execute(
             """
             INSERT INTO board_game_enrichments(
-                board_game_id,source,external_id,title,metadata_json,
+                board_game_id,source,external_id,title,publishers_json,
                 next_refresh_at,created_at,updated_at
             ) VALUES(?,?,?,?,?,?,?,?)
             """,
@@ -38,7 +38,7 @@ def _database(tmp_path: Path) -> Database:
                 "test",
                 "329082",
                 "Radlands",
-                json.dumps({"publishers": ["Roxley Games"]}),
+                json.dumps(["Roxley Games"]),
                 "2099-01-01T00:00:00+00:00",
                 "now",
                 "now",
