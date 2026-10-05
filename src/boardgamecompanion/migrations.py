@@ -1308,6 +1308,42 @@ def _gameplay_summaries(connection: sqlite3.Connection) -> None:
 
 
 
+def _tutorial_videos(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_tutorial_videos (
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            youtube_video_id TEXT NOT NULL,
+            language TEXT NOT NULL CHECK(language IN ('it', 'en')),
+            title TEXT NOT NULL,
+            channel_id TEXT,
+            channel_title TEXT NOT NULL,
+            thumbnail_url TEXT,
+            duration_seconds INTEGER CHECK(
+                duration_seconds IS NULL OR duration_seconds >= 0
+            ),
+            view_count INTEGER NOT NULL DEFAULT 0 CHECK(view_count >= 0),
+            published_at TEXT,
+            is_official INTEGER NOT NULL DEFAULT 0 CHECK(is_official IN (0, 1)),
+            official_reason TEXT,
+            source_query TEXT NOT NULL,
+            discovered_at TEXT NOT NULL,
+            verified_at TEXT NOT NULL,
+            PRIMARY KEY(board_game_id, youtube_video_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_tutorial_videos_game_language
+        ON game_tutorial_videos(
+            board_game_id, language, is_official DESC, view_count DESC
+        )
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1325,6 +1361,7 @@ MIGRATIONS = (
     Migration(14, "bgg-collection-sync-state", _bgg_collection_sync_state),
     Migration(15, "personal-collection-progress", _personal_collection_progress),
     Migration(16, "gameplay-summaries", _gameplay_summaries),
+    Migration(17, "tutorial-videos", _tutorial_videos),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

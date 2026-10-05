@@ -111,6 +111,10 @@ const clearTokenRow = document.querySelector("#clearTokenRow");
 const bggTokenHint = document.querySelector("#bggTokenHint");
 const bggSyncSettingsStatus = document.querySelector("#bggSyncSettingsStatus");
 const bggSyncSettingsNow = document.querySelector("#bggSyncSettingsNow");
+const youtubeApiKey = document.querySelector("#youtubeApiKey");
+const youtubeApiKeyHint = document.querySelector("#youtubeApiKeyHint");
+const youtubeClearApiKey = document.querySelector("#youtubeClearApiKey");
+const clearYoutubeApiKeyRow = document.querySelector("#clearYoutubeApiKeyRow");
 const settingsResult = document.querySelector("#settingsResult");
 const ragEmbeddingOrder = document.querySelector("#ragEmbeddingOrder");
 const ragGenerationOrder = document.querySelector("#ragGenerationOrder");
@@ -291,6 +295,7 @@ let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
 let currentRagSettings = null;
+let currentYoutubeSettings = null;
 let copyBusy = false;
 let editingCopyId = null;
 let editingCopyBggId = null;
@@ -340,6 +345,50 @@ function initials(title) {
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString("it-IT", { maximumFractionDigits: digits });
+}
+
+function formatTutorialDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const total = Math.round(value);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours) return `${hours} h ${minutes} min`;
+  return `${minutes} min`;
+}
+
+function tutorialVideoCard(item) {
+  const language = String(item.language || "en").toUpperCase();
+  const kind = item.is_official ? "Ufficiale" : "Community";
+  const duration = formatTutorialDuration(item.duration_seconds);
+  const views = Number(item.view_count || 0);
+  const meta = [
+    item.channel_title || "YouTube",
+    duration || null,
+    views ? `${formatNumber(views, 0)} visualizzazioni` : null,
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="tutorial-video-card">
+      <div class="tutorial-video-frame">
+        <iframe
+          src="${escapeHtml(item.embed_url)}"
+          title="${escapeHtml(item.title || "Video tutorial")}"
+          loading="lazy"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen></iframe>
+      </div>
+      <div class="tutorial-video-body">
+        <div class="document-badges">
+          <span class="badge">${escapeHtml(language)}</span>
+          <span class="badge ${item.is_official ? "document-official" : "document-unofficial"}">${kind}</span>
+        </div>
+        <strong>${escapeHtml(item.title || "Video tutorial")}</strong>
+        <p class="muted">${escapeHtml(meta)}</p>
+        <a class="external-link" href="${escapeHtml(item.watch_url)}" target="_blank" rel="noopener noreferrer">Apri su YouTube ↗</a>
+      </div>
+    </article>
+  `;
 }
 
 function runWhenIdle(callback, timeout = 1500) {
@@ -476,6 +525,28 @@ function applyBggSettingsToForm(data) {
   }
 }
 
+function applyYoutubeSettingsToForm(data) {
+  currentYoutubeSettings = data;
+  youtubeApiKey.value = "";
+  youtubeClearApiKey.checked = false;
+  const overridden = Boolean(data.overrides?.api_key);
+  youtubeApiKey.disabled = overridden;
+  youtubeClearApiKey.disabled = overridden;
+  if (overridden) {
+    youtubeApiKeyHint.textContent =
+      "Chiave configurata tramite BGC_YOUTUBE_API_KEY. L'override runtime ha precedenza.";
+    clearYoutubeApiKeyRow.hidden = true;
+  } else if (data.stored_api_key_configured) {
+    youtubeApiKeyHint.textContent =
+      "YouTube Data API key configurata. Lascia vuoto per mantenerla invariata.";
+    clearYoutubeApiKeyRow.hidden = false;
+  } else {
+    youtubeApiKeyHint.textContent =
+      "Nessuna YouTube Data API key configurata.";
+    clearYoutubeApiKeyRow.hidden = true;
+  }
+}
+
 function formatBggSyncTime(value) {
   if (!value) return "mai";
   const date = new Date(value);
@@ -594,13 +665,15 @@ async function openSettingsDialog(initialTab = "general") {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const [bggData, ragData, syncData] = await Promise.all([
+    const [bggData, ragData, youtubeData, syncData] = await Promise.all([
       api("/api/settings/bgg"),
       api("/api/settings/rag"),
+      api("/api/settings/youtube"),
       api("/api/bgg-collection-sync"),
     ]);
     applyBggSettingsToForm(bggData);
     applyRagSettingsToForm(ragData);
+    applyYoutubeSettingsToForm(youtubeData);
     renderBggSyncSettingsStatus(syncData);
     settingsDialog.showModal();
   } catch (error) {
@@ -672,6 +745,21 @@ async function persistSettings({verifyAfter = false} = {}) {
       body: JSON.stringify(bggPayload),
     });
     applyBggSettingsToForm(savedBgg);
+
+    const youtubePayload = {
+      api_key:
+        youtubeClearApiKey.checked || !youtubeApiKey.value.trim()
+          ? null
+          : youtubeApiKey.value.trim(),
+      clear_api_key: youtubeClearApiKey.checked,
+    };
+    const savedYoutube = await api("/api/settings/youtube", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(youtubePayload),
+    });
+    applyYoutubeSettingsToForm(savedYoutube);
+
     try {
       renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
     } catch (_) {}
@@ -2719,10 +2807,11 @@ async function renderDetail(bggId) {
   `;
   const requestedPath = window.location.pathname;
   try {
-    const [game, copies, documents] = await Promise.all([
+    const [game, copies, documents, tutorials] = await Promise.all([
       api(`/api/games/${bggId}`),
       api(`/api/games/${bggId}/copies`),
       api(`/api/games/${bggId}/documents`),
+      api(`/api/games/${bggId}/tutorial-videos`),
     ]);
     if (window.location.pathname !== requestedPath) return;
 
@@ -2732,6 +2821,7 @@ async function renderDetail(bggId) {
     const metadata = game.bgg_metadata || {};
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
+    const tutorialItems = tutorials.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
     const italianDescription = String(game.description_it || "").trim();
     const description = italianDescription
@@ -2817,6 +2907,26 @@ async function renderDetail(bggId) {
                 </div>
               </details>
             ` : '<div id="physicalCopyList" hidden></div>'}
+          </section>
+
+          <section class="game-section tutorial-videos-section" aria-labelledby="tutorialVideosTitle">
+            <div class="simple-rulebook-head">
+              <div>
+                <p class="eyebrow">Video tutorial</p>
+                <h2 id="tutorialVideosTitle">Come si gioca</h2>
+              </div>
+              <button class="button button-ghost" id="tutorialDiscoveryAction" type="button">
+                ${tutorials.configured ? (tutorialItems.length ? "Aggiorna video" : "Cerca video") : "Configura YouTube API"}
+              </button>
+            </div>
+            ${tutorialItems.length
+              ? `<div class="tutorial-video-grid">${tutorialItems.map(tutorialVideoCard).join("")}</div>`
+              : `<div class="tutorial-video-empty">
+                   ${tutorials.configured
+                     ? "Nessun tutorial selezionato. Avvia la ricerca automatica per italiano e inglese."
+                     : "Configura una YouTube Data API key per trovare automaticamente tutorial ufficiali e community."}
+                 </div>`}
+            <p class="muted tutorial-video-note">Priorità ai canali ufficiali del publisher; per i video community viene preferito il tutorial pertinente con più visualizzazioni.</p>
           </section>
 
           <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
@@ -2915,6 +3025,7 @@ async function renderDetail(bggId) {
     });
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
+    setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
     ensureItalianDescription(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;
@@ -2925,6 +3036,35 @@ async function renderDetail(bggId) {
     `;
     showToast(error.message, true);
   }
+}
+
+function setupTutorialDiscovery(bggId, configured) {
+  const button = document.querySelector("#tutorialDiscoveryAction");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    if (!configured) {
+      void openSettingsDialog("general");
+      return;
+    }
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = "Ricerca video…";
+    try {
+      const result = await api(`/api/games/${bggId}/tutorial-videos/discover`, {
+        method: "POST",
+      });
+      showToast(
+        result.count
+          ? `Tutorial aggiornati: ${result.count} video selezionati.`
+          : "Nessun tutorial pertinente trovato.",
+      );
+      await renderDetail(bggId);
+    } catch (error) {
+      showToast(error.message, true);
+      button.disabled = false;
+      button.textContent = original;
+    }
+  });
 }
 
 async function setupGameDiscovery(bggId, gameTitle) {
@@ -4619,6 +4759,7 @@ settingsDialog.addEventListener("close", () => {
   settingsResult.textContent = "";
   currentBggSettings = null;
   currentRagSettings = null;
+  currentYoutubeSettings = null;
 });
 
 settingsForm.addEventListener("submit", (event) => {
@@ -4648,6 +4789,12 @@ lmstudioClearApiKey.addEventListener("change", () => {
 geminiClearApiKey.addEventListener("change", () => {
   geminiApiKey.disabled = geminiClearApiKey.checked;
   if (geminiClearApiKey.checked) geminiApiKey.value = "";
+});
+
+youtubeClearApiKey.addEventListener("change", () => {
+  youtubeApiKey.disabled =
+    youtubeClearApiKey.checked || Boolean(currentYoutubeSettings?.overrides?.api_key);
+  if (youtubeClearApiKey.checked) youtubeApiKey.value = "";
 });
 
 importButton.addEventListener("click", () => {

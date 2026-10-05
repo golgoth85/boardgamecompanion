@@ -23,6 +23,7 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert 'id="settingsDialogTitle">Impostazioni<' in response.text
     assert "Priorità provider" in response.text
     assert 'id="bggApplicationToken"' in response.text
+    assert 'id="youtubeApiKey"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
@@ -76,10 +77,14 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "--accent:" in css.text
     assert extra_css.status_code == 200
     assert ".assistant-dialog" in extra_css.text
+    assert ".tutorial-video-grid" in extra_css.text
     assert js.status_code == 200
     assert "renderCatalog" in js.text
     assert "renderReviews" in js.text
     assert "renderUpdates" in js.text
     assert "renderDiscovery" in js.text
+    assert "tutorialDiscoveryAction" in js.text
+    assert "tutorialVideoCard" in js.text
+    assert "tutorial-video-frame" in js.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text

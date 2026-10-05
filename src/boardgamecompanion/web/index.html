@@ -174,6 +174,29 @@
             <button class="button button-ghost" id="importButton" type="button">Importa CSV BGG</button>
           </div>
         </section>
+
+        <section class="settings-card" id="youtubeSettings">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">YouTube</p>
+              <h3>Video tutorial</h3>
+            </div>
+            <span class="quiet-pill">IT + EN</span>
+          </div>
+          <p class="muted">La chiave YouTube Data API abilita la ricerca automatica. I video non vengono scaricati: vengono salvati solo ID e metadati pubblici.</p>
+          <div class="settings-grid">
+            <label class="settings-field copy-span-2">
+              <span>YouTube Data API key</span>
+              <input id="youtubeApiKey" type="password" autocomplete="new-password"
+                     placeholder="Lascia vuoto per mantenerla invariata">
+              <small id="youtubeApiKeyHint" class="muted"></small>
+            </label>
+            <label class="settings-check copy-span-2" id="clearYoutubeApiKeyRow" hidden>
+              <input id="youtubeClearApiKey" type="checkbox">
+              <span>Rimuovi la YouTube API key salvata</span>
+            </label>
+          </div>
+        </section>
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="rulebooks" hidden>

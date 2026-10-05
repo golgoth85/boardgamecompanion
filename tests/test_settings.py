@@ -22,6 +22,10 @@ def clear_bgg_env() -> None:
     os.environ.pop("BGC_BGG_USERNAME", None)
 
 
+def clear_youtube_env() -> None:
+    os.environ.pop("BGC_YOUTUBE_API_KEY", None)
+
+
 def test_bgg_settings_persist_without_returning_secret(tmp_path: Path) -> None:
     clear_bgg_env()
     configure_paths(tmp_path)
@@ -189,3 +193,64 @@ def test_rag_settings_reject_duplicate_provider_priority(tmp_path: Path) -> None
 
     assert response.status_code == 400
     assert "duplicates" in response.json()["detail"]
+
+
+def test_youtube_settings_persist_without_returning_secret(tmp_path: Path) -> None:
+    clear_youtube_env()
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        initial = client.get("/api/settings/youtube")
+        assert initial.status_code == 200
+        assert initial.json()["configured"] is False
+
+        saved = client.put(
+            "/api/settings/youtube",
+            json={"api_key": "youtube-secret-key"},
+        )
+        assert saved.status_code == 200
+        body = saved.json()
+        assert body["configured"] is True
+        assert body["api_key_source"] == "stored"
+        assert body["stored_api_key_configured"] is True
+        assert "youtube-secret-key" not in saved.text
+        assert "api_key" not in body
+
+        reloaded = client.get("/api/settings/youtube")
+        assert reloaded.status_code == 200
+        assert reloaded.json() == body
+        assert "youtube-secret-key" not in reloaded.text
+
+        cleared = client.put(
+            "/api/settings/youtube",
+            json={"api_key": None, "clear_api_key": True},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["configured"] is False
+
+
+def test_youtube_environment_key_overrides_stored_value(tmp_path: Path) -> None:
+    clear_youtube_env()
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        stored = client.put(
+            "/api/settings/youtube",
+            json={"api_key": "stored-youtube-key"},
+        )
+        assert stored.status_code == 200
+
+        os.environ["BGC_YOUTUBE_API_KEY"] = "env-youtube-key"
+        try:
+            response = client.get("/api/settings/youtube")
+        finally:
+            clear_youtube_env()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["api_key_source"] == "environment"
+    assert body["overrides"]["api_key"] is True
+    assert body["stored_api_key_configured"] is True
+    assert "env-youtube-key" not in response.text
+    assert "stored-youtube-key" not in response.text

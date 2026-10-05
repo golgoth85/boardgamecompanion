@@ -270,3 +270,69 @@
   .trophy-card-body{padding:.58rem}
   .achievement-showcase-grid{grid-template-columns:1fr}
 }
+
+
+/* Tutorial videos */
+.tutorial-videos-section {
+  display: grid;
+  gap: 16px;
+}
+
+.tutorial-video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tutorial-video-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.tutorial-video-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.tutorial-video-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.tutorial-video-body {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.tutorial-video-body strong {
+  line-height: 1.35;
+}
+
+.tutorial-video-body .muted,
+.tutorial-video-note {
+  margin: 0;
+}
+
+.tutorial-video-empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .tutorial-video-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-video-card {
+    border-radius: 14px;
+  }
+}

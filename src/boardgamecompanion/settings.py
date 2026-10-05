@@ -84,6 +84,9 @@ class Settings(BaseSettings):
         ge=30.0,
         le=6 * 60 * 60,
     )
+    youtube_api_key: str | None = None
+    youtube_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
+    youtube_search_results: int = Field(default=12, ge=4, le=25)
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
