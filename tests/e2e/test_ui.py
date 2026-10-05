@@ -437,7 +437,10 @@ def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_ser
         "bgg_metadata": {"cover_url": None},
     }
 
+    catalog_urls = []
+
     def games_route(route):
+        catalog_urls.append(route.request.url)
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -466,6 +469,7 @@ def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_ser
         )
         page.goto(live_server)
 
+        assert any("limit=5000" in url and "offset=0" in url for url in catalog_urls)
         expect(page.locator(".game-card")).to_have_count(1)
         badge = page.locator(".expansion-count-badge")
         expect(badge).to_have_count(1)
@@ -480,6 +484,7 @@ def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_ser
 
         page.locator("#collapseExpansions").uncheck()
         expect(page.locator(".game-card")).to_have_count(2)
+        assert any("limit=50" in url and "offset=0" in url for url in catalog_urls)
     finally:
         context.close()
 

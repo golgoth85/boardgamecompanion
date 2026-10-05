@@ -2045,8 +2045,9 @@ function bindCatalogControls() {
   document.querySelector("#collapseExpansions")?.addEventListener("change", (event) => {
     state.collapseExpansions = event.target.checked;
     state.expandedGameGroups.clear();
+    state.offset = 0;
     window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
-    rerenderCurrentCatalog();
+    refreshCatalog();
   });
 
   document.querySelector("#cardViewButton")?.addEventListener("click", () => {
@@ -2161,9 +2162,12 @@ async function checkBggCollectionSyncOnOpen() {
 }
 
 async function loadCatalogData(signal) {
+  // Grouping base games with their expansions must happen before pagination.
+  // Otherwise a page boundary can separate an expansion from its parent.
+  const groupBeforePaginating = state.collapseExpansions;
   const params = new URLSearchParams({
-    limit: String(state.limit),
-    offset: String(state.offset),
+    limit: String(groupBeforePaginating ? CATALOG_ALL_LIMIT : state.limit),
+    offset: String(groupBeforePaginating ? 0 : state.offset),
     sort: state.sort,
   });
   if (state.q) params.set("q", state.q);
@@ -2247,7 +2251,6 @@ function renderStats(stats) {
 
 function renderCatalogData(catalog) {
   currentCatalogData = catalog;
-  state.total = catalog.total;
   const grid = document.querySelector("#catalogGrid");
   const count = document.querySelector("#resultCount");
   if (!grid || !count) return;
@@ -2256,9 +2259,14 @@ function renderCatalogData(catalog) {
   grid.className = `catalog-results ${state.catalogView === "list" ? "catalog-results-list" : `catalog-results-cards catalog-columns-${state.cardsPerRow}`}`;
 
   if (!catalog.items.length) {
+    state.total = 0;
     grid.innerHTML = '<div class="empty catalog-empty">Nessun gioco corrisponde ai filtri selezionati.</div>';
   } else {
-    const groups = groupCatalogItems(catalog.items);
+    const allGroups = groupCatalogItems(catalog.items);
+    state.total = state.collapseExpansions ? allGroups.length : catalog.total;
+    const groups = state.collapseExpansions
+      ? allGroups.slice(state.offset, state.offset + state.limit)
+      : allGroups;
     if (state.catalogView === "list") {
       grid.innerHTML = `
         <div class="catalog-list-head" aria-label="Ordina la lista per colonna">
