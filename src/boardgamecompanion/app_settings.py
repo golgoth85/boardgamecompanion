@@ -150,6 +150,68 @@ def save_bgg_settings(
     return resolve_bgg_settings(database)
 
 
+
+@dataclass(frozen=True)
+class ResolvedYouTubeSettings:
+    api_key: str | None
+    api_key_source: str | None
+    stored_api_key_configured: bool
+    timeout_seconds: float
+    search_results: int
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "configured": self.configured,
+            "api_key_configured": self.configured,
+            "api_key_source": self.api_key_source,
+            "stored_api_key_configured": self.stored_api_key_configured,
+            "timeout_seconds": self.timeout_seconds,
+            "search_results": self.search_results,
+            "overrides": {
+                "api_key": self.api_key_source == "environment",
+            },
+        }
+
+
+def resolve_youtube_settings(database: Database) -> ResolvedYouTubeSettings:
+    store = AppSettingsStore(database)
+    stored_key = store.get("youtube_api_key")
+    runtime_key = settings.youtube_api_key
+    api_key = runtime_key if runtime_key and runtime_key.strip() else stored_key
+    source = (
+        "environment"
+        if runtime_key and runtime_key.strip()
+        else "stored"
+        if stored_key
+        else None
+    )
+    return ResolvedYouTubeSettings(
+        api_key=api_key.strip() if api_key else None,
+        api_key_source=source,
+        stored_api_key_configured=bool(stored_key),
+        timeout_seconds=float(settings.youtube_timeout_seconds),
+        search_results=int(settings.youtube_search_results),
+    )
+
+
+def save_youtube_settings(
+    database: Database,
+    *,
+    api_key: str | None,
+    clear_api_key: bool,
+) -> ResolvedYouTubeSettings:
+    store = AppSettingsStore(database)
+    if clear_api_key:
+        store.set("youtube_api_key", None, sensitive=True)
+    elif api_key is not None and api_key.strip():
+        store.set("youtube_api_key", api_key.strip(), sensitive=True)
+    return resolve_youtube_settings(database)
+
+
 RAG_PROVIDERS = ("ollama", "lmstudio", "gemini")
 
 
