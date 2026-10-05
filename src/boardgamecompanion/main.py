@@ -656,7 +656,7 @@ def list_games(
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     completed: bool | None = Query(default=None),
     sort: str = Query(default="title"),
-    limit: int = Query(default=50, ge=1, le=250),
+    limit: int = Query(default=50, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     database = get_database()
