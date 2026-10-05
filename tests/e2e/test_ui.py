@@ -310,8 +310,15 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator(".catalog-list-row")).to_have_count(2)
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#cardsPerRowField")).to_be_hidden()
         page.get_by_role("button", name="▦ Card").click()
         expect(page.locator(".catalog-results-cards")).to_be_visible()
+        expect(page.locator("#cardsPerRowField")).to_be_visible()
+        page.locator("#cardsPerRowFilter").select_option("3")
+        expect(page.locator(".catalog-results-cards")).to_have_class(
+            re.compile(r"\bcatalog-columns-3\b")
+        )
+        assert page.evaluate("localStorage.getItem('bgc.catalogColumns')") == "3"
         assert catalog_requests == []
 
         page.get_by_role("button", name="☷ Lista").click()
@@ -514,7 +521,21 @@ def test_pagination(browser, live_server, tmp_path: Path):
         page.get_by_role("button", name="Chiudi").click()
 
         expect(page.locator(".game-card")).to_have_count(30)
+        expect(page.locator("#pageSizeFilter")).to_have_value("50")
         expect(page.locator("#pagination")).to_be_hidden()
+
+        page.locator("#pageSizeFilter").select_option("20")
+        expect(page.locator(".game-card")).to_have_count(20)
+        expect(page.locator("#pagination")).to_be_visible()
+        expect(page.locator("#pagination")).to_contain_text("20 per pagina")
+
+        page.get_by_role("button", name="Successiva →").click()
+        expect(page.locator(".game-card")).to_have_count(10)
+
+        page.locator("#pageSizeFilter").select_option("all")
+        expect(page.locator(".game-card")).to_have_count(30)
+        expect(page.locator("#pagination")).to_be_hidden()
+        assert page.evaluate("localStorage.getItem('bgc.catalogPageSize')") == "all"
     finally:
         context.close()
 
