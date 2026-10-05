@@ -460,6 +460,10 @@ def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_ser
         page.goto(live_server)
 
         expect(page.locator(".game-card")).to_have_count(1)
+        expect(page.locator(".catalog-metric-duration strong")).to_have_text("60–90")
+        assert page.locator(".catalog-metric-duration strong").evaluate(
+            "node => getComputedStyle(node).textOverflow"
+        ) == "clip"
         badge = page.locator(".expansion-count-badge")
         expect(badge).to_have_count(1)
         expect(badge).to_contain_text("1")
@@ -513,8 +517,43 @@ def test_pagination(browser, live_server, tmp_path: Path):
         expect(page.locator("#importResult")).to_contain_text("30 righe")
         page.get_by_role("button", name="Chiudi").click()
 
+        expect(page.locator("#pageSizeFilter")).to_have_value("20")
+        expect(page.locator(".game-card")).to_have_count(20)
+        expect(page.locator("#pagination")).to_be_visible()
+        expect(page.locator("#pagination")).to_contain_text("Pagina 1 di 2")
+
+        page.get_by_role("button", name="Successiva").click()
+        expect(page.locator(".game-card")).to_have_count(10)
+        expect(page.locator("#pagination")).to_contain_text("Pagina 2 di 2")
+
+        page.locator("#pageSizeFilter").select_option("50")
         expect(page.locator(".game-card")).to_have_count(30)
         expect(page.locator("#pagination")).to_be_hidden()
+
+        page.locator("#pageSizeFilter").select_option("5000")
+        expect(page.locator(".game-card")).to_have_count(30)
+        expect(page.locator("#pageSizeFilter")).to_have_value("5000")
+    finally:
+        context.close()
+
+
+def test_catalog_card_columns_are_selectable_and_persist(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        expect(page.locator("#catalogGrid")).to_have_class(re.compile(r".*catalog-columns-5.*"))
+
+        page.locator("#catalogColumnsFilter").select_option("3")
+        expect(page.locator("#catalogGrid")).to_have_class(re.compile(r".*catalog-columns-3.*"))
+
+        page.reload()
+        expect(page.locator("#catalogColumnsFilter")).to_have_value("3")
+        expect(page.locator("#catalogGrid")).to_have_class(re.compile(r".*catalog-columns-3.*"))
+
+        page.get_by_role("button", name="☷ Lista").click()
+        expect(page.locator("#catalogColumnsFilter")).to_be_disabled()
+        page.get_by_role("button", name="▦ Card").click()
+        expect(page.locator("#catalogColumnsFilter")).to_be_enabled()
     finally:
         context.close()
 
