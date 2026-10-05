@@ -169,10 +169,15 @@ const state = {
   itemType: "",
   owned: "",
   sort: "title",
-  limit: 250,
+  limit: [20, 50, 100, 250, 5000].includes(Number(window.localStorage.getItem("bgc.catalogPageSize")))
+    ? Number(window.localStorage.getItem("bgc.catalogPageSize"))
+    : 20,
   offset: 0,
   total: 0,
   catalogView: window.localStorage.getItem("bgc.catalogView") === "list" ? "list" : "cards",
+  catalogColumns: [3, 4, 5].includes(Number(window.localStorage.getItem("bgc.catalogColumns")))
+    ? Number(window.localStorage.getItem("bgc.catalogColumns"))
+    : 5,
   collapseExpansions: window.localStorage.getItem("bgc.collapseExpansions") !== "false",
   expandedGameGroups: new Set(),
   supportsPlayers: "",
@@ -1559,8 +1564,9 @@ function ageText(game) {
   return text;
 }
 
-function catalogMetric(label, value) {
-  return `<div class="catalog-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+function catalogMetric(label, value, key = "") {
+  const metricClass = key ? ` catalog-metric-${escapeHtml(key)}` : "";
+  return `<div class="catalog-metric${metricClass}"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
 function inferExpansionParent(expansion, standaloneGames) {
@@ -1662,7 +1668,7 @@ function gameCard(game, expansions = []) {
           <div class="catalog-metrics">
             ${catalogMetric("Giocatori", playerText(game))}
             ${catalogMetric("Età", ageText(game))}
-            ${catalogMetric("Durata", timeText(game).replace(" min", ""))}
+            ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
             ${catalogMetric("Peso", weight)}
           </div>
           <div class="card-footer-meta">
@@ -1744,6 +1750,12 @@ function skeletons() {
   return Array.from({length: 12}, () => '<div class="skeleton"></div>').join("");
 }
 
+function catalogGridClass() {
+  const viewClass = state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards";
+  const columnsClass = state.catalogView === "cards" ? ` catalog-columns-${state.catalogColumns}` : "";
+  return `catalog-results ${viewClass}${columnsClass}`;
+}
+
 function syncCatalogViewControls() {
   for (const [id, view] of [
     ["cardViewButton", "cards"],
@@ -1755,6 +1767,8 @@ function syncCatalogViewControls() {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   }
+  const columns = document.querySelector("#catalogColumnsFilter");
+  if (columns) columns.disabled = state.catalogView !== "cards";
 }
 
 function rerenderCurrentCatalog() {
@@ -1780,31 +1794,13 @@ async function renderCatalog() {
         <p class="eyebrow">Ludoteca</p>
         <h1>I tuoi giochi</h1>
         <p class="page-lead">Trova rapidamente il gioco giusto per persone, tempo e serata.</p>
-        <div class="catalog-hero-actions">
-          <button class="assistant-home-button" id="catalogAssistantHome" type="button">
-            <span aria-hidden="true">✦</span>
-            <span><strong>Chiedi alla tua ludoteca</strong><small>Consigli su misura con l'AI</small></span>
-          </button>
-          ${activeFacet ? `
+        ${activeFacet ? `
+          <div class="catalog-hero-actions">
             <button class="active-facet-chip" id="clearFacet" type="button">
               ${escapeHtml(activeFacet)} <span aria-hidden="true">×</span>
             </button>
-          ` : ""}
-        </div>
-      </div>
-      <div class="page-header-meta catalog-header-actions">
-        <div class="catalog-sync-inline" title="Sincronizzazione automatica BoardGameGeek">
-          <span class="status-dot" id="catalogBggSyncDot" aria-hidden="true"></span>
-          <span id="catalogBggSyncStatus">BGG</span>
-          <button class="sync-icon-button" id="catalogBggSync" type="button"
-                  aria-label="Sincronizza ora con BoardGameGeek" title="Sincronizza ora">↻</button>
-        </div>
-        <div class="catalog-view-switch" aria-label="Vista catalogo">
-          <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
-          <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
-        </div>
+          </div>
+        ` : ""}
       </div>
     </section>
 
@@ -1885,6 +1881,28 @@ async function renderCatalog() {
             </optgroup>
           </select>
         </label>
+        <div class="catalog-view-switch catalog-toolbar-view" aria-label="Vista catalogo">
+          <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
+                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+          <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
+                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+        </div>
+        <label class="field catalog-compact-field">
+          <select id="pageSizeFilter" aria-label="Elementi per pagina">
+            <option value="20" ${state.limit === 20 ? "selected" : ""}>20 / pagina</option>
+            <option value="50" ${state.limit === 50 ? "selected" : ""}>50 / pagina</option>
+            <option value="100" ${state.limit === 100 ? "selected" : ""}>100 / pagina</option>
+            <option value="250" ${state.limit === 250 ? "selected" : ""}>250 / pagina</option>
+            <option value="5000" ${state.limit === 5000 ? "selected" : ""}>Tutti</option>
+          </select>
+        </label>
+        <label class="field catalog-compact-field catalog-columns-field">
+          <select id="catalogColumnsFilter" aria-label="Card per riga" ${state.catalogView === "list" ? "disabled" : ""}>
+            <option value="3" ${state.catalogColumns === 3 ? "selected" : ""}>3 card / riga</option>
+            <option value="4" ${state.catalogColumns === 4 ? "selected" : ""}>4 card / riga</option>
+            <option value="5" ${state.catalogColumns === 5 ? "selected" : ""}>5 card / riga</option>
+          </select>
+        </label>
       </section>
 
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
@@ -1910,7 +1928,7 @@ async function renderCatalog() {
         </div>
       </details>
 
-      <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}"
+      <section class="${catalogGridClass()}"
                id="catalogGrid">${skeletons()}</section>
       <nav class="pagination" id="pagination" aria-label="Paginazione"></nav>
     </section>
@@ -1967,6 +1985,17 @@ function bindCatalogControls() {
   document.querySelector("#typeFilter")?.addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
   document.querySelector("#ownedFilter")?.addEventListener("change", (event) => refreshFrom("owned", event.target.value));
   document.querySelector("#sortFilter")?.addEventListener("change", (event) => refreshFrom("sort", event.target.value));
+  document.querySelector("#pageSizeFilter")?.addEventListener("change", (event) => {
+    state.limit = Number(event.target.value);
+    state.offset = 0;
+    window.localStorage.setItem("bgc.catalogPageSize", String(state.limit));
+    refreshCatalog();
+  });
+  document.querySelector("#catalogColumnsFilter")?.addEventListener("change", (event) => {
+    state.catalogColumns = Number(event.target.value);
+    window.localStorage.setItem("bgc.catalogColumns", String(state.catalogColumns));
+    rerenderCurrentCatalog();
+  });
 
   for (const [id, key] of [
     ["supportsPlayers", "supportsPlayers"],
@@ -2002,14 +2031,6 @@ function bindCatalogControls() {
     state.offset = 0;
     event.currentTarget.remove();
     refreshCatalog();
-  });
-
-  document.querySelector("#catalogAssistantHome")?.addEventListener("click", () => {
-    openCatalogAssistant();
-  });
-
-  document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
-    void runCatalogBggSync();
   });
 
   document.querySelector("#collapseExpansions")?.addEventListener("change", (event) => {
@@ -2223,7 +2244,7 @@ function renderCatalogData(catalog) {
   if (!grid || !count) return;
 
   count.textContent = `${formatNumber(catalog.total, 0)} titoli`;
-  grid.className = `catalog-results ${state.catalogView === "list" ? "catalog-results-list" : "catalog-results-cards"}`;
+  grid.className = catalogGridClass();
 
   if (!catalog.items.length) {
     grid.innerHTML = '<div class="empty catalog-empty">Nessun gioco corrisponde ai filtri selezionati.</div>';
@@ -4717,6 +4738,9 @@ documentFile.addEventListener("change", () => {
 settingsButton.addEventListener("click", () => {
   closeSidebar();
   void openSettingsDialog("general");
+});
+document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
+  void runCatalogBggSync();
 });
 settingsTabs.forEach((tab) => {
   tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
