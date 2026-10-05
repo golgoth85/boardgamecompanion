@@ -88,10 +88,14 @@ def _tutorial_relevance(title: str, description: str, game_title: str, language:
         coverage = matched / len(tokens)
         if coverage < 0.5 and _normalize(game_title) not in haystack:
             return -1
-    positives = sum(1 for marker in _POSITIVE[language] if _normalize(marker) in haystack)
+    positive_markers = tuple(_normalize(marker) for marker in _POSITIVE[language])
+    positives = sum(1 for marker in positive_markers if marker in haystack)
     if positives == 0:
         return -1
+    title_has_positive = any(marker in normalized_title for marker in positive_markers)
     negatives = sum(1 for marker in _NEGATIVE if _normalize(marker) in normalized_title)
+    if negatives and not title_has_positive:
+        return -1
     return int(coverage * 100) + positives * 30 - negatives * 35
 
 
