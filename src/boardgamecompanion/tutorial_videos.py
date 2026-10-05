@@ -99,7 +99,7 @@ def _tutorial_relevance(title: str, description: str, game_title: str, language:
     return int(coverage * 100) + positives * 30 - negatives * 35
 
 
-def _publisher_names(raw_publishers: object, metadata_json: object) -> tuple[str, ...]:
+def _publisher_names(raw_publishers: object, publishers_json: object) -> tuple[str, ...]:
     result: list[str] = []
     if raw_publishers:
         for part in re.split(r"[,;/|]", str(raw_publishers)):
@@ -107,16 +107,14 @@ def _publisher_names(raw_publishers: object, metadata_json: object) -> tuple[str
             if len(value) >= 4:
                 result.append(value)
     try:
-        metadata = json.loads(str(metadata_json or "{}"))
+        publishers = json.loads(str(publishers_json or "[]"))
     except (TypeError, ValueError, RecursionError):
-        metadata = {}
-    if isinstance(metadata, dict):
-        values = metadata.get("publishers") or []
-        if isinstance(values, list):
-            for item in values:
-                value = _normalize(item)
-                if len(value) >= 4:
-                    result.append(value)
+        publishers = []
+    if isinstance(publishers, list):
+        for item in publishers:
+            value = _normalize(item)
+            if len(value) >= 4:
+                result.append(value)
     return tuple(dict.fromkeys(result))
 
 
@@ -174,7 +172,7 @@ class YouTubeTutorialService:
             row = connection.execute(
                 """
                 SELECT g.id,g.title,g.original_title,c.version_publishers,
-                       e.metadata_json
+                       e.publishers_json
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id=g.id
                 LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
@@ -189,7 +187,7 @@ class YouTubeTutorialService:
             "title": str(row["title"]),
             "original_title": str(row["original_title"] or ""),
             "publishers": _publisher_names(
-                row["version_publishers"], row["metadata_json"]
+                row["version_publishers"], row["publishers_json"]
             ),
         }
 
