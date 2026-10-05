@@ -1,20 +1,7 @@
 name: Validate NAS Control references
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - '.github/workflows/validate-nas-control-references.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - '.github/workflows/validate-nas-control-references.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
