@@ -180,7 +180,7 @@ class ResolvedYouTubeSettings:
 def resolve_youtube_settings(database: Database) -> ResolvedYouTubeSettings:
     store = AppSettingsStore(database)
     stored_key = store.get("youtube_api_key")
-    runtime_key = settings.youtube_api_key
+    runtime_key = os.environ.get("BGC_YOUTUBE_API_KEY") or settings.youtube_api_key
     api_key = runtime_key if runtime_key and runtime_key.strip() else stored_key
     source = (
         "environment"
