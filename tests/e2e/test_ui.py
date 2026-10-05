@@ -1252,6 +1252,8 @@ def test_catalog_bgg_sync_button_uses_manual_sync_endpoint(browser, live_server)
 
         button = page.get_by_role("button", name="Sincronizza ora con BoardGameGeek")
         expect(button).to_be_visible()
+        expect(page.locator(".sidebar-footer #catalogBggSync")).to_be_visible()
+        expect(page.get_by_text("Backend locale", exact=True)).to_have_count(0)
         button.click()
         expect(page.locator("#toast")).to_contain_text("1 nuovi, 1 aggiornati")
         assert calls == ["POST"]
