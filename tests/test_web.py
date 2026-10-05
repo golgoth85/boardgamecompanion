@@ -84,6 +84,7 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderUpdates" in js.text
     assert "renderDiscovery" in js.text
     assert "tutorialDiscoveryAction" in js.text
-    assert "youtube-nocookie.com/embed/" in js.text
+    assert "tutorialVideoCard" in js.text
+    assert "tutorial-video-frame" in js.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text
