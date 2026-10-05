@@ -5,6 +5,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from boardgamecompanion.app_settings import AppSettingsStore, activate_embedding_provider
+from boardgamecompanion.database import Database
 from boardgamecompanion.main import app
 from boardgamecompanion.settings import settings
 
@@ -152,6 +154,25 @@ def test_rag_settings_persist_priority_and_hide_secrets(tmp_path: Path) -> None:
         assert reloaded.json() == body
         assert "lmstudio-secret" not in reloaded.text
         assert "gemini-secret" not in reloaded.text
+
+
+def test_embedding_provider_promotion_preserves_recovery_chain(tmp_path: Path) -> None:
+    configure_paths(tmp_path)
+    database = Database(settings.database_path)
+    database.initialize()
+    store = AppSettingsStore(database)
+
+    store.set(
+        "rag_embedding_provider_order",
+        '["gemini","lmstudio"]',
+        sensitive=False,
+    )
+    promoted = activate_embedding_provider(database, "lmstudio")
+    assert promoted.embedding_provider_order == ("lmstudio", "gemini")
+
+    recovered = activate_embedding_provider(database, "gemini")
+    assert recovered.embedding_provider_order == ("gemini", "lmstudio")
+
 
 
 def test_rag_settings_reject_duplicate_provider_priority(tmp_path: Path) -> None:

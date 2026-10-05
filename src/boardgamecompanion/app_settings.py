@@ -335,9 +335,16 @@ def activate_embedding_provider(
     selected = str(provider).strip().lower()
     if selected not in RAG_PROVIDERS:
         raise ValueError(f"Unsupported RAG provider: {provider}")
+
+    # Promotion must not delete the configured fallback chain. Keeping the
+    # remaining providers makes failover recoverable if the promoted provider
+    # later becomes unavailable, while the caller still requeues documents so
+    # retrieval never mixes vector spaces for the active descriptor.
+    current = resolve_rag_settings(database).embedding_provider_order
+    promoted = (selected, *(item for item in current if item != selected))
     AppSettingsStore(database).set(
         "rag_embedding_provider_order",
-        json.dumps([selected]),
+        json.dumps(list(promoted)),
         sensitive=False,
     )
     return resolve_rag_settings(database)

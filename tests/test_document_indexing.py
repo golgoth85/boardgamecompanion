@@ -212,6 +212,7 @@ def test_embedding_failover_promotes_qwen_after_gemini_failure(monkeypatch) -> N
     assert result["provider_message"].endswith("Qwen OK")
     assert result["requeued_documents"] == 3
     assert activated == ["ollama"]
+    # activate_embedding_provider itself preserves the remaining configured providers.
 
 
 def test_embedding_failover_reports_both_provider_failures(monkeypatch) -> None:
