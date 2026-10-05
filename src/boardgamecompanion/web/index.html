@@ -64,9 +64,11 @@
                 aria-haspopup="dialog" aria-controls="settingsDialog">
           <span aria-hidden="true">⚙</span><span>Impostazioni</span>
         </button>
-        <div class="sidebar-backend-status">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span>Backend locale</span>
+        <div class="catalog-sync-inline" title="Sincronizzazione automatica BoardGameGeek">
+          <span class="status-dot" id="catalogBggSyncDot" aria-hidden="true"></span>
+          <span id="catalogBggSyncStatus">BGG</span>
+          <button class="sync-icon-button" id="catalogBggSync" type="button"
+                  aria-label="Sincronizza ora con BoardGameGeek" title="Sincronizza ora">↻</button>
         </div>
       </div>
     </aside>
