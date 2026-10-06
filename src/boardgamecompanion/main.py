@@ -42,6 +42,7 @@ from boardgamecompanion.bgg_metadata import (
     BggMetadataError,
     BggMetadataStore,
 )
+from boardgamecompanion.bgg_rulebook_search import GeminiBggFileProvider
 from boardgamecompanion.catalog import SORT_SQL, Catalog
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
@@ -118,7 +119,10 @@ from boardgamecompanion.rulebook_discovery import (
     RulebookDiscoveryNotFound,
     RulebookDiscoveryService,
 )
-from boardgamecompanion.rulebook_providers import production_rulebook_providers
+from boardgamecompanion.rulebook_providers import (
+    production_community_rulebook_providers,
+    production_official_rulebook_providers,
+)
 from boardgamecompanion.rulebook_updates import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
@@ -227,14 +231,40 @@ def get_youtube_tutorial_service() -> YouTubeTutorialService:
 def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     database = get_database()
     database.initialize()
-    return RulebookDiscoveryService(
-        database,
-        production_rulebook_providers(
+    limiter = PersistentRateLimiter(database).acquire
+    official_providers = production_official_rulebook_providers(
+        timeout_seconds=settings.rulebook_discovery_timeout_seconds,
+        max_attempts=settings.rulebook_discovery_max_attempts,
+        min_interval_seconds=settings.rulebook_discovery_min_interval_seconds,
+        rate_limiter=limiter,
+    )
+    fallback_providers: list = []
+    rag = resolve_rag_settings(database)
+    if rag.gemini_api_key:
+        fallback_providers.append(
+            GeminiBggFileProvider(
+                base_url=rag.gemini_url,
+                model=rag.gemini_generation_model,
+                api_key=rag.gemini_api_key,
+                timeout_seconds=min(
+                    max(settings.rulebook_discovery_timeout_seconds, 15.0),
+                    30.0,
+                ),
+                verify_tls=settings.gemini_verify_tls,
+            )
+        )
+    fallback_providers.extend(
+        production_community_rulebook_providers(
             timeout_seconds=settings.rulebook_discovery_timeout_seconds,
             max_attempts=settings.rulebook_discovery_max_attempts,
             min_interval_seconds=settings.rulebook_discovery_min_interval_seconds,
-            rate_limiter=PersistentRateLimiter(database).acquire,
-        ),
+            rate_limiter=limiter,
+        )
+    )
+    return RulebookDiscoveryService(
+        database,
+        official_providers,
+        fallback_providers=tuple(fallback_providers),
         metadata_store=get_bgg_metadata_store(),
         refresh_seconds=settings.rulebook_discovery_refresh_seconds,
         empty_refresh_seconds=settings.rulebook_discovery_empty_refresh_seconds,
