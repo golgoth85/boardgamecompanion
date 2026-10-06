@@ -207,6 +207,33 @@ def test_pdf_ingest_records_empty_pages_without_inventing_ocr_text(
         assert page["extraction_status"] == "empty"
 
 
+def test_pdf_ingest_normalizes_whitespace_only_pages_to_empty_text(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    pdf = _pdf_with_pages("   ")
+
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _upload(client, pdf)
+        response = client.post(f"/api/documents/{document['id']}/ingest")
+        assert response.status_code == 200
+        ingest = response.json()["ingest"]
+        assert ingest["text_page_count"] == 0
+        assert ingest["empty_page_count"] == 1
+        assert ingest["total_text_chars"] == 0
+
+        page = client.get(f"/api/documents/{document['id']}/pages/1").json()
+        assert page["text"] == ""
+        assert page["char_count"] == 0
+        assert page["extraction_status"] == "empty"
+
+        chunks = client.post(f"/api/documents/{document['id']}/chunks/build")
+        assert chunks.status_code == 200
+        assert chunks.json()["index"]["chunk_count"] == 0
+
+
 def test_pdf_ingest_rejects_tampered_archive_and_keeps_no_pages(
     monkeypatch,
     tmp_path: Path,
