@@ -4,8 +4,15 @@ import json
 
 import httpx
 
-from boardgamecompanion.bgg_rulebook_search import GeminiBggFileProvider
+from boardgamecompanion.bgg_rulebook_search import (
+    BGG_GROUNDING_MODEL,
+    GeminiBggFileProvider,
+)
 from boardgamecompanion.rulebooks import RulebookQuery, RulebookSource
+
+
+def test_bgg_grounding_model_stays_free_tier_compatible():
+    assert BGG_GROUNDING_MODEL == "gemini-2.5-flash"
 
 
 def query() -> RulebookQuery:

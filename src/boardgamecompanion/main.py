@@ -42,7 +42,10 @@ from boardgamecompanion.bgg_metadata import (
     BggMetadataError,
     BggMetadataStore,
 )
-from boardgamecompanion.bgg_rulebook_search import GeminiBggFileProvider
+from boardgamecompanion.bgg_rulebook_search import (
+    BGG_GROUNDING_MODEL,
+    GeminiBggFileProvider,
+)
 from boardgamecompanion.catalog import SORT_SQL, Catalog
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
@@ -244,7 +247,7 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
         fallback_providers.append(
             GeminiBggFileProvider(
                 base_url=rag.gemini_url,
-                model=rag.gemini_generation_model,
+                model=BGG_GROUNDING_MODEL,
                 api_key=rag.gemini_api_key,
                 timeout_seconds=min(
                     max(settings.rulebook_discovery_timeout_seconds, 15.0),
