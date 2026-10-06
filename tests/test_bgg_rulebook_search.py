@@ -12,7 +12,7 @@ from boardgamecompanion.rulebooks import RulebookQuery, RulebookSource
 
 
 def test_bgg_grounding_model_stays_free_tier_compatible():
-    assert BGG_GROUNDING_MODEL == "gemini-2.5-flash"
+    assert BGG_GROUNDING_MODEL == "gemini-3.5-flash-lite"
 
 
 def query() -> RulebookQuery:
@@ -75,7 +75,7 @@ def provider(payload: dict) -> GeminiBggFileProvider:
     )
     return GeminiBggFileProvider(
         base_url="https://generativelanguage.googleapis.com",
-        model="gemini-3.8-flash",
+        model="gemini-3.5-flash-lite",
         api_key="secret",
         client=client,
     )
@@ -159,7 +159,7 @@ def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
     )
     item = GeminiBggFileProvider(
         base_url="https://generativelanguage.googleapis.com",
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash-lite",
         api_key="secret",
         client=client,
         rate_limiter=lambda scope, interval: gates.append((scope, interval)),
