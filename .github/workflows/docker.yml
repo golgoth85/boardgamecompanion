@@ -1,5 +1,7 @@
 name: Docker
 
+# Self-hosted release path; no GitHub-hosted runner minutes.
+
 on:
   push:
     branches: [main]
