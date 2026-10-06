@@ -8,7 +8,13 @@ from uuid import uuid4
 from boardgamecompanion.bgg_metadata import BggMetadataStore
 from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_review import RulebookReviewQueue
-from boardgamecompanion.rulebooks import (\n    OFFICIAL_SOURCES,\n    RulebookProvider,\n    RulebookQuery,\n    RulebookResolution,\n    RulebookResolver,\n)
+from boardgamecompanion.rulebooks import (
+    OFFICIAL_SOURCES,
+    RulebookProvider,
+    RulebookQuery,
+    RulebookResolution,
+    RulebookResolver,
+)
 
 
 class RulebookDiscoveryError(RuntimeError):
