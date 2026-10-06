@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+import time
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 import httpx
@@ -118,6 +119,10 @@ class GeminiBggFileProvider:
         timeout_seconds: float = 20.0,
         verify_tls: bool = True,
         client: httpx.Client | None = None,
+        rate_limiter: Callable[[str, float], None] | None = None,
+        min_interval_seconds: float = 8.0,
+        max_attempts: int = 3,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_url = str(base_url).rstrip("/")
         self.model = validate_model_id(model)
@@ -125,41 +130,67 @@ class GeminiBggFileProvider:
         self.timeout_seconds = float(timeout_seconds)
         self.verify_tls = bool(verify_tls)
         self.client = client
+        self.rate_limiter = rate_limiter
+        self.min_interval_seconds = float(min_interval_seconds)
+        self.max_attempts = int(max_attempts)
+        self.sleep = sleep
         if not self.base_url.startswith("https://"):
             raise ValueError("Gemini URL must use https://")
         if not self.api_key:
             raise ValueError("Gemini API key is required")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if self.min_interval_seconds < 0:
+            raise ValueError("min_interval_seconds must be non-negative")
+        if not 1 <= self.max_attempts <= 5:
+            raise ValueError("max_attempts must be 1..5")
 
     def _post(self, payload: dict[str, Any]) -> httpx.Response:
         path = f"/v1beta/models/{self.model}:generateContent"
         headers = {"x-goog-api-key": self.api_key}
-        try:
-            if self.client is not None:
-                response = self.client.post(
-                    path,
-                    headers=headers,
-                    json=payload,
-                    timeout=self.timeout_seconds,
-                )
-            else:
-                with httpx.Client(
-                    base_url=self.base_url,
-                    timeout=self.timeout_seconds,
-                    verify=self.verify_tls,
-                ) as client:
-                    response = client.post(path, headers=headers, json=payload)
-            response.raise_for_status()
-            if len(response.content) > _MAX_RESPONSE_BYTES:
-                raise RulebookProviderError("BGG grounded search response is too large")
-            return response
-        except httpx.HTTPStatusError as exc:
-            raise RulebookProviderError(
-                f"BGG grounded search failed with HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise RulebookProviderError("BGG grounded search endpoint is unreachable") from exc
+        for attempt in range(1, self.max_attempts + 1):
+            if self.rate_limiter is not None:
+                self.rate_limiter("gemini:bgg-google-search", self.min_interval_seconds)
+            try:
+                if self.client is not None:
+                    response = self.client.post(
+                        path,
+                        headers=headers,
+                        json=payload,
+                        timeout=self.timeout_seconds,
+                    )
+                else:
+                    with httpx.Client(
+                        base_url=self.base_url,
+                        timeout=self.timeout_seconds,
+                        verify=self.verify_tls,
+                    ) as client:
+                        response = client.post(path, headers=headers, json=payload)
+                response.raise_for_status()
+                if len(response.content) > _MAX_RESPONSE_BYTES:
+                    raise RulebookProviderError("BGG grounded search response is too large")
+                return response
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status == 429 and attempt < self.max_attempts:
+                    raw_retry = exc.response.headers.get("retry-after")
+                    try:
+                        retry_after = float(raw_retry) if raw_retry is not None else 10.0
+                    except (TypeError, ValueError):
+                        retry_after = 10.0
+                    self.sleep(min(max(retry_after, 2.0), 20.0))
+                    continue
+                raise RulebookProviderError(
+                    f"BGG grounded search failed with HTTP {status}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                if attempt < self.max_attempts:
+                    self.sleep(min(2.0 * attempt, 5.0))
+                    continue
+                raise RulebookProviderError(
+                    "BGG grounded search endpoint is unreachable"
+                ) from exc
+        raise RulebookProviderError("BGG grounded search exhausted retry budget")
 
     def discover(self, query: RulebookQuery):
         prompt = (
