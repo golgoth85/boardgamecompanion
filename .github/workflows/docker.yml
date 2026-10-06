@@ -1,3 +1,4 @@
+# Trusted release/publish boundary: canonical main -> self-hosted NAS runner -> GHCR
 name: Docker
 
 on:
