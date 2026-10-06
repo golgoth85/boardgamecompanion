@@ -32,10 +32,9 @@ _ALLOWED_DOWNLOAD_HOSTS = frozenset(
 _MAX_RESULTS = 6
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-# Gemini 3.x Google Search grounding is not available on the free API tier.
-# Keep BGG discovery on 2.5 Flash, which supports bounded free-tier grounding,
-# independently from the app's primary RAG generation model.
-BGG_GROUNDING_MODEL = "gemini-2.5-flash"
+# Use a current stable model for Google Search grounding. Gemini 2.5 access can
+# return MODEL_OR_RESOURCE/404 for projects without legacy entitlement.
+BGG_GROUNDING_MODEL = "gemini-3.8-flash"
 
 
 def _language_from(value: object, title: str) -> str:
