@@ -32,9 +32,9 @@ _ALLOWED_DOWNLOAD_HOSTS = frozenset(
 _MAX_RESULTS = 6
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-# Use a current stable model for Google Search grounding. Gemini 2.5 access can
-# return MODEL_OR_RESOURCE/404 for projects without legacy entitlement.
-BGG_GROUNDING_MODEL = "gemini-3.8-flash"
+# BGG grounding is pinned independently from the app's primary RAG model.
+# This exact API identifier has been verified for Google Search grounding.
+BGG_GROUNDING_MODEL = "gemini-3.5-flash-lite"
 
 
 def _language_from(value: object, title: str) -> str:
