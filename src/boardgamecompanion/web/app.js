@@ -1849,14 +1849,7 @@ async function renderCatalog() {
             <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
           </select>
         </label>
-        <label class="field">
-          <select id="ownedFilter" aria-label="Stato collezione">
-            <option value="">Tutti</option>
-            <option value="true" ${state.owned === "true" ? "selected" : ""}>Posseduti</option>
-            <option value="false" ${state.owned === "false" ? "selected" : ""}>Non posseduti</option>
-          </select>
-        </label>
-        <label class="field">
+        <label class="field catalog-sort-field">
           <select id="sortFilter" aria-label="Ordina">
             <optgroup label="Titolo">
               <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
@@ -1890,24 +1883,36 @@ async function renderCatalog() {
           <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
                   type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
         </div>
-        <label class="field catalog-compact-field" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
-          <select id="cardsPerRowFilter" aria-label="Card per riga">
-            <option value="3" ${state.cardsPerRow === 3 ? "selected" : ""}>3 / riga</option>
-            <option value="4" ${state.cardsPerRow === 4 ? "selected" : ""}>4 / riga</option>
-            <option value="5" ${state.cardsPerRow === 5 ? "selected" : ""}>5 / riga</option>
-          </select>
-        </label>
-        <label class="field catalog-compact-field">
-          <select id="pageSizeFilter" aria-label="Titoli per pagina">
-            <option value="20" ${state.pageSize === "20" ? "selected" : ""}>20 / pagina</option>
-            <option value="50" ${state.pageSize === "50" ? "selected" : ""}>50 / pagina</option>
-            <option value="100" ${state.pageSize === "100" ? "selected" : ""}>100 / pagina</option>
-            <option value="250" ${state.pageSize === "250" ? "selected" : ""}>250 / pagina</option>
-            <option value="all" ${state.pageSize === "all" ? "selected" : ""}>Tutti</option>
-          </select>
-        </label>
-      </section>
 
+        <div class="catalog-density-controls" aria-label="Densità catalogo">
+          <div class="catalog-density-group" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
+            <span class="catalog-density-label">Riga</span>
+            <div class="catalog-density-options" role="group" aria-label="Card per riga">
+              <button class="catalog-density-button ${state.cardsPerRow === 3 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="3" aria-pressed="${state.cardsPerRow === 3 ? "true" : "false"}">3</button>
+              <button class="catalog-density-button ${state.cardsPerRow === 4 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="4" aria-pressed="${state.cardsPerRow === 4 ? "true" : "false"}">4</button>
+              <button class="catalog-density-button ${state.cardsPerRow === 5 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="5" aria-pressed="${state.cardsPerRow === 5 ? "true" : "false"}">5</button>
+            </div>
+          </div>
+          <div class="catalog-density-group">
+            <span class="catalog-density-label">Pagina</span>
+            <div class="catalog-density-options" role="group" aria-label="Titoli per pagina">
+              <button class="catalog-density-button ${state.pageSize === "20" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="20" aria-pressed="${state.pageSize === "20" ? "true" : "false"}">20</button>
+              <button class="catalog-density-button ${state.pageSize === "50" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="50" aria-pressed="${state.pageSize === "50" ? "true" : "false"}">50</button>
+              <button class="catalog-density-button ${state.pageSize === "100" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="100" aria-pressed="${state.pageSize === "100" ? "true" : "false"}">100</button>
+              <button class="catalog-density-button ${state.pageSize === "250" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="250" aria-pressed="${state.pageSize === "250" ? "true" : "false"}">250</button>
+              <button class="catalog-density-button ${state.pageSize === "all" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="all" aria-pressed="${state.pageSize === "all" ? "true" : "false"}">Tutti</button>
+            </div>
+          </div>
+        </div>
+      </section>
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
         <summary>Ricerca avanzata</summary>
         <div class="advanced-search-grid">
@@ -1986,24 +1991,30 @@ function bindCatalogControls() {
     searchTimer = window.setTimeout(() => refreshFrom("q", event.target.value), 260);
   });
   document.querySelector("#typeFilter")?.addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
-  document.querySelector("#ownedFilter")?.addEventListener("change", (event) => refreshFrom("owned", event.target.value));
   document.querySelector("#sortFilter")?.addEventListener("change", (event) => refreshFrom("sort", event.target.value));
 
-  document.querySelector("#pageSizeFilter")?.addEventListener("change", (event) => {
-    const value = catalogPageSizeValues.has(event.target.value) ? event.target.value : "50";
-    state.pageSize = value;
-    state.limit = value === "all" ? CATALOG_ALL_LIMIT : Number(value);
-    state.offset = 0;
-    window.localStorage.setItem("bgc.catalogPageSize", value);
-    refreshCatalog();
+  document.querySelectorAll("[data-catalog-page-size]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const value = catalogPageSizeValues.has(button.dataset.catalogPageSize)
+        ? button.dataset.catalogPageSize
+        : "50";
+      if (state.pageSize === value) return;
+      state.pageSize = value;
+      state.limit = value === "all" ? CATALOG_ALL_LIMIT : Number(value);
+      state.offset = 0;
+      window.localStorage.setItem("bgc.catalogPageSize", value);
+      refreshCatalog();
+    });
   });
 
-  document.querySelector("#cardsPerRowFilter")?.addEventListener("change", (event) => {
-    const value = Number(event.target.value);
-    if (![3, 4, 5].includes(value)) return;
-    state.cardsPerRow = value;
-    window.localStorage.setItem("bgc.catalogColumns", String(value));
-    rerenderCurrentCatalog();
+  document.querySelectorAll("[data-catalog-columns]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const value = Number(button.dataset.catalogColumns);
+      if (![3, 4, 5].includes(value) || state.cardsPerRow === value) return;
+      state.cardsPerRow = value;
+      window.localStorage.setItem("bgc.catalogColumns", String(value));
+      rerenderCurrentCatalog();
+    });
   });
 
   for (const [id, key] of [
