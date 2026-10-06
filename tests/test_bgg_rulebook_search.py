@@ -149,6 +149,16 @@ def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
             return httpx.Response(
                 429,
                 headers={"Retry-After": "3"},
+                json={
+                    "error": {
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                                "retryDelay": "37.5s",
+                            }
+                        ]
+                    }
+                },
                 request=request,
             )
         return httpx.Response(200, json=payload, request=request)
@@ -176,4 +186,4 @@ def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
         ("gemini:bgg-google-search", 8.0),
         ("gemini:bgg-google-search", 8.0),
     ]
-    assert sleeps == [3.0]
+    assert sleeps == [37.5]
