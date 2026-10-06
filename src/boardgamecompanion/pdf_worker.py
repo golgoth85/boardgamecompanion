@@ -118,6 +118,8 @@ def parse_pdf(
                     page = reader.pages[page_index]
                     extracted = page.extract_text()
                     text = extracted if isinstance(extracted, str) else ""
+                    if not text.strip():
+                        text = ""
                     if len(text) > max_chars_per_page:
                         raise WorkerLimitError(
                             "page_text_limit",
