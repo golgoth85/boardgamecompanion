@@ -207,7 +207,7 @@ def _validate_pages(
                 raise ChunkIndexCorruptSource("Text page has no extractable text")
             text_count += 1
         elif status == "empty":
-            if text:
+            if text.strip():
                 raise ChunkIndexCorruptSource("Empty page unexpectedly contains text")
             empty_count += 1
         elif status == "error":
