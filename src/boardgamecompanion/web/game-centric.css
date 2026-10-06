@@ -177,6 +177,11 @@
   background:linear-gradient(135deg,rgba(232,191,93,.16),rgba(232,191,93,.05));
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.025);
 }
+
+.completion-date-editor{display:grid;grid-template-columns:auto minmax(8.8rem,1fr);align-items:center;gap:.42rem;min-height:2.45rem;padding:.28rem .34rem .28rem .58rem;border:1px solid var(--line);border-radius:10px;color:var(--muted);background:rgba(18,24,38,.6);font-size:.64rem;font-weight:800}
+.completion-date-editor input{min-width:0;min-height:1.9rem;padding:.3rem .42rem;border:1px solid rgba(118,132,155,.28);border-radius:7px;outline:0;color:var(--text);background:#121826;color-scheme:dark;font:inherit;font-size:.7rem}
+.completion-date-editor input:focus{border-color:rgba(73,190,132,.58)}
+.completion-date-save{white-space:nowrap}
 .trophy-hero{
   position:relative;display:flex;align-items:center;justify-content:space-between;gap:1.4rem;
   overflow:hidden;margin-bottom:1rem;padding:1.35rem 1.45rem;border:1px solid rgba(232,191,93,.24);
@@ -336,3 +341,5 @@
     border-radius: 14px;
   }
 }
+
+@media(max-width:760px){.game-primary-actions{align-items:stretch}.completion-date-editor{grid-template-columns:auto minmax(0,1fr);width:100%}.completion-date-save{width:100%}}
