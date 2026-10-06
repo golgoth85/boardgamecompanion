@@ -866,3 +866,112 @@ def test_discovery_to_policy_guarded_fetch_archive_and_auto_index_queue(tmp_path
     assert document["source_provider"] == "official"
     assert document["is_official"] == 1
     assert job["status"] == "pending" and job["stage"] == "queued"
+
+
+class CountingProvider(StaticProvider):
+    def __init__(self, name: str, values: tuple[RulebookCandidate, ...] = (), error: Exception | None = None):
+        super().__init__(name, values, error)
+        self.calls = 0
+
+    def discover(self, query: RulebookQuery):
+        self.calls += 1
+        return super().discover(query)
+
+
+def test_second_line_providers_are_skipped_when_official_it_or_en_exists(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    official = CountingProvider(
+        "official-primary",
+        (
+            candidate(
+                provider="official-primary",
+                source="official_publisher",
+                language="en",
+                url="https://publisher.example/rules-en.pdf",
+                official=True,
+                confidence=100,
+            ),
+        ),
+    )
+    bgg = CountingProvider(
+        "bgg_google_search",
+        (
+            candidate(
+                provider="bgg_google_search",
+                source="community",
+                language="it",
+                url="https://cdn.1j1ju.com/medias/example/rules-it.pdf",
+                official=False,
+                confidence=70,
+            ),
+        ),
+    )
+    service = RulebookDiscoveryService(
+        db,
+        (official,),
+        fallback_providers=(bgg,),
+        refresh_seconds=3600,
+        empty_refresh_seconds=3600,
+    )
+    service.synchronize_catalog()
+    result = service.run_game(173346)
+
+    assert official.calls == 1
+    assert bgg.calls == 0
+    assert result["providers_queried"] == 1
+    assert result["candidates_found"] == 1
+    assert [item["candidate"]["provider"] for item in result["review_items"]] == [
+        "official-primary"
+    ]
+
+
+def test_second_line_bgg_runs_after_official_miss_and_remains_review_gated(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    official = CountingProvider("official-primary", ())
+    bgg = CountingProvider(
+        "bgg_google_search",
+        (
+            candidate(
+                provider="bgg_google_search",
+                source="community",
+                language="it",
+                url="https://cdn.1j1ju.com/medias/example/rules-it.pdf",
+                official=False,
+                confidence=70,
+            ),
+        ),
+    )
+    community = CountingProvider(
+        "rulebook_org",
+        (
+            candidate(
+                provider="rulebook_org",
+                source="community",
+                language="en",
+                url="https://community.example/rules-en.pdf",
+                official=False,
+                confidence=70,
+                bgg_id=None,
+            ),
+        ),
+    )
+    service = RulebookDiscoveryService(
+        db,
+        (official,),
+        fallback_providers=(bgg, community),
+        refresh_seconds=3600,
+        empty_refresh_seconds=3600,
+    )
+    service.synchronize_catalog()
+    result = service.run_game(173346)
+
+    assert official.calls == 1
+    assert bgg.calls == 1
+    assert community.calls == 1
+    assert result["providers_queried"] == 3
+    assert result["candidates_found"] == 2
+    assert [item["candidate"]["provider"] for item in result["review_items"]] == [
+        "bgg_google_search",
+        "rulebook_org",
+    ]
+    assert all(item["policy_action"] == "review" for item in result["review_items"])

@@ -1132,6 +1132,10 @@ class RulebookUpdateService:
                 "candidate_key": review["candidate_key"],
                 "decision_source": review["decision_source"],
                 "candidate_confidence": candidate.confidence,
+                "candidate_metadata": review["candidate"].get("metadata") or {},
+                "source_reference_url": (
+                    (review["candidate"].get("metadata") or {}).get("bgg_filepage")
+                ),
                 "requested_url": result.requested_url,
                 "final_url": result.final_url,
                 "redirect_chain": [

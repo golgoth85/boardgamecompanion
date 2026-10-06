@@ -8,7 +8,13 @@ from uuid import uuid4
 from boardgamecompanion.bgg_metadata import BggMetadataStore
 from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_review import RulebookReviewQueue
-from boardgamecompanion.rulebooks import RulebookProvider, RulebookQuery, RulebookResolver
+from boardgamecompanion.rulebooks import (
+    OFFICIAL_SOURCES,
+    RulebookProvider,
+    RulebookQuery,
+    RulebookResolution,
+    RulebookResolver,
+)
 
 
 class RulebookDiscoveryError(RuntimeError):
@@ -41,6 +47,7 @@ class RulebookDiscoveryService:
         database: Database,
         providers: tuple[RulebookProvider, ...],
         *,
+        fallback_providers: tuple[RulebookProvider, ...] = (),
         metadata_store: BggMetadataStore | None = None,
         refresh_seconds: int = 14 * 24 * 60 * 60,
         empty_refresh_seconds: int = 3 * 24 * 60 * 60,
@@ -50,7 +57,9 @@ class RulebookDiscoveryService:
     ) -> None:
         self.database = database
         self.providers = tuple(providers)
+        self.fallback_providers = tuple(fallback_providers)
         self.resolver = RulebookResolver(self.providers)
+        self.fallback_resolver = RulebookResolver(self.fallback_providers)
         self.metadata_store = metadata_store
         self.refresh_seconds = int(refresh_seconds)
         self.empty_refresh_seconds = int(empty_refresh_seconds)
@@ -161,6 +170,42 @@ class RulebookDiscoveryService:
                 pass
         query = self._query(bgg_id)
         resolution = self.resolver.resolve(query, preferred_languages=("it", "en"))
+        queried_providers: tuple[RulebookProvider, ...] = self.providers
+        has_official_it_en = any(
+            item.candidate.official
+            and item.candidate.source_kind in OFFICIAL_SOURCES
+            and item.candidate.language.split("-", 1)[0] in {"it", "en"}
+            for item in resolution.candidates
+        )
+        if not has_official_it_en and self.fallback_providers:
+            fallback = self.fallback_resolver.resolve(
+                query,
+                preferred_languages=("it", "en"),
+            )
+            combined = {
+                (
+                    item.candidate.provider,
+                    item.candidate.url,
+                    item.candidate.language,
+                    item.candidate.document_type,
+                ): item
+                for item in (*resolution.candidates, *fallback.candidates)
+            }
+            ranked = tuple(
+                sorted(
+                    combined.values(),
+                    key=lambda item: (
+                        -item.score,
+                        RulebookResolver._deterministic_tie_key(item.candidate),
+                    ),
+                )
+            )
+            resolution = RulebookResolution(
+                query=query,
+                candidates=ranked,
+                failures=(*resolution.failures, *fallback.failures),
+            )
+            queried_providers = (*self.providers, *self.fallback_providers)
         queue = RulebookReviewQueue(self.database)
         created = 0
         review_items: list[dict[str, Any]] = []
@@ -194,7 +239,7 @@ class RulebookDiscoveryService:
         finished = _now()
         failures = len(resolution.failures)
         candidates = len(resolution.candidates)
-        if failures == len(self.providers) and not candidates:
+        if failures == len(queried_providers) and not candidates:
             status = "failed"
         elif failures:
             status = "partial"
@@ -217,7 +262,7 @@ class RulebookDiscoveryService:
             ).fetchone()
             if fenced is None or fenced["lease_owner"] != owner or int(fenced["lease_generation"]) != generation:
                 raise RulebookDiscoveryBusy("Discovery lease changed before completion")
-            for provider in self.providers:
+            for provider in queried_providers:
                 name = str(provider.name)
                 failure = failure_map.get(name)
                 count = sum(1 for item in resolution.candidates if item.candidate.provider == name)
@@ -244,7 +289,7 @@ class RulebookDiscoveryService:
                    consecutive_failures=?,providers_queried=?,candidates_found=?,review_items_created=?,
                    provider_failures=?,last_error=?,lease_owner=NULL,lease_until=NULL,updated_at=?
                    WHERE board_game_id=? AND lease_owner=? AND lease_generation=?""",
-                (status, next_attempt.isoformat(), finished.isoformat(), failure_count, len(self.providers),
+                (status, next_attempt.isoformat(), finished.isoformat(), failure_count, len(queried_providers),
                  candidates, created, failures,
                  json.dumps([{"provider": f.provider, "type": f.error_type, "message": f.message[:500]} for f in resolution.failures]) if failures else None,
                  finished.isoformat(), game_id, owner, generation),
@@ -253,7 +298,7 @@ class RulebookDiscoveryService:
             "bgg_id": int(bgg_id),
             "status": status,
             "generation": generation,
-            "providers_queried": len(self.providers),
+            "providers_queried": len(queried_providers),
             "candidates_found": candidates,
             "review_items_created": created,
             "review_items": review_items,

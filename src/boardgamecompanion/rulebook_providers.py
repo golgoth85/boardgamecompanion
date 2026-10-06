@@ -1129,14 +1129,14 @@ class RuleBookOrgProvider:
         return tuple(candidates)
 
 
-def production_rulebook_providers(
+def _production_client_factory(
     *,
-    timeout_seconds: float = 10.0,
-    max_response_bytes: int = MAX_DISCOVERY_RESPONSE_BYTES,
-    max_attempts: int = 2,
-    min_interval_seconds: float = 1.0,
-    rate_limiter: Callable[[str, float], None] | None = None,
-) -> tuple[RulebookProvider, ...]:
+    timeout_seconds: float,
+    max_response_bytes: int,
+    max_attempts: int,
+    min_interval_seconds: float,
+    rate_limiter: Callable[[str, float], None] | None,
+):
     def client(*, browser_fallback_hosts: Iterable[str] = ()) -> ProviderHttpClient:
         return ProviderHttpClient(
             timeout_seconds=timeout_seconds,
@@ -1146,9 +1146,25 @@ def production_rulebook_providers(
             rate_limiter=rate_limiter,
             browser_fallback_hosts=browser_fallback_hosts,
         )
+    return client
 
-    # Import after defining ProviderHttpClient to keep the generic engine
-    # separate from the publisher-specific compatibility adapters.
+
+def production_official_rulebook_providers(
+    *,
+    timeout_seconds: float = 10.0,
+    max_response_bytes: int = MAX_DISCOVERY_RESPONSE_BYTES,
+    max_attempts: int = 2,
+    min_interval_seconds: float = 1.0,
+    rate_limiter: Callable[[str, float], None] | None = None,
+) -> tuple[RulebookProvider, ...]:
+    client = _production_client_factory(
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        max_attempts=max_attempts,
+        min_interval_seconds=min_interval_seconds,
+        rate_limiter=rate_limiter,
+    )
+
     from boardgamecompanion.official_site_discovery import (
         PublisherSiteProvider,
         VERIFIED_PUBLISHER_SITES,
@@ -1189,5 +1205,48 @@ def production_rulebook_providers(
         MsEdizioniProvider(
             client(browser_fallback_hosts=MsEdizioniProvider._HOSTS)
         ),
-        RuleBookOrgProvider(client()),
+    )
+
+
+def production_community_rulebook_providers(
+    *,
+    timeout_seconds: float = 10.0,
+    max_response_bytes: int = MAX_DISCOVERY_RESPONSE_BYTES,
+    max_attempts: int = 2,
+    min_interval_seconds: float = 1.0,
+    rate_limiter: Callable[[str, float], None] | None = None,
+) -> tuple[RulebookProvider, ...]:
+    client = _production_client_factory(
+        timeout_seconds=timeout_seconds,
+        max_response_bytes=max_response_bytes,
+        max_attempts=max_attempts,
+        min_interval_seconds=min_interval_seconds,
+        rate_limiter=rate_limiter,
+    )
+    return (RuleBookOrgProvider(client()),)
+
+
+def production_rulebook_providers(
+    *,
+    timeout_seconds: float = 10.0,
+    max_response_bytes: int = MAX_DISCOVERY_RESPONSE_BYTES,
+    max_attempts: int = 2,
+    min_interval_seconds: float = 1.0,
+    rate_limiter: Callable[[str, float], None] | None = None,
+) -> tuple[RulebookProvider, ...]:
+    return (
+        *production_official_rulebook_providers(
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+            max_attempts=max_attempts,
+            min_interval_seconds=min_interval_seconds,
+            rate_limiter=rate_limiter,
+        ),
+        *production_community_rulebook_providers(
+            timeout_seconds=timeout_seconds,
+            max_response_bytes=max_response_bytes,
+            max_attempts=max_attempts,
+            min_interval_seconds=min_interval_seconds,
+            rate_limiter=rate_limiter,
+        ),
     )

@@ -1159,3 +1159,48 @@ def test_heartbeat_renews_active_lease_during_slow_fetch(
     assert not thread.is_alive()
     assert errors == []
     assert updates.list_runs(review["id"])["total"] == 1
+
+
+def test_bgg_community_archive_preserves_filepage_reference(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    candidate = community_candidate(
+        provider="bgg_google_search",
+        url="https://cdn.1j1ju.com/medias/example/rules.pdf",
+        language="en",
+        metadata={
+            "bgg_filepage": "https://boardgamegeek.com/filepage/123456/example-rules",
+            "transport_url": "https://cdn.1j1ju.com/medias/example/rules.pdf",
+            "identity_evidence": [
+                "requested_bgg_id",
+                "google_grounded_bgg_filepage",
+                "google_grounded_transport",
+            ],
+        },
+    )
+    review, _ = RulebookReviewQueue(db).submit(
+        bgg_id=900001,
+        candidate=candidate,
+    )
+    review = RulebookReviewQueue(db).decide(
+        review["id"],
+        decision="approved",
+        note="verified BGG filepage",
+    )
+    manuals = tmp_path / "manuals"
+    fetcher = SequenceFetcher(manuals, [PDF_A])
+    updates = service(db, manuals, fetcher)
+
+    result = updates.run_review_now(review["id"], owner="bgg-test", now=NOW)
+
+    assert result["outcome"] == "created"
+    document = DocumentStore(db, manuals).list_for_game(900001)[0]
+    assert document["source"]["provider"] == "bgg_google_search"
+    assert document["source"]["official"] is False
+    assert document["source"]["url"] == candidate.url
+    assert document["provenance"]["source_reference_url"] == (
+        "https://boardgamegeek.com/filepage/123456/example-rules"
+    )
+    assert document["provenance"]["candidate_metadata"]["bgg_filepage"] == (
+        "https://boardgamegeek.com/filepage/123456/example-rules"
+    )
+    assert document["provenance"]["candidate_metadata"]["transport_url"] == candidate.url
