@@ -857,7 +857,16 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         page.goto(f"{live_server}/games/900001")
         completed_button = page.get_by_role("button", name="Segna completato")
         expect(completed_button).to_be_visible()
-        completed_button.click(),        expect(page.get_by_role("button", name="♛ Completato")).to_be_visible(),        completion_date = page.locator("#completionDate"),        expect(completion_date).to_be_visible(),        completion_date.fill("2025-12-24"),        page.get_by_role("button", name="Salva data").click(),        expect(page.locator("#completionDate")).to_have_value("2025-12-24"),,        page.get_by_role("link", name="Completati").click()
+        completed_button.click()
+        expect(page.get_by_role("button", name="♛ Completato")).to_be_visible()
+
+        completion_date = page.locator("#completionDate")
+        expect(completion_date).to_be_visible()
+        completion_date.fill("2025-12-24")
+        page.get_by_role("button", name="Salva data").click()
+        expect(page.locator("#completionDate")).to_have_value("2025-12-24")
+
+        page.get_by_role("link", name="Completati").click()
         expect(page).to_have_url(f"{live_server}/completed")
         expect(page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
         expect(page.locator(".trophy-card")).to_have_count(1)
