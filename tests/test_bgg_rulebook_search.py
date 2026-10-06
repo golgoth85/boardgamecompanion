@@ -132,3 +132,48 @@ def test_non_bgg_source_or_unapproved_transport_is_rejected():
         ).discover(query())
     )
     assert results == ()
+
+
+def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
+    source = "https://boardgamegeek.com/filepage/148606/official-english-rulebook"
+    download = "https://cdn.1j1ju.com/medias/example/rules.pdf"
+    payload = response_payload(source_url=source, download_url=download)
+    calls = 0
+    sleeps: list[float] = []
+    gates: list[tuple[str, float]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "3"},
+                request=request,
+            )
+        return httpx.Response(200, json=payload, request=request)
+
+    client = httpx.Client(
+        base_url="https://generativelanguage.googleapis.com",
+        transport=httpx.MockTransport(handler),
+    )
+    item = GeminiBggFileProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-2.5-flash",
+        api_key="secret",
+        client=client,
+        rate_limiter=lambda scope, interval: gates.append((scope, interval)),
+        min_interval_seconds=8.0,
+        max_attempts=3,
+        sleep=sleeps.append,
+    )
+
+    results = tuple(item.discover(query()))
+
+    assert len(results) == 1
+    assert calls == 2
+    assert gates == [
+        ("gemini:bgg-google-search", 8.0),
+        ("gemini:bgg-google-search", 8.0),
+    ]
+    assert sleeps == [3.0]

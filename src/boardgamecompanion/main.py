@@ -254,6 +254,9 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
                     30.0,
                 ),
                 verify_tls=settings.gemini_verify_tls,
+                rate_limiter=limiter,
+                min_interval_seconds=8.0,
+                max_attempts=3,
             )
         )
     fallback_providers.extend(
