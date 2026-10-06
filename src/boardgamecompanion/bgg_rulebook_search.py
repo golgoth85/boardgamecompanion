@@ -144,6 +144,40 @@ class GeminiBggFileProvider:
         if not 1 <= self.max_attempts <= 5:
             raise ValueError("max_attempts must be 1..5")
 
+    @staticmethod
+    def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
+        delay = float(fallback)
+
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                delay = max(delay, float(retry_after))
+            except ValueError:
+                pass
+
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            details = error.get("details") if isinstance(error, dict) else None
+            if isinstance(details, list):
+                for item in details:
+                    if not isinstance(item, dict):
+                        continue
+                    type_name = str(item.get("@type") or "")
+                    if not type_name.endswith("RetryInfo"):
+                        continue
+                    raw = item.get("retryDelay")
+                    if not isinstance(raw, str):
+                        continue
+                    match = re.fullmatch(r"([0-9]+(?:\\.[0-9]+)?)s", raw.strip())
+                    if match:
+                        delay = max(delay, float(match.group(1)))
+
+        return min(60.0, delay)
+
     def _post(self, payload: dict[str, Any]) -> httpx.Response:
         path = f"/v1beta/models/{self.model}:generateContent"
         headers = {"x-goog-api-key": self.api_key}
@@ -172,12 +206,11 @@ class GeminiBggFileProvider:
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 if status == 429 and attempt < self.max_attempts:
-                    raw_retry = exc.response.headers.get("retry-after")
-                    try:
-                        retry_after = float(raw_retry) if raw_retry is not None else 10.0
-                    except (TypeError, ValueError):
-                        retry_after = 10.0
-                    self.sleep(min(max(retry_after, 2.0), 20.0))
+                    retry_after = self._retry_delay(
+                        exc.response,
+                        fallback=min(20.0, 10.0 * attempt),
+                    )
+                    self.sleep(retry_after)
                     continue
                 raise RulebookProviderError(
                     f"BGG grounded search failed with HTTP {status}"
