@@ -2928,6 +2928,15 @@ async function renderDetail(bggId) {
                       aria-pressed="${game.progress?.completed ? "true" : "false"}">
                 ${game.progress?.completed ? "♛ Completato" : "Segna completato"}
               </button>
+              ${game.progress?.completed ? `
+                <label class="completion-date-editor" for="completionDate">
+                  <span>Completato il</span>
+                  <input id="completionDate" type="date"
+                         value="${escapeHtml(game.progress.completed_at || "")}"
+                         max="${new Date().toISOString().slice(0, 10)}">
+                </label>
+                <button class="button button-ghost completion-date-save" id="saveCompletionDate" type="button">Salva data</button>
+              ` : ""}
               <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
             </div>
           </header>
@@ -3055,6 +3064,29 @@ async function renderDetail(bggId) {
           body: JSON.stringify({completed: next}),
         });
         showToast(next ? "Gioco aggiunto alla Sala dei trofei." : "Gioco rimosso dai completati.");
+        await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
+    document.querySelector("#saveCompletionDate")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const input = document.querySelector("#completionDate");
+      const completedAt = String(input?.value || "").trim();
+      if (!completedAt) {
+        showToast("Seleziona una data di completamento.", true);
+        input?.focus();
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/games/${game.bgg_id}/completion`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({completed: true, completed_at: completedAt}),
+        });
+        showToast("Data di completamento aggiornata.");
         await renderDetail(game.bgg_id);
       } catch (error) {
         showToast(error.message, true);
