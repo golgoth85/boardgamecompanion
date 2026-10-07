@@ -500,7 +500,13 @@ async function api(url, options) {
 
 function setSettingsBusy(busy) {
   settingsBusy = busy;
-  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
+  for (const control of [
+    closeSettings,
+    cancelSettings,
+    saveSettings,
+    saveTestSettings,
+    verifyApifyToken,
+  ]) {
     if (control) control.disabled = busy;
   }
   if (bggSyncSettingsNow) {
@@ -590,7 +596,7 @@ function applyCrowdfundingSettingsToForm(data) {
   const overridden = Boolean(data.overrides?.apify_token);
   apifyToken.disabled = overridden;
   apifyClearToken.disabled = overridden;
-  verifyApifyToken.disabled = false;
+  verifyApifyToken.disabled = settingsBusy;
 
   if (overridden) {
     apifyTokenHint.textContent =
