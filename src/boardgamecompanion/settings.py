@@ -127,6 +127,7 @@ class Settings(BaseSettings):
     lmstudio_embedding_timeout_seconds: float = Field(
         default=60.0, ge=1.0, le=600.0
     )
+    lmstudio_wol_enabled: bool = True
     lmstudio_wol_mac: str | None = None
     lmstudio_wol_broadcast: str = "192.168.1.255"
     lmstudio_wol_port: int = Field(default=9, ge=1, le=65535)
