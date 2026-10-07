@@ -65,6 +65,12 @@ from boardgamecompanion.copies import (
     PhysicalCopyNotFound,
     PhysicalCopyStore,
 )
+from boardgamecompanion.crowdfunding import (
+    CrowdfundingError,
+    CrowdfundingService,
+    EcbFxProvider,
+    GamefoundProvider,
+)
 from boardgamecompanion.database import Database
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
@@ -150,6 +156,18 @@ LOGGER = logging.getLogger(__name__)
 
 def get_database() -> Database:
     return Database(settings.database_path)
+
+
+def get_crowdfunding_service() -> CrowdfundingService:
+    return CrowdfundingService(
+        cache_path=settings.crowdfunding_cache_path,
+        cache_ttl_seconds=settings.crowdfunding_cache_ttl_seconds,
+        gamefound=GamefoundProvider(
+            base_url=settings.gamefound_public_api_url,
+            timeout_seconds=settings.crowdfunding_timeout_seconds,
+        ),
+        fx=EcbFxProvider(timeout_seconds=settings.crowdfunding_timeout_seconds),
+    )
 
 
 def get_rulebook_update_service() -> RulebookUpdateService:
@@ -619,6 +637,11 @@ def web_completed() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/crowdfunding", include_in_schema=False)
+def web_crowdfunding() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -646,6 +669,26 @@ def health() -> dict[str, object]:
             "database": str(settings.database_path),
         },
     }
+
+
+@app.get("/api/crowdfunding", tags=["crowdfunding"])
+def list_crowdfunding(
+    sort: Literal["top", "funds", "backers", "ending", "upcoming"] = Query(default="top"),
+    platform: Literal["all", "gamefound", "kickstarter"] = Query(default="all"),
+    status: Literal["all", "active", "upcoming"] = Query(default="active"),
+    limit: int = Query(default=50, ge=1, le=100),
+    refresh: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_crowdfunding_service().list_campaigns(
+            sort=sort,
+            platform=platform,
+            status=status,
+            limit=limit,
+            refresh=refresh,
+        )
+    except CrowdfundingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/imports/bgg-csv", tags=["imports"])
