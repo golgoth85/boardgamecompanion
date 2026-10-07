@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     youtube_api_key: str | None = None
     youtube_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     youtube_search_results: int = Field(default=12, ge=4, le=25)
+    crowdfunding_cache_ttl_seconds: int = Field(
+        default=3 * 60 * 60, ge=15 * 60, le=24 * 60 * 60
+    )
+    crowdfunding_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
+    gamefound_public_api_url: str = "https://gamefound.com"
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
@@ -134,7 +139,7 @@ class Settings(BaseSettings):
     gemini_embedding_dimensions: int | None = Field(default=768, ge=128, le=3072)
     gemini_embedding_batch_size: int = Field(default=16, ge=1, le=100)
     gemini_embedding_timeout_seconds: float = Field(default=60.0, ge=1.0, le=600.0)
-    gemini_generation_model: str = "gemini-3.8-flash"
+    gemini_generation_model: str = "gemini-3.5-flash-lite"
     gemini_generation_timeout_seconds: float = Field(default=120.0, ge=1.0, le=900.0)
     gemini_generation_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     gemini_verify_tls: bool = True
@@ -150,6 +155,10 @@ class Settings(BaseSettings):
     @property
     def effective_generation_provider(self) -> Literal["ollama", "lmstudio", "gemini"]:
         return self.generation_provider or self.rag_provider
+
+    @property
+    def crowdfunding_cache_path(self) -> Path:
+        return self.config_dir / "crowdfunding-cache.json"
 
     @property
     def database_path(self) -> Path:

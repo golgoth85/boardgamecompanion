@@ -87,7 +87,7 @@ Default models:
 ```text
 BGC_GEMINI_EMBEDDING_MODEL=gemini-embedding-2
 BGC_GEMINI_EMBEDDING_DIMENSIONS=768
-BGC_GEMINI_GENERATION_MODEL=gemini-3.8-flash
+BGC_GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite
 ```
 
 To use Gemini for generation while keeping local embeddings:
