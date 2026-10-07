@@ -145,6 +145,44 @@ class GeminiBggFileProvider:
             raise ValueError("max_attempts must be 1..5")
 
     @staticmethod
+    def _quota_diagnostic(response: httpx.Response) -> str | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return None
+        parts: list[str] = []
+        status = str(error.get("status") or "").strip()
+        if status:
+            parts.append(status[:80])
+        details = error.get("details")
+        if isinstance(details, list):
+            for item in details:
+                if not isinstance(item, dict):
+                    continue
+                type_name = str(item.get("@type") or "")
+                if not type_name.endswith("QuotaFailure"):
+                    continue
+                violations = item.get("violations")
+                if not isinstance(violations, list):
+                    continue
+                for violation in violations[:3]:
+                    if not isinstance(violation, dict):
+                        continue
+                    quota_id = str(violation.get("quotaId") or "").strip()
+                    quota_value = str(violation.get("quotaValue") or "").strip()
+                    if quota_id:
+                        item_text = f"quota={quota_id[:160]}"
+                        if quota_value:
+                            item_text += f"; limit={quota_value[:40]}"
+                        parts.append(item_text)
+        return "; ".join(parts) if parts else None
+
+    @staticmethod
     def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
         delay = float(fallback)
 
@@ -212,8 +250,10 @@ class GeminiBggFileProvider:
                     )
                     self.sleep(retry_after)
                     continue
+                diagnostic = self._quota_diagnostic(exc.response)
+                suffix = f" ({diagnostic})" if diagnostic else ""
                 raise RulebookProviderError(
-                    f"BGG grounded search failed with HTTP {status}"
+                    f"BGG grounded search failed with HTTP {status}{suffix}"
                 ) from exc
             except httpx.HTTPError as exc:
                 if attempt < self.max_attempts:
