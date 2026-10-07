@@ -44,6 +44,7 @@ class FakeBggClient:
                 "bgg_recommended_players": "1, 2, 3",
                 "categories": ["Fantasy"],
                 "mechanics": ["Deck Building", "Cooperative Game"],
+                "description": "A cooperative fantasy adventure.",
             },
             300: {
                 "bgg_id": 300,
@@ -157,6 +158,18 @@ def test_suggestions_exclude_owned_and_expansions_and_rank_by_profile(tmp_path: 
     assert [item["bgg_id"] for item in payload["items"]] == [200, 300]
     assert payload["items"][0]["suggestion_score"] > payload["items"][1]["suggestion_score"]
     assert "Deck Building" in payload["items"][0]["reason"]
+    assert "Tema/ambito: Fantasy." in payload["items"][0]["overview"]["summary"]
+    assert "Meccaniche: Deck Building, Cooperative Game." in payload["items"][0]["overview"]["summary"]
+    assert payload["items"][0]["overview"]["source_description_available"] is True
+
+    novelty = service.list_suggestions(limit=10, sort="novelty")
+    assert novelty["sort"] == "novelty"
+    assert novelty["items"][0]["bgg_id"] == 300
+
+    bgg = service.list_suggestions(limit=10, sort="bgg")
+    assert bgg["sort"] == "bgg"
+    assert bgg["items"][0]["bgg_id"] == 200
+
     assert client.hot_calls == 1
     assert client.thing_calls == 1
 

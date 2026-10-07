@@ -4751,6 +4751,10 @@ async function renderExplore(initialTab = null) {
   await refreshExplore();
 }
 
+const suggestionsState = {
+  sort: "for_you",
+};
+
 const crowdfundingState = {
   sort: "top",
   platform: "all",
@@ -4849,6 +4853,7 @@ function suggestionCard(item, index) {
   const players = item.players || {};
   const playTime = item.play_time || {};
   const bgg = item.bgg || {};
+  const overview = item.overview || {};
   const playerText = players.min && players.max
     ? (players.min === players.max ? `${players.min} giocatori` : `${players.min}–${players.max} giocatori`)
     : "giocatori —";
@@ -4863,10 +4868,16 @@ function suggestionCard(item, index) {
   const weightText = Number.isFinite(Number(bgg.average_weight))
     ? Number(bgg.average_weight).toFixed(1)
     : "—";
-  const mechanics = Array.isArray(item.mechanics) ? item.mechanics.slice(0, 4) : [];
+  const mechanics = Array.isArray(overview.mechanics) && overview.mechanics.length
+    ? overview.mechanics
+    : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : []);
+  const setting = Array.isArray(overview.setting) ? overview.setting : [];
   const cover = item.cover_url
     ? `<img src="${escapeHtml(item.cover_url)}" alt="" loading="lazy">`
     : '<span aria-hidden="true">BGC</span>';
+  const overviewText = overview.summary
+    || "Dati BGG verificati disponibili; il profilo sintetico non è ancora stato generato.";
+
   return `
     <article class="suggestion-card">
       <div class="suggestion-rank">#${index + 1}</div>
@@ -4882,16 +4893,41 @@ function suggestionCard(item, index) {
             <small>affinità</small>
           </div>
         </div>
-        <p class="suggestion-reason">${escapeHtml(item.reason || "")}</p>
-        <div class="suggestion-facts">
-          <span>${escapeHtml(playerText)}</span>
-          <span>${escapeHtml(timeText)}</span>
-          <span>BGG ${escapeHtml(ratingText)}</span>
-          <span>Peso ${escapeHtml(weightText)}</span>
+
+        <div class="suggestion-editorial">
+          <section class="suggestion-copy-block">
+            <h3>Il gioco</h3>
+            <p>${escapeHtml(overviewText)}</p>
+            <div class="suggestion-facts">
+              <span>${escapeHtml(playerText)}</span>
+              <span>${escapeHtml(timeText)}</span>
+              <span>BGG ${escapeHtml(ratingText)}</span>
+              <span>Peso ${escapeHtml(weightText)}</span>
+            </div>
+            ${setting.length ? `
+              <div class="suggestion-mini-row">
+                <strong>Ambientazione / temi</strong>
+                <div class="suggestion-tags">
+                  ${setting.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+                </div>
+              </div>
+            ` : ""}
+            ${mechanics.length ? `
+              <div class="suggestion-mini-row">
+                <strong>Meccaniche</strong>
+                <div class="suggestion-tags">
+                  ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+                </div>
+              </div>
+            ` : ""}
+          </section>
+
+          <section class="suggestion-copy-block suggestion-why">
+            <h3>Potrebbe piacerti perché</h3>
+            <p>${escapeHtml(item.reason || "È un candidato verificato BGG non presente nella tua ludoteca.")}</p>
+          </section>
         </div>
-        <div class="suggestion-tags">
-          ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-        </div>
+
         <a class="button button-ghost suggestion-open"
            href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
            target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
@@ -4903,16 +4939,24 @@ function suggestionCard(item, index) {
 
 async function renderSuggestions({forceRefresh = false} = {}) {
   document.title = "Suggerimenti · BoardGameCompanion";
+  const sortOptions = [
+    ["for_you", "Per te"],
+    ["novelty", "Più diversi"],
+    ["bgg", "BGG"],
+  ];
   app.innerHTML = `
     <section class="suggestions-page">
       <header class="suggestions-header">
         <div>
           <p class="eyebrow">Scopri</p>
           <h1>Suggerimenti</h1>
-          <p>10 giochi che non possiedi, selezionati confrontando i dati BGG verificati con il profilo della tua ludoteca.</p>
+          <p>10 giochi che non possiedi, presentati con dati BGG verificati e una motivazione basata sulla tua ludoteca.</p>
         </div>
         <button class="button button-ghost" id="suggestionsRefresh" type="button">↻ Aggiorna</button>
       </header>
+      <div class="suggestions-toolbar" aria-label="Ordina suggerimenti">
+        ${sortOptions.map(([value, label]) => `<button type="button" data-suggestions-sort="${value}" class="${suggestionsState.sort === value ? "is-active" : ""}">${label}</button>`).join("")}
+      </div>
       <div id="suggestionsSummary" class="suggestions-summary">
         <span class="muted">Analisi del profilo e dei candidati BGG…</span>
       </div>
@@ -4925,11 +4969,20 @@ async function renderSuggestions({forceRefresh = false} = {}) {
   document.querySelector("#suggestionsRefresh")?.addEventListener("click", () => {
     void renderSuggestions({forceRefresh: true});
   });
+  document.querySelectorAll("[data-suggestions-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      suggestionsState.sort = button.dataset.suggestionsSort || "for_you";
+      void renderSuggestions();
+    });
+  });
 
   const grid = document.querySelector("#suggestionsGrid");
   const summary = document.querySelector("#suggestionsSummary");
   try {
-    const params = new URLSearchParams({limit: "10"});
+    const params = new URLSearchParams({
+      limit: "10",
+      sort: suggestionsState.sort,
+    });
     if (forceRefresh) params.set("refresh", "true");
     const payload = await api(`/api/catalog/suggestions?${params.toString()}`);
     const items = Array.isArray(payload.items) ? payload.items : [];
@@ -4937,10 +4990,15 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     const topMechanics = Array.isArray(profile.top_mechanics)
       ? profile.top_mechanics.slice(0, 4).map((entry) => entry?.[0]).filter(Boolean)
       : [];
+    const sortLabel = {
+      for_you: "ordinati per affinità complessiva",
+      novelty: "ordinati per varietà rispetto alla tua ludoteca",
+      bgg: "ordinati per valutazione BGG",
+    }[payload.sort || suggestionsState.sort] || "ordinati per affinità";
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
-        <span class="muted">Pool BGG: ${formatNumber(payload.candidate_count || 0, 0)} · posseduti esclusi: ${formatNumber(payload.owned_excluded_count || 0, 0)}</span>
+        <span class="muted">${escapeHtml(sortLabel)} · pool BGG ${formatNumber(payload.candidate_count || 0, 0)} · posseduti esclusi ${formatNumber(payload.owned_excluded_count || 0, 0)}</span>
       </div>
       <div class="suggestions-profile">
         ${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
@@ -4956,7 +5014,6 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     grid.innerHTML = `<div class="empty-state"><strong>Impossibile generare i suggerimenti</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
 }
-
 
 async function renderCrowdfunding({forceRefresh = false} = {}) {
   document.title = "Crowdfunding · BoardGameCompanion";
