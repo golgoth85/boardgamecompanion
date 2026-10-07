@@ -181,3 +181,43 @@ def test_bgg_rejects_content_encoding_before_decoding() -> None:
     )
     with pytest.raises(BggMetadataError, match="encoding"):
         client.thing(173346)
+
+
+HOT_XML = b"""<?xml version='1.0'?>
+<items total='2' termsofuse='https://boardgamegeek.com/xmlapi/termsofuse'>
+  <item id='999001' rank='1'>
+    <name value='Candidate One'/>
+    <yearpublished value='2025'/>
+  </item>
+  <item id='999002' rank='2'>
+    <name value='Candidate Two'/>
+    <yearpublished value='2024'/>
+  </item>
+</items>"""
+
+
+def test_bgg_hot_list_is_bearer_authenticated_and_bounded() -> None:
+    observed: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["authorization"] = request.headers["authorization"]
+        observed["url"] = str(request.url)
+        return httpx.Response(200, content=HOT_XML, request=request)
+
+    client = BggApiClient(
+        BggApiConfig("secret", min_interval_seconds=0),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert client.hot(limit=1) == [
+        {
+            "bgg_id": 999001,
+            "title": "Candidate One",
+            "year_published": 2025,
+            "hot_rank": 1,
+        }
+    ]
+    assert observed == {
+        "authorization": "Bearer secret",
+        "url": "https://boardgamegeek.com/xmlapi2/hot?type=boardgame",
+    }
