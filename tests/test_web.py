@@ -27,6 +27,7 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert 'data-settings-tab="crowdfunding"' in response.text
     assert 'id="apifyToken"' in response.text
     assert 'id="verifyApifyToken"' in response.text
+    assert 'id="lmstudioWolEnabled"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
@@ -107,7 +108,6 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderCrowdfunding" in js.text
     assert "renderSuggestions" in js.text
     assert "/api/catalog/suggestions" in js.text
-    assert 'id="lmstudioWolEnabled"' in client.get("/").text
     assert 'openSettingsDialog("crowdfunding")' in js.text
     assert "Configura Apify" in js.text
     assert "tutorialDiscoveryAction" in js.text
