@@ -178,6 +178,8 @@ def test_suggestions_exclude_owned_and_expansions_and_rank_by_profile(tmp_path: 
     assert "Tema/ambito: Fantasy." in payload["items"][0]["overview"]["summary"]
     assert "Meccaniche: Deck Building, Cooperative Game." in payload["items"][0]["overview"]["summary"]
     assert payload["items"][0]["overview"]["source_description_available"] is True
+    assert payload["items"][0]["players"]["recommended"] == "1, 2, 3"
+    assert payload["items"][0]["players"]["best"] == "2"
 
     novelty = service.list_suggestions(limit=10, sort="novelty")
     assert novelty["sort"] == "novelty"

@@ -4856,12 +4856,14 @@ function suggestionCard(item, index) {
   const overview = item.overview || {};
   const playerText = players.min && players.max
     ? (players.min === players.max ? `${players.min} giocatori` : `${players.min}–${players.max} giocatori`)
-    : "giocatori —";
+    : "—";
+  const recommendedPlayers = String(players.recommended || "").trim() || "—";
+  const bestPlayers = String(players.best || "").trim() || "—";
   const timeText = playTime.playing
     ? `${playTime.playing} min`
     : playTime.max
       ? `≤ ${playTime.max} min`
-      : "durata —";
+      : "—";
   const ratingText = Number.isFinite(Number(bgg.average))
     ? Number(bgg.average).toFixed(1)
     : "—";
@@ -4872,8 +4874,9 @@ function suggestionCard(item, index) {
     ? overview.mechanics
     : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : []);
   const setting = Array.isArray(overview.setting) ? overview.setting : [];
+  const title = item.title || `BGG #${item.bgg_id}`;
   const cover = item.cover_url
-    ? `<img src="${escapeHtml(item.cover_url)}" alt="" loading="lazy">`
+    ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
     : '<span aria-hidden="true">BGC</span>';
   const overviewText = item.game_summary_it
     || overview.summary
@@ -4885,16 +4888,37 @@ function suggestionCard(item, index) {
   return `
     <article class="suggestion-card">
       <div class="suggestion-rank">#${index + 1}</div>
-      <div class="suggestion-cover">${cover}</div>
+
+      <aside class="suggestion-rail" aria-label="Dati rapidi di ${escapeHtml(title)}">
+        <div class="suggestion-cover">${cover}</div>
+        <dl class="suggestion-quick-facts">
+          <div><dt>Giocatori</dt><dd>${escapeHtml(playerText)}</dd></div>
+          <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
+          <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
+          <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
+          <div class="suggestion-player-poll">
+            <dt>Raccomandato per</dt><dd>${escapeHtml(recommendedPlayers)}</dd>
+          </div>
+          <div class="suggestion-player-poll suggestion-player-best">
+            <dt>Ideale in</dt><dd>${escapeHtml(bestPlayers)}</dd>
+          </div>
+        </dl>
+      </aside>
+
       <div class="suggestion-body">
         <div class="suggestion-heading">
-          <div>
-            <h2>${escapeHtml(item.title || `BGG #${item.bgg_id}`)}</h2>
+          <div class="suggestion-title">
+            <h2>${escapeHtml(title)}</h2>
             <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
           </div>
-          <div class="suggestion-score">
-            <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
-            <small>affinità</small>
+          <div class="suggestion-heading-actions">
+            <div class="suggestion-score">
+              <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
+              <small>affinità</small>
+            </div>
+            <a class="button button-ghost suggestion-open"
+               href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+               target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
           </div>
         </div>
 
@@ -4924,18 +4948,6 @@ function suggestionCard(item, index) {
             <h3>Potrebbe piacerti perché</h3>
             <p>${escapeHtml(whyText)}</p>
           </section>
-        </div>
-
-        <div class="suggestion-footer">
-          <div class="suggestion-meta-soft">
-            <span>${escapeHtml(playerText)}</span>
-            <span>${escapeHtml(timeText)}</span>
-            <span>Peso ${escapeHtml(weightText)}</span>
-            <span>BGG ${escapeHtml(ratingText)}</span>
-          </div>
-          <a class="button button-ghost suggestion-open"
-             href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
-             target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
         </div>
       </div>
     </article>
