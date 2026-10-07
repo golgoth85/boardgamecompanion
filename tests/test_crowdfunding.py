@@ -242,7 +242,8 @@ def test_apify_provider_normalizes_structured_campaign_data() -> None:
             "/v2/actors/fetchfinch~kickstarter-scraper/"
             "run-sync-get-dataset-items"
         )
-        assert request.url.params["token"] == "secret"
+        assert "token" not in request.url.params
+        assert request.headers["Authorization"] == "Bearer secret"
         seen_payload.update(__import__("json").loads(request.content.decode("utf-8")))
         return httpx.Response(
             200,
@@ -404,3 +405,27 @@ def test_gamefound_error_is_not_marked_stale_from_kickstarter_only_cache(
 
     assert payload["providers"]["gamefound"]["status"] == "error"
     assert payload["providers"]["kickstarter"]["status"] == "ok"
+
+
+
+def test_apify_provider_verifies_token_with_bearer_header() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v2/users/me"
+        assert "token" not in request.url.params
+        assert request.headers["Authorization"] == "Bearer secret"
+        return httpx.Response(
+            200,
+            json={"data": {"id": "user-123", "username": "marco-test"}},
+        )
+
+    provider = ApifyKickstarterProvider(
+        token="secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert provider.verify_token() == {
+        "verified": True,
+        "username": "marco-test",
+        "user_id": "user-123",
+    }
