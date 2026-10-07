@@ -238,6 +238,10 @@ def test_apify_provider_normalizes_structured_campaign_data() -> None:
     seen_payload: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == (
+            "/v2/actors/fetchfinch~kickstarter-scraper/"
+            "run-sync-get-dataset-items"
+        )
         assert request.url.params["token"] == "secret"
         seen_payload.update(__import__("json").loads(request.content.decode("utf-8")))
         return httpx.Response(
