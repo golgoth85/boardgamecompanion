@@ -134,8 +134,12 @@ def test_non_bgg_source_or_unapproved_transport_is_rejected():
     assert results == ()
 
 
-def test_bgg_429_exposes_sanitized_quota_failure_without_response_message():
+def test_bgg_zero_quota_fails_fast_with_sanitized_diagnostic():
+    calls = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         return httpx.Response(
             429,
             json={
@@ -172,7 +176,7 @@ def test_bgg_429_exposes_sanitized_quota_failure_without_response_message():
         model="gemini-3.5-flash-lite",
         api_key="secret",
         client=client,
-        max_attempts=1,
+        max_attempts=3,
     )
 
     try:
@@ -187,6 +191,7 @@ def test_bgg_429_exposes_sanitized_quota_failure_without_response_message():
     assert "limit=0" in message
     assert "sensitive project-specific quota message" not in message
     assert "must-not-leak" not in message
+    assert calls == 1
 
 
 def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
