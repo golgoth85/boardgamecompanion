@@ -16,7 +16,7 @@ class SuggestionEditorialError(RuntimeError):
     pass
 
 
-EDITORIAL_VERSION = 3
+EDITORIAL_VERSION = 4
 
 
 EDITORIAL_SCHEMA: dict[str, Any] = {
@@ -56,15 +56,19 @@ Per ogni candidato restituisci:
    meccaniche davvero centrali. Se la descrizione manca, usa soltanto i dati
    strutturati forniti. Non inventare campagne, modalità solitario, trama o altre
    caratteristiche non presenti nei dati.
-2. why_it_fits: 2-3 frasi concrete, non stereotipate. Scegli fra i titoli
-   posseduti in comparison_anchors SOLO quelli che aiutano davvero a capire il tipo
-   di esperienza. Dai priorità al loop di gioco, alle meccaniche centrali e alla
-   sensazione complessiva; non forzare confronti per somiglianze incidentali come
-   il semplice uso di carte, tessere, una griglia o un tabellone. Se nessun titolo
-   è un confronto davvero significativo, spiega invece quale spazio nuovo occupa
-   il candidato rispetto alla ludoteca senza citarne uno a caso.
+2. why_it_fits: 3-5 frasi concrete, non stereotipate, per circa 70-120 parole.
+   Deve essere il cuore editoriale del suggerimento: spiega prima quale esperienza
+   offre il candidato, poi collegala alla ludoteca dell'utente in modo leggibile.
+   Scegli fra i titoli posseduti in comparison_anchors SOLO quelli che aiutano
+   davvero a capire il tipo di esperienza. Dai priorità al loop di gioco, alle
+   meccaniche centrali e alla sensazione complessiva; non forzare confronti per
+   somiglianze incidentali come il semplice uso di carte, tessere, una griglia o
+   un tabellone. Se nessun titolo è un confronto davvero significativo, spiega
+   invece quale spazio nuovo occupa il candidato rispetto alla ludoteca senza
+   citarne uno a caso.
    Quando confronti, cita uno o due giochi posseduti per nome e spiega sia il punto
-   in comune sia la differenza rilevante. "Più leggero", "più breve" o "più
+   in comune sia la differenza rilevante, chiudendo con il motivo pratico per cui
+   il candidato può meritare attenzione. "Più leggero", "più breve" o "più
    complesso" sono ammessi SOLO se i valori forniti lo dimostrano. Evita frasi
    generiche come "se ti piace X potrebbe piacerti Y", liste di metriche, rating
    BGG e formule ripetitive.
