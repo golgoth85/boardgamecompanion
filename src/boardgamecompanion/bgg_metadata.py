@@ -77,8 +77,7 @@ class BggApiClient:
                 self._sleep(remaining)
         self._last_request_at = self._monotonic()
 
-    def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
-        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
+    def _request_xml(self, url: str) -> bytes:
         response: httpx.Response | None = None
         content = b""
         for attempt in range(self.config.max_attempts):
@@ -149,6 +148,38 @@ class BggApiClient:
         if response.status_code != 200:
             raise BggMetadataError(f"BGG API returned HTTP {response.status_code}")
         return content
+
+    def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
+        url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
+        return self._request_xml(url)
+
+    def hot(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        cap = max(1, min(int(limit), 100))
+        content = self._request_xml(f"{BGG_API_ORIGIN}/xmlapi2/hot?type=boardgame")
+        try:
+            root = ET.fromstring(content)
+        except (ET.ParseError, ValueError) as exc:
+            raise BggMetadataError("BGG hot list returned invalid XML") from exc
+
+        items: list[dict[str, Any]] = []
+        for node in root.findall("item"):
+            raw_id = (node.attrib.get("id") or "").strip()
+            if not raw_id.isdigit():
+                continue
+            name = _attribute(node.find("name"))
+            year = _attribute(node.find("yearpublished"))
+            rank = (node.attrib.get("rank") or "").strip()
+            items.append(
+                {
+                    "bgg_id": int(raw_id),
+                    "title": name,
+                    "year_published": int(year) if year and year.isdigit() else None,
+                    "hot_rank": int(rank) if rank.isdigit() else None,
+                }
+            )
+            if len(items) >= cap:
+                break
+        return items
 
     def thing(self, bgg_id: int) -> dict[str, Any]:
         identifier = int(bgg_id)
