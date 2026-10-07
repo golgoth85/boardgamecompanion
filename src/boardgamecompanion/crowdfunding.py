@@ -184,6 +184,45 @@ class ApifyKickstarterProvider:
                 return candidate
         return None
 
+    def verify_token(self) -> dict[str, object]:
+        if not self.configured:
+            raise CrowdfundingProviderError("Apify token is not configured")
+
+        endpoint = f"{self.base_url}/users/me"
+        try:
+            with httpx.Client(
+                timeout=min(self.timeout_seconds, 30.0),
+                follow_redirects=True,
+                transport=self.transport,
+                headers={
+                    "User-Agent": "BoardGameCompanion/0.1 crowdfunding",
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {self.token}",
+                },
+            ) as client:
+                response = client.get(endpoint)
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise CrowdfundingProviderError(
+                f"Apify token verification failed: {type(exc).__name__}"
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise CrowdfundingProviderError(
+                "Apify token verification returned an invalid payload"
+            )
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            data = payload
+        username = self._text(data.get("username"))
+        user_id = self._text(data.get("id"))
+        return {
+            "verified": True,
+            "username": username,
+            "user_id": user_id,
+        }
+
     def fetch_campaigns(self) -> list[dict[str, object]]:
         if not self.configured:
             raise CrowdfundingProviderError("Apify token is not configured")
@@ -205,11 +244,11 @@ class ApifyKickstarterProvider:
                 headers={
                     "User-Agent": "BoardGameCompanion/0.1 crowdfunding",
                     "Accept": "application/json",
+                    "Authorization": f"Bearer {self.token}",
                 },
             ) as client:
                 response = client.post(
                     endpoint,
-                    params={"token": self.token},
                     json=payload,
                 )
                 response.raise_for_status()

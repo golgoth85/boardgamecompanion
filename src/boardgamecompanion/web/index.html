@@ -316,6 +316,31 @@
               </div>
             </div>
           </details>
+
+          <details class="settings-provider" id="apifySettings">
+            <summary>
+              <span><strong>Apify / Kickstarter</strong><small>Discovery crowdfunding tabletop</small></span>
+              <span class="settings-provider-state" id="apifyProviderState">Configura</span>
+            </summary>
+            <div class="settings-provider-body">
+              <p class="muted">Il token resta sul server e non viene mai mostrato dopo il salvataggio. Kickstarter usa cache dedicata per limitare chiamate e costi.</p>
+              <div class="settings-grid">
+                <label class="settings-field copy-span-2">
+                  <span>Apify API token</span>
+                  <input id="apifyToken" type="password" autocomplete="new-password"
+                         placeholder="Lascia vuoto per mantenerlo invariato">
+                  <small id="apifyTokenHint" class="muted"></small>
+                </label>
+                <label class="settings-check copy-span-2" id="clearApifyTokenRow" hidden>
+                  <input id="apifyClearToken" type="checkbox"><span>Rimuovi il token Apify salvato</span>
+                </label>
+              </div>
+              <div class="settings-inline-actions">
+                <button class="button button-ghost" id="verifyApifyToken" type="button">Salva e verifica Apify</button>
+                <span id="apifyVerifyStatus" class="muted"></span>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 

@@ -212,6 +212,72 @@ def save_youtube_settings(
     return resolve_youtube_settings(database)
 
 
+@dataclass(frozen=True)
+class ResolvedCrowdfundingSettings:
+    apify_token: str | None
+    apify_token_source: str | None
+    stored_apify_token_configured: bool
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.apify_token)
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "configured": self.configured,
+            "apify_token_configured": self.configured,
+            "apify_token_source": self.apify_token_source,
+            "stored_apify_token_configured": self.stored_apify_token_configured,
+            "overrides": {
+                "apify_token": self.apify_token_source == "environment",
+            },
+            "kickstarter": {
+                "provider": "apify",
+                "actor": settings.kickstarter_apify_actor,
+                "cache_ttl_seconds": int(settings.kickstarter_cache_ttl_seconds),
+                "max_items": int(settings.kickstarter_max_items),
+                "max_pages": int(settings.kickstarter_max_pages),
+            },
+        }
+
+
+def resolve_crowdfunding_settings(database: Database) -> ResolvedCrowdfundingSettings:
+    store = AppSettingsStore(database)
+    stored_token = store.get("crowdfunding_apify_token")
+    runtime_token = os.environ.get("BGC_APIFY_TOKEN") or settings.apify_token
+    token = runtime_token.strip() if runtime_token and runtime_token.strip() else stored_token
+    source = (
+        "environment"
+        if runtime_token and runtime_token.strip()
+        else "stored"
+        if stored_token
+        else None
+    )
+    return ResolvedCrowdfundingSettings(
+        apify_token=token.strip() if token else None,
+        apify_token_source=source,
+        stored_apify_token_configured=bool(stored_token),
+    )
+
+
+def save_crowdfunding_settings(
+    database: Database,
+    *,
+    apify_token: str | None,
+    clear_apify_token: bool,
+) -> ResolvedCrowdfundingSettings:
+    store = AppSettingsStore(database)
+    if clear_apify_token:
+        store.set("crowdfunding_apify_token", None, sensitive=True)
+    elif apify_token is not None and apify_token.strip():
+        store.set(
+            "crowdfunding_apify_token",
+            apify_token.strip(),
+            sensitive=True,
+        )
+    return resolve_crowdfunding_settings(database)
+
+
 RAG_PROVIDERS = ("ollama", "lmstudio", "gemini")
 
 

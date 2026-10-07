@@ -117,6 +117,13 @@ const youtubeApiKey = document.querySelector("#youtubeApiKey");
 const youtubeApiKeyHint = document.querySelector("#youtubeApiKeyHint");
 const youtubeClearApiKey = document.querySelector("#youtubeClearApiKey");
 const clearYoutubeApiKeyRow = document.querySelector("#clearYoutubeApiKeyRow");
+const apifyToken = document.querySelector("#apifyToken");
+const apifyTokenHint = document.querySelector("#apifyTokenHint");
+const apifyClearToken = document.querySelector("#apifyClearToken");
+const clearApifyTokenRow = document.querySelector("#clearApifyTokenRow");
+const apifyProviderState = document.querySelector("#apifyProviderState");
+const verifyApifyToken = document.querySelector("#verifyApifyToken");
+const apifyVerifyStatus = document.querySelector("#apifyVerifyStatus");
 const settingsResult = document.querySelector("#settingsResult");
 const ragEmbeddingOrder = document.querySelector("#ragEmbeddingOrder");
 const ragGenerationOrder = document.querySelector("#ragGenerationOrder");
@@ -309,6 +316,7 @@ let settingsBusy = false;
 let currentBggSettings = null;
 let currentRagSettings = null;
 let currentYoutubeSettings = null;
+let currentCrowdfundingSettings = null;
 let copyBusy = false;
 let editingCopyId = null;
 let editingCopyBggId = null;
@@ -492,7 +500,13 @@ async function api(url, options) {
 
 function setSettingsBusy(busy) {
   settingsBusy = busy;
-  for (const control of [closeSettings, cancelSettings, saveSettings, saveTestSettings]) {
+  for (const control of [
+    closeSettings,
+    cancelSettings,
+    saveSettings,
+    saveTestSettings,
+    verifyApifyToken,
+  ]) {
     if (control) control.disabled = busy;
   }
   if (bggSyncSettingsNow) {
@@ -572,6 +586,76 @@ function applyYoutubeSettingsToForm(data) {
     clearYoutubeApiKeyRow.hidden = true;
   }
 }
+
+function applyCrowdfundingSettingsToForm(data) {
+  currentCrowdfundingSettings = data;
+  apifyToken.value = "";
+  apifyClearToken.checked = false;
+  apifyVerifyStatus.textContent = "";
+
+  const overridden = Boolean(data.overrides?.apify_token);
+  apifyToken.disabled = overridden;
+  apifyClearToken.disabled = overridden;
+  verifyApifyToken.disabled = settingsBusy;
+
+  if (overridden) {
+    apifyTokenHint.textContent =
+      "Token configurato tramite BGC_APIFY_TOKEN. L'override runtime ha precedenza.";
+    clearApifyTokenRow.hidden = true;
+  } else if (data.stored_apify_token_configured) {
+    apifyTokenHint.textContent =
+      "Token Apify configurato. Lascia vuoto per mantenerlo invariato.";
+    clearApifyTokenRow.hidden = false;
+  } else {
+    apifyTokenHint.textContent =
+      "Nessun token Apify configurato. Crea un token dedicato in Apify Console → Settings → API & Integrations.";
+    clearApifyTokenRow.hidden = true;
+  }
+  apifyProviderState.textContent = data.configured ? "Configurato" : "Configura";
+}
+
+
+async function saveCrowdfundingSettings() {
+  const payload = {
+    apify_token:
+      apifyToken.disabled || apifyClearToken.checked || !apifyToken.value.trim()
+        ? null
+        : apifyToken.value.trim(),
+    clear_apify_token:
+      !apifyClearToken.disabled && apifyClearToken.checked,
+  };
+  const saved = await api("/api/settings/crowdfunding", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  applyCrowdfundingSettingsToForm(saved);
+  return saved;
+}
+
+
+async function saveAndVerifyApify() {
+  if (settingsBusy) return;
+  setSettingsBusy(true);
+  apifyVerifyStatus.textContent = "Verifica…";
+  try {
+    const saved = await saveCrowdfundingSettings();
+    if (!saved.configured) {
+      throw new Error("Inserisci un token Apify prima della verifica.");
+    }
+    const result = await api("/api/settings/crowdfunding/verify", {method: "POST"});
+    apifyVerifyStatus.textContent = result.username
+      ? `Token valido · account ${result.username}`
+      : "Token valido.";
+    showToast("Token Apify verificato.");
+  } catch (error) {
+    apifyVerifyStatus.textContent = error.message;
+    showToast(error.message, true);
+  } finally {
+    setSettingsBusy(false);
+  }
+}
+
 
 function formatBggSyncTime(value) {
   if (!value) return "mai";
@@ -691,15 +775,17 @@ async function openSettingsDialog(initialTab = "general") {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
-    const [bggData, ragData, youtubeData, syncData] = await Promise.all([
+    const [bggData, ragData, youtubeData, crowdfundingData, syncData] = await Promise.all([
       api("/api/settings/bgg"),
       api("/api/settings/rag"),
       api("/api/settings/youtube"),
+      api("/api/settings/crowdfunding"),
       api("/api/bgg-collection-sync"),
     ]);
     applyBggSettingsToForm(bggData);
     applyRagSettingsToForm(ragData);
     applyYoutubeSettingsToForm(youtubeData);
+    applyCrowdfundingSettingsToForm(crowdfundingData);
     renderBggSyncSettingsStatus(syncData);
     settingsDialog.showModal();
   } catch (error) {
@@ -785,6 +871,9 @@ async function persistSettings({verifyAfter = false} = {}) {
       body: JSON.stringify(youtubePayload),
     });
     applyYoutubeSettingsToForm(savedYoutube);
+
+    const savedCrowdfunding = await saveCrowdfundingSettings();
+    applyCrowdfundingSettingsToForm(savedCrowdfunding);
 
     try {
       renderBggSyncSettingsStatus(await api("/api/bgg-collection-sync"));
@@ -5043,6 +5132,7 @@ settingsDialog.addEventListener("close", () => {
   currentBggSettings = null;
   currentRagSettings = null;
   currentYoutubeSettings = null;
+  currentCrowdfundingSettings = null;
 });
 
 settingsForm.addEventListener("submit", (event) => {
@@ -5082,6 +5172,16 @@ youtubeClearApiKey.addEventListener("change", () => {
   youtubeApiKey.disabled =
     youtubeClearApiKey.checked || Boolean(currentYoutubeSettings?.overrides?.api_key);
   if (youtubeClearApiKey.checked) youtubeApiKey.value = "";
+});
+
+apifyClearToken.addEventListener("change", () => {
+  apifyToken.disabled =
+    apifyClearToken.checked || Boolean(currentCrowdfundingSettings?.overrides?.apify_token);
+  if (apifyClearToken.checked) apifyToken.value = "";
+});
+
+verifyApifyToken.addEventListener("click", () => {
+  void saveAndVerifyApify();
 });
 
 importButton.addEventListener("click", () => {

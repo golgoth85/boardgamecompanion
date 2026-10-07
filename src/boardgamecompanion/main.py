@@ -23,9 +23,11 @@ from boardgamecompanion.answer_generation import (
 from boardgamecompanion.app_settings import (
     activate_embedding_provider,
     resolve_bgg_settings,
+    resolve_crowdfunding_settings,
     resolve_rag_settings,
     resolve_youtube_settings,
     save_bgg_settings,
+    save_crowdfunding_settings,
     save_rag_settings,
     save_youtube_settings,
 )
@@ -160,6 +162,9 @@ def get_database() -> Database:
 
 
 def get_crowdfunding_service() -> CrowdfundingService:
+    database = get_database()
+    database.initialize()
+    crowdfunding_settings = resolve_crowdfunding_settings(database)
     return CrowdfundingService(
         cache_path=settings.crowdfunding_cache_path,
         cache_ttl_seconds=settings.crowdfunding_cache_ttl_seconds,
@@ -168,7 +173,7 @@ def get_crowdfunding_service() -> CrowdfundingService:
             timeout_seconds=settings.crowdfunding_timeout_seconds,
         ),
         kickstarter=ApifyKickstarterProvider(
-            token=settings.apify_token,
+            token=crowdfunding_settings.apify_token,
             base_url=settings.kickstarter_apify_base_url,
             actor=settings.kickstarter_apify_actor,
             timeout_seconds=settings.kickstarter_apify_timeout_seconds,
@@ -363,6 +368,11 @@ class BggSettingsUpdate(BaseModel):
 class YouTubeSettingsUpdate(BaseModel):
     api_key: str | None = Field(default=None, max_length=4096)
     clear_api_key: bool = False
+
+
+class CrowdfundingSettingsUpdate(BaseModel):
+    apify_token: str | None = Field(default=None, max_length=4096)
+    clear_apify_token: bool = False
 
 
 class RagSettingsUpdate(BaseModel):
@@ -1995,6 +2005,53 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return resolved.public_dict()
+
+
+@app.get("/api/settings/crowdfunding", tags=["settings"])
+def get_crowdfunding_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return resolve_crowdfunding_settings(database).public_dict()
+
+
+@app.put("/api/settings/crowdfunding", tags=["settings"])
+def update_crowdfunding_settings(
+    payload: CrowdfundingSettingsUpdate,
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = save_crowdfunding_settings(
+        database,
+        apify_token=payload.apify_token,
+        clear_apify_token=payload.clear_apify_token,
+    )
+    return resolved.public_dict()
+
+
+@app.post("/api/settings/crowdfunding/verify", tags=["settings"])
+def verify_crowdfunding_settings() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_crowdfunding_settings(database)
+    if not resolved.apify_token:
+        raise HTTPException(status_code=409, detail="Apify token is not configured")
+    provider = ApifyKickstarterProvider(
+        token=resolved.apify_token,
+        base_url=settings.kickstarter_apify_base_url,
+        actor=settings.kickstarter_apify_actor,
+        timeout_seconds=settings.kickstarter_apify_timeout_seconds,
+        max_items=settings.kickstarter_max_items,
+        max_pages=settings.kickstarter_max_pages,
+    )
+    try:
+        result = provider.verify_token()
+    except CrowdfundingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        **result,
+        "source": resolved.apify_token_source,
+        "actor": settings.kickstarter_apify_actor,
+    }
 
 
 @app.get("/api/settings/youtube", tags=["settings"])
