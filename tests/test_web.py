@@ -65,6 +65,15 @@ def test_web_discovery_route_is_spa_entrypoint(tmp_path: Path) -> None:
     assert "Ricerca regolamenti" in response.text
 
 
+def test_web_crowdfunding_route_is_spa_entrypoint(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/crowdfunding")
+
+    assert response.status_code == 200
+    assert "Crowdfunding" in response.text
+
+
 def test_static_assets_are_served(tmp_path: Path) -> None:
     _configure(tmp_path)
     with TestClient(app) as client:
@@ -83,6 +92,7 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderReviews" in js.text
     assert "renderUpdates" in js.text
     assert "renderDiscovery" in js.text
+    assert "renderCrowdfunding" in js.text
     assert "tutorialDiscoveryAction" in js.text
     assert "tutorialVideoCard" in js.text
     assert "tutorial-video-frame" in js.text
