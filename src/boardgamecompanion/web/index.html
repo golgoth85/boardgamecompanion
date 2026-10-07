@@ -140,6 +140,8 @@
                 role="tab" aria-selected="false" data-settings-tab="rulebooks">Regolamenti</button>
         <button class="settings-tab" id="settingsTabProviders" type="button"
                 role="tab" aria-selected="false" data-settings-tab="providers">AI e provider</button>
+        <button class="settings-tab" id="settingsTabCrowdfunding" type="button"
+                role="tab" aria-selected="false" data-settings-tab="crowdfunding">Crowdfunding</button>
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="general">
@@ -317,31 +319,39 @@
             </div>
           </details>
 
-          <details class="settings-provider" id="apifySettings">
-            <summary>
-              <span><strong>Apify / Kickstarter</strong><small>Discovery crowdfunding tabletop</small></span>
-              <span class="settings-provider-state" id="apifyProviderState">Configura</span>
-            </summary>
-            <div class="settings-provider-body">
-              <p class="muted">Il token resta sul server e non viene mai mostrato dopo il salvataggio. Kickstarter usa cache dedicata per limitare chiamate e costi.</p>
-              <div class="settings-grid">
-                <label class="settings-field copy-span-2">
-                  <span>Apify API token</span>
-                  <input id="apifyToken" type="password" autocomplete="new-password"
-                         placeholder="Lascia vuoto per mantenerlo invariato">
-                  <small id="apifyTokenHint" class="muted"></small>
-                </label>
-                <label class="settings-check copy-span-2" id="clearApifyTokenRow" hidden>
-                  <input id="apifyClearToken" type="checkbox"><span>Rimuovi il token Apify salvato</span>
-                </label>
-              </div>
-              <div class="settings-inline-actions">
-                <button class="button button-ghost" id="verifyApifyToken" type="button">Salva e verifica Apify</button>
-                <span id="apifyVerifyStatus" class="muted"></span>
-              </div>
-            </div>
-          </details>
         </div>
+      </div>
+
+      <div class="settings-tab-panel" data-settings-panel="crowdfunding" hidden>
+        <section class="settings-card" id="apifySettings">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Kickstarter</p>
+              <h3>Apify</h3>
+            </div>
+            <span class="quiet-pill" id="apifyProviderState">Da configurare</span>
+          </div>
+          <p class="muted">
+            Inserisci qui il token API di Apify per abilitare i progetti Kickstarter nella sezione Crowdfunding.
+            Il token viene salvato solo lato server e non viene mai mostrato nuovamente in chiaro.
+          </p>
+          <div class="settings-grid">
+            <label class="settings-field copy-span-2">
+              <span>Apify API token</span>
+              <input id="apifyToken" type="password" autocomplete="new-password"
+                     placeholder="Incolla qui il token Apify">
+              <small id="apifyTokenHint" class="muted"></small>
+            </label>
+            <label class="settings-check copy-span-2" id="clearApifyTokenRow" hidden>
+              <input id="apifyClearToken" type="checkbox">
+              <span>Rimuovi il token Apify salvato</span>
+            </label>
+          </div>
+          <div class="settings-inline-actions">
+            <button class="button button-primary" id="verifyApifyToken" type="button">Salva e verifica</button>
+            <span id="apifyVerifyStatus" class="muted"></span>
+          </div>
+        </section>
       </div>
 
       <div id="settingsResult" class="import-result settings-result" hidden></div>
