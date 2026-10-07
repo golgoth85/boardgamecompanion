@@ -121,13 +121,21 @@ def parse_pdf(
                     if not text.strip():
                         text = ""
                     if len(text) > max_chars_per_page:
-                        raise WorkerLimitError(
-                            "page_text_limit",
-                            (
-                                f"Page {page_index + 1} extracted {len(text)} characters; "
-                                f"configured limit is {max_chars_per_page}"
-                            ),
+                        error_pages += 1
+                        pages.append(
+                            _page_payload(
+                                page_index=page_index,
+                                text="",
+                                status="error",
+                                diagnostics={
+                                    "extraction_mode": "plain",
+                                    "error_type": "page_text_limit",
+                                    "observed_chars": len(text),
+                                    "configured_limit": max_chars_per_page,
+                                },
+                            )
                         )
+                        continue
                     total_chars += len(text)
                     if total_chars > max_total_chars:
                         raise WorkerLimitError(
