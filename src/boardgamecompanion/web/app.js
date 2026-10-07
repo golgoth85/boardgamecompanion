@@ -524,7 +524,9 @@ function closeSettingsDialog() {
 }
 
 function setSettingsTab(name = "general") {
-  const active = ["general", "rulebooks", "providers"].includes(name) ? name : "general";
+  const active = ["general", "rulebooks", "providers", "crowdfunding"].includes(name)
+    ? name
+    : "general";
   settingsTabs.forEach((tab) => {
     const selected = tab.dataset.settingsTab === active;
     tab.classList.toggle("is-active", selected);
@@ -4819,7 +4821,9 @@ function crowdfundingProviderNotice(payload) {
   }
   if (crowdfundingState.platform !== "gamefound") {
     if (kickstarter.status === "configuration_required") {
-      notices.push("Kickstarter è predisposto tramite Apify ma non è configurato: serve BGC_APIFY_TOKEN.");
+      notices.push(
+        'Kickstarter è predisposto tramite Apify ma non è configurato. <button class="button button-ghost" id="configureApifyFromCrowdfunding" type="button">Configura Apify</button>'
+      );
     } else if (kickstarter.status === "stale") {
       notices.push("Kickstarter/Apify temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
     } else if (kickstarter.status === "error") {
@@ -4827,7 +4831,11 @@ function crowdfundingProviderNotice(payload) {
     }
   }
   return notices.length
-    ? `<div class="crowdfunding-source-note">${notices.map((text) => `<p>${escapeHtml(text)}</p>`).join("")}</div>`
+    ? `<div class="crowdfunding-source-note">${notices.map((text) => (
+        text.includes('id="configureApifyFromCrowdfunding"')
+          ? `<p>${text}</p>`
+          : `<p>${escapeHtml(text)}</p>`
+      )).join("")}</div>`
     : "";
 }
 
@@ -4908,6 +4916,10 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
     ` + crowdfundingProviderNotice(payload);
 
+    document.querySelector("#configureApifyFromCrowdfunding")?.addEventListener("click", () => {
+      void openSettingsDialog("crowdfunding");
+    });
+
     if (!items.length) {
       const gamefoundOnlyUpcoming = crowdfundingState.sort === "upcoming"
         && crowdfundingState.platform === "gamefound"
@@ -4925,10 +4937,16 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
           <p class="muted">${gamefoundOnlyUpcoming
             ? "La Public API documentata di Gamefound espone al momento solo le campagne attive."
             : kickstarterNeedsConfig
-              ? "Imposta BGC_APIFY_TOKEN: il provider Kickstarter è già predisposto e supporta anche le campagne upcoming."
+              ? "Configura il token Apify nelle Impostazioni: il provider Kickstarter è già predisposto e supporta anche le campagne upcoming."
               : "Prova un’altra piattaforma o classifica."}</p>
+          ${kickstarterNeedsConfig
+            ? '<button class="button button-primary" id="configureApifyFromEmpty" type="button">Configura Apify</button>'
+            : ""}
         </div>
       `;
+      document.querySelector("#configureApifyFromEmpty")?.addEventListener("click", () => {
+        void openSettingsDialog("crowdfunding");
+      });
       return;
     }
     grid.innerHTML = items.map(crowdfundingCard).join("");
