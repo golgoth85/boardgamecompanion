@@ -171,17 +171,30 @@ class RulebookDiscoveryService:
         query = self._query(bgg_id)
         resolution = self.resolver.resolve(query, preferred_languages=("it", "en"))
         queried_providers: tuple[RulebookProvider, ...] = self.providers
-        has_official_it_en = any(
-            item.candidate.official
-            and item.candidate.source_kind in OFFICIAL_SOURCES
-            and item.candidate.language.split("-", 1)[0] in {"it", "en"}
+        official_languages = {
+            item.candidate.language.split("-", 1)[0]
             for item in resolution.candidates
-        )
-        if not has_official_it_en and self.fallback_providers:
+            if item.candidate.official
+            and item.candidate.source_kind in OFFICIAL_SOURCES
+        }
+        has_official_it = "it" in official_languages
+        has_official_en = "en" in official_languages
+        if not has_official_it and self.fallback_providers:
             fallback = self.fallback_resolver.resolve(
                 query,
                 preferred_languages=("it", "en"),
             )
+            fallback_candidates = fallback.candidates
+            if has_official_en:
+                # When an authoritative English rulebook already exists, the
+                # second line is only useful for filling the Italian gap.
+                # Preserve the official EN document and discard redundant
+                # community EN candidates before they reach the review queue.
+                fallback_candidates = tuple(
+                    item
+                    for item in fallback.candidates
+                    if item.candidate.language.split("-", 1)[0] == "it"
+                )
             combined = {
                 (
                     item.candidate.provider,
@@ -189,7 +202,7 @@ class RulebookDiscoveryService:
                     item.candidate.language,
                     item.candidate.document_type,
                 ): item
-                for item in (*resolution.candidates, *fallback.candidates)
+                for item in (*resolution.candidates, *fallback_candidates)
             }
             ranked = tuple(
                 sorted(
