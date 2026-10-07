@@ -7,6 +7,7 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 const shellSectionLabels = {
   catalog: "Ludoteca",
   rankings: "Classifiche",
+  crowdfunding: "Crowdfunding",
   explore: "Esplora",
   completed: "Completati",
   reviews: "Fonti da verificare",
@@ -16,6 +17,7 @@ const shellSectionLabels = {
 
 function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
+  if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
   if (/^\/completed\/?$/.test(pathname)) return "completed";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
@@ -356,6 +358,19 @@ function initials(title) {
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString("it-IT", { maximumFractionDigits: digits });
+}
+
+function formatCampaignMoney(value, currency) {
+  const amount = Number(value);
+  const code = String(currency || "").toUpperCase();
+  if (!Number.isFinite(amount)) return "—";
+  try {
+    return new Intl.NumberFormat("it-IT", {
+      style: "currency", currency: code, maximumFractionDigits: 0,
+    }).format(amount);
+  } catch (_) {
+    return `${formatNumber(amount, 0)} ${code}`.trim();
+  }
 }
 
 function formatTutorialDuration(seconds) {
@@ -4640,6 +4655,183 @@ async function renderExplore(initialTab = null) {
   await refreshExplore();
 }
 
+const crowdfundingState = {
+  sort: "top",
+  platform: "all",
+};
+
+function crowdfundingTimeLabel(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "";
+  if (value < 3600) return `${Math.max(1, Math.ceil(value / 60))} min`;
+  if (value < 86400) return `${Math.ceil(value / 3600)} h`;
+  return `${Math.ceil(value / 86400)} giorni`;
+}
+
+function crowdfundingStatusLabel(item) {
+  if (item.status === "ending_soon") return "In scadenza";
+  if (item.status === "upcoming") return "Upcoming";
+  if (item.status === "ended") return "Terminata";
+  return "Attiva";
+}
+
+function crowdfundingCard(item) {
+  const funds = formatCampaignMoney(item.funds, item.currency);
+  const goal = Number(item.goal) > 0 ? formatCampaignMoney(item.goal, item.currency) : "—";
+  const percent = item.funding_percent === null || item.funding_percent === undefined
+    ? "—"
+    : `${formatNumber(item.funding_percent, 0)}%`;
+  const remaining = crowdfundingTimeLabel(item.remaining_seconds);
+  const status = crowdfundingStatusLabel(item);
+  const score = item.top_score === null || item.top_score === undefined
+    ? ""
+    : ` · Top ${formatNumber(Number(item.top_score) * 100, 0)}`;
+  return `
+    <article class="crowdfunding-card">
+      <a class="crowdfunding-cover" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${item.image_url
+          ? `<img src="${escapeHtml(item.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
+        <span class="crowdfunding-platform">Gamefound</span>
+        <span class="crowdfunding-status ${item.status === "ending_soon" ? "is-ending" : ""}">${escapeHtml(status)}</span>
+      </a>
+      <div class="crowdfunding-card-body">
+        <div>
+          <p class="crowdfunding-creator">${escapeHtml(item.creator || "Creator non indicato")}</p>
+          <h3>${escapeHtml(item.title)}</h3>
+        </div>
+        <p class="crowdfunding-description">${escapeHtml(item.description || "Nessuna descrizione disponibile.")}</p>
+        <div class="crowdfunding-money-row">
+          <div><span>Raccolto</span><strong>${escapeHtml(funds)}</strong></div>
+          <div><span>Goal</span><strong>${escapeHtml(goal)}</strong></div>
+          <div><span>Finanziato</span><strong>${escapeHtml(percent)}</strong></div>
+        </div>
+        <div class="crowdfunding-meta-row">
+          <span><strong>${formatNumber(item.backer_count, 0)}</strong> backer</span>
+          ${remaining ? `<span><strong>${escapeHtml(remaining)}</strong> rimasti</span>` : ""}
+          <span class="crowdfunding-score">${escapeHtml(score.replace(/^ · /, ""))}</span>
+        </div>
+        <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
+          Apri campagna ↗
+        </a>
+      </div>
+    </article>
+  `;
+}
+
+function crowdfundingProviderNotice(payload) {
+  const gamefound = payload.providers?.gamefound || {};
+  const kickstarter = payload.providers?.kickstarter || {};
+  const notices = [];
+  if (gamefound.status === "stale") {
+    notices.push("Gamefound temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
+  } else if (gamefound.status === "error") {
+    notices.push("Gamefound non è al momento disponibile e non esiste ancora una cache valida.");
+  }
+  if (crowdfundingState.platform !== "gamefound" && kickstarter.status === "unavailable") {
+    notices.push("Kickstarter: integrazione sospesa finché non è disponibile una fonte pubblica e autorizzata stabile; non vengono usate API interne o scraping fragile.");
+  }
+  return notices.length
+    ? `<div class="crowdfunding-source-note">${notices.map((text) => `<p>${escapeHtml(text)}</p>`).join("")}</div>`
+    : "";
+}
+
+async function renderCrowdfunding({forceRefresh = false} = {}) {
+  document.title = "Crowdfunding · BoardGameCompanion";
+  const sortOptions = [
+    ["top", "Top"],
+    ["funds", "Più finanziati"],
+    ["backers", "Più backer"],
+    ["ending", "In scadenza"],
+    ["upcoming", "Upcoming"],
+  ];
+  const platformOptions = [
+    ["all", "Tutti"],
+    ["gamefound", "Gamefound"],
+    ["kickstarter", "Kickstarter"],
+  ];
+  app.innerHTML = `
+    <section class="crowdfunding-page">
+      <header class="crowdfunding-hero">
+        <div>
+          <p class="eyebrow">Scopri</p>
+          <h1>Crowdfunding</h1>
+          <p>I progetti tabletop più rilevanti del momento, ordinati con criteri leggibili e dati della fonte originale.</p>
+        </div>
+        <button class="button button-ghost" id="crowdfundingRefresh" type="button">↻ Aggiorna</button>
+      </header>
+      <div class="crowdfunding-toolbar">
+        <div class="crowdfunding-segment" aria-label="Classifica">
+          ${sortOptions.map(([value, label]) => `<button type="button" data-crowdfunding-sort="${value}" class="${crowdfundingState.sort === value ? "is-active" : ""}">${label}</button>`).join("")}
+        </div>
+        <div class="crowdfunding-segment crowdfunding-platform-filter" aria-label="Piattaforma">
+          ${platformOptions.map(([value, label]) => `<button type="button" data-crowdfunding-platform="${value}" class="${crowdfundingState.platform === value ? "is-active" : ""}">${label}</button>`).join("")}
+        </div>
+      </div>
+      <div id="crowdfundingSummary" class="crowdfunding-summary"></div>
+      <div id="crowdfundingGrid" class="crowdfunding-grid" aria-live="polite">
+        ${skeletons()}
+      </div>
+    </section>
+  `;
+
+  const grid = document.querySelector("#crowdfundingGrid");
+  const summary = document.querySelector("#crowdfundingSummary");
+  const refreshButton = document.querySelector("#crowdfundingRefresh");
+
+  document.querySelectorAll("[data-crowdfunding-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      crowdfundingState.sort = button.dataset.crowdfundingSort;
+      void renderCrowdfunding();
+    });
+  });
+  document.querySelectorAll("[data-crowdfunding-platform]").forEach((button) => {
+    button.addEventListener("click", () => {
+      crowdfundingState.platform = button.dataset.crowdfundingPlatform;
+      void renderCrowdfunding();
+    });
+  });
+  refreshButton?.addEventListener("click", () => void renderCrowdfunding({forceRefresh: true}));
+
+  try {
+    const status = crowdfundingState.sort === "upcoming" ? "upcoming" : "active";
+    const params = new URLSearchParams({
+      sort: crowdfundingState.sort,
+      platform: crowdfundingState.platform,
+      status,
+      limit: "60",
+    });
+    if (forceRefresh) params.set("refresh", "true");
+    const payload = await api(`/api/crowdfunding?${params.toString()}`);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const rankingText = payload.ranking?.[crowdfundingState.sort];
+    summary.innerHTML = `
+      <div>
+        <strong>${formatNumber(payload.total_matching || 0, 0)} progetti</strong>
+        <span class="muted">${rankingText ? escapeHtml(rankingText) : "Dati aggiornati dalla cache locale."}</span>
+      </div>
+      <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
+    ` + crowdfundingProviderNotice(payload);
+
+    if (!items.length) {
+      const upcomingUnsupported = crowdfundingState.sort === "upcoming"
+        && payload.providers?.gamefound?.supports_upcoming === false;
+      grid.innerHTML = `
+        <div class="empty-state crowdfunding-empty">
+          <strong>${upcomingUnsupported ? "Upcoming non esposti dalla Public API" : "Nessun progetto disponibile"}</strong>
+          <p class="muted">${upcomingUnsupported
+            ? "Gamefound mostra progetti upcoming sul sito, ma la Public API documentata espone al momento solo le campagne attive. Non uso scraping come sostituto."
+            : "Prova un’altra piattaforma o classifica."}</p>
+        </div>
+      `;
+      return;
+    }
+    grid.innerHTML = items.map(crowdfundingCard).join("");
+  } catch (error) {
+    grid.innerHTML = `<div class="empty-state crowdfunding-empty"><strong>Impossibile caricare il crowdfunding</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
 async function route() {
   catalogRequestController?.abort();
   exploreRequestController?.abort();
@@ -4663,6 +4855,10 @@ async function route() {
   }
   if (/^\/rankings\/?$/.test(window.location.pathname)) {
     await renderRankings();
+    return;
+  }
+  if (/^\/crowdfunding\/?$/.test(window.location.pathname)) {
+    await renderCrowdfunding();
     return;
   }
   if (/^\/completed\/?$/.test(window.location.pathname)) {
