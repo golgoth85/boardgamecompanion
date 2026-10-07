@@ -183,6 +183,38 @@ class GeminiBggFileProvider:
         return "; ".join(parts) if parts else None
 
     @staticmethod
+    def _has_zero_quota(response: httpx.Response) -> bool:
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        error = payload.get("error")
+        details = error.get("details") if isinstance(error, dict) else None
+        if not isinstance(details, list):
+            return False
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            type_name = str(item.get("@type") or "")
+            if not type_name.endswith("QuotaFailure"):
+                continue
+            violations = item.get("violations")
+            if not isinstance(violations, list):
+                continue
+            for violation in violations:
+                if not isinstance(violation, dict):
+                    continue
+                raw = str(violation.get("quotaValue") or "").strip()
+                try:
+                    if raw and float(raw) <= 0:
+                        return True
+                except ValueError:
+                    continue
+        return False
+
+    @staticmethod
     def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
         delay = float(fallback)
 
@@ -243,7 +275,11 @@ class GeminiBggFileProvider:
                 return response
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
-                if status == 429 and attempt < self.max_attempts:
+                if (
+                    status == 429
+                    and not self._has_zero_quota(exc.response)
+                    and attempt < self.max_attempts
+                ):
                     retry_after = self._retry_delay(
                         exc.response,
                         fallback=min(20.0, 10.0 * attempt),
