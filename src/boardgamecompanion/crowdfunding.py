@@ -520,8 +520,17 @@ class CrowdfundingService:
         now = datetime.now(UTC)
         with self._lock:
             cached = self._read_cache()
-            if refresh or not self._fresh(cached, now):
-                cache = self._refresh(cached, now, force_kickstarter=refresh)
+            provider_fetched_at = dict((cached or {}).get("provider_fetched_at") or {})
+            kickstarter_needs_initial_fetch = (
+                self.kickstarter is not None
+                and self.kickstarter.configured
+                and _parse_datetime(provider_fetched_at.get("kickstarter")) is None
+            )
+            if refresh or kickstarter_needs_initial_fetch or not self._fresh(cached, now):
+                # A generic/manual refresh never bypasses the Kickstarter TTL: Actor
+                # results are billable. A newly configured provider is refreshed
+                # immediately because it has no provider-level timestamp yet.
+                cache = self._refresh(cached, now, force_kickstarter=False)
                 cache_state = "refreshed" if not cache.get("provider_errors", {}).get("gamefound") else "stale"
             else:
                 cache = cached or {}
