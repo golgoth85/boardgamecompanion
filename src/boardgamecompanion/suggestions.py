@@ -57,8 +57,8 @@ class SuggestionsService:
         playing_times: list[float] = []
 
         for game in owned:
-            categories.update(dict.fromkeys(game.get("categories") or []))
-            mechanics.update(dict.fromkeys(game.get("mechanics") or []))
+            categories.update(dict.fromkeys(game.get("categories") or []).keys())
+            mechanics.update(dict.fromkeys(game.get("mechanics") or []).keys())
             weight = game.get("weight")
             if isinstance(weight, (int, float)) and weight > 0:
                 weights.append(float(weight))
