@@ -4875,8 +4875,12 @@ function suggestionCard(item, index) {
   const cover = item.cover_url
     ? `<img src="${escapeHtml(item.cover_url)}" alt="" loading="lazy">`
     : '<span aria-hidden="true">BGC</span>';
-  const overviewText = overview.summary
-    || "Dati BGG verificati disponibili; il profilo sintetico non è ancora stato generato.";
+  const overviewText = item.game_summary_it
+    || overview.summary
+    || "Descrizione non disponibile.";
+  const whyText = item.why_it_fits
+    || item.reason
+    || "È un candidato verificato BGG non presente nella tua ludoteca.";
 
   return `
     <article class="suggestion-card">
@@ -4898,12 +4902,6 @@ function suggestionCard(item, index) {
           <section class="suggestion-copy-block">
             <h3>Il gioco</h3>
             <p>${escapeHtml(overviewText)}</p>
-            <div class="suggestion-facts">
-              <span>${escapeHtml(playerText)}</span>
-              <span>${escapeHtml(timeText)}</span>
-              <span>BGG ${escapeHtml(ratingText)}</span>
-              <span>Peso ${escapeHtml(weightText)}</span>
-            </div>
             ${setting.length ? `
               <div class="suggestion-mini-row">
                 <strong>Ambientazione / temi</strong>
@@ -4924,13 +4922,21 @@ function suggestionCard(item, index) {
 
           <section class="suggestion-copy-block suggestion-why">
             <h3>Potrebbe piacerti perché</h3>
-            <p>${escapeHtml(item.reason || "È un candidato verificato BGG non presente nella tua ludoteca.")}</p>
+            <p>${escapeHtml(whyText)}</p>
           </section>
         </div>
 
-        <a class="button button-ghost suggestion-open"
-           href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
-           target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+        <div class="suggestion-footer">
+          <div class="suggestion-meta-soft">
+            <span>${escapeHtml(playerText)}</span>
+            <span>${escapeHtml(timeText)}</span>
+            <span>Peso ${escapeHtml(weightText)}</span>
+            <span>BGG ${escapeHtml(ratingText)}</span>
+          </div>
+          <a class="button button-ghost suggestion-open"
+             href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+             target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+        </div>
       </div>
     </article>
   `;

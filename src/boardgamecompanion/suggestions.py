@@ -10,6 +10,7 @@ from typing import Any
 from boardgamecompanion.bgg_metadata import BggApiClient, BggMetadataError
 from boardgamecompanion.catalog import Catalog
 from boardgamecompanion.database import Database
+from boardgamecompanion.suggestion_editorial import SuggestionEditorialService
 
 
 class SuggestionsError(RuntimeError):
@@ -78,12 +79,14 @@ class SuggestionsService:
         client: BggApiClient | None,
         *,
         cache_path: Path,
+        editorial_service: SuggestionEditorialService | None = None,
         cache_ttl_seconds: int = 24 * 60 * 60,
         candidate_limit: int = 50,
     ) -> None:
         self.database = database
         self.client = client
         self.cache_path = Path(cache_path)
+        self.editorial_service = editorial_service
         self.cache_ttl_seconds = int(cache_ttl_seconds)
         self.candidate_limit = max(20, min(int(candidate_limit), 100))
 
@@ -99,8 +102,7 @@ class SuggestionsService:
             ).fetchall()
         return {int(row["bgg_id"]) for row in rows}
 
-    def _profile(self) -> dict[str, Any]:
-        owned = Catalog(self.database).assistant_candidates(limit=250)
+    def _profile(self, owned: list[dict[str, Any]]) -> dict[str, Any]:
         categories: Counter[str] = Counter()
         mechanics: Counter[str] = Counter()
         weights: list[float] = []
@@ -130,6 +132,97 @@ class SuggestionsService:
                 else None
             ),
         }
+
+    @staticmethod
+    def _comparison_anchors(
+        metadata: dict[str, Any],
+        owned: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        candidate_mechanics = {
+            str(value) for value in metadata.get("mechanics") or [] if str(value)
+        }
+        candidate_categories = {
+            str(value) for value in metadata.get("categories") or [] if str(value)
+        }
+        candidate_weight = metadata.get("bgg_average_weight")
+        candidate_time = metadata.get("playing_time")
+
+        ranked: list[tuple[float, dict[str, Any]]] = []
+        for game in owned:
+            mechanics = {
+                str(value) for value in game.get("mechanics") or [] if str(value)
+            }
+            categories = {
+                str(value) for value in game.get("categories") or [] if str(value)
+            }
+            shared_mechanics = sorted(candidate_mechanics & mechanics)
+            shared_categories = sorted(candidate_categories & categories)
+
+            mechanic_fit = (
+                len(shared_mechanics) / max(1, len(candidate_mechanics))
+                if candidate_mechanics
+                else 0.0
+            )
+            category_fit = (
+                len(shared_categories) / max(1, len(candidate_categories))
+                if candidate_categories
+                else 0.0
+            )
+
+            owned_weight = game.get("weight")
+            if (
+                isinstance(candidate_weight, (int, float))
+                and isinstance(owned_weight, (int, float))
+                and candidate_weight > 0
+                and owned_weight > 0
+            ):
+                weight_fit = _clamp(
+                    1.0 - abs(float(candidate_weight) - float(owned_weight)) / 2.5
+                )
+            else:
+                weight_fit = 0.5
+
+            minutes = game.get("minutes") or {}
+            owned_time = minutes.get("playing") if isinstance(minutes, dict) else None
+            if (
+                isinstance(candidate_time, (int, float))
+                and isinstance(owned_time, (int, float))
+                and candidate_time > 0
+                and owned_time > 0
+            ):
+                time_fit = _clamp(
+                    1.0
+                    - abs(float(candidate_time) - float(owned_time))
+                    / max(float(candidate_time), float(owned_time), 30.0)
+                )
+            else:
+                time_fit = 0.5
+
+            similarity = (
+                0.55 * mechanic_fit
+                + 0.25 * category_fit
+                + 0.12 * weight_fit
+                + 0.08 * time_fit
+            )
+            if not shared_mechanics and not shared_categories and similarity < 0.3:
+                continue
+            ranked.append(
+                (
+                    similarity,
+                    {
+                        "bgg_id": game.get("bgg_id"),
+                        "title": game.get("title"),
+                        "shared_mechanics": shared_mechanics[:6],
+                        "shared_categories": shared_categories[:4],
+                        "weight": owned_weight,
+                        "playing_time": owned_time,
+                        "similarity": round(similarity, 4),
+                    },
+                )
+            )
+
+        ranked.sort(key=lambda pair: (-pair[0], str(pair[1].get("title") or "")))
+        return [item for _, item in ranked[:3]]
 
     @staticmethod
     def _normalized_weights(pairs: list[tuple[str, int]]) -> dict[str, float]:
@@ -291,6 +384,7 @@ class SuggestionsService:
         return (
             payload
             if isinstance(payload, dict)
+            and payload.get("schema_version") == 2
             and isinstance(payload.get("items"), list)
             else None
         )
@@ -332,7 +426,8 @@ class SuggestionsService:
             )
 
         owned_ids = self._owned_ids()
-        profile = self._profile()
+        owned_games = Catalog(self.database).assistant_candidates(limit=250)
+        profile = self._profile(owned_games)
         try:
             hot = self.client.hot(limit=self.candidate_limit)
             candidate_ids = [
@@ -402,6 +497,13 @@ class SuggestionsService:
                     "mechanics": list(
                         metadata.get("mechanics") or []
                     ),
+                    "source_description": _plain_description(
+                        metadata.get("description")
+                    )[:5000],
+                    "comparison_anchors": self._comparison_anchors(
+                        metadata,
+                        owned_games,
+                    ),
                     "overview": _game_overview(metadata),
                     "hot_rank": hot_by_id.get(
                         bgg_id, {}
@@ -425,6 +527,7 @@ class SuggestionsService:
             )
         )
         payload = {
+            "schema_version": 2,
             "generated_at": (
                 datetime.now(UTC)
                 .isoformat()
@@ -484,11 +587,17 @@ class SuggestionsService:
             and not refresh
             and self._fresh(cached)
         ):
+            selected = ordered(cached["items"])[:cap]
+            if self.editorial_service is not None:
+                selected = self.editorial_service.enrich(selected)
+            for item in selected:
+                item.pop("source_description", None)
+                item.pop("comparison_anchors", None)
             return {
                 **cached,
                 "cache_state": "fresh",
                 "cache_ttl_seconds": self.cache_ttl_seconds,
-                "items": ordered(cached["items"])[:cap],
+                "items": selected,
                 "sort": sort_mode,
                 "total_available": len(cached["items"]),
             }
@@ -502,11 +611,17 @@ class SuggestionsService:
             payload = cached
             state = "stale"
 
+        selected = ordered(payload["items"])[:cap]
+        if self.editorial_service is not None:
+            selected = self.editorial_service.enrich(selected)
+        for item in selected:
+            item.pop("source_description", None)
+            item.pop("comparison_anchors", None)
         return {
             **payload,
             "cache_state": state,
             "cache_ttl_seconds": self.cache_ttl_seconds,
-            "items": ordered(payload["items"])[:cap],
+            "items": selected,
             "sort": sort_mode,
             "total_available": len(payload["items"]),
         }

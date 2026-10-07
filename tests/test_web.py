@@ -109,7 +109,10 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderSuggestions" in js.text
     assert "/api/catalog/suggestions" in js.text
     assert "Potrebbe piacerti perché" in js.text
+    assert "game_summary_it" in js.text
+    assert "why_it_fits" in js.text
     assert "data-suggestions-sort" in js.text
+    assert "object-fit:contain" in extra_css.text
     assert "Più diversi" in js.text
     assert 'openSettingsDialog("crowdfunding")' in js.text
     assert "Configura Apify" in js.text

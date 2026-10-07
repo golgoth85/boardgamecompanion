@@ -50,6 +50,7 @@ from boardgamecompanion.bgg_rulebook_search import (
 )
 from boardgamecompanion.catalog import SORT_SQL, Catalog
 from boardgamecompanion.suggestions import SuggestionsError, SuggestionsService
+from boardgamecompanion.suggestion_editorial import SuggestionEditorialService
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
     CatalogAssistantService,
@@ -268,6 +269,10 @@ def get_suggestions_service() -> SuggestionsService:
         database,
         client,
         cache_path=settings.suggestions_cache_path,
+        editorial_service=SuggestionEditorialService(
+            database,
+            cache_path=settings.suggestions_editorial_cache_path,
+        ),
         cache_ttl_seconds=settings.suggestions_cache_ttl_seconds,
         candidate_limit=settings.suggestions_candidate_limit,
     )

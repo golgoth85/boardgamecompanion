@@ -8,6 +8,23 @@ from boardgamecompanion.database import Database
 from boardgamecompanion.suggestions import SuggestionsService
 
 
+class FakeEditorialService:
+    def __init__(self) -> None:
+        self.seen: list[dict] = []
+
+    def enrich(self, items):
+        self.seen = [dict(item) for item in items]
+        enriched = []
+        for item in items:
+            copy = dict(item)
+            copy["game_summary_it"] = "Sintesi narrativa in italiano."
+            anchors = item.get("comparison_anchors") or []
+            anchor = anchors[0]["title"] if anchors else "un gioco posseduto"
+            copy["why_it_fits"] = f"Ricorda {anchor} per elementi condivisi, ma cambia ritmo."
+            enriched.append(copy)
+        return enriched
+
+
 class FakeBggClient:
     def __init__(self) -> None:
         self.hot_calls = 0
@@ -172,6 +189,30 @@ def test_suggestions_exclude_owned_and_expansions_and_rank_by_profile(tmp_path: 
 
     assert client.hot_calls == 1
     assert client.thing_calls == 1
+
+
+def test_suggestions_ground_editorial_copy_in_bgg_description_and_owned_anchors(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    editorial = FakeEditorialService()
+    service = SuggestionsService(
+        database,
+        FakeBggClient(),
+        cache_path=tmp_path / "suggestions.json",
+        editorial_service=editorial,
+        cache_ttl_seconds=3600,
+        candidate_limit=50,
+    )
+
+    payload = service.list_suggestions(limit=1, refresh=True)
+
+    assert payload["items"][0]["game_summary_it"] == "Sintesi narrativa in italiano."
+    assert "Owned Game" in payload["items"][0]["why_it_fits"]
+    assert "source_description" not in payload["items"][0]
+    assert "comparison_anchors" not in payload["items"][0]
+
+    assert editorial.seen[0]["source_description"] == "A cooperative fantasy adventure."
+    assert editorial.seen[0]["comparison_anchors"][0]["title"] == "Owned Game"
+    assert "Deck Building" in editorial.seen[0]["comparison_anchors"][0]["shared_mechanics"]
 
 
 def test_suggestions_cache_survives_without_live_bgg_client(tmp_path: Path) -> None:
