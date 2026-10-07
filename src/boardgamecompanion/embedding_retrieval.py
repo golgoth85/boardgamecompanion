@@ -4,14 +4,17 @@ import hashlib
 import json
 import math
 import re
+import socket
 import sqlite3
 import sys
+import threading
 import time
 from array import array
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Protocol
+from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
@@ -33,6 +36,7 @@ from boardgamecompanion.gemini import (
 from boardgamecompanion.lmstudio import LMStudioModelMetadataError, resolve_model
 
 VECTOR_FORMAT = "f32le"
+_LMSTUDIO_WOL_LOCK = threading.Lock()
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -313,6 +317,11 @@ class LMStudioEmbeddingProvider:
         verify_tls: bool,
         api_key: str | None = None,
         client: httpx.Client | None = None,
+        wol_mac: str | None = None,
+        wol_broadcast: str = "255.255.255.255",
+        wol_port: int = 9,
+        wol_wait_seconds: float = 90.0,
+        wol_probe_interval_seconds: float = 2.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model.strip()
@@ -321,17 +330,97 @@ class LMStudioEmbeddingProvider:
         self.verify_tls = bool(verify_tls)
         self.api_key = (api_key or "").strip() or None
         self._client = client
+        self.wol_mac = (wol_mac or "").strip() or None
+        self.wol_broadcast = str(wol_broadcast or "").strip() or "255.255.255.255"
+        self.wol_port = int(wol_port)
+        self.wol_wait_seconds = float(wol_wait_seconds)
+        self.wol_probe_interval_seconds = float(wol_probe_interval_seconds)
         if not self.base_url.startswith(("http://", "https://")):
             raise ValueError("LM Studio URL must start with http:// or https://")
         if not self.model:
             raise ValueError("LM Studio embedding model is required")
+        if not 1 <= self.wol_port <= 65535:
+            raise ValueError("Wake-on-LAN port must be 1..65535")
+        if self.wol_wait_seconds <= 0 or self.wol_probe_interval_seconds <= 0:
+            raise ValueError("Wake-on-LAN wait/probe intervals must be positive")
+        if self.wol_mac is not None:
+            self._wol_mac_bytes()
 
     def _headers(self) -> dict[str, str]:
         if self.api_key is None:
             return {}
         return {"Authorization": f"Bearer {self.api_key}"}
 
+    def _wol_mac_bytes(self) -> bytes:
+        raw = str(self.wol_mac or "").replace("-", ":").strip()
+        parts = raw.split(":")
+        if len(parts) != 6 or any(len(part) != 2 for part in parts):
+            raise ValueError("LM Studio Wake-on-LAN MAC is invalid")
+        try:
+            return bytes(int(part, 16) for part in parts)
+        except ValueError as exc:
+            raise ValueError("LM Studio Wake-on-LAN MAC is invalid") from exc
+
+    def _endpoint_address(self) -> tuple[str, int]:
+        parsed = urlsplit(self.base_url)
+        host = parsed.hostname
+        if not host:
+            raise EmbeddingProviderError("LM Studio endpoint host is invalid")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return host, port
+
+    def _tcp_ready(self) -> bool:
+        host, port = self._endpoint_address()
+        try:
+            with socket.create_connection(
+                (host, port),
+                timeout=min(1.0, max(0.25, self.timeout_seconds)),
+            ):
+                return True
+        except OSError:
+            return False
+
+    def _send_magic_packet(self) -> None:
+        mac = self._wol_mac_bytes()
+        packet = b"\xff" * 6 + mac * 16
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sent = sock.sendto(packet, (self.wol_broadcast, self.wol_port))
+        except OSError as exc:
+            raise EmbeddingProviderError(
+                "LM Studio Wake-on-LAN packet could not be sent"
+            ) from exc
+        if sent != len(packet):
+            raise EmbeddingProviderError(
+                "LM Studio Wake-on-LAN packet was only partially sent"
+            )
+
+    def _ensure_endpoint_ready(self) -> None:
+        if self.wol_mac is None or self._tcp_ready():
+            return
+
+        # Serialize wake attempts so concurrent retrieval/indexing requests do not
+        # flood the LAN with duplicate magic packets or each start its own wait.
+        with _LMSTUDIO_WOL_LOCK:
+            if self._tcp_ready():
+                return
+            self._send_magic_packet()
+            deadline = time.monotonic() + self.wol_wait_seconds
+            while time.monotonic() < deadline:
+                if self._tcp_ready():
+                    return
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(self.wol_probe_interval_seconds, remaining))
+
+        raise EmbeddingProviderError(
+            "LM Studio endpoint did not become reachable after Wake-on-LAN"
+        )
+
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        self._ensure_endpoint_ready()
         headers = dict(kwargs.pop("headers", {}))
         headers.update(self._headers())
         try:
@@ -438,6 +527,7 @@ class LMStudioEmbeddingProvider:
                 "LM Studio embedding response indexes are invalid"
             )
         return [_normalize_vector(vector) for _, vector in ordered]
+
 
 def _input_set_sha256(chunk_run_id: str, chunks: list[dict[str, Any]]) -> str:
     return _sha256_json(
