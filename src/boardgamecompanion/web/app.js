@@ -4889,71 +4889,71 @@ function suggestionCard(item, index) {
     <article class="suggestion-card">
       <div class="suggestion-rank">#${index + 1}</div>
 
-      <aside class="suggestion-rail" aria-label="Dati rapidi di ${escapeHtml(title)}">
+      <div class="suggestion-hero">
         <div class="suggestion-cover">${cover}</div>
-        <dl class="suggestion-quick-facts">
-          <div><dt>Giocatori</dt><dd>${escapeHtml(playerText)}</dd></div>
-          <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
-          <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
-          <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
-          <div class="suggestion-player-poll">
-            <dt>Raccomandato per</dt><dd>${escapeHtml(recommendedPlayers)}</dd>
-          </div>
-          <div class="suggestion-player-poll suggestion-player-best">
-            <dt>Ideale in</dt><dd>${escapeHtml(bestPlayers)}</dd>
-          </div>
-        </dl>
-      </aside>
 
-      <div class="suggestion-body">
-        <div class="suggestion-heading">
-          <div class="suggestion-title">
-            <h2>${escapeHtml(title)}</h2>
-            <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
-          </div>
-          <div class="suggestion-heading-actions">
-            <div class="suggestion-score">
-              <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
-              <small>affinità</small>
+        <div class="suggestion-hero-content">
+          <div class="suggestion-heading">
+            <div class="suggestion-title">
+              <h2>${escapeHtml(title)}</h2>
+              <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
             </div>
-            <a class="button button-ghost suggestion-open"
-               href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
-               target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+            <div class="suggestion-heading-actions">
+              <div class="suggestion-score">
+                <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
+                <small>affinità</small>
+              </div>
+              <a class="button button-ghost suggestion-open"
+                 href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+                 target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+            </div>
           </div>
-        </div>
 
-        <div class="suggestion-editorial">
-          <section class="suggestion-copy-block">
-            <h3>Il gioco</h3>
-            <p>${escapeHtml(overviewText)}</p>
-            ${setting.length ? `
-              <div class="suggestion-mini-row">
-                <strong>Ambientazione / temi</strong>
-                <div class="suggestion-tags">
-                  ${setting.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-                </div>
-              </div>
-            ` : ""}
-            ${mechanics.length ? `
-              <div class="suggestion-mini-row">
-                <strong>Meccaniche</strong>
-                <div class="suggestion-tags">
-                  ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-                </div>
-              </div>
-            ` : ""}
-          </section>
-
-          <section class="suggestion-copy-block suggestion-why">
-            <h3>Potrebbe piacerti perché</h3>
-            <p>${escapeHtml(whyText)}</p>
-          </section>
+          <dl class="suggestion-quick-facts" aria-label="Dati BGG di ${escapeHtml(title)}">
+            <div><dt>Giocatori</dt><dd>${escapeHtml(playerText)}</dd></div>
+            <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
+            <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
+            <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
+            <div class="suggestion-player-poll">
+              <dt>Raccomandato per</dt><dd>${escapeHtml(recommendedPlayers)}</dd>
+            </div>
+            <div class="suggestion-player-poll suggestion-player-best">
+              <dt>Ideale in</dt><dd>${escapeHtml(bestPlayers)}</dd>
+            </div>
+          </dl>
         </div>
+      </div>
+
+      <div class="suggestion-editorial">
+        <section class="suggestion-copy-block">
+          <h3>Il gioco</h3>
+          <p>${escapeHtml(overviewText)}</p>
+          ${setting.length ? `
+            <div class="suggestion-mini-row">
+              <strong>Ambientazione / temi</strong>
+              <div class="suggestion-tags">
+                ${setting.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+              </div>
+            </div>
+          ` : ""}
+          ${mechanics.length ? `
+            <div class="suggestion-mini-row">
+              <strong>Meccaniche</strong>
+              <div class="suggestion-tags">
+                ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+              </div>
+            </div>
+          ` : ""}
+        </section>
+
+        <section class="suggestion-copy-block suggestion-why">
+          <h3>Potrebbe piacerti perché</h3>
+          <p>${escapeHtml(whyText)}</p>
+        </section>
       </div>
     </article>
   `;
 }
-
 
 async function renderSuggestions({forceRefresh = false} = {}) {
   document.title = "Suggerimenti · BoardGameCompanion";

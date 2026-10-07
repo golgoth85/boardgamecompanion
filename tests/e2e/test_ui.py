@@ -2943,3 +2943,54 @@ def test_rulebook_search_panel_is_readable_on_mobile(browser, live_server):
     finally:
         context.close()
 
+
+
+def test_suggestions_use_compact_hero_and_bgg_player_guidance(browser, live_server):
+    context, page = new_page(browser)
+    payload = {
+        "items": [
+            {
+                "bgg_id": 424242,
+                "title": "Synthetic Suggestion",
+                "year_published": 2025,
+                "cover_url": None,
+                "players": {"min": 1, "max": 4, "recommended": "1, 2, 3, 4", "best": "4"},
+                "play_time": {"playing": 40},
+                "bgg": {"average": 8.2, "average_weight": 2.8},
+                "overview": {
+                    "setting": ["Card Game", "Mythology"],
+                    "mechanics": ["Cooperative Game", "Hand Management"],
+                    "summary": "Fallback summary.",
+                },
+                "game_summary_it": "Un gioco cooperativo compatto e leggibile.",
+                "why_it_fits": "Offre una sfida cooperativa tesa e coordinata, con una motivazione narrativa sufficientemente articolata.",
+                "suggestion_score": 57.8,
+            }
+        ],
+        "profile": {},
+        "candidate_count": 1,
+        "owned_excluded_count": 0,
+        "sort": "for_you",
+    }
+
+    def fulfill_suggestions(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(payload),
+        )
+
+    page.route("**/api/catalog/suggestions?*", fulfill_suggestions)
+    try:
+        page.goto(f"{live_server}/suggestions")
+        card = page.locator(".suggestion-card")
+        expect(card).to_have_count(1)
+        expect(card.locator(".suggestion-hero")).to_have_count(1)
+        expect(card.locator(".suggestion-editorial")).to_have_count(1)
+        expect(card.locator(".suggestion-quick-facts")).to_contain_text("Raccomandato per")
+        expect(card.locator(".suggestion-quick-facts")).to_contain_text("1, 2, 3, 4")
+        expect(card.locator(".suggestion-quick-facts")).to_contain_text("Ideale in")
+        expect(card.locator(".suggestion-quick-facts")).to_contain_text("4")
+        assert card.locator(".suggestion-hero").bounding_box()["y"] < card.locator(".suggestion-editorial").bounding_box()["y"]
+    finally:
+        context.close()
