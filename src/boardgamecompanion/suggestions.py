@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,55 @@ class SuggestionsError(RuntimeError):
 
 def _clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def _compact_names(values: list[str], limit: int) -> str:
+    cleaned = [str(value).strip() for value in values if str(value).strip()]
+    if not cleaned:
+        return ""
+    selected = cleaned[:limit]
+    if len(cleaned) > limit:
+        return ", ".join(selected) + " e altre"
+    return ", ".join(selected)
+
+
+def _plain_description(value: Any) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _game_overview(metadata: dict[str, Any]) -> dict[str, Any]:
+    categories = [str(value) for value in metadata.get("categories") or []]
+    mechanics = [str(value) for value in metadata.get("mechanics") or []]
+    min_players = metadata.get("min_players")
+    max_players = metadata.get("max_players")
+    playing = metadata.get("playing_time")
+    weight = metadata.get("bgg_average_weight")
+
+    facts: list[str] = []
+    if categories:
+        facts.append("Tema/ambito: " + _compact_names(categories, 3) + ".")
+    if mechanics:
+        facts.append("Meccaniche: " + _compact_names(mechanics, 4) + ".")
+    if isinstance(min_players, int) and isinstance(max_players, int):
+        players = (
+            f"{min_players} giocatori"
+            if min_players == max_players
+            else f"{min_players}–{max_players} giocatori"
+        )
+        facts.append("Pensato per " + players + ".")
+    if isinstance(playing, int) and playing > 0:
+        facts.append(f"Durata indicativa {playing} minuti.")
+    if isinstance(weight, (int, float)) and weight > 0:
+        facts.append(f"Complessità BGG {float(weight):.1f}/5.")
+
+    description = _plain_description(metadata.get("description"))
+    return {
+        "summary": " ".join(facts),
+        "setting": categories[:4],
+        "mechanics": mechanics[:6],
+        "source_description_available": bool(description),
+    }
 
 
 class SuggestionsService:
@@ -94,7 +144,7 @@ class SuggestionsService:
         *,
         hot_rank: int | None,
         profile: dict[str, Any],
-    ) -> tuple[float, dict[str, float], list[str], list[str]]:
+    ) -> tuple[float, dict[str, float], list[str], list[str], list[str]]:
         category_weights = self._normalized_weights(profile["top_categories"])
         mechanic_weights = self._normalized_weights(profile["top_mechanics"])
         categories = [str(value) for value in metadata.get("categories") or []]
@@ -180,6 +230,7 @@ class SuggestionsService:
                 "novelty": round(novelty, 4),
                 "hotness": round(hotness, 4),
             },
+            matched_categories,
             matched_mechanics,
             novel_mechanics,
         )
@@ -188,10 +239,17 @@ class SuggestionsService:
     def _reason(
         metadata: dict[str, Any],
         *,
+        matched_categories: list[str],
         matched_mechanics: list[str],
         novel_mechanics: list[str],
     ) -> str:
         phrases: list[str] = []
+        if matched_categories:
+            phrases.append(
+                "Riprende temi che ricorrono spesso nella tua ludoteca, soprattutto "
+                + ", ".join(matched_categories[:2])
+                + "."
+            )
         if matched_mechanics:
             phrases.append(
                 "È vicino ai tuoi gusti per "
@@ -304,7 +362,7 @@ class SuggestionsService:
             if metadata.get("parent_bgg_id") is not None:
                 continue
 
-            score, parts, matched_mechanics, novel_mechanics = self._score(
+            score, parts, matched_categories, matched_mechanics, novel_mechanics = self._score(
                 metadata,
                 hot_rank=hot_by_id.get(bgg_id, {}).get("hot_rank"),
                 profile=profile,
@@ -344,6 +402,7 @@ class SuggestionsService:
                     "mechanics": list(
                         metadata.get("mechanics") or []
                     ),
+                    "overview": _game_overview(metadata),
                     "hot_rank": hot_by_id.get(
                         bgg_id, {}
                     ).get("hot_rank"),
@@ -351,6 +410,7 @@ class SuggestionsService:
                     "score_parts": parts,
                     "reason": self._reason(
                         metadata,
+                        matched_categories=matched_categories,
                         matched_mechanics=matched_mechanics,
                         novel_mechanics=novel_mechanics,
                     ),
@@ -388,8 +448,36 @@ class SuggestionsService:
         *,
         limit: int = 10,
         refresh: bool = False,
+        sort: str = "for_you",
     ) -> dict[str, Any]:
         cap = max(1, min(int(limit), 25))
+        sort_mode = sort if sort in {"for_you", "novelty", "bgg"} else "for_you"
+
+        def ordered(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            values = list(items)
+            if sort_mode == "novelty":
+                values.sort(
+                    key=lambda item: (
+                        -float((item.get("score_parts") or {}).get("novelty") or 0),
+                        -float(item.get("suggestion_score") or 0),
+                    )
+                )
+            elif sort_mode == "bgg":
+                values.sort(
+                    key=lambda item: (
+                        -float((item.get("bgg") or {}).get("bayes_average") or 0),
+                        -float((item.get("bgg") or {}).get("average") or 0),
+                    )
+                )
+            else:
+                values.sort(
+                    key=lambda item: (
+                        -float(item.get("suggestion_score") or 0),
+                        int(item.get("hot_rank") or 10_000),
+                    )
+                )
+            return values
+
         cached = self._read_cache()
         if (
             cached is not None
@@ -400,7 +488,8 @@ class SuggestionsService:
                 **cached,
                 "cache_state": "fresh",
                 "cache_ttl_seconds": self.cache_ttl_seconds,
-                "items": cached["items"][:cap],
+                "items": ordered(cached["items"])[:cap],
+                "sort": sort_mode,
                 "total_available": len(cached["items"]),
             }
 
@@ -417,6 +506,7 @@ class SuggestionsService:
             **payload,
             "cache_state": state,
             "cache_ttl_seconds": self.cache_ttl_seconds,
-            "items": payload["items"][:cap],
+            "items": ordered(payload["items"])[:cap],
+            "sort": sort_mode,
             "total_available": len(payload["items"]),
         }
