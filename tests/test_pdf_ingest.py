@@ -574,6 +574,47 @@ def test_pdf_worker_plain_extraction_preserves_readable_words_not_layout_spacing
     assert "gioco per 2 giocatori" in parsed["pages"][0]["text"]
 
 
+def test_pdf_worker_degrades_oversized_single_page_without_failing_document(
+    monkeypatch,
+) -> None:
+    from boardgamecompanion import pdf_worker
+
+    class OversizedPage:
+        def extract_text(self, *args, **kwargs):
+            return "X" * 1001
+
+    class NormalPage:
+        def extract_text(self, *args, **kwargs):
+            return "Setup and turn sequence."
+
+    class RepresentativeReader:
+        is_encrypted = False
+        pages = [OversizedPage(), NormalPage()]
+
+    monkeypatch.setattr(
+        pdf_worker.pypdf,
+        "PdfReader",
+        lambda *args, **kwargs: RepresentativeReader(),
+    )
+    parsed = pdf_worker.parse_pdf(
+        Path("/tmp/pathological-page.pdf"),
+        max_pages=5,
+        max_chars_per_page=1000,
+        max_total_chars=5000,
+    )
+
+    assert parsed["ok"] is True
+    assert parsed["page_count"] == 2
+    assert parsed["error_page_count"] == 1
+    assert parsed["text_page_count"] == 1
+    assert parsed["total_text_chars"] == len("Setup and turn sequence.")
+    assert parsed["pages"][0]["extraction_status"] == "error"
+    assert parsed["pages"][0]["text"] == ""
+    assert parsed["pages"][0]["diagnostics"]["error_type"] == "page_text_limit"
+    assert parsed["pages"][0]["diagnostics"]["observed_chars"] == 1001
+    assert parsed["pages"][1]["extraction_status"] == "text"
+
+
 def test_pdf_parser_cache_identity_includes_extraction_policy(
     monkeypatch, tmp_path: Path,
 ) -> None:
