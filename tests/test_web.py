@@ -77,6 +77,15 @@ def test_web_crowdfunding_route_is_spa_entrypoint(tmp_path: Path) -> None:
     assert "Crowdfunding" in response.text
 
 
+def test_web_suggestions_route_is_spa_entrypoint(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/suggestions")
+
+    assert response.status_code == 200
+    assert "Suggerimenti" in response.text
+
+
 def test_static_assets_are_served(tmp_path: Path) -> None:
     _configure(tmp_path)
     with TestClient(app) as client:
@@ -96,6 +105,9 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderUpdates" in js.text
     assert "renderDiscovery" in js.text
     assert "renderCrowdfunding" in js.text
+    assert "renderSuggestions" in js.text
+    assert "/api/catalog/suggestions" in js.text
+    assert 'id="lmstudioWolEnabled"' in client.get("/").text
     assert 'openSettingsDialog("crowdfunding")' in js.text
     assert "Configura Apify" in js.text
     assert "tutorialDiscoveryAction" in js.text
