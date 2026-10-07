@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     kickstarter_apify_actor: str = "fetchfinch~kickstarter-scraper"
     kickstarter_apify_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     kickstarter_max_items: int = Field(default=60, ge=10, le=200)
-    kickstarter_max_pages: int = Field(default=5, ge=1, le=20)
+    kickstarter_max_pages: int = Field(default=2, ge=1, le=20)
     kickstarter_cache_ttl_seconds: int = Field(
         default=12 * 60 * 60, ge=60 * 60, le=7 * 24 * 60 * 60
     )
