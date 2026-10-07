@@ -549,6 +549,64 @@ def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> No
     assert len(requests) == 3
 
 
+def test_gemini_embedding_persistent_gate_runs_for_each_batch_attempt(monkeypatch) -> None:
+    gates: list[tuple[str, float]] = []
+    sleeps: list[float] = []
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "1"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={"embeddings": [{"values": [1.0, 0.0, 0.0, 0.0]}]},
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.time.sleep",
+        lambda seconds: sleeps.append(float(seconds)),
+    )
+    client = httpx.Client(
+        base_url="https://gemini.test",
+        transport=httpx.MockTransport(handler),
+    )
+    provider = GeminiEmbeddingProvider(
+        base_url="https://gemini.test",
+        model="gemini-embedding-2",
+        api_key="test-key",
+        requested_dimensions=4,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        client=client,
+        rate_limiter=lambda scope, interval: gates.append((scope, interval)),
+        min_interval_seconds=10.0,
+    )
+    descriptor = EmbeddingDescriptor(
+        provider="gemini",
+        model="gemini-embedding-2",
+        model_digest="f" * 64,
+        requested_dimensions=4,
+        endpoint="https://gemini.test",
+    )
+
+    vectors = provider.embed(["alpha"], descriptor)
+
+    assert attempts == 2
+    assert gates == [
+        ("gemini:embedding-batch", 10.0),
+        ("gemini:embedding-batch", 10.0),
+    ]
+    assert sleeps == [1.0]
+    assert vectors == [[1.0, 0.0, 0.0, 0.0]]
+
+
 def test_gemini_embedding_honors_google_retryinfo_delay(monkeypatch) -> None:
     sleeps: list[float] = []
     attempts = 0
