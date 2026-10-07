@@ -299,16 +299,9 @@ class SuggestionEditorialService:
         items: list[dict[str, Any]],
     ) -> tuple[dict[int, dict[str, str]], str, str]:
         rag = resolve_rag_settings(self.database)
-        provider_order = tuple(
-            dict.fromkeys(
-                (
-                    rag.generation_provider,
-                    "lmstudio",
-                    "ollama",
-                    "gemini",
-                )
-            )
-        )
+        provider_order = [rag.generation_provider]
+        if rag.generation_provider != "gemini" and rag.gemini_api_key:
+            provider_order.append("gemini")
         payload = {
             "items": [_stable_payload(item) for item in items],
         }
