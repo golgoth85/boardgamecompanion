@@ -26,6 +26,11 @@ def clear_youtube_env() -> None:
     os.environ.pop("BGC_YOUTUBE_API_KEY", None)
 
 
+def clear_apify_env() -> None:
+    os.environ.pop("BGC_APIFY_TOKEN", None)
+    settings.apify_token = None
+
+
 def test_bgg_settings_persist_without_returning_secret(tmp_path: Path) -> None:
     clear_bgg_env()
     configure_paths(tmp_path)
@@ -254,3 +259,84 @@ def test_youtube_environment_key_overrides_stored_value(tmp_path: Path) -> None:
     assert body["stored_api_key_configured"] is True
     assert "env-youtube-key" not in response.text
     assert "stored-youtube-key" not in response.text
+
+
+
+def test_crowdfunding_settings_persist_without_returning_token(tmp_path: Path) -> None:
+    clear_apify_env()
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        initial = client.get("/api/settings/crowdfunding")
+        assert initial.status_code == 200
+        assert initial.json()["configured"] is False
+
+        saved = client.put(
+            "/api/settings/crowdfunding",
+            json={"apify_token": "test-apify-token"},
+        )
+        assert saved.status_code == 200
+        body = saved.json()
+        assert body["configured"] is True
+        assert body["apify_token_source"] == "stored"
+        assert body["stored_apify_token_configured"] is True
+        assert body["kickstarter"]["provider"] == "apify"
+        assert "test-apify-token" not in saved.text
+        assert "apify_token" not in body
+
+        reloaded = client.get("/api/settings/crowdfunding")
+        assert reloaded.status_code == 200
+        assert reloaded.json() == body
+        assert "test-apify-token" not in reloaded.text
+
+        kept = client.put(
+            "/api/settings/crowdfunding",
+            json={"apify_token": None},
+        )
+        assert kept.status_code == 200
+        assert kept.json()["configured"] is True
+
+        cleared = client.put(
+            "/api/settings/crowdfunding",
+            json={"apify_token": None, "clear_apify_token": True},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["configured"] is False
+
+
+def test_crowdfunding_environment_token_overrides_stored_value(tmp_path: Path) -> None:
+    clear_apify_env()
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        stored = client.put(
+            "/api/settings/crowdfunding",
+            json={"apify_token": "stored-test-token"},
+        )
+        assert stored.status_code == 200
+
+        os.environ["BGC_APIFY_TOKEN"] = "runtime-test-token"
+        try:
+            response = client.get("/api/settings/crowdfunding")
+        finally:
+            clear_apify_env()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["apify_token_source"] == "environment"
+    assert body["overrides"]["apify_token"] is True
+    assert body["stored_apify_token_configured"] is True
+    assert "runtime-test-token" not in response.text
+    assert "stored-test-token" not in response.text
+
+
+def test_crowdfunding_verify_requires_configured_token(tmp_path: Path) -> None:
+    clear_apify_env()
+    configure_paths(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post("/api/settings/crowdfunding/verify")
+
+    assert response.status_code == 409
+    assert "not configured" in response.json()["detail"]
