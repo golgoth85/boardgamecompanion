@@ -588,6 +588,9 @@ class SuggestionsService:
             selected = ordered(cached["items"])[:cap]
             if self.editorial_service is not None:
                 selected = self.editorial_service.enrich(selected)
+            for item in selected:
+                item.pop("source_description", None)
+                item.pop("comparison_anchors", None)
             return {
                 **cached,
                 "cache_state": "fresh",
@@ -609,6 +612,9 @@ class SuggestionsService:
         selected = ordered(payload["items"])[:cap]
         if self.editorial_service is not None:
             selected = self.editorial_service.enrich(selected)
+        for item in selected:
+            item.pop("source_description", None)
+            item.pop("comparison_anchors", None)
         return {
             **payload,
             "cache_state": state,
