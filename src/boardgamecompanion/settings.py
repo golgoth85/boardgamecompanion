@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     )
     crowdfunding_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     gamefound_public_api_url: str = "https://gamefound.com"
+    apify_token: str | None = None
+    kickstarter_apify_base_url: str = "https://api.apify.com/v2"
+    kickstarter_apify_actor: str = "fetchfinch~kickstarter-scraper"
+    kickstarter_max_items: int = Field(default=60, ge=10, le=200)
+    kickstarter_max_pages: int = Field(default=5, ge=1, le=20)
+    kickstarter_cache_ttl_seconds: int = Field(
+        default=12 * 60 * 60, ge=60 * 60, le=7 * 24 * 60 * 60
+    )
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
     generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
