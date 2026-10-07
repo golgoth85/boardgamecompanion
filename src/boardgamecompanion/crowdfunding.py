@@ -13,7 +13,15 @@ import httpx
 
 GAMEFOUND_ACTIVE_PATH = "/api/public/projects/getActiveCrowdfundingProjects"
 ECB_DAILY_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
-CACHE_SCHEMA_VERSION = 1
+KICKSTARTER_LIVE_TABLETOP_URL = (
+    "https://www.kickstarter.com/discover/advanced"
+    "?category_id=34&sort=most_funded&state=live"
+)
+KICKSTARTER_UPCOMING_TABLETOP_URL = (
+    "https://www.kickstarter.com/discover/advanced"
+    "?category_id=34&sort=newest&state=upcoming"
+)
+CACHE_SCHEMA_VERSION = 2
 _CACHE_LOCK = threading.Lock()
 
 
@@ -133,6 +141,139 @@ class GamefoundProvider:
         return campaigns
 
 
+class ApifyKickstarterProvider:
+    platform = "kickstarter"
+
+    def __init__(
+        self,
+        *,
+        token: str | None,
+        base_url: str = "https://api.apify.com/v2",
+        actor: str = "fetchfinch~kickstarter-scraper",
+        timeout_seconds: float = 180.0,
+        max_items: int = 60,
+        max_pages: int = 5,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.token = (token or "").strip()
+        self.base_url = base_url.rstrip("/")
+        self.actor = actor.strip() or "fetchfinch~kickstarter-scraper"
+        self.timeout_seconds = timeout_seconds
+        self.max_items = max_items
+        self.max_pages = max_pages
+        self.transport = transport
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.token)
+
+    @staticmethod
+    def _text(value: object) -> str | None:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return None
+
+    @classmethod
+    def _nested_text(cls, value: object, *keys: str) -> str | None:
+        if not isinstance(value, dict):
+            return cls._text(value)
+        for key in keys:
+            candidate = cls._text(value.get(key))
+            if candidate:
+                return candidate
+        return None
+
+    def fetch_campaigns(self) -> list[dict[str, object]]:
+        if not self.configured:
+            raise CrowdfundingProviderError("Apify token is not configured")
+
+        endpoint = f"{self.base_url}/actors/{self.actor}/run-sync-get-dataset-items"
+        payload = {
+            "startUrls": [
+                {"url": KICKSTARTER_LIVE_TABLETOP_URL},
+                {"url": KICKSTARTER_UPCOMING_TABLETOP_URL},
+            ],
+            "maxItems": self.max_items,
+            "maxPages": self.max_pages,
+        }
+        try:
+            with httpx.Client(
+                timeout=self.timeout_seconds,
+                follow_redirects=True,
+                transport=self.transport,
+                headers={
+                    "User-Agent": "BoardGameCompanion/0.1 crowdfunding",
+                    "Accept": "application/json",
+                },
+            ) as client:
+                response = client.post(
+                    endpoint,
+                    params={"token": self.token},
+                    json=payload,
+                )
+                response.raise_for_status()
+                raw_payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise CrowdfundingProviderError(
+                f"Apify Kickstarter provider unavailable: {type(exc).__name__}"
+            ) from exc
+
+        if not isinstance(raw_payload, list):
+            raise CrowdfundingProviderError(
+                "Apify Kickstarter provider returned a non-list payload"
+            )
+
+        campaigns: list[dict[str, object]] = []
+        for raw in raw_payload:
+            if not isinstance(raw, dict):
+                continue
+            project_id = self._text(raw.get("projectId"))
+            slug = self._text(raw.get("slug"))
+            url = self._text(raw.get("url")) or self._text(raw.get("projectUrl"))
+            title = self._text(raw.get("title")) or self._text(raw.get("name"))
+            stable_id = project_id or slug or url
+            if not stable_id or not title:
+                continue
+
+            creator = self._nested_text(
+                raw.get("creator"), "name", "displayName", "displayableName"
+            )
+            campaigns.append(
+                {
+                    "id": f"kickstarter:{stable_id}",
+                    "platform": "kickstarter",
+                    "platform_project_id": project_id or slug or stable_id,
+                    "title": title,
+                    "creator": creator,
+                    "funds": _number(raw.get("pledged")),
+                    "currency": self._text(raw.get("currency")),
+                    "goal": _number(raw.get("goal")),
+                    "backer_count": _integer(raw.get("backersCount")),
+                    "campaign_start": _iso(
+                        raw.get("launchedAt")
+                        or raw.get("launchDate")
+                        or raw.get("launchAt")
+                    ),
+                    "campaign_end": _iso(raw.get("deadline")),
+                    "project_url": url,
+                    "image_url": self._text(raw.get("imageUrl")),
+                    "description": self._text(raw.get("blurb"))
+                    or self._text(raw.get("description")),
+                    "reward_count": 0,
+                    "update_count": 0,
+                    "comment_count": 0,
+                    "raw_status": (
+                        self._text(raw.get("status"))
+                        or self._text(raw.get("state"))
+                        or ""
+                    ).lower(),
+                    "funds_usd": _number(raw.get("usdPledged")),
+                }
+            )
+        return campaigns
+
+
 class EcbFxProvider:
     def __init__(
         self,
@@ -182,11 +323,15 @@ class CrowdfundingService:
         cache_path: Path,
         cache_ttl_seconds: int = 3 * 60 * 60,
         gamefound: GamefoundProvider | None = None,
+        kickstarter: ApifyKickstarterProvider | None = None,
+        kickstarter_cache_ttl_seconds: int = 12 * 60 * 60,
         fx: EcbFxProvider | None = None,
     ) -> None:
         self.cache_path = cache_path
         self.cache_ttl_seconds = cache_ttl_seconds
         self.gamefound = gamefound or GamefoundProvider()
+        self.kickstarter = kickstarter
+        self.kickstarter_cache_ttl_seconds = kickstarter_cache_ttl_seconds
         self.fx = fx or EcbFxProvider()
         self._lock = _CACHE_LOCK
 
@@ -219,27 +364,71 @@ class CrowdfundingService:
             return False
         return (now - fetched_at).total_seconds() < self.cache_ttl_seconds
 
-    def _refresh(self, cached: dict[str, Any] | None, now: datetime) -> dict[str, Any]:
-        provider_error: str | None = None
+    def _refresh(
+        self,
+        cached: dict[str, Any] | None,
+        now: datetime,
+        *,
+        force_kickstarter: bool = False,
+    ) -> dict[str, Any]:
+        gamefound_error: str | None = None
+        kickstarter_error: str | None = None
         fx_error: str | None = None
-        campaigns: list[dict[str, object]] | None = None
+        gamefound_campaigns: list[dict[str, object]] | None = None
+        kickstarter_campaigns: list[dict[str, object]] | None = None
         rates: dict[str, float] | None = None
 
+        cached_campaigns = [
+            dict(item)
+            for item in (cached or {}).get("campaigns", [])
+            if isinstance(item, dict)
+        ]
+        cached_gamefound = [
+            item for item in cached_campaigns if item.get("platform") == "gamefound"
+        ]
+        cached_kickstarter = [
+            item for item in cached_campaigns if item.get("platform") == "kickstarter"
+        ]
+        provider_fetched_at = dict((cached or {}).get("provider_fetched_at") or {})
+
         try:
-            campaigns = self.gamefound.fetch_active()
+            gamefound_campaigns = self.gamefound.fetch_active()
+            provider_fetched_at["gamefound"] = now.isoformat().replace("+00:00", "Z")
         except CrowdfundingProviderError as exc:
-            provider_error = str(exc)
+            gamefound_error = str(exc)
+
+        kickstarter_due = False
+        if self.kickstarter is not None and self.kickstarter.configured:
+            last_kickstarter = _parse_datetime(provider_fetched_at.get("kickstarter"))
+            kickstarter_due = (
+                force_kickstarter
+                or last_kickstarter is None
+                or (now - last_kickstarter).total_seconds()
+                >= self.kickstarter_cache_ttl_seconds
+            )
+            if kickstarter_due:
+                try:
+                    kickstarter_campaigns = self.kickstarter.fetch_campaigns()
+                    provider_fetched_at["kickstarter"] = now.isoformat().replace(
+                        "+00:00", "Z"
+                    )
+                except CrowdfundingProviderError as exc:
+                    kickstarter_error = str(exc)
+            else:
+                kickstarter_campaigns = cached_kickstarter
+        else:
+            kickstarter_campaigns = cached_kickstarter
 
         try:
             rates = self.fx.fetch_rates()
+            provider_fetched_at["fx"] = now.isoformat().replace("+00:00", "Z")
         except CrowdfundingProviderError as exc:
             fx_error = str(exc)
 
-        if campaigns is None and cached:
-            campaigns = [
-                dict(item) for item in cached.get("campaigns", [])
-                if isinstance(item, dict)
-            ]
+        if gamefound_campaigns is None:
+            gamefound_campaigns = cached_gamefound
+        if kickstarter_campaigns is None:
+            kickstarter_campaigns = cached_kickstarter
         if rates is None and cached and isinstance(cached.get("fx_rates"), dict):
             rates = {
                 str(key).upper(): float(value)
@@ -247,15 +436,17 @@ class CrowdfundingService:
                 if _number(value) > 0
             }
 
-        campaigns = campaigns or []
+        campaigns = [*gamefound_campaigns, *kickstarter_campaigns]
         rates = rates or {"EUR": 1.0}
         payload: dict[str, Any] = {
             "schema_version": CACHE_SCHEMA_VERSION,
             "fetched_at": now.isoformat().replace("+00:00", "Z"),
+            "provider_fetched_at": provider_fetched_at,
             "campaigns": campaigns,
             "fx_rates": rates,
             "provider_errors": {
-                "gamefound": provider_error,
+                "gamefound": gamefound_error,
+                "kickstarter": kickstarter_error,
                 "fx": fx_error,
             },
         }
@@ -288,7 +479,8 @@ class CrowdfundingService:
         start = _parse_datetime(item.get("campaign_start"))
         remaining = None if end is None else max(0, int((end - now).total_seconds()))
 
-        status = "active"
+        raw_status = str(item.get("raw_status") or "").strip().lower()
+        status = "upcoming" if raw_status in {"upcoming", "prelaunch"} else "active"
         if start is not None and start > now:
             status = "upcoming"
         elif end is not None and end <= now:
@@ -328,8 +520,17 @@ class CrowdfundingService:
         now = datetime.now(UTC)
         with self._lock:
             cached = self._read_cache()
-            if refresh or not self._fresh(cached, now):
-                cache = self._refresh(cached, now)
+            provider_fetched_at = dict((cached or {}).get("provider_fetched_at") or {})
+            kickstarter_needs_initial_fetch = (
+                self.kickstarter is not None
+                and self.kickstarter.configured
+                and _parse_datetime(provider_fetched_at.get("kickstarter")) is None
+            )
+            if refresh or kickstarter_needs_initial_fetch or not self._fresh(cached, now):
+                # A generic/manual refresh never bypasses the Kickstarter TTL: Actor
+                # results are billable. A newly configured provider is refreshed
+                # immediately because it has no provider-level timestamp yet.
+                cache = self._refresh(cached, now, force_kickstarter=False)
                 cache_state = "refreshed" if not cache.get("provider_errors", {}).get("gamefound") else "stale"
             else:
                 cache = cached or {}
@@ -348,10 +549,33 @@ class CrowdfundingService:
         ]
 
         provider_errors = cache.get("provider_errors") or {}
+        gamefound_items = [
+            item for item in campaigns if item.get("platform") == "gamefound"
+        ]
         gamefound_error = provider_errors.get("gamefound")
         gamefound_status = "ok"
         if gamefound_error:
-            gamefound_status = "stale" if campaigns else "error"
+            gamefound_status = "stale" if gamefound_items else "error"
+
+        kickstarter_items = [
+            item for item in campaigns if item.get("platform") == "kickstarter"
+        ]
+        kickstarter_error = provider_errors.get("kickstarter")
+        if self.kickstarter is None or not self.kickstarter.configured:
+            # A disabled provider must not leak an old cached dataset into results.
+            campaigns = [
+                item for item in campaigns if item.get("platform") != "kickstarter"
+            ]
+            kickstarter_items = []
+            kickstarter_status = "configuration_required"
+            kickstarter_error = (
+                "Set BGC_APIFY_TOKEN to enable the Kickstarter provider. "
+                "No reverse-engineered Kickstarter API is used."
+            )
+        elif kickstarter_error:
+            kickstarter_status = "stale" if kickstarter_items else "error"
+        else:
+            kickstarter_status = "ok"
 
         providers = {
             "gamefound": {
@@ -362,14 +586,19 @@ class CrowdfundingService:
                 "source": "Gamefound Public API",
             },
             "kickstarter": {
-                "status": "unavailable",
-                "error": (
-                    "No supported public project-discovery source is configured; "
-                    "internal or reverse-engineered Kickstarter APIs are intentionally not used."
+                "status": kickstarter_status,
+                "error": kickstarter_error,
+                "supports_active": True,
+                "supports_upcoming": True,
+                "source": (
+                    "Apify / fetchfinch Kickstarter Scraper"
+                    if self.kickstarter is not None
+                    else None
                 ),
-                "supports_active": False,
-                "supports_upcoming": False,
-                "source": None,
+                "terms_notice": (
+                    "Third-party discovery provider over public Kickstarter data; "
+                    "review Kickstarter terms before enabling automated collection."
+                ),
             },
             "fx": {
                 "status": "stale" if provider_errors.get("fx") else "ok",

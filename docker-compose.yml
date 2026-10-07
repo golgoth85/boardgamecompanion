@@ -21,6 +21,12 @@ services:
       # Optional approved BoardGameGeek XML API application token. CSV import,
       # rulebook discovery and RAG remain usable when it is unset.
       # BGC_BGG_APPLICATION_TOKEN: replace-with-approved-bgg-application-token
+      # Kickstarter crowdfunding via Apify (optional; never commit the token):
+      # BGC_APIFY_TOKEN: ""
+      # BGC_KICKSTARTER_APIFY_ACTOR: fetchfinch~kickstarter-scraper
+      # BGC_KICKSTARTER_MAX_ITEMS: "60"
+      # BGC_KICKSTARTER_MAX_PAGES: "2"
+      # BGC_KICKSTARTER_CACHE_TTL_SECONDS: "43200"
       # Gemini (API key required; never commit it):
       # BGC_GEMINI_API_KEY: ""
       # BGC_GEMINI_EMBEDDING_MODEL: gemini-embedding-2

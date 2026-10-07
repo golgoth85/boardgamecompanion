@@ -66,6 +66,7 @@ from boardgamecompanion.copies import (
     PhysicalCopyStore,
 )
 from boardgamecompanion.crowdfunding import (
+    ApifyKickstarterProvider,
     CrowdfundingError,
     CrowdfundingService,
     EcbFxProvider,
@@ -166,6 +167,15 @@ def get_crowdfunding_service() -> CrowdfundingService:
             base_url=settings.gamefound_public_api_url,
             timeout_seconds=settings.crowdfunding_timeout_seconds,
         ),
+        kickstarter=ApifyKickstarterProvider(
+            token=settings.apify_token,
+            base_url=settings.kickstarter_apify_base_url,
+            actor=settings.kickstarter_apify_actor,
+            timeout_seconds=settings.kickstarter_apify_timeout_seconds,
+            max_items=settings.kickstarter_max_items,
+            max_pages=settings.kickstarter_max_pages,
+        ),
+        kickstarter_cache_ttl_seconds=settings.kickstarter_cache_ttl_seconds,
         fx=EcbFxProvider(timeout_seconds=settings.crowdfunding_timeout_seconds),
     )
 

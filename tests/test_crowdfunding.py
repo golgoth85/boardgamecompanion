@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
+
 from boardgamecompanion.crowdfunding import (
+    ApifyKickstarterProvider,
     CrowdfundingProviderError,
     CrowdfundingService,
 )
@@ -17,6 +20,21 @@ class FakeGamefound:
     def fetch_active(self):
         if self.fail:
             raise CrowdfundingProviderError("Gamefound offline")
+        return [dict(item) for item in self.campaigns]
+
+
+class FakeKickstarter:
+    configured = True
+
+    def __init__(self, campaigns):
+        self.campaigns = campaigns
+        self.fail = False
+        self.calls = 0
+
+    def fetch_campaigns(self):
+        self.calls += 1
+        if self.fail:
+            raise CrowdfundingProviderError("Kickstarter offline")
         return [dict(item) for item in self.campaigns]
 
 
@@ -92,7 +110,7 @@ def test_funds_ranking_uses_eur_normalization_and_preserves_originals(tmp_path: 
     assert usd["currency"] == "USD"
     assert usd["funds_eur"] == 100_000
     assert payload["providers"]["gamefound"]["status"] == "ok"
-    assert payload["providers"]["kickstarter"]["status"] == "unavailable"
+    assert payload["providers"]["kickstarter"]["status"] == "configuration_required"
 
 
 def test_backer_and_ending_rankings_are_independent(tmp_path: Path) -> None:
@@ -134,3 +152,255 @@ def test_upcoming_does_not_scrape_when_public_api_lacks_discovery(tmp_path: Path
 
     assert payload["items"] == []
     assert payload["providers"]["gamefound"]["supports_upcoming"] is False
+
+
+
+def kickstarter_campaign(
+    slug: str,
+    *,
+    funds: float,
+    currency: str,
+    backers: int,
+    hours_left: int,
+) -> dict[str, object]:
+    now = datetime.now(UTC)
+    return {
+        "id": f"kickstarter:{slug}",
+        "platform": "kickstarter",
+        "platform_project_id": slug,
+        "title": slug.replace("-", " ").title(),
+        "creator": "Kickstarter Studio",
+        "funds": funds,
+        "currency": currency,
+        "goal": 20_000,
+        "backer_count": backers,
+        "campaign_start": (now - timedelta(days=5)).isoformat(),
+        "campaign_end": (now + timedelta(hours=hours_left)).isoformat(),
+        "project_url": f"https://www.kickstarter.com/projects/studio/{slug}",
+        "image_url": None,
+        "description": "Kickstarter campaign",
+        "reward_count": 0,
+        "update_count": 0,
+        "comment_count": 0,
+        "raw_status": "live",
+        "funds_usd": funds,
+    }
+
+
+def test_kickstarter_campaigns_are_merged_into_shared_ranking(tmp_path: Path) -> None:
+    subject = service(tmp_path)
+    subject.kickstarter = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "ks-hit",
+                funds=250_000,
+                currency="EUR",
+                backers=9_000,
+                hours_left=120,
+            )
+        ]
+    )
+
+    payload = subject.list_campaigns(sort="top", refresh=True)
+
+    assert payload["providers"]["kickstarter"]["status"] == "ok"
+    assert payload["providers"]["kickstarter"]["supports_upcoming"] is True
+    assert any(item["platform_project_id"] == "ks-hit" for item in payload["items"])
+    assert payload["items"][0]["platform_project_id"] == "ks-hit"
+
+
+def test_kickstarter_cache_is_reused_across_more_frequent_gamefound_refreshes(
+    tmp_path: Path,
+) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "cached-ks",
+                funds=50_000,
+                currency="EUR",
+                backers=1_500,
+                hours_left=72,
+            )
+        ]
+    )
+    subject = service(tmp_path)
+    subject.cache_ttl_seconds = 0
+    subject.kickstarter = ks
+    subject.kickstarter_cache_ttl_seconds = 3600
+
+    subject.list_campaigns(refresh=False)
+    subject.list_campaigns(refresh=False)
+
+    assert ks.calls == 1
+
+
+def test_apify_provider_normalizes_structured_campaign_data() -> None:
+    seen_payload: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == (
+            "/v2/actors/fetchfinch~kickstarter-scraper/"
+            "run-sync-get-dataset-items"
+        )
+        assert request.url.params["token"] == "secret"
+        seen_payload.update(__import__("json").loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "projectId": "123",
+                    "slug": "great-game",
+                    "url": "https://www.kickstarter.com/projects/studio/great-game",
+                    "title": "Great Game",
+                    "blurb": "A board game",
+                    "status": "live",
+                    "goal": 10000,
+                    "pledged": 75000,
+                    "usdPledged": 80000,
+                    "currency": "EUR",
+                    "percentFunded": 750,
+                    "backersCount": 2200,
+                    "deadline": "2026-11-01T12:00:00Z",
+                    "launchedAt": "2026-10-01T12:00:00Z",
+                    "creator": {"name": "Studio"},
+                    "imageUrl": "https://example.test/game.jpg",
+                }
+            ],
+        )
+
+    provider = ApifyKickstarterProvider(
+        token="secret",
+        transport=httpx.MockTransport(handler),
+        max_items=25,
+        max_pages=2,
+    )
+
+    campaigns = provider.fetch_campaigns()
+
+    assert seen_payload["maxItems"] == 25
+    assert seen_payload["maxPages"] == 2
+    assert len(seen_payload["startUrls"]) == 2
+    assert campaigns == [
+        {
+            "id": "kickstarter:123",
+            "platform": "kickstarter",
+            "platform_project_id": "123",
+            "title": "Great Game",
+            "creator": "Studio",
+            "funds": 75000.0,
+            "currency": "EUR",
+            "goal": 10000.0,
+            "backer_count": 2200,
+            "campaign_start": "2026-10-01T12:00:00Z",
+            "campaign_end": "2026-11-01T12:00:00Z",
+            "project_url": "https://www.kickstarter.com/projects/studio/great-game",
+            "image_url": "https://example.test/game.jpg",
+            "description": "A board game",
+            "reward_count": 0,
+            "update_count": 0,
+            "comment_count": 0,
+            "raw_status": "live",
+            "funds_usd": 80000.0,
+        }
+    ]
+
+
+
+def test_manual_refresh_does_not_bypass_kickstarter_billing_ttl(tmp_path: Path) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "paid-cache",
+                funds=80_000,
+                currency="EUR",
+                backers=2_000,
+                hours_left=96,
+            )
+        ]
+    )
+    subject = service(tmp_path)
+    subject.kickstarter = ks
+    subject.kickstarter_cache_ttl_seconds = 3600
+
+    subject.list_campaigns(refresh=True)
+    subject.list_campaigns(refresh=True)
+
+    assert ks.calls == 1
+
+
+def test_newly_configured_kickstarter_fetches_even_with_fresh_gamefound_cache(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "crowdfunding-cache.json"
+    without_kickstarter = service(tmp_path)
+    without_kickstarter.list_campaigns(refresh=True)
+
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "first-fetch",
+                funds=65_000,
+                currency="EUR",
+                backers=1_900,
+                hours_left=120,
+            )
+        ]
+    )
+    with_kickstarter = service(tmp_path)
+    with_kickstarter.kickstarter = ks
+
+    payload = with_kickstarter.list_campaigns()
+
+    assert ks.calls == 1
+    assert any(
+        item["platform_project_id"] == "first-fetch"
+        for item in payload["items"]
+    )
+
+
+
+def test_unconfigured_kickstarter_does_not_serve_old_cached_rows(tmp_path: Path) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "cached-before-disable",
+                funds=90_000,
+                currency="EUR",
+                backers=2_100,
+                hours_left=96,
+            )
+        ]
+    )
+    enabled = service(tmp_path)
+    enabled.kickstarter = ks
+    enabled.list_campaigns(refresh=True)
+
+    disabled = service(tmp_path)
+    payload = disabled.list_campaigns()
+
+    assert payload["providers"]["kickstarter"]["status"] == "configuration_required"
+    assert all(item["platform"] != "kickstarter" for item in payload["items"])
+
+
+def test_gamefound_error_is_not_marked_stale_from_kickstarter_only_cache(
+    tmp_path: Path,
+) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "ks-only",
+                funds=120_000,
+                currency="EUR",
+                backers=3_000,
+                hours_left=120,
+            )
+        ]
+    )
+    subject = service(tmp_path)
+    subject.kickstarter = ks
+    subject.gamefound.fail = True
+
+    payload = subject.list_campaigns(refresh=True)
+
+    assert payload["providers"]["gamefound"]["status"] == "error"
+    assert payload["providers"]["kickstarter"]["status"] == "ok"
