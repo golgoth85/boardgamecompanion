@@ -1281,9 +1281,9 @@ def _embedding_retrieval_service_for(
             verify_tls=settings.gemini_verify_tls,
             rate_limiter=PersistentRateLimiter(database).acquire,
             # batchEmbedContents can be quota-accounted per embedded text.
-            # A persistent 10s gate keeps successive 16-text batches below
-            # the observed free-tier request window across worker restarts.
-            min_interval_seconds=10.0,
+            # Pace by input count: a full 16-text batch waits about 12s,
+            # while a one-text retrieval query waits only about 0.75s.
+            min_interval_seconds_per_input=0.75,
         )
         batch_size = settings.gemini_embedding_batch_size
     elif selected == "ollama":
