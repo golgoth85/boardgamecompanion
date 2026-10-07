@@ -126,11 +126,11 @@ Kickstarter discovery uses the community-maintained `fetchfinch/kickstarter-scra
 BGC_APIFY_TOKEN=<runtime secret>
 BGC_KICKSTARTER_APIFY_ACTOR=fetchfinch~kickstarter-scraper
 BGC_KICKSTARTER_MAX_ITEMS=60
-BGC_KICKSTARTER_MAX_PAGES=5
+BGC_KICKSTARTER_MAX_PAGES=2
 BGC_KICKSTARTER_CACHE_TTL_SECONDS=43200
 ```
 
-The Kickstarter cache defaults to 12 hours, independently of the shorter Gamefound cache, to limit paid Actor results and avoid unnecessary collection. Failed refreshes keep the last valid local Kickstarter cache when available. The Apify token must never be committed to Git or written to logs.
+The Kickstarter cache defaults to 12 hours and two Discover pages per source, independently of the shorter Gamefound cache, to limit paid Actor results and avoid unnecessary collection. The generic UI refresh does not bypass this provider-level TTL. Failed refreshes keep the last valid local Kickstarter cache when available. The Apify token must never be committed to Git or written to logs.
 
 This integration relies on a third-party scraping service over public Kickstarter discovery data; it is not an official Kickstarter API. Review Kickstarter's current terms before enabling automated collection.
 ## Direct BGG metadata (optional)
