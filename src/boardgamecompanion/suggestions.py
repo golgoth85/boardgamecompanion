@@ -222,7 +222,7 @@ class SuggestionsService:
             )
 
         ranked.sort(key=lambda pair: (-pair[0], str(pair[1].get("title") or "")))
-        return [item for _, item in ranked[:3]]
+        return [item for _, item in ranked[:5]]
 
     @staticmethod
     def _normalized_weights(pairs: list[tuple[str, int]]) -> dict[str, float]:
