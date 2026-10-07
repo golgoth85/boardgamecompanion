@@ -16,7 +16,7 @@ class SuggestionEditorialError(RuntimeError):
     pass
 
 
-EDITORIAL_VERSION = 2
+EDITORIAL_VERSION = 3
 
 
 EDITORIAL_SCHEMA: dict[str, Any] = {
@@ -74,8 +74,10 @@ Esempi di STILE, non di fatti da riutilizzare:
 - "Ricorda X per esplorazione e gestione della mano, però è sensibilmente più leggero."
 
 Scrivi in italiano corretto e naturale, senza refusi, parole duplicate o calchi
-dall'inglese. Usa esclusivamente i fatti del payload. Restituisci solo JSON conforme
-allo schema.
+dall'inglese. Non usare MAI come confronto un altro candidato presente nello stesso batch:
+i confronti ammessi sono esclusivamente quelli elencati in comparison_anchors per
+quel candidato. Usa esclusivamente i fatti del payload. Restituisci solo JSON
+conforme allo schema.
 """
 
 
@@ -368,6 +370,23 @@ class SuggestionEditorialService:
             raise SuggestionEditorialError(
                 "Editorial response did not cover all requested games"
             )
+
+        if len(items) > 1:
+            by_id = {int(item["bgg_id"]): item for item in items}
+            retry_ids: list[int] = []
+            for bgg_id, generated_item in result.items():
+                why = generated_item["why_it_fits"].casefold()
+                for other_id, other in by_id.items():
+                    if other_id == bgg_id:
+                        continue
+                    other_title = str(other.get("title") or "").strip()
+                    if len(other_title) >= 5 and other_title.casefold() in why:
+                        retry_ids.append(bgg_id)
+                        break
+            for bgg_id in dict.fromkeys(retry_ids):
+                isolated, _, _ = self._generate([by_id[bgg_id]])
+                result[bgg_id] = isolated[bgg_id]
+
         return result, provider, model
 
     def enrich(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
