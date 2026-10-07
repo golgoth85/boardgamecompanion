@@ -21,6 +21,7 @@ from boardgamecompanion.embedding_retrieval import (
     EmbeddingProviderError,
     EmbeddingRetrievalService,
     GeminiEmbeddingProvider,
+    LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
     _descriptor_config,
 )
@@ -481,6 +482,106 @@ def test_embedding_build_revalidates_chunk_set_after_provider_work(
             (document["id"],),
         ).fetchone()["count"]
     assert run_count == 0
+
+
+def test_lmstudio_embedding_wol_wakes_offline_endpoint(monkeypatch) -> None:
+    tcp_attempts = 0
+    sent_packets: list[tuple[bytes, tuple[str, int]]] = []
+
+    class ReadySocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_create_connection(address, timeout):
+        nonlocal tcp_attempts
+        assert address == ("192.168.1.249", 1234)
+        assert timeout <= 1.0
+        tcp_attempts += 1
+        if tcp_attempts < 3:
+            raise OSError("host asleep")
+        return ReadySocket()
+
+    class UdpSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def setsockopt(self, *args):
+            return None
+
+        def sendto(self, packet, address):
+            sent_packets.append((packet, address))
+            return len(packet)
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.socket.create_connection",
+        fake_create_connection,
+    )
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.socket.socket",
+        lambda *args, **kwargs: UdpSocket(),
+    )
+
+    provider = LMStudioEmbeddingProvider(
+        base_url="http://192.168.1.249:1234",
+        model="text-embedding-qwen3-embedding-0.6b",
+        requested_dimensions=None,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        wol_mac="D8:5E:D3:5A:63:DA",
+        wol_broadcast="192.168.1.255",
+        wol_wait_seconds=1.0,
+        wol_probe_interval_seconds=0.01,
+    )
+
+    provider._ensure_endpoint_ready()
+
+    assert tcp_attempts == 3
+    assert len(sent_packets) == 1
+    packet, destination = sent_packets[0]
+    assert destination == ("192.168.1.255", 9)
+    assert packet[:6] == b"\xff" * 6
+    assert packet[6:] == bytes.fromhex("D85ED35A63DA") * 16
+
+
+def test_lmstudio_embedding_wol_does_not_send_when_endpoint_is_ready(
+    monkeypatch,
+) -> None:
+    class ReadySocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.socket.create_connection",
+        lambda address, timeout: ReadySocket(),
+    )
+
+    def unexpected_socket(*args, **kwargs):
+        raise AssertionError("magic packet must not be sent while LM Studio is online")
+
+    monkeypatch.setattr(
+        "boardgamecompanion.embedding_retrieval.socket.socket",
+        unexpected_socket,
+    )
+
+    provider = LMStudioEmbeddingProvider(
+        base_url="http://192.168.1.249:1234",
+        model="text-embedding-qwen3-embedding-0.6b",
+        requested_dimensions=None,
+        timeout_seconds=5.0,
+        verify_tls=True,
+        wol_mac="D8:5E:D3:5A:63:DA",
+    )
+
+    provider._ensure_endpoint_ready()
 
 
 def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> None:
