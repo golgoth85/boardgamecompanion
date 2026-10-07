@@ -173,6 +173,10 @@ class Settings(BaseSettings):
         return self.config_dir / "suggestions-cache.json"
 
     @property
+    def suggestions_editorial_cache_path(self) -> Path:
+        return self.config_dir / "suggestions-editorial-cache.json"
+
+    @property
     def crowdfunding_cache_path(self) -> Path:
         return self.config_dir / "crowdfunding-cache.json"
 
