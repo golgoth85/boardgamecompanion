@@ -24,6 +24,9 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert "Priorità provider" in response.text
     assert 'id="bggApplicationToken"' in response.text
     assert 'id="youtubeApiKey"' in response.text
+    assert 'data-settings-tab="crowdfunding"' in response.text
+    assert 'id="apifyToken"' in response.text
+    assert 'id="verifyApifyToken"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
@@ -93,6 +96,8 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "renderUpdates" in js.text
     assert "renderDiscovery" in js.text
     assert "renderCrowdfunding" in js.text
+    assert 'openSettingsDialog("crowdfunding")' in js.text
+    assert "Configura Apify" in js.text
     assert "tutorialDiscoveryAction" in js.text
     assert "tutorialVideoCard" in js.text
     assert "tutorial-video-frame" in js.text
