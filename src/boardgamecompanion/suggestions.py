@@ -384,6 +384,7 @@ class SuggestionsService:
         return (
             payload
             if isinstance(payload, dict)
+            and payload.get("schema_version") == 2
             and isinstance(payload.get("items"), list)
             else None
         )
@@ -498,7 +499,7 @@ class SuggestionsService:
                     ),
                     "source_description": _plain_description(
                         metadata.get("description")
-                    )[:8000],
+                    )[:5000],
                     "comparison_anchors": self._comparison_anchors(
                         metadata,
                         owned_games,
@@ -526,6 +527,7 @@ class SuggestionsService:
             )
         )
         payload = {
+            "schema_version": 2,
             "generated_at": (
                 datetime.now(UTC)
                 .isoformat()
