@@ -299,3 +299,56 @@ def test_apify_provider_normalizes_structured_campaign_data() -> None:
             "funds_usd": 80000.0,
         }
     ]
+
+
+
+def test_manual_refresh_does_not_bypass_kickstarter_billing_ttl(tmp_path: Path) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "paid-cache",
+                funds=80_000,
+                currency="EUR",
+                backers=2_000,
+                hours_left=96,
+            )
+        ]
+    )
+    subject = service(tmp_path)
+    subject.kickstarter = ks
+    subject.kickstarter_cache_ttl_seconds = 3600
+
+    subject.list_campaigns(refresh=True)
+    subject.list_campaigns(refresh=True)
+
+    assert ks.calls == 1
+
+
+def test_newly_configured_kickstarter_fetches_even_with_fresh_gamefound_cache(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "crowdfunding-cache.json"
+    without_kickstarter = service(tmp_path)
+    without_kickstarter.list_campaigns(refresh=True)
+
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "first-fetch",
+                funds=65_000,
+                currency="EUR",
+                backers=1_900,
+                hours_left=120,
+            )
+        ]
+    )
+    with_kickstarter = service(tmp_path)
+    with_kickstarter.kickstarter = ks
+
+    payload = with_kickstarter.list_campaigns()
+
+    assert ks.calls == 1
+    assert any(
+        item["platform_project_id"] == "first-fetch"
+        for item in payload["items"]
+    )
