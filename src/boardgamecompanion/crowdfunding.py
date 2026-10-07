@@ -188,7 +188,7 @@ class ApifyKickstarterProvider:
         if not self.configured:
             raise CrowdfundingProviderError("Apify token is not configured")
 
-        endpoint = f"{self.base_url}/acts/{self.actor}/run-sync-get-dataset-items"
+        endpoint = f"{self.base_url}/actors/{self.actor}/run-sync-get-dataset-items"
         payload = {
             "startUrls": [
                 {"url": KICKSTARTER_LIVE_TABLETOP_URL},
