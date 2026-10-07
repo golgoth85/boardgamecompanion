@@ -14,6 +14,7 @@ import httpx
 GAMEFOUND_ACTIVE_PATH = "/api/public/projects/getActiveCrowdfundingProjects"
 ECB_DAILY_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 CACHE_SCHEMA_VERSION = 1
+_CACHE_LOCK = threading.Lock()
 
 
 class CrowdfundingError(RuntimeError):
@@ -187,7 +188,7 @@ class CrowdfundingService:
         self.cache_ttl_seconds = cache_ttl_seconds
         self.gamefound = gamefound or GamefoundProvider()
         self.fx = fx or EcbFxProvider()
-        self._lock = threading.Lock()
+        self._lock = _CACHE_LOCK
 
     def _read_cache(self) -> dict[str, Any] | None:
         try:
@@ -332,7 +333,8 @@ class CrowdfundingService:
                 cache_state = "refreshed" if not cache.get("provider_errors", {}).get("gamefound") else "stale"
             else:
                 cache = cached or {}
-                cache_state = "fresh"
+                cached_errors = cache.get("provider_errors") or {}
+                cache_state = "stale" if cached_errors.get("gamefound") else "fresh"
 
         rates = {
             str(key).upper(): float(value)
