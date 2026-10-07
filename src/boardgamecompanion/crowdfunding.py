@@ -549,16 +549,24 @@ class CrowdfundingService:
         ]
 
         provider_errors = cache.get("provider_errors") or {}
+        gamefound_items = [
+            item for item in campaigns if item.get("platform") == "gamefound"
+        ]
         gamefound_error = provider_errors.get("gamefound")
         gamefound_status = "ok"
         if gamefound_error:
-            gamefound_status = "stale" if campaigns else "error"
+            gamefound_status = "stale" if gamefound_items else "error"
 
         kickstarter_items = [
             item for item in campaigns if item.get("platform") == "kickstarter"
         ]
         kickstarter_error = provider_errors.get("kickstarter")
         if self.kickstarter is None or not self.kickstarter.configured:
+            # A disabled provider must not leak an old cached dataset into results.
+            campaigns = [
+                item for item in campaigns if item.get("platform") != "kickstarter"
+            ]
+            kickstarter_items = []
             kickstarter_status = "configuration_required"
             kickstarter_error = (
                 "Set BGC_APIFY_TOKEN to enable the Kickstarter provider. "
