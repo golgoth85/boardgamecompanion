@@ -142,6 +142,7 @@ const lmstudioGenerationModel = document.querySelector("#lmstudioGenerationModel
 const lmstudioGenerationTimeout = document.querySelector("#lmstudioGenerationTimeout");
 const lmstudioGenerationMaxTokens = document.querySelector("#lmstudioGenerationMaxTokens");
 const lmstudioDisableThinking = document.querySelector("#lmstudioDisableThinking");
+const lmstudioWolEnabled = document.querySelector("#lmstudioWolEnabled");
 const geminiUrl = document.querySelector("#geminiUrl");
 const geminiApiKey = document.querySelector("#geminiApiKey");
 const geminiApiKeyHint = document.querySelector("#geminiApiKeyHint");
@@ -735,6 +736,7 @@ function applyRagSettingsToForm(data) {
   lmstudioGenerationTimeout.value = lmstudio.generation_timeout_seconds ?? 300;
   lmstudioGenerationMaxTokens.value = lmstudio.generation_max_tokens ?? 512;
   lmstudioDisableThinking.checked = lmstudio.generation_disable_thinking !== false;
+  lmstudioWolEnabled.checked = lmstudio.wol_enabled !== false;
   lmstudioApiKey.value = "";
   lmstudioClearApiKey.checked = false;
   clearLmstudioApiKeyRow.hidden = lmstudio.api_key_source !== "stored";
@@ -830,6 +832,7 @@ async function persistSettings({verifyAfter = false} = {}) {
       lmstudio_generation_timeout_seconds: Number(lmstudioGenerationTimeout.value || 300),
       lmstudio_generation_max_tokens: Number(lmstudioGenerationMaxTokens.value || 512),
       lmstudio_generation_disable_thinking: lmstudioDisableThinking.checked,
+      lmstudio_wol_enabled: lmstudioWolEnabled.checked,
       gemini_url: geminiUrl.value.trim() || null,
       gemini_api_key:
         geminiClearApiKey.checked || !geminiApiKey.value.trim()
