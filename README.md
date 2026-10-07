@@ -116,6 +116,23 @@ BGC_OLLAMA_GENERATION_MODEL=<chat-model>
 
 Newly uploaded or automatically archived rulebooks are queued for PDF parsing, chunking and embeddings. **Prepara indice** remains an explicit retry/fallback control. Then use **Chiedi al regolamento** for page-cited answers.
 
+## Crowdfunding discovery
+
+The **Crowdfunding** section combines Gamefound and, optionally, Kickstarter campaigns in a shared explainable ranking. Gamefound uses its documented public API. Kickstarter is disabled until an Apify token is configured; BoardGameCompanion does not call reverse-engineered Kickstarter APIs.
+
+Kickstarter discovery uses the community-maintained `fetchfinch/kickstarter-scraper` Apify Actor and requests public **Tabletop Games** discovery data for live and upcoming campaigns. The normalized fields used by BoardGameCompanion are pledged amount, goal, currency, aggregate backer count, launch/deadline, creator, image and canonical campaign URL.
+
+```text
+BGC_APIFY_TOKEN=<runtime secret>
+BGC_KICKSTARTER_APIFY_ACTOR=fetchfinch~kickstarter-scraper
+BGC_KICKSTARTER_MAX_ITEMS=60
+BGC_KICKSTARTER_MAX_PAGES=5
+BGC_KICKSTARTER_CACHE_TTL_SECONDS=43200
+```
+
+The Kickstarter cache defaults to 12 hours, independently of the shorter Gamefound cache, to limit paid Actor results and avoid unnecessary collection. Failed refreshes keep the last valid local Kickstarter cache when available. The Apify token must never be committed to Git or written to logs.
+
+This integration relies on a third-party scraping service over public Kickstarter discovery data; it is not an official Kickstarter API. Review Kickstarter's current terms before enabling automated collection.
 ## Direct BGG metadata (optional)
 
 BGC uses the official server-side XML API2 endpoint for exact catalog BGG IDs. It never scrapes authenticated BGG pages. Configure an approved Application Token from **Impostazioni** in the web UI. The token is stored under `/config`, is never returned in clear text, and can be replaced or removed from the same screen. For automated deployments, `BGC_BGG_APPLICATION_TOKEN` remains an optional runtime override and takes precedence over the stored value:
