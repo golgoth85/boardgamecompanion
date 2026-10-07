@@ -136,6 +136,7 @@ def test_rag_settings_persist_priority_and_hide_secrets(tmp_path: Path) -> None:
         "lmstudio_generation_timeout_seconds": 300,
         "lmstudio_generation_max_tokens": 384,
         "lmstudio_generation_disable_thinking": True,
+        "lmstudio_wol_enabled": False,
         "gemini_url": "https://generativelanguage.googleapis.com",
         "gemini_api_key": "gemini-secret",
         "gemini_embedding_model": "gemini-embedding-2",
@@ -153,6 +154,7 @@ def test_rag_settings_persist_priority_and_hide_secrets(tmp_path: Path) -> None:
         assert body["automatic_fallback"] is False
         assert body["providers"]["lmstudio"]["generation_max_tokens"] == 384
         assert body["providers"]["lmstudio"]["generation_disable_thinking"] is True
+        assert body["providers"]["lmstudio"]["wol_enabled"] is False
         assert body["providers"]["lmstudio"]["api_key_configured"] is True
         assert body["providers"]["gemini"]["api_key_configured"] is True
         assert "lmstudio-secret" not in saved.text

@@ -49,6 +49,7 @@ from boardgamecompanion.bgg_rulebook_search import (
     GeminiBggFileProvider,
 )
 from boardgamecompanion.catalog import SORT_SQL, Catalog
+from boardgamecompanion.suggestions import SuggestionsError, SuggestionsService
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
     CatalogAssistantService,
@@ -246,6 +247,32 @@ def get_bgg_metadata_store() -> BggMetadataStore:
     )
 
 
+def get_suggestions_service() -> SuggestionsService:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    token = (resolved.application_token or "").strip()
+    client = (
+        BggApiClient(
+            BggApiConfig(
+                application_token=token,
+                timeout_seconds=resolved.timeout_seconds,
+                min_interval_seconds=resolved.min_interval_seconds,
+            ),
+            rate_limiter=PersistentRateLimiter(database).acquire,
+        )
+        if token
+        else None
+    )
+    return SuggestionsService(
+        database,
+        client,
+        cache_path=settings.suggestions_cache_path,
+        cache_ttl_seconds=settings.suggestions_cache_ttl_seconds,
+        candidate_limit=settings.suggestions_candidate_limit,
+    )
+
+
 def get_description_translation_service() -> DescriptionTranslationService:
     database = get_database()
     database.initialize()
@@ -393,6 +420,7 @@ class RagSettingsUpdate(BaseModel):
     lmstudio_generation_timeout_seconds: float = Field(default=300.0, ge=1.0, le=900.0)
     lmstudio_generation_max_tokens: int = Field(default=512, ge=64, le=4096)
     lmstudio_generation_disable_thinking: bool = True
+    lmstudio_wol_enabled: bool | None = None
     gemini_url: str | None = Field(default=None, max_length=4096)
     gemini_api_key: str | None = Field(default=None, max_length=4096)
     clear_gemini_api_key: bool = False
@@ -662,6 +690,11 @@ def web_crowdfunding() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/suggestions", include_in_schema=False)
+def web_suggestions() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -864,6 +897,20 @@ def explore_catalog(
         min_rating=min_rating,
         limit=limit,
     )
+
+
+@app.get("/api/catalog/suggestions", tags=["catalog"])
+def get_catalog_suggestions(
+    limit: int = Query(default=10, ge=1, le=25),
+    refresh: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_suggestions_service().list_suggestions(
+            limit=limit,
+            refresh=refresh,
+        )
+    except SuggestionsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/catalog/facets", tags=["catalog"])
@@ -1328,7 +1375,7 @@ def _embedding_retrieval_service_for(
             timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
             api_key=rag.lmstudio_api_key,
-            wol_mac=settings.lmstudio_wol_mac,
+            wol_mac=settings.lmstudio_wol_mac if rag.lmstudio_wol_enabled else None,
             wol_broadcast=settings.lmstudio_wol_broadcast,
             wol_port=settings.lmstudio_wol_port,
             wol_wait_seconds=settings.lmstudio_wol_wait_seconds,
@@ -1981,6 +2028,7 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
     database = get_database()
     database.initialize()
     try:
+        current = resolve_rag_settings(database)
         resolved = save_rag_settings(
             database,
             embedding_provider_order=tuple(payload.embedding_provider_order),
@@ -1996,6 +2044,11 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
             lmstudio_generation_timeout_seconds=payload.lmstudio_generation_timeout_seconds,
             lmstudio_generation_max_tokens=payload.lmstudio_generation_max_tokens,
             lmstudio_generation_disable_thinking=payload.lmstudio_generation_disable_thinking,
+            lmstudio_wol_enabled=(
+                current.lmstudio_wol_enabled
+                if payload.lmstudio_wol_enabled is None
+                else payload.lmstudio_wol_enabled
+            ),
             gemini_url=payload.gemini_url,
             gemini_api_key=payload.gemini_api_key,
             clear_gemini_api_key=payload.clear_gemini_api_key,

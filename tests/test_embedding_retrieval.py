@@ -6,12 +6,14 @@ import math
 import sqlite3
 import threading
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import boardgamecompanion.main as main_module
 from boardgamecompanion.chunk_index import ChunkIndexService
 from boardgamecompanion.database import Database
 from boardgamecompanion.embedding_retrieval import (
@@ -482,6 +484,46 @@ def test_embedding_build_revalidates_chunk_set_after_provider_work(
             (document["id"],),
         ).fetchone()["count"]
     assert run_count == 0
+
+
+def test_lmstudio_wol_setting_disables_magic_packet_configuration(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: list[dict[str, object]] = []
+
+    class CapturingProvider:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    monkeypatch.setattr(main_module, "LMStudioEmbeddingProvider", CapturingProvider)
+    monkeypatch.setattr(
+        main_module,
+        "EmbeddingRetrievalService",
+        lambda database, chunk_service, provider, **kwargs: provider,
+    )
+    monkeypatch.setattr(main_module, "get_chunk_index_service", lambda: object())
+    monkeypatch.setattr(
+        settings,
+        "lmstudio_wol_mac",
+        "D8:5E:D3:5A:63:DA",
+    )
+
+    database = Database(tmp_path / "wol-setting.sqlite3")
+    database.initialize()
+    rag = SimpleNamespace(
+        lmstudio_url="http://192.168.1.249:1234",
+        lmstudio_embedding_model="text-embedding-qwen3-embedding-0.6b",
+        lmstudio_api_key=None,
+        lmstudio_wol_enabled=False,
+    )
+
+    main_module._embedding_retrieval_service_for(database, rag, "lmstudio")
+    assert captured[-1]["wol_mac"] is None
+
+    rag.lmstudio_wol_enabled = True
+    main_module._embedding_retrieval_service_for(database, rag, "lmstudio")
+    assert captured[-1]["wol_mac"] == "D8:5E:D3:5A:63:DA"
 
 
 def test_lmstudio_embedding_wol_wakes_offline_endpoint(monkeypatch) -> None:

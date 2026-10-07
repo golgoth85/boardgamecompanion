@@ -7,6 +7,7 @@ const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
 const shellSectionLabels = {
   catalog: "Ludoteca",
   rankings: "Classifiche",
+  suggestions: "Suggerimenti",
   crowdfunding: "Crowdfunding",
   explore: "Esplora",
   completed: "Completati",
@@ -17,6 +18,7 @@ const shellSectionLabels = {
 
 function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
+  if (/^\/suggestions\/?$/.test(pathname)) return "suggestions";
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
   if (/^\/completed\/?$/.test(pathname)) return "completed";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
@@ -140,6 +142,7 @@ const lmstudioGenerationModel = document.querySelector("#lmstudioGenerationModel
 const lmstudioGenerationTimeout = document.querySelector("#lmstudioGenerationTimeout");
 const lmstudioGenerationMaxTokens = document.querySelector("#lmstudioGenerationMaxTokens");
 const lmstudioDisableThinking = document.querySelector("#lmstudioDisableThinking");
+const lmstudioWolEnabled = document.querySelector("#lmstudioWolEnabled");
 const geminiUrl = document.querySelector("#geminiUrl");
 const geminiApiKey = document.querySelector("#geminiApiKey");
 const geminiApiKeyHint = document.querySelector("#geminiApiKeyHint");
@@ -733,6 +736,7 @@ function applyRagSettingsToForm(data) {
   lmstudioGenerationTimeout.value = lmstudio.generation_timeout_seconds ?? 300;
   lmstudioGenerationMaxTokens.value = lmstudio.generation_max_tokens ?? 512;
   lmstudioDisableThinking.checked = lmstudio.generation_disable_thinking !== false;
+  lmstudioWolEnabled.checked = lmstudio.wol_enabled !== false;
   lmstudioApiKey.value = "";
   lmstudioClearApiKey.checked = false;
   clearLmstudioApiKeyRow.hidden = lmstudio.api_key_source !== "stored";
@@ -828,6 +832,7 @@ async function persistSettings({verifyAfter = false} = {}) {
       lmstudio_generation_timeout_seconds: Number(lmstudioGenerationTimeout.value || 300),
       lmstudio_generation_max_tokens: Number(lmstudioGenerationMaxTokens.value || 512),
       lmstudio_generation_disable_thinking: lmstudioDisableThinking.checked,
+      lmstudio_wol_enabled: lmstudioWolEnabled.checked,
       gemini_url: geminiUrl.value.trim() || null,
       gemini_api_key:
         geminiClearApiKey.checked || !geminiApiKey.value.trim()
@@ -4839,6 +4844,120 @@ function crowdfundingProviderNotice(payload) {
     : "";
 }
 
+
+function suggestionCard(item, index) {
+  const players = item.players || {};
+  const playTime = item.play_time || {};
+  const bgg = item.bgg || {};
+  const playerText = players.min && players.max
+    ? (players.min === players.max ? `${players.min} giocatori` : `${players.min}–${players.max} giocatori`)
+    : "giocatori —";
+  const timeText = playTime.playing
+    ? `${playTime.playing} min`
+    : playTime.max
+      ? `≤ ${playTime.max} min`
+      : "durata —";
+  const ratingText = Number.isFinite(Number(bgg.average))
+    ? Number(bgg.average).toFixed(1)
+    : "—";
+  const weightText = Number.isFinite(Number(bgg.average_weight))
+    ? Number(bgg.average_weight).toFixed(1)
+    : "—";
+  const mechanics = Array.isArray(item.mechanics) ? item.mechanics.slice(0, 4) : [];
+  const cover = item.cover_url
+    ? `<img src="${escapeHtml(item.cover_url)}" alt="" loading="lazy">`
+    : '<span aria-hidden="true">BGC</span>';
+  return `
+    <article class="suggestion-card">
+      <div class="suggestion-rank">#${index + 1}</div>
+      <div class="suggestion-cover">${cover}</div>
+      <div class="suggestion-body">
+        <div class="suggestion-heading">
+          <div>
+            <h2>${escapeHtml(item.title || `BGG #${item.bgg_id}`)}</h2>
+            <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
+          </div>
+          <div class="suggestion-score">
+            <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
+            <small>affinità</small>
+          </div>
+        </div>
+        <p class="suggestion-reason">${escapeHtml(item.reason || "")}</p>
+        <div class="suggestion-facts">
+          <span>${escapeHtml(playerText)}</span>
+          <span>${escapeHtml(timeText)}</span>
+          <span>BGG ${escapeHtml(ratingText)}</span>
+          <span>Peso ${escapeHtml(weightText)}</span>
+        </div>
+        <div class="suggestion-tags">
+          ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+        </div>
+        <a class="button button-ghost suggestion-open"
+           href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+           target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+      </div>
+    </article>
+  `;
+}
+
+
+async function renderSuggestions({forceRefresh = false} = {}) {
+  document.title = "Suggerimenti · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="suggestions-page">
+      <header class="suggestions-header">
+        <div>
+          <p class="eyebrow">Scopri</p>
+          <h1>Suggerimenti</h1>
+          <p>10 giochi che non possiedi, selezionati confrontando i dati BGG verificati con il profilo della tua ludoteca.</p>
+        </div>
+        <button class="button button-ghost" id="suggestionsRefresh" type="button">↻ Aggiorna</button>
+      </header>
+      <div id="suggestionsSummary" class="suggestions-summary">
+        <span class="muted">Analisi del profilo e dei candidati BGG…</span>
+      </div>
+      <div id="suggestionsGrid" class="suggestions-grid" aria-live="polite">
+        ${skeletons()}
+      </div>
+    </section>
+  `;
+
+  document.querySelector("#suggestionsRefresh")?.addEventListener("click", () => {
+    void renderSuggestions({forceRefresh: true});
+  });
+
+  const grid = document.querySelector("#suggestionsGrid");
+  const summary = document.querySelector("#suggestionsSummary");
+  try {
+    const params = new URLSearchParams({limit: "10"});
+    if (forceRefresh) params.set("refresh", "true");
+    const payload = await api(`/api/catalog/suggestions?${params.toString()}`);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const profile = payload.profile || {};
+    const topMechanics = Array.isArray(profile.top_mechanics)
+      ? profile.top_mechanics.slice(0, 4).map((entry) => entry?.[0]).filter(Boolean)
+      : [];
+    summary.innerHTML = `
+      <div>
+        <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
+        <span class="muted">Pool BGG: ${formatNumber(payload.candidate_count || 0, 0)} · posseduti esclusi: ${formatNumber(payload.owned_excluded_count || 0, 0)}</span>
+      </div>
+      <div class="suggestions-profile">
+        ${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
+        <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
+      </div>
+    `;
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state"><strong>Nessun candidato disponibile</strong><p class="muted">Riprova con Aggiorna o verifica il token BGG nelle Impostazioni.</p></div>';
+      return;
+    }
+    grid.innerHTML = items.map(suggestionCard).join("");
+  } catch (error) {
+    grid.innerHTML = `<div class="empty-state"><strong>Impossibile generare i suggerimenti</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+
 async function renderCrowdfunding({forceRefresh = false} = {}) {
   document.title = "Crowdfunding · BoardGameCompanion";
   const sortOptions = [
@@ -4978,6 +5097,10 @@ async function route() {
   }
   if (/^\/rankings\/?$/.test(window.location.pathname)) {
     await renderRankings();
+    return;
+  }
+  if (/^\/suggestions\/?$/.test(window.location.pathname)) {
+    await renderSuggestions();
     return;
   }
   if (/^\/crowdfunding\/?$/.test(window.location.pathname)) {
