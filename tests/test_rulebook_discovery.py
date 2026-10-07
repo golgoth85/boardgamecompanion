@@ -878,7 +878,7 @@ class CountingProvider(StaticProvider):
         return super().discover(query)
 
 
-def test_second_line_providers_are_skipped_when_official_it_or_en_exists(tmp_path: Path) -> None:
+def test_second_line_providers_are_skipped_when_official_it_exists(tmp_path: Path) -> None:
     db = database(tmp_path)
     official = CountingProvider(
         "official-primary",
@@ -886,8 +886,8 @@ def test_second_line_providers_are_skipped_when_official_it_or_en_exists(tmp_pat
             candidate(
                 provider="official-primary",
                 source="official_publisher",
-                language="en",
-                url="https://publisher.example/rules-en.pdf",
+                language="it",
+                url="https://publisher.example/rules-it.pdf",
                 official=True,
                 confidence=100,
             ),
@@ -900,7 +900,7 @@ def test_second_line_providers_are_skipped_when_official_it_or_en_exists(tmp_pat
                 provider="bgg_google_search",
                 source="community",
                 language="it",
-                url="https://cdn.1j1ju.com/medias/example/rules-it.pdf",
+                url="https://cdn.1j1ju.com/medias/example/community-it.pdf",
                 official=False,
                 confidence=70,
             ),
@@ -923,6 +923,67 @@ def test_second_line_providers_are_skipped_when_official_it_or_en_exists(tmp_pat
     assert [item["candidate"]["provider"] for item in result["review_items"]] == [
         "official-primary"
     ]
+
+
+def test_second_line_searches_it_for_en_only_without_replacing_official_en(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    official_en = candidate(
+        provider="official-primary",
+        source="official_publisher",
+        language="en",
+        url="https://publisher.example/rules-en.pdf",
+        official=True,
+        confidence=100,
+    )
+    community_it = candidate(
+        provider="bgg_google_search",
+        source="community",
+        language="it",
+        url="https://cdn.1j1ju.com/medias/example/rules-it.pdf",
+        official=False,
+        confidence=70,
+    )
+    redundant_community_en = candidate(
+        provider="bgg_google_search",
+        source="community",
+        language="en",
+        url="https://cdn.1j1ju.com/medias/example/community-en.pdf",
+        official=False,
+        confidence=70,
+    )
+    official = CountingProvider("official-primary", (official_en,))
+    bgg = CountingProvider(
+        "bgg_google_search",
+        (community_it, redundant_community_en),
+    )
+    service = RulebookDiscoveryService(
+        db,
+        (official,),
+        fallback_providers=(bgg,),
+        refresh_seconds=3600,
+        empty_refresh_seconds=3600,
+    )
+    service.synchronize_catalog()
+    result = service.run_game(173346)
+
+    assert official.calls == 1
+    assert bgg.calls == 1
+    assert result["providers_queried"] == 2
+    assert result["candidates_found"] == 2
+    assert [
+        (item["candidate"]["provider"], item["candidate"]["language"])
+        for item in result["review_items"]
+    ] == [
+        ("official-primary", "en"),
+        ("bgg_google_search", "it"),
+    ]
+    community = next(
+        item
+        for item in result["review_items"]
+        if item["candidate"]["provider"] == "bgg_google_search"
+    )
+    assert community["policy_action"] == "review"
+    assert community["candidate"]["official"] is False
 
 
 def test_second_line_bgg_runs_after_official_miss_and_remains_review_gated(tmp_path: Path) -> None:
