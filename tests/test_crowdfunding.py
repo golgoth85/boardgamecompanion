@@ -356,3 +356,51 @@ def test_newly_configured_kickstarter_fetches_even_with_fresh_gamefound_cache(
         item["platform_project_id"] == "first-fetch"
         for item in payload["items"]
     )
+
+
+
+def test_unconfigured_kickstarter_does_not_serve_old_cached_rows(tmp_path: Path) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "cached-before-disable",
+                funds=90_000,
+                currency="EUR",
+                backers=2_100,
+                hours_left=96,
+            )
+        ]
+    )
+    enabled = service(tmp_path)
+    enabled.kickstarter = ks
+    enabled.list_campaigns(refresh=True)
+
+    disabled = service(tmp_path)
+    payload = disabled.list_campaigns()
+
+    assert payload["providers"]["kickstarter"]["status"] == "configuration_required"
+    assert all(item["platform"] != "kickstarter" for item in payload["items"])
+
+
+def test_gamefound_error_is_not_marked_stale_from_kickstarter_only_cache(
+    tmp_path: Path,
+) -> None:
+    ks = FakeKickstarter(
+        [
+            kickstarter_campaign(
+                "ks-only",
+                funds=120_000,
+                currency="EUR",
+                backers=3_000,
+                hours_left=120,
+            )
+        ]
+    )
+    subject = service(tmp_path)
+    subject.kickstarter = ks
+    subject.gamefound.fail = True
+
+    payload = subject.list_campaigns(refresh=True)
+
+    assert payload["providers"]["gamefound"]["status"] == "error"
+    assert payload["providers"]["kickstarter"]["status"] == "ok"
