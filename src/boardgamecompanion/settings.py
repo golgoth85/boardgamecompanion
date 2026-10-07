@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     bgg_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     bgg_min_interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
     bgg_metadata_refresh_seconds: int = Field(default=30 * 24 * 60 * 60, ge=86400, le=365 * 24 * 60 * 60)
+    suggestions_cache_ttl_seconds: int = Field(default=24 * 60 * 60, ge=3600, le=7 * 24 * 60 * 60)
+    suggestions_candidate_limit: int = Field(default=50, ge=20, le=100)
     bgg_collection_sync_interval_seconds: int = Field(
         default=6 * 60 * 60,
         ge=15 * 60,
@@ -164,6 +166,10 @@ class Settings(BaseSettings):
     @property
     def effective_generation_provider(self) -> Literal["ollama", "lmstudio", "gemini"]:
         return self.generation_provider or self.rag_provider
+
+    @property
+    def suggestions_cache_path(self) -> Path:
+        return self.config_dir / "suggestions-cache.json"
 
     @property
     def crowdfunding_cache_path(self) -> Path:
