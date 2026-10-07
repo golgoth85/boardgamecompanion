@@ -420,7 +420,7 @@ class RagSettingsUpdate(BaseModel):
     lmstudio_generation_timeout_seconds: float = Field(default=300.0, ge=1.0, le=900.0)
     lmstudio_generation_max_tokens: int = Field(default=512, ge=64, le=4096)
     lmstudio_generation_disable_thinking: bool = True
-    lmstudio_wol_enabled: bool = True
+    lmstudio_wol_enabled: bool | None = None
     gemini_url: str | None = Field(default=None, max_length=4096)
     gemini_api_key: str | None = Field(default=None, max_length=4096)
     clear_gemini_api_key: bool = False
@@ -2028,6 +2028,7 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
     database = get_database()
     database.initialize()
     try:
+        current = resolve_rag_settings(database)
         resolved = save_rag_settings(
             database,
             embedding_provider_order=tuple(payload.embedding_provider_order),
@@ -2043,7 +2044,11 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
             lmstudio_generation_timeout_seconds=payload.lmstudio_generation_timeout_seconds,
             lmstudio_generation_max_tokens=payload.lmstudio_generation_max_tokens,
             lmstudio_generation_disable_thinking=payload.lmstudio_generation_disable_thinking,
-            lmstudio_wol_enabled=payload.lmstudio_wol_enabled,
+            lmstudio_wol_enabled=(
+                current.lmstudio_wol_enabled
+                if payload.lmstudio_wol_enabled is None
+                else payload.lmstudio_wol_enabled
+            ),
             gemini_url=payload.gemini_url,
             gemini_api_key=payload.gemini_api_key,
             clear_gemini_api_key=payload.clear_gemini_api_key,
