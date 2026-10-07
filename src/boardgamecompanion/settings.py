@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     lmstudio_embedding_timeout_seconds: float = Field(
         default=60.0, ge=1.0, le=600.0
     )
+    lmstudio_wol_mac: str | None = None
+    lmstudio_wol_broadcast: str = "192.168.1.255"
+    lmstudio_wol_port: int = Field(default=9, ge=1, le=65535)
+    lmstudio_wol_wait_seconds: float = Field(default=90.0, ge=5.0, le=300.0)
+    lmstudio_wol_probe_interval_seconds: float = Field(
+        default=2.0, ge=0.25, le=10.0
+    )
     lmstudio_generation_model: str | None = None
     lmstudio_generation_timeout_seconds: float = Field(
         default=300.0, ge=1.0, le=900.0
