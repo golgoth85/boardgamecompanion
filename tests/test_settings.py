@@ -134,7 +134,7 @@ def test_rag_settings_persist_priority_and_hide_secrets(tmp_path: Path) -> None:
         "gemini_url": "https://generativelanguage.googleapis.com",
         "gemini_api_key": "gemini-secret",
         "gemini_embedding_model": "gemini-embedding-2",
-        "gemini_generation_model": "gemini-3.8-flash",
+        "gemini_generation_model": "gemini-3.5-flash-lite",
     }
 
     with TestClient(app) as client:
