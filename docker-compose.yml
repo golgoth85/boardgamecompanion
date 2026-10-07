@@ -25,7 +25,7 @@ services:
       # BGC_APIFY_TOKEN: ""
       # BGC_KICKSTARTER_APIFY_ACTOR: fetchfinch~kickstarter-scraper
       # BGC_KICKSTARTER_MAX_ITEMS: "60"
-      # BGC_KICKSTARTER_MAX_PAGES: "5"
+      # BGC_KICKSTARTER_MAX_PAGES: "2"
       # BGC_KICKSTARTER_CACHE_TTL_SECONDS: "43200"
       # Gemini (API key required; never commit it):
       # BGC_GEMINI_API_KEY: ""
