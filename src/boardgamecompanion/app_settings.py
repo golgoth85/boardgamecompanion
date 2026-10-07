@@ -319,6 +319,7 @@ class ResolvedRagSettings:
     lmstudio_generation_timeout_seconds: float
     lmstudio_generation_max_tokens: int
     lmstudio_generation_disable_thinking: bool
+    lmstudio_wol_enabled: bool
     gemini_url: str
     gemini_api_key: str | None
     gemini_api_key_source: str | None
@@ -355,6 +356,7 @@ class ResolvedRagSettings:
                     "generation_timeout_seconds": self.lmstudio_generation_timeout_seconds,
                     "generation_max_tokens": self.lmstudio_generation_max_tokens,
                     "generation_disable_thinking": self.lmstudio_generation_disable_thinking,
+                    "wol_enabled": self.lmstudio_wol_enabled,
                 },
                 "gemini": {
                     "url": self.gemini_url,
@@ -382,6 +384,7 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
         "rag_lmstudio_generation_timeout_seconds",
         "rag_lmstudio_generation_max_tokens",
         "rag_lmstudio_generation_disable_thinking",
+        "rag_lmstudio_wol_enabled",
         "rag_gemini_url",
         "rag_gemini_api_key",
         "rag_gemini_embedding_model",
@@ -437,6 +440,11 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
             values["rag_lmstudio_generation_disable_thinking"] != "false"
             if values["rag_lmstudio_generation_disable_thinking"] is not None
             else settings.lmstudio_generation_disable_thinking
+        ),
+        lmstudio_wol_enabled=(
+            values["rag_lmstudio_wol_enabled"] != "false"
+            if values["rag_lmstudio_wol_enabled"] is not None
+            else settings.lmstudio_wol_enabled
         ),
         gemini_url=values["rag_gemini_url"] or settings.gemini_url,
         gemini_api_key=gemini_api_key,
@@ -494,6 +502,7 @@ def save_rag_settings(
     lmstudio_generation_timeout_seconds: float,
     lmstudio_generation_max_tokens: int,
     lmstudio_generation_disable_thinking: bool,
+    lmstudio_wol_enabled: bool,
     gemini_url: str | None,
     gemini_api_key: str | None,
     clear_gemini_api_key: bool,
@@ -522,6 +531,9 @@ def save_rag_settings(
         "rag_lmstudio_generation_max_tokens": str(lmstudio_generation_max_tokens),
         "rag_lmstudio_generation_disable_thinking": (
             "true" if lmstudio_generation_disable_thinking else "false"
+        ),
+        "rag_lmstudio_wol_enabled": (
+            "true" if lmstudio_wol_enabled else "false"
         ),
         "rag_gemini_url": (gemini_url or "").strip() or None,
         "rag_gemini_embedding_model": (gemini_embedding_model or "").strip() or None,
