@@ -4728,8 +4728,14 @@ function crowdfundingProviderNotice(payload) {
   } else if (gamefound.status === "error") {
     notices.push("Gamefound non è al momento disponibile e non esiste ancora una cache valida.");
   }
-  if (crowdfundingState.platform !== "gamefound" && kickstarter.status === "unavailable") {
-    notices.push("Kickstarter: integrazione sospesa finché non è disponibile una fonte pubblica e autorizzata stabile; non vengono usate API interne o scraping fragile.");
+  if (crowdfundingState.platform !== "gamefound") {
+    if (kickstarter.status === "configuration_required") {
+      notices.push("Kickstarter è predisposto tramite Apify ma non è configurato: serve BGC_APIFY_TOKEN.");
+    } else if (kickstarter.status === "stale") {
+      notices.push("Kickstarter/Apify temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
+    } else if (kickstarter.status === "error") {
+      notices.push("Kickstarter/Apify non è al momento disponibile e non esiste ancora una cache valida.");
+    }
   }
   return notices.length
     ? `<div class="crowdfunding-source-note">${notices.map((text) => `<p>${escapeHtml(text)}</p>`).join("")}</div>`
@@ -4814,14 +4820,24 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
     ` + crowdfundingProviderNotice(payload);
 
     if (!items.length) {
-      const upcomingUnsupported = crowdfundingState.sort === "upcoming"
+      const gamefoundOnlyUpcoming = crowdfundingState.sort === "upcoming"
+        && crowdfundingState.platform === "gamefound"
         && payload.providers?.gamefound?.supports_upcoming === false;
+      const kickstarterNeedsConfig = crowdfundingState.sort === "upcoming"
+        && crowdfundingState.platform !== "gamefound"
+        && payload.providers?.kickstarter?.status === "configuration_required";
       grid.innerHTML = `
         <div class="empty-state crowdfunding-empty">
-          <strong>${upcomingUnsupported ? "Upcoming non esposti dalla Public API" : "Nessun progetto disponibile"}</strong>
-          <p class="muted">${upcomingUnsupported
-            ? "Gamefound mostra progetti upcoming sul sito, ma la Public API documentata espone al momento solo le campagne attive. Non uso scraping come sostituto."
-            : "Prova un’altra piattaforma o classifica."}</p>
+          <strong>${gamefoundOnlyUpcoming
+            ? "Upcoming non esposti dalla Public API Gamefound"
+            : kickstarterNeedsConfig
+              ? "Configura Kickstarter/Apify per gli upcoming"
+              : "Nessun progetto disponibile"}</strong>
+          <p class="muted">${gamefoundOnlyUpcoming
+            ? "La Public API documentata di Gamefound espone al momento solo le campagne attive."
+            : kickstarterNeedsConfig
+              ? "Imposta BGC_APIFY_TOKEN: il provider Kickstarter è già predisposto e supporta anche le campagne upcoming."
+              : "Prova un’altra piattaforma o classifica."}</p>
         </div>
       `;
       return;
