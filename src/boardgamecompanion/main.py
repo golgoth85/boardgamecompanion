@@ -903,11 +903,13 @@ def explore_catalog(
 def get_catalog_suggestions(
     limit: int = Query(default=10, ge=1, le=25),
     refresh: bool = Query(default=False),
+    sort: str = Query(default="for_you", pattern="^(for_you|novelty|bgg)$"),
 ) -> dict[str, object]:
     try:
         return get_suggestions_service().list_suggestions(
             limit=limit,
             refresh=refresh,
+            sort=sort,
         )
     except SuggestionsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
