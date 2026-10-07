@@ -487,7 +487,7 @@ class GeminiEmbeddingProvider:
         verify_tls: bool,
         client: httpx.Client | None = None,
         rate_limiter: Callable[[str, float], None] | None = None,
-        min_interval_seconds: float = 0.0,
+        min_interval_seconds_per_input: float = 0.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = validate_gemini_model_id(model)
@@ -497,13 +497,17 @@ class GeminiEmbeddingProvider:
         self.verify_tls = bool(verify_tls)
         self._client = client
         self.rate_limiter = rate_limiter
-        self.min_interval_seconds = float(min_interval_seconds)
+        self.min_interval_seconds_per_input = float(
+            min_interval_seconds_per_input
+        )
         if not self.base_url.startswith("https://"):
             raise ValueError("Gemini URL must use https://")
         if not self.api_key:
             raise ValueError("Gemini API key is required")
-        if self.min_interval_seconds < 0:
-            raise ValueError("min_interval_seconds must be non-negative")
+        if self.min_interval_seconds_per_input < 0:
+            raise ValueError(
+                "min_interval_seconds_per_input must be non-negative"
+            )
 
     @staticmethod
     def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
@@ -543,20 +547,17 @@ class GeminiEmbeddingProvider:
         return min(60.0, delay)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        rate_limit_interval = float(kwargs.pop("_rate_limit_interval", 0.0))
         headers = dict(kwargs.pop("headers", {}))
         headers["x-goog-api-key"] = self.api_key
         retryable_statuses = {429, 500, 502, 503, 504}
         max_attempts = 5
 
         for attempt in range(max_attempts):
-            if (
-                self.rate_limiter is not None
-                and method.upper() == "POST"
-                and path.endswith(":batchEmbedContents")
-            ):
+            if self.rate_limiter is not None and rate_limit_interval > 0:
                 self.rate_limiter(
                     "gemini:embedding-batch",
-                    self.min_interval_seconds,
+                    rate_limit_interval,
                 )
             try:
                 if self._client is not None:
@@ -653,6 +654,9 @@ class GeminiEmbeddingProvider:
         response = self._request(
             "POST",
             f"/v1beta/models/{descriptor.model}:batchEmbedContents",
+            _rate_limit_interval=(
+                self.min_interval_seconds_per_input * len(requests)
+            ),
             json={"requests": requests},
         )
         try:
