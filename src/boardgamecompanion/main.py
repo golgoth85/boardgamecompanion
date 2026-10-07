@@ -1265,6 +1265,11 @@ def _embedding_retrieval_service_for(
             timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
             api_key=rag.lmstudio_api_key,
+            wol_mac=settings.lmstudio_wol_mac,
+            wol_broadcast=settings.lmstudio_wol_broadcast,
+            wol_port=settings.lmstudio_wol_port,
+            wol_wait_seconds=settings.lmstudio_wol_wait_seconds,
+            wol_probe_interval_seconds=settings.lmstudio_wol_probe_interval_seconds,
         )
         batch_size = settings.lmstudio_embedding_batch_size
     elif selected == "gemini":
