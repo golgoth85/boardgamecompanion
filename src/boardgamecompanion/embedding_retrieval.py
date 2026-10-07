@@ -11,7 +11,7 @@ from array import array
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
@@ -486,6 +486,8 @@ class GeminiEmbeddingProvider:
         timeout_seconds: float,
         verify_tls: bool,
         client: httpx.Client | None = None,
+        rate_limiter: Callable[[str, float], None] | None = None,
+        min_interval_seconds: float = 0.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = validate_gemini_model_id(model)
@@ -494,10 +496,14 @@ class GeminiEmbeddingProvider:
         self.timeout_seconds = float(timeout_seconds)
         self.verify_tls = bool(verify_tls)
         self._client = client
+        self.rate_limiter = rate_limiter
+        self.min_interval_seconds = float(min_interval_seconds)
         if not self.base_url.startswith("https://"):
             raise ValueError("Gemini URL must use https://")
         if not self.api_key:
             raise ValueError("Gemini API key is required")
+        if self.min_interval_seconds < 0:
+            raise ValueError("min_interval_seconds must be non-negative")
 
     @staticmethod
     def _retry_delay(response: httpx.Response, *, fallback: float) -> float:
@@ -543,6 +549,15 @@ class GeminiEmbeddingProvider:
         max_attempts = 5
 
         for attempt in range(max_attempts):
+            if (
+                self.rate_limiter is not None
+                and method.upper() == "POST"
+                and path.endswith(":batchEmbedContents")
+            ):
+                self.rate_limiter(
+                    "gemini:embedding-batch",
+                    self.min_interval_seconds,
+                )
             try:
                 if self._client is not None:
                     response = self._client.request(
