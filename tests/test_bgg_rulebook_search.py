@@ -134,6 +134,61 @@ def test_non_bgg_source_or_unapproved_transport_is_rejected():
     assert results == ()
 
 
+def test_bgg_429_exposes_sanitized_quota_failure_without_response_message():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": 429,
+                    "status": "RESOURCE_EXHAUSTED",
+                    "message": "sensitive project-specific quota message",
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                            "violations": [
+                                {
+                                    "quotaId": "GroundingSearchRequestsPerDay-FreeTier",
+                                    "quotaValue": "0",
+                                    "quotaDimensions": {
+                                        "project": "must-not-leak",
+                                        "model": "gemini-3.5-flash-lite",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+            request=request,
+        )
+
+    client = httpx.Client(
+        base_url="https://generativelanguage.googleapis.com",
+        transport=httpx.MockTransport(handler),
+    )
+    item = GeminiBggFileProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-3.5-flash-lite",
+        api_key="secret",
+        client=client,
+        max_attempts=1,
+    )
+
+    try:
+        tuple(item.discover(query()))
+    except Exception as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected quota failure")
+
+    assert "RESOURCE_EXHAUSTED" in message
+    assert "GroundingSearchRequestsPerDay-FreeTier" in message
+    assert "limit=0" in message
+    assert "sensitive project-specific quota message" not in message
+    assert "must-not-leak" not in message
+
+
 def test_http_429_is_retried_with_bounded_backoff_and_persistent_gate():
     source = "https://boardgamegeek.com/filepage/148606/official-english-rulebook"
     download = "https://cdn.1j1ju.com/medias/example/rules.pdf"
