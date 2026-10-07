@@ -549,7 +549,7 @@ def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> No
     assert len(requests) == 3
 
 
-def test_gemini_embedding_persistent_gate_runs_for_each_batch_attempt(monkeypatch) -> None:
+def test_gemini_embedding_persistent_gate_scales_with_input_count(monkeypatch) -> None:
     gates: list[tuple[str, float]] = []
     sleeps: list[float] = []
     attempts = 0
@@ -565,7 +565,12 @@ def test_gemini_embedding_persistent_gate_runs_for_each_batch_attempt(monkeypatc
             )
         return httpx.Response(
             200,
-            json={"embeddings": [{"values": [1.0, 0.0, 0.0, 0.0]}]},
+            json={
+                "embeddings": [
+                    {"values": [1.0, 0.0, 0.0, 0.0]},
+                    {"values": [0.0, 1.0, 0.0, 0.0]},
+                ]
+            },
             request=request,
         )
 
@@ -586,7 +591,7 @@ def test_gemini_embedding_persistent_gate_runs_for_each_batch_attempt(monkeypatc
         verify_tls=True,
         client=client,
         rate_limiter=lambda scope, interval: gates.append((scope, interval)),
-        min_interval_seconds=10.0,
+        min_interval_seconds_per_input=0.75,
     )
     descriptor = EmbeddingDescriptor(
         provider="gemini",
@@ -596,15 +601,18 @@ def test_gemini_embedding_persistent_gate_runs_for_each_batch_attempt(monkeypatc
         endpoint="https://gemini.test",
     )
 
-    vectors = provider.embed(["alpha"], descriptor)
+    vectors = provider.embed(["alpha", "beta"], descriptor)
 
     assert attempts == 2
     assert gates == [
-        ("gemini:embedding-batch", 10.0),
-        ("gemini:embedding-batch", 10.0),
+        ("gemini:embedding-batch", 1.5),
+        ("gemini:embedding-batch", 1.5),
     ]
     assert sleeps == [1.0]
-    assert vectors == [[1.0, 0.0, 0.0, 0.0]]
+    assert vectors == [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+    ]
 
 
 def test_gemini_embedding_honors_google_retryinfo_delay(monkeypatch) -> None:
