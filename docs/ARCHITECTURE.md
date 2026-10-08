@@ -65,7 +65,7 @@ Maps internal objects to optional external systems when a future adapter require
 
 ## Personal library foundation
 
-Personal state is additive to imported collection data. A 1–5 `personal_rating`, local
+Personal state is additive to imported collection data. A 0.5–5 `personal_rating` in 0.5 steps, local
 `played_at` marker and `completed_at` milestone live in `game_progress`; imported BGG
 `num_plays > 0` is also authoritative evidence that a title has been played. Clearing a
 local marker must not rewrite or deny imported play history. Completion implies played,
