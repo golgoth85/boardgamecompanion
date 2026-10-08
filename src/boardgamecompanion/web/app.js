@@ -4321,7 +4321,10 @@ async function renderRankings() {
 }
 
 function completionAchievementMarkup(game) {
-  const achievements = [{icon: "♛", label: "Completato"}];
+  const achievements = [{
+    icon: game.progress?.completed ? "♛" : "◇",
+    label: game.progress?.completed ? "Completato" : "Giocato",
+  }];
   const weight = Number(game.bgg?.average_weight || 0);
   const minutes = Number(
     game.play_time?.max || game.play_time?.playing || game.play_time?.min || 0
@@ -4337,19 +4340,23 @@ function trophyGameCard(game, {compact = false} = {}) {
   const cover = game.bgg_metadata?.cover_url
     ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`;
-  const completedAt = game.progress?.completed_at
-    ? new Date(game.progress.completed_at + "T12:00:00").toLocaleDateString("it-IT", {
+  const milestoneAt = game.progress?.completed_at || game.progress?.played_at || null;
+  const milestoneLabel = game.progress?.completed ? "Completato" : "Giocato";
+  const milestoneDate = milestoneAt
+    ? new Date(milestoneAt + "T12:00:00").toLocaleDateString("it-IT", {
         year: "numeric", month: "short", day: "numeric",
       })
     : null;
   return `
     <a class="trophy-card ${compact ? "is-compact" : ""}"
        href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
-      <span class="trophy-crown" aria-hidden="true">♛</span>
+      <span class="trophy-crown" aria-hidden="true">${game.progress?.completed ? "♛" : "◇"}</span>
       <span class="trophy-cover">${cover}</span>
       <span class="trophy-card-body">
         <strong>${escapeHtml(game.title)}</strong>
-        <small>${completedAt ? `Registrato il ${escapeHtml(completedAt)}` : "Completato"}</small>
+        <small>${milestoneDate
+          ? `${milestoneLabel} · ${escapeHtml(milestoneDate)}`
+          : milestoneLabel}</small>
         <span class="trophy-achievements">${completionAchievementMarkup(game)}</span>
       </span>
     </a>
@@ -4362,7 +4369,7 @@ async function refreshAchievementShowcase() {
   if (!showcase || !grid) return;
   try {
     const payload = await api(
-      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=4&offset=0"
+      "/api/games?owned=true&item_type=standalone&played=true&sort=played_desc&limit=4&offset=0"
     );
     if (!showcase.isConnected || !grid.isConnected) return;
     if (!payload.items.length) {
@@ -4383,7 +4390,7 @@ async function renderCompleted() {
         <p class="eyebrow">La mia ludoteca</p>
         <h1>Sala dei trofei</h1>
         <p class="page-lead">
-          I giochi che hai portato fino in fondo. Nessun punteggio: solo traguardi personali.
+          I giochi che hai davvero portato al tavolo: campagne concluse e giochi giocati, senza forzare falsi “completamenti”.
         </p>
       </div>
       <span class="trophy-hero-mark" aria-hidden="true">♛</span>
@@ -4392,7 +4399,7 @@ async function renderCompleted() {
   `;
   try {
     const payload = await api(
-      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=250&offset=0"
+      "/api/games?owned=true&item_type=standalone&played=true&sort=played_desc&limit=250&offset=0"
     );
     const target = document.querySelector("#trophyWall");
     if (!target) return;
@@ -4400,9 +4407,9 @@ async function renderCompleted() {
       ? payload.items.map((game) => trophyGameCard(game)).join("")
       : `<div class="empty trophy-empty">
           <strong>La Sala dei trofei è ancora vuota.</strong>
-          <span>Apri la scheda di un gioco e usa “Segna completato” quando vuoi esporlo qui.</span>
+          <span>Apri la scheda di un gioco e usa “Segna giocato” oppure “Segna completato”.</span>
         </div>`;
-    document.title = "Completati · BoardGameCompanion";
+    document.title = "Sala dei trofei · BoardGameCompanion";
   } catch (error) {
     document.querySelector("#trophyWall").innerHTML =
       `<div class="empty">${escapeHtml(error.message)}</div>`;
