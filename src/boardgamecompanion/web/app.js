@@ -12,6 +12,7 @@ import {
   rankingState,
   state,
 } from "./state.js";
+import {escapeHtml, formatNumber, initials} from "./ui-utils.js";
 
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
@@ -237,15 +238,6 @@ let documentBusy = false;
 let documentBggId = null;
 let metadataBackfillRunning = false;
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 // Human-reviewed web search: no Google API, scraping, or automatic PDF trust.
 function googleRulebookSearchUrl(title) {
   // URL encoding protects the href; this separately keeps untrusted game names
@@ -259,17 +251,6 @@ function googleRulebookSearchUrl(title) {
     ? `"${gameTitle}" regolamento italiano pdf`
     : "regolamento italiano pdf";
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-}
-
-function initials(title) {
-  const words = String(title || "?").trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return "?";
-  return words.slice(0, 3).map((word) => word[0]).join("").toUpperCase();
-}
-
-function formatNumber(value, digits = 1) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  return Number(value).toLocaleString("it-IT", { maximumFractionDigits: digits });
 }
 
 function formatCampaignMoney(value, currency) {
