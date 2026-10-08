@@ -5068,6 +5068,9 @@ function crowdfundingStatusLabel(item) {
 
 function crowdfundingCard(item) {
   const funds = formatCampaignMoney(item.funds, item.currency);
+  const platform = String(item.platform || "gamefound").toLowerCase();
+  const sourceKey = String(item.project_url || item.id || item.title || "");
+  const wishlist = wishlistEntry("crowdfunding", sourceKey);
   const goal = Number(item.goal) > 0 ? formatCampaignMoney(item.goal, item.currency) : "—";
   const percent = item.funding_percent === null || item.funding_percent === undefined
     ? "—"
@@ -5083,7 +5086,7 @@ function crowdfundingCard(item) {
         ${item.image_url
           ? `<img src="${escapeHtml(item.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
-        <span class="crowdfunding-platform">Gamefound</span>
+        <span class="crowdfunding-platform">${escapeHtml(platform === "kickstarter" ? "Kickstarter" : "Gamefound")}</span>
         <span class="crowdfunding-status ${item.status === "ending_soon" ? "is-ending" : ""}">${escapeHtml(status)}</span>
       </a>
       <div class="crowdfunding-card-body">
@@ -5102,9 +5105,22 @@ function crowdfundingCard(item) {
           ${remaining ? `<span><strong>${escapeHtml(remaining)}</strong> rimasti</span>` : ""}
           <span class="crowdfunding-score">${escapeHtml(score.replace(/^ · /, ""))}</span>
         </div>
-        <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
-          Apri campagna ↗
-        </a>
+        <div class="crowdfunding-card-actions">
+          <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
+            Apri campagna ↗
+          </a>
+          <button class="button button-ghost wishlist-action ${wishlist ? "is-active" : ""}"
+                  type="button"
+                  data-wishlist-source-kind="crowdfunding"
+                  data-wishlist-source-key="${escapeHtml(sourceKey)}"
+                  data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
+                  data-wishlist-title="${escapeHtml(item.title || "")}"
+                  data-wishlist-cover="${escapeHtml(item.image_url || "")}"
+                  data-wishlist-target="${escapeHtml(item.project_url || "")}"
+                  data-wishlist-platform="${escapeHtml(platform)}">
+            ${wishlist ? "♥ In Wishlist" : "♡ Wishlist"}
+          </button>
+        </div>
       </div>
     </article>
   `;
@@ -5142,6 +5158,8 @@ function crowdfundingProviderNotice(payload) {
 
 function suggestionCard(item, index) {
   const players = item.players || {};
+  const suggestionSourceKey = String(item.bgg_id || "");
+  const wishlist = wishlistEntry("bgg", suggestionSourceKey);
   const playTime = item.play_time || {};
   const bgg = item.bgg || {};
   const overview = item.overview || {};
@@ -5197,6 +5215,18 @@ function suggestionCard(item, index) {
               <a class="button button-ghost suggestion-open"
                  href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
                  target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+              <button class="button button-ghost wishlist-action ${wishlist ? "is-active" : ""}"
+                      type="button"
+                      data-wishlist-source-kind="bgg"
+                      data-wishlist-source-key="${escapeHtml(suggestionSourceKey)}"
+                      data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
+                      data-wishlist-bgg-id="${Number(item.bgg_id)}"
+                      data-wishlist-title="${escapeHtml(title)}"
+                      data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
+                      data-wishlist-cover="${escapeHtml(item.cover_url || "")}"
+                      data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
+                ${wishlist ? "♥ In Wishlist" : "♡ Wishlist"}
+              </button>
             </div>
           </div>
 
@@ -5293,7 +5323,10 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       sort: suggestionsState.sort,
     });
     if (forceRefresh) params.set("refresh", "true");
-    const payload = await api(`/api/catalog/suggestions?${params.toString()}`);
+    const [payload] = await Promise.all([
+      api(`/api/catalog/suggestions?${params.toString()}`),
+      refreshWishlistIndex().catch(() => null),
+    ]);
     const items = Array.isArray(payload.items) ? payload.items : [];
     const profile = payload.profile || {};
     const topMechanics = Array.isArray(profile.top_mechanics)
@@ -5307,11 +5340,10 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
-        <span class="muted">${escapeHtml(sortLabel)} · pool BGG ${formatNumber(payload.candidate_count || 0, 0)} · posseduti esclusi ${formatNumber(payload.owned_excluded_count || 0, 0)}</span>
+        <span class="muted">${escapeHtml(sortLabel)}</span>
       </div>
       <div class="suggestions-profile">
         ${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-        <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
       </div>
     `;
     if (!items.length) {
@@ -5319,6 +5351,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       return;
     }
     grid.innerHTML = items.map(suggestionCard).join("");
+    bindWishlistActions(grid);
   } catch (error) {
     grid.innerHTML = `<div class="empty-state"><strong>Impossibile generare i suggerimenti</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
@@ -5390,7 +5423,10 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       limit: "60",
     });
     if (forceRefresh) params.set("refresh", "true");
-    const payload = await api(`/api/crowdfunding?${params.toString()}`);
+    const [payload] = await Promise.all([
+      api(`/api/crowdfunding?${params.toString()}`),
+      refreshWishlistIndex().catch(() => null),
+    ]);
     const items = Array.isArray(payload.items) ? payload.items : [];
     const rankingText = payload.ranking?.[crowdfundingState.sort];
     summary.innerHTML = `
@@ -5398,7 +5434,6 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
         <strong>${formatNumber(payload.total_matching || 0, 0)} progetti</strong>
         <span class="muted">${rankingText ? escapeHtml(rankingText) : "Dati aggiornati dalla cache locale."}</span>
       </div>
-      <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
     ` + crowdfundingProviderNotice(payload);
 
     document.querySelector("#configureApifyFromCrowdfunding")?.addEventListener("click", () => {
@@ -5435,6 +5470,7 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       return;
     }
     grid.innerHTML = items.map(crowdfundingCard).join("");
+    bindWishlistActions(grid);
   } catch (error) {
     grid.innerHTML = `<div class="empty-state crowdfunding-empty"><strong>Impossibile caricare il crowdfunding</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
