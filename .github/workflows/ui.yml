@@ -2,9 +2,6 @@ name: UI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/ui-polish-navigation-20261008
 
 permissions:
   contents: read
@@ -21,6 +18,6 @@ jobs:
       - name: Install application and browser test dependencies
         run: pip install -e ".[dev,e2e]"
       - name: Install Chromium
-        run: python -m playwright install chromium
+        run: python -m playwright install --with-deps chromium
       - name: End-to-end UI tests
         run: pytest -q tests/e2e
