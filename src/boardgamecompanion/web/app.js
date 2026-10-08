@@ -376,7 +376,13 @@ async function toggleWishlistButton(button) {
       await api(`/api/wishlist/${encodeURIComponent(existing.id)}`, {method: "DELETE"});
       wishlistIndex.delete(wishlistKey(sourceKind, sourceKey));
       button.classList.remove("is-active");
-      button.textContent = "♡ Wishlist";
+      if (button.classList.contains("wishlist-heart")) {
+        button.innerHTML = '<span aria-hidden="true">♡</span>';
+        button.setAttribute("aria-label", "Aggiungi alla wishlist");
+        button.setAttribute("title", "Aggiungi alla wishlist");
+      } else {
+        button.textContent = "♡ Wishlist";
+      }
       button.dataset.wishlistItemId = "";
       showToast("Rimosso dalla Wishlist.");
       if (/^\/wishlist\/?$/.test(window.location.pathname)) void renderWishlist();
@@ -405,7 +411,13 @@ async function toggleWishlistButton(button) {
     });
     wishlistIndex.set(wishlistKey(sourceKind, sourceKey), created);
     button.classList.add("is-active");
-    button.textContent = "♥ In Wishlist";
+    if (button.classList.contains("wishlist-heart")) {
+      button.innerHTML = '<span aria-hidden="true">♥</span>';
+      button.setAttribute("aria-label", "Rimuovi dalla wishlist");
+      button.setAttribute("title", "Rimuovi dalla wishlist");
+    } else {
+      button.textContent = "♥ In Wishlist";
+    }
     button.dataset.wishlistItemId = created.id;
     showToast("Aggiunto alla Wishlist.");
   } catch (error) {
