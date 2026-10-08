@@ -2229,7 +2229,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
 
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
         page.locator("#scannerBarcode").fill("1234567890123")
-        page.get_by_role("button", name="Cerca", exact=True).click()
+        page.locator("#lookupBarcode").click()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
         expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
 
