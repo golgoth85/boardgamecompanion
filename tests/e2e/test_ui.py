@@ -20,7 +20,7 @@ from playwright.sync_api import expect, sync_playwright  # noqa: E402
 SAMPLE = Path(__file__).parents[1] / "fixtures" / "bgg_collection_sample.csv"
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser():
     with sync_playwright() as p:
         launch_kwargs = {}
@@ -3069,7 +3069,12 @@ def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
         expect(page.locator(".saved-list-card")).to_have_count(1)
         expect(page.locator(".saved-list-card")).to_contain_text("Mai giocati")
         page.locator("[data-open-list]").click()
-        expect(page.locator(".saved-list-game-grid .game-card")).to_have_count(2)
+        # Synthetic Alpha has imported numplays=3 and is therefore already
+        # considered played. Only the expansion remains in "Mai giocati".
+        expect(page.locator(".saved-list-game-grid .game-card")).to_have_count(1)
+        expect(page.locator(".saved-list-game-grid .game-card")).to_contain_text(
+            "Synthetic Beta Expansion"
+        )
     finally:
         context.close()
 
