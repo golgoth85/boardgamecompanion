@@ -442,6 +442,7 @@
 
 .wishlist-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem}
 .wishlist-card{display:grid;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
+.wishlist-card.is-highlighted{outline:2px solid rgba(73,190,132,.62);outline-offset:2px}
 .wishlist-cover{display:grid;aspect-ratio:1/1;place-items:center;overflow:hidden;background:rgba(5,9,15,.55);text-decoration:none}
 .wishlist-cover img{width:100%;height:100%;object-fit:contain}
 .wishlist-card-body{display:grid;align-content:start;gap:.5rem;padding:.78rem}
