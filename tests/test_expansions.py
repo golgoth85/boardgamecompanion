@@ -91,6 +91,8 @@ def test_major_expansion_filter_excludes_minor_addons() -> None:
     assert minor_expansion_reason("Game: Promo Pack") == "promo"
     assert minor_expansion_reason("Game: Miniatures Set") == "miniature"
     assert minor_expansion_reason("Game: Metal Coins") == "coins"
+    assert minor_expansion_reason("Middara: Bounty Pack – The Pit Boss") == "content_pack"
+    assert minor_expansion_reason("Living Card Game: Chapter Pack") == "content_pack"
     assert minor_expansion_reason("Game: The Lost Kingdom") is None
 
 
