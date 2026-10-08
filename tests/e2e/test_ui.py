@@ -1464,7 +1464,10 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         assert sidebar_box["x"] >= 0
         assert sidebar_box["x"] + sidebar_box["width"] <= 390
         expect(page.locator("#appSidebar").get_by_role("button", name="Scansiona barcode")).to_have_count(0)
-        page.locator("#sidebarBackdrop").click()
+        backdrop = page.locator("#sidebarBackdrop")
+        backdrop_box = backdrop.bounding_box()
+        assert backdrop_box is not None
+        backdrop.click(position={"x": backdrop_box["width"] - 8, "y": 80})
 
         open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
