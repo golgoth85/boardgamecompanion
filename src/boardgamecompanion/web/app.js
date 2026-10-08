@@ -51,7 +51,6 @@ function updateShellNavigation() {
 }
 const importDialog = document.querySelector("#importDialog");
 const importButton = document.querySelector("#importButton");
-const importSidebarButton = document.querySelector("#importSidebarButton");
 const importForm = document.querySelector("#importForm");
 const csvFile = document.querySelector("#csvFile");
 const fileName = document.querySelector("#fileName");
@@ -6025,12 +6024,6 @@ importButton.addEventListener("click", () => {
   resetImportDialog();
   importDialog.showModal();
 });
-importSidebarButton?.addEventListener("click", () => {
-  closeSidebar();
-  resetImportDialog();
-  importDialog.showModal();
-});
-
 cancelImport.addEventListener("click", closeImportDialog);
 closeImport.addEventListener("click", closeImportDialog);
 
