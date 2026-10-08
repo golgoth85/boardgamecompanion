@@ -3058,7 +3058,7 @@ def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
         page.get_by_role("button", name="Chiudi ricerca").click()
 
         page.goto(f"{live_server}/lists")
-        expect(page.get_by_role("heading", name="Liste")).to_be_visible()
+        expect(page.get_by_role("heading", name="Liste", exact=True)).to_be_visible()
         page.locator("#gameListName").fill("Mai giocati")
         page.locator("#gameListKind").select_option("smart")
         page.locator("#listPlayed").select_option("false")
