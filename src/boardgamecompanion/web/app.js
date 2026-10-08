@@ -13,6 +13,7 @@ import {
   state,
 } from "./state.js";
 import {escapeHtml, formatNumber, initials} from "./ui-utils.js";
+import {activateSettingsTab} from "./settings-ui.js";
 
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
@@ -686,20 +687,14 @@ function closeSettingsDialog() {
 }
 
 function setSettingsTab(name = "general") {
-  const active = ["general", "rulebooks", "providers", "crowdfunding", "diagnostics"].includes(name)
-    ? name
-    : "general";
-  settingsTabs.forEach((tab) => {
-    const selected = tab.dataset.settingsTab === active;
-    tab.classList.toggle("is-active", selected);
-    tab.setAttribute("aria-selected", selected ? "true" : "false");
+  activateSettingsTab({
+    name,
+    tabs: settingsTabs,
+    panels: settingsPanels,
+    saveSettings,
+    saveTestSettings,
+    onDiagnostics: () => void refreshDiagnostics(),
   });
-  settingsPanels.forEach((panel) => {
-    panel.hidden = panel.dataset.settingsPanel !== active;
-  });
-  if (saveSettings) saveSettings.hidden = ["rulebooks", "diagnostics"].includes(active);
-  if (saveTestSettings) saveTestSettings.hidden = active !== "general";
-  if (active === "diagnostics") void refreshDiagnostics();
 }
 
 function applyBggSettingsToForm(data) {
