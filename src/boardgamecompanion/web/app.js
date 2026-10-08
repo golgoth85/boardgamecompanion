@@ -448,6 +448,9 @@ async function performGlobalSearch() {
     const games = payload.groups?.games || [];
     const sections = payload.groups?.sections || [];
     const wishlist = payload.groups?.wishlist || [];
+    const lists = payload.groups?.lists || [];
+    const rulebooks = payload.groups?.rulebooks || [];
+    const crowdfunding = payload.groups?.crowdfunding || [];
     globalSearchResults.innerHTML = `
       ${games.length ? `
         <section class="global-search-group">
@@ -486,6 +489,45 @@ async function performGlobalSearch() {
           }).join("")}
         </section>
       ` : ""}
+      ${lists.length ? `
+        <section class="global-search-group">
+          <h3>Liste</h3>
+          ${lists.map((item) => `
+            <a class="global-search-result is-section" href="/lists" data-nav>
+              <span aria-hidden="true">☷</span>
+              <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? "Lista dinamica" : "Lista manuale"}</small></span>
+            </a>
+          `).join("")}
+        </section>
+      ` : ""}
+      ${rulebooks.length ? `
+        <section class="global-search-group">
+          <h3>Regolamenti</h3>
+          ${rulebooks.map((item) => `
+            <a class="global-search-result is-section" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+              <span aria-hidden="true">▤</span>
+              <span><strong>${escapeHtml(item.game_title)}</strong><small>${escapeHtml(item.title || "Regolamento")} · ${escapeHtml(item.language || "—")}</small></span>
+            </a>
+          `).join("")}
+        </section>
+      ` : ""}
+      ${crowdfunding.length ? `
+        <section class="global-search-group">
+          <h3>Crowdfunding</h3>
+          ${crowdfunding.map((item) => {
+            const target = /^https?:\\/\\//i.test(String(item.project_url || ""))
+              ? item.project_url : "/crowdfunding";
+            const external = target !== "/crowdfunding";
+            return `
+              <a class="global-search-result is-section" href="${escapeHtml(target)}"
+                ${external ? 'target="_blank" rel="noopener noreferrer"' : "data-nav"}>
+                <span aria-hidden="true">↗</span>
+                <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.platform || "Crowdfunding")}</small></span>
+              </a>
+            `;
+          }).join("")}
+        </section>
+      ` : ""}
       ${sections.length ? `
         <section class="global-search-group">
           <h3>Sezioni</h3>
@@ -497,7 +539,7 @@ async function performGlobalSearch() {
           `).join("")}
         </section>
       ` : ""}
-      ${!games.length && !wishlist.length && !sections.length
+      ${!games.length && !wishlist.length && !lists.length && !rulebooks.length && !crowdfunding.length && !sections.length
         ? '<div class="empty">Nessun risultato.</div>'
         : ""}
     `;
