@@ -1527,6 +1527,62 @@ def _crowdfunding_notification_baseline(connection: sqlite3.Connection) -> None:
         )
 
 
+def _half_star_personal_ratings(connection: sqlite3.Connection) -> None:
+    # SQLite cannot relax an existing CHECK constraint in place. Rebuild the
+    # small per-game progress table while preserving all local state.
+    connection.execute("DROP INDEX IF EXISTS idx_game_progress_completed")
+    connection.execute("DROP INDEX IF EXISTS idx_game_progress_played")
+    connection.execute("DROP INDEX IF EXISTS idx_game_progress_personal_rating")
+    connection.execute(
+        """
+        CREATE TABLE game_progress_half_star (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            completed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            played_at TEXT,
+            personal_rating REAL CHECK(
+                personal_rating IS NULL OR (
+                    personal_rating BETWEEN 0.5 AND 5
+                    AND personal_rating * 2 = CAST(personal_rating * 2 AS INTEGER)
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO game_progress_half_star(
+            board_game_id,completed_at,created_at,updated_at,played_at,personal_rating
+        )
+        SELECT
+            board_game_id,completed_at,created_at,updated_at,played_at,personal_rating
+        FROM game_progress
+        """
+    )
+    connection.execute("DROP TABLE game_progress")
+    connection.execute("ALTER TABLE game_progress_half_star RENAME TO game_progress")
+    connection.execute(
+        """
+        CREATE INDEX idx_game_progress_completed
+        ON game_progress(completed_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_game_progress_played
+        ON game_progress(played_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_game_progress_personal_rating
+        ON game_progress(personal_rating)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1547,6 +1603,7 @@ MIGRATIONS = (
     Migration(17, "tutorial-videos", _tutorial_videos),
     Migration(18, "personal-library-foundation", _personal_library_foundation),
     Migration(19, "crowdfunding-notification-baseline", _crowdfunding_notification_baseline),
+    Migration(20, "half-star-personal-ratings", _half_star_personal_ratings),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
