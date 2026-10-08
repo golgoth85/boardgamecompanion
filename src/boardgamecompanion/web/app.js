@@ -1297,7 +1297,7 @@ async function saveDocumentUpload(event) {
     });
     const created = result.created === true;
     documentDialog.close();
-    showToast(created ? "Documento caricato. Indicizzazione automatica avviata." : "Documento già presente. Indicizzazione verificata.");
+    showToast(created ? "Documento caricato. Preparazione dell’assistente avviata." : "Documento già presente. Assistente verificato.");
     if (window.location.pathname === `/games/${bggId}`) {
       await renderDetail(bggId);
     }
@@ -2952,26 +2952,8 @@ function bindRagResultActions(bggId, documentItems) {
   });
 }
 
-function ragIndexFailureText(item) {
-  const raw = String(item?.last_error_message || "").trim();
-  if (!raw) return "Indicizzazione non riuscita.";
-
-  if (/failed.*->.*failed/i.test(raw)) {
-    return raw.slice(0, 320);
-  }
-  if (/Gemini embedding request failed with HTTP 429/i.test(raw)) {
-    return "Gemini embedding non disponibile: quota/rate limit (HTTP 429).";
-  }
-  if (/Gemini embedding/i.test(raw)) {
-    return "Gemini embedding non disponibile: " + raw.slice(0, 220);
-  }
-  if (/Ollama/i.test(raw) || /qwen/i.test(raw)) {
-    return "Qwen/Ollama embedding non disponibile: " + raw.slice(0, 220);
-  }
-  if (/embedding/i.test(raw)) {
-    return "Embedding non disponibile: " + raw.slice(0, 220);
-  }
-  return "Indicizzazione non riuscita: " + raw.slice(0, 220);
+function ragIndexFailureText(_item) {
+  return "Assistente temporaneamente non disponibile.";
 }
 
 async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
@@ -2982,7 +2964,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
 
   if (!documentItems.length) {
     status.className = "rag-index-status muted";
-    status.textContent = "L'indice verrà creato automaticamente quando aggiungi un regolamento.";
+    status.textContent = "Aggiungi un regolamento per rendere disponibile l’assistente.";
     if (retry) retry.hidden = true;
     return;
   }
@@ -2996,7 +2978,7 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
     const rows = jobs.flatMap((payload) => payload.items || []);
     if (rows.length < documentItems.length) {
       status.className = "rag-index-status";
-      status.textContent = "Indicizzazione automatica in preparazione…";
+      status.textContent = "Assistente in preparazione…";
       if (retry) retry.hidden = true;
       if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
       return;
@@ -3012,16 +2994,14 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
       if (retry) {
         retry.hidden = false;
         retry.disabled = false;
-        retry.textContent = "Riprova indicizzazione";
+        retry.textContent = "Riprova preparazione";
       }
       return;
     }
 
     if (running.length) {
       status.className = "rag-index-status";
-      const stageLabels = {queued: "in coda", ingest: "lettura PDF", chunks: "preparazione testo", embeddings: "indicizzazione"};
-      const stage = running[0]?.stage;
-      status.textContent = "Indicizzazione automatica in corso" + (stage ? " · " + (stageLabels[stage] || stage) : "") + "…";
+      status.textContent = "Assistente in preparazione…";
       if (retry) retry.hidden = true;
       if (poll) window.setTimeout(() => void refreshRagIndexStatus(bggId, documentItems), 3000);
       return;
@@ -3029,23 +3009,21 @@ async function refreshRagIndexStatus(bggId, documentItems, {poll = true} = {}) {
 
     if (ready.length === documentItems.length) {
       status.className = "rag-index-status success";
-      status.textContent = documentItems.length === 1
-        ? "✓ Regolamento indicizzato"
-        : "✓ " + documentItems.length + " documenti indicizzati";
+      status.textContent = "✓ Assistente disponibile";
       if (retry) retry.hidden = true;
       return;
     }
 
     status.className = "rag-index-status";
-    status.textContent = "Indicizzazione automatica in preparazione…";
+    status.textContent = "Assistente in preparazione…";
     if (retry) retry.hidden = true;
   } catch (_) {
     status.className = "rag-index-status error";
-    status.textContent = "Non riesco a verificare l'indicizzazione.";
+    status.textContent = "Assistente temporaneamente non disponibile.";
     if (retry) {
       retry.hidden = false;
       retry.disabled = false;
-      retry.textContent = "Riprova indicizzazione";
+      retry.textContent = "Riprova preparazione";
     }
   }
 }
@@ -3066,7 +3044,7 @@ async function prepareRagIndex(bggId, documentItems) {
     retry.textContent = "Riprovo…";
   }
   status.className = "rag-index-status";
-  status.textContent = "Riprovo l'indicizzazione…";
+  status.textContent = "Riprovo la preparazione dell’assistente…";
   try {
     for (const item of documentItems) {
       try {
@@ -3078,7 +3056,7 @@ async function prepareRagIndex(bggId, documentItems) {
         if (error.status !== 409) throw error;
       }
     }
-    showToast("Indicizzazione completata.");
+    showToast("Assistente disponibile.");
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -3426,9 +3404,9 @@ async function renderDetail(bggId) {
               <div class="rag-heading-row">
                 <h3>Fai una domanda sul regolamento</h3>
                 <div class="rag-index-line">
-                  <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo indicizzazione…</span>
+                  <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo disponibilità assistente…</span>
                   <button class="button button-ghost rag-prepare-index" type="button" hidden
-                          ${documentItems.length ? "" : "disabled"}>Riprova indicizzazione</button>
+                          ${documentItems.length ? "" : "disabled"}>Riprova preparazione</button>
                 </div>
               </div>
               <form class="rag-query-form" id="ragQueryForm">
