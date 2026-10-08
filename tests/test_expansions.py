@@ -71,8 +71,8 @@ def _database(tmp_path: Path) -> Database:
         owned_expansion = connection.execute(
             """
             INSERT INTO board_games(
-                bgg_id,title,item_type,parent_bgg_id,source_metadata_json,created_at,updated_at
-            ) VALUES(201,'Owned Expansion','expansion',100,'{}',?,?)
+                bgg_id,title,item_type,source_metadata_json,created_at,updated_at
+            ) VALUES(201,'Owned Expansion','expansion','{}',?,?)
             """,
             (now, now),
         )
