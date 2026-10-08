@@ -1,15 +1,28 @@
+function personalRatingLabel(value) {
+  return String(Number(value)).replace(".", ",");
+}
+
 export function starRatingMarkup(value, {interactive = false, compact = false} = {}) {
   const rating = Number(value || 0);
   const stars = [1, 2, 3, 4, 5].map((star) => {
-    const active = star <= rating;
+    const fillClass = rating >= star ? "is-active" : (rating >= star - 0.5 ? "is-half" : "");
     if (!interactive) {
-      return `<span class="personal-star ${active ? "is-active" : ""}" aria-hidden="true">★</span>`;
+      return `<span class="personal-star ${fillClass}" aria-hidden="true">★</span>`;
     }
-    return `<button class="personal-star-button ${active ? "is-active" : ""}"
-                    type="button" data-personal-rating="${star}"
-                    aria-label="Valuta ${star} stelle" aria-pressed="${rating === star ? "true" : "false"}">★</button>`;
+    const half = star - 0.5;
+    return `<span class="personal-star-control ${fillClass}">
+      <span class="personal-star-glyph" aria-hidden="true">★</span>
+      <button class="personal-star-hit personal-star-hit-left" type="button"
+              data-personal-rating="${half}"
+              aria-label="Valuta ${personalRatingLabel(half)} stelle"
+              aria-pressed="${rating === half ? "true" : "false"}"></button>
+      <button class="personal-star-hit personal-star-hit-right" type="button"
+              data-personal-rating="${star}"
+              aria-label="Valuta ${personalRatingLabel(star)} stelle"
+              aria-pressed="${rating === star ? "true" : "false"}"></button>
+    </span>`;
   }).join("");
-  return `<span class="personal-stars ${compact ? "is-compact" : ""}" aria-label="${rating ? `${rating} stelle su 5` : "Non valutato"}">${stars}</span>`;
+  return `<span class="personal-stars ${compact ? "is-compact" : ""}" aria-label="${rating ? `${personalRatingLabel(rating)} stelle su 5` : "Non valutato"}">${stars}</span>`;
 }
 
 export function wishlistActionMarkup({active = false, itemId = "", sourceKind, sourceKey}) {
