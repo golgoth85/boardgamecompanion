@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from boardgamecompanion.database import Database
@@ -15,6 +15,22 @@ class PersonalStateNotFound(PersonalStateError):
 
 
 UNSET = object()
+
+
+def _normalize_personal_date(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise PersonalStateError(f"{field} must be an ISO date")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise PersonalStateError(f"{field} must be a valid ISO date") from exc
+    if parsed.isoformat() != value:
+        raise PersonalStateError(f"{field} must use YYYY-MM-DD")
+    if parsed > datetime.now(UTC).date():
+        raise PersonalStateError(f"{field} cannot be in the future")
+    return parsed.isoformat()
 
 
 class PersonalStateStore:
@@ -44,7 +60,7 @@ class PersonalStateStore:
         return {
             "bgg_id": int(row["bgg_id"]),
             "rating": (
-                int(row["personal_rating"])
+                float(row["personal_rating"])
                 if row["personal_rating"] is not None
                 else None
             ),
@@ -66,14 +82,25 @@ class PersonalStateStore:
         completed_at: object = UNSET,
     ) -> dict[str, Any]:
         if rating is not UNSET and rating is not None:
-            if type(rating) is not int or not 1 <= rating <= 5:
-                raise PersonalStateError("rating must be an integer between 1 and 5")
+            if type(rating) not in (int, float):
+                raise PersonalStateError("rating must be between 0.5 and 5 in 0.5 steps")
+            numeric_rating = float(rating)
+            if (
+                not 0.5 <= numeric_rating <= 5
+                or abs(numeric_rating * 2 - round(numeric_rating * 2)) > 1e-9
+            ):
+                raise PersonalStateError("rating must be between 0.5 and 5 in 0.5 steps")
+            rating = round(numeric_rating * 2) / 2
         if played is not UNSET and type(played) is not bool:
             raise PersonalStateError("played must be boolean")
         if completed is not UNSET and type(completed) is not bool:
             raise PersonalStateError("completed must be boolean")
         if played is False and completed is True:
             raise PersonalStateError("a completed game must also be played")
+        if played_at is not UNSET:
+            played_at = _normalize_personal_date(played_at, "played_at")
+        if completed_at is not UNSET:
+            completed_at = _normalize_personal_date(completed_at, "completed_at")
 
         current = self.get(bgg_id)
         next_rating = current["rating"] if rating is UNSET else rating
