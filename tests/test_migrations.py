@@ -89,6 +89,9 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "saved_game_lists",
         "saved_game_list_items",
         "notifications",
+        "expansion_scan_state",
+        "expansion_watch_state",
+        "crowdfunding_watch_state",
         "schema_migrations",
     } <= tables
 
