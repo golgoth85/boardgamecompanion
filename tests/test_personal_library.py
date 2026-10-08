@@ -262,3 +262,34 @@ def test_universal_search_finds_documents_lists_and_cached_campaigns(
         wildcard = client.get("/api/search", params={"q": "%"})
         assert wildcard.status_code == 200
         assert wildcard.json()["groups"]["rulebooks"] == []
+
+
+def test_smart_list_rejects_invalid_filter_types_and_ranges(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    with _client(monkeypatch, tmp_path) as client:
+        _import_fixture(client)
+        cases = [
+            {"owned": "false"},
+            {"played": 1},
+            {"supports_players": "two"},
+            {"personal_rating_min": 6},
+            {"personal_rating_min": 5, "personal_rating_max": 2},
+            {"min_rating": "good"},
+            {"weight": "impossible"},
+            {"sort": "not_an_order"},
+            {"category": ["deck building"]},
+        ]
+        for filters in cases:
+            response = client.post(
+                "/api/lists",
+                json={"name": "Invalid list", "kind": "smart", "filters": filters},
+            )
+            assert response.status_code == 400, (filters, response.text)
+
+        manual = client.post(
+            "/api/lists",
+            json={"name": "Manual", "kind": "manual", "filters": {"owned": True}},
+        )
+        assert manual.status_code == 400
+        assert client.get("/api/lists").json()["total"] == 0
