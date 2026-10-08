@@ -23,6 +23,8 @@ _MINOR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bscenario (?:pack|set)\b", re.I), "scenario_pack"),
     (re.compile(r"\bcharacter (?:pack|set)\b|\bhero (?:pack|set)\b", re.I), "character_pack"),
     (re.compile(r"\bcard (?:pack|set)\b", re.I), "card_pack"),
+    (re.compile(r"\b(?:bounty|chapter|adventure|mythos|deck) pack\b", re.I), "content_pack"),
+    (re.compile(r"\bstarter deck\b", re.I), "starter_deck"),
     (re.compile(r"\bterrain (?:pack|set)\b|\bscenery\b", re.I), "terrain"),
     (re.compile(r"\breplacement\b|\bstickers?\b|\bpins?\b", re.I), "accessory"),
     (re.compile(r"\bart book\b|\bsoundtrack\b", re.I), "media"),
