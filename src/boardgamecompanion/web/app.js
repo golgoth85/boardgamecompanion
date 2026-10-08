@@ -3187,6 +3187,65 @@ async function ensureItalianDescription(bggId) {
   }
 }
 
+function relevantExpansionCard(item) {
+  return `
+    <article class="relevant-expansion-card ${item.owned ? "is-owned" : "is-missing"}"
+             data-expansion-id="${Number(item.bgg_id)}">
+      <a class="relevant-expansion-cover" href="${escapeHtml(item.url)}"
+         target="_blank" rel="noopener noreferrer">
+        ${item.cover_url
+          ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
+      </a>
+      <div class="relevant-expansion-copy">
+        <div class="relevant-expansion-title-row">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span class="badge ${item.owned ? "is-owned" : "is-missing"}">
+            ${item.owned ? "✓ Posseduta" : "Non posseduta"}
+          </span>
+        </div>
+        <small>${item.year_published || "Anno —"}</small>
+        <a class="external-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+          Apri su BGG ↗
+        </a>
+      </div>
+    </article>
+  `;
+}
+
+async function loadRelevantExpansions(bggId) {
+  const section = document.querySelector("#relevantExpansionsSection");
+  const grid = document.querySelector("#relevantExpansionsGrid");
+  const summary = document.querySelector("#relevantExpansionsSummary");
+  if (!section || !grid || !summary) return;
+  try {
+    const payload = await api(`/api/games/${bggId}/expansions`);
+    if (!section.isConnected || !grid.isConnected) return;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    const missing = Number(payload.missing_count || 0);
+    const owned = Number(payload.owned_count || 0);
+    summary.textContent = missing
+      ? `${missing} da valutare · ${owned} già possedute`
+      : `Tutte le espansioni principali rilevate risultano possedute`;
+    grid.innerHTML = items.map(relevantExpansionCard).join("");
+    const selected = new URLSearchParams(window.location.search).get("expansion");
+    if (selected) {
+      const card = grid.querySelector(`[data-expansion-id="${CSS.escape(selected)}"]`);
+      if (card) {
+        card.classList.add("is-highlighted");
+        card.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    }
+  } catch (_) {
+    section.hidden = true;
+  }
+}
+
 async function renderDetail(bggId) {
   app.innerHTML = `
     <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
@@ -3296,6 +3355,19 @@ async function renderDetail(bggId) {
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
             <div class="game-description-text" id="gameDescriptionText" data-ready="${italianDescription ? "true" : "false"}">${description}</div>
+          </section>
+
+          <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
+            <div class="simple-rulebook-head">
+              <div>
+                <p class="eyebrow">Espansioni</p>
+                <h2 id="relevantExpansionsTitle">Espansioni principali</h2>
+              </div>
+              <span class="muted" id="relevantExpansionsSummary">Controllo disponibilità…</span>
+            </div>
+            <div class="relevant-expansions-grid" id="relevantExpansionsGrid">
+              <div class="skeleton"></div><div class="skeleton"></div>
+            </div>
           </section>
 
           <section class="copy-compact-panel" aria-label="Copie fisiche">
@@ -3493,6 +3565,7 @@ async function renderDetail(bggId) {
     setupGameDiscovery(game.bgg_id, game.title);
     setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
     ensureItalianDescription(game.bgg_id);
+    void loadRelevantExpansions(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
