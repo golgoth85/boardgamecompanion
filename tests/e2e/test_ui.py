@@ -246,7 +246,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
     try:
         import_csv(page, live_server)
 
-        expect(page.locator("#statsPanel .stat strong")).to_have_text(["1", "1", "0", "0"])
+        expect(page.locator("#statsPanel .stat strong")).to_have_text(["1", "1", "1", "0"])
         expect(page.locator(".game-card")).to_have_count(2)
 
         page.locator("#searchInput").fill("Beta")
@@ -591,7 +591,7 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Completati")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Sala dei trofei")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Da giocare")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Novità")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
@@ -2229,7 +2229,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
 
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
         page.locator("#scannerBarcode").fill("1234567890123")
-        page.get_by_role("button", name="Cerca").click()
+        page.get_by_role("button", name="Cerca", exact=True).click()
         expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
         expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
 
@@ -2441,7 +2441,7 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
-        expect(page.locator("#ragIndexStatus")).to_contain_text("Regolamento indicizzato")
+        expect(page.locator("#ragIndexStatus")).to_contain_text("Assistente disponibile")
 
         page.locator("#ragQuestion").fill("Come si prepara?")
         page.locator("#ragAsk").click()
@@ -2588,10 +2588,9 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Gemini embedding non disponibile"
+            "Assistente temporaneamente non disponibile"
         )
-        expect(page.locator("#ragIndexStatus")).to_contain_text("HTTP 429")
-        expect(page.get_by_role("button", name="Riprova indicizzazione")).to_be_visible()
+        expect(page.get_by_role("button", name="Riprova preparazione")).to_be_visible()
 
         page.locator("#ragQuestion").fill("Quando finisce il turno?")
         page.locator("#ragAsk").click()
@@ -2600,11 +2599,9 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
         )
         page.locator(".rag-state-not-found .rag-prepare-index").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Regolamento indicizzato"
+            "Assistente disponibile"
         )
-        expect(page.locator(".toast")).to_contain_text(
-            "Gemini failed (HTTP 429 / quota) -> Qwen OK"
-        )
+        expect(page.locator(".toast")).to_contain_text("Assistente disponibile")
         assert retry_calls == [True]
     finally:
         context.close()
@@ -2617,7 +2614,7 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
 
         expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "verrà creato automaticamente"
+            "Aggiungi un regolamento per rendere disponibile l’assistente"
         )
         box = page.locator("#ragPanel").bounding_box()
         assert box is not None
@@ -2651,7 +2648,7 @@ def test_google_rulebook_query_treats_title_as_literal_phrase(
     try:
         page.goto(live_server)
         # Exercise the shipped JavaScript, not a second implementation in Python.
-        href = page.evaluate("(value) => googleRulebookSearchUrl(value)", title)
+        href = page.evaluate("(value) => import('/static/app.js').then((m) => m.googleRulebookSearchUrl(value))", title)
         parsed = urlsplit(href)
         assert (parsed.scheme, parsed.netloc, parsed.path) == (
             "https", "www.google.com", "/search"
@@ -2670,7 +2667,8 @@ def test_google_rulebook_query_control_only_title_uses_safe_fallback(
     try:
         page.goto(live_server)
         href = page.evaluate(
-            "(value) => googleRulebookSearchUrl(value)", '\u0001"\\\u2028'
+            "(value) => import('/static/app.js').then((m) => m.googleRulebookSearchUrl(value))",
+            '\u0001"\\\u2028',
         )
         assert parse_qs(urlsplit(href).query)["q"] == ["regolamento italiano pdf"]
     finally:
@@ -2705,7 +2703,10 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         expect(page.locator(".detail-main h1")).to_have_text(malicious_title)
         expect(page.get_by_role("link", name="Cerca PDF su Google")).to_have_count(0)
         expect(page.get_by_role("button", name="Cerca automaticamente")).to_be_visible()
-        href = page.evaluate("(value) => googleRulebookSearchUrl(value)", malicious_title)
+        href = page.evaluate(
+            "(value) => import('/static/app.js').then((m) => m.googleRulebookSearchUrl(value))",
+            malicious_title,
+        )
         query = parse_qs(urlsplit(href).query)["q"][0]
         assert query == '"Game site:example.invalid manual" regolamento italiano pdf'
         assert google_requests == []
@@ -3005,7 +3006,7 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         rating = page.get_by_role("button", name="Valuta 3,5 stelle")
         expect(rating).to_be_visible()
         rating.click()
-        expect(page.locator(".personal-rating-panel")).to_contain_text("3.5/5")
+        expect(page.locator(".personal-rating-panel")).to_contain_text("3,5/5")
         expect(page.locator(".personal-star-control.is-half")).to_have_count(1)
 
         # The imported BGG fixture already reports numplays=3, so the game is
@@ -3020,7 +3021,8 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
 
         page.goto(live_server)
         expect(page.locator(".personal-card-rating")).to_contain_text("Tu")
-        expect(page.locator(".personal-card-rating .personal-star.is-active")).to_have_count(4)
+        expect(page.locator(".personal-card-rating .personal-star.is-active")).to_have_count(3)
+        expect(page.locator(".personal-card-rating .personal-star.is-half")).to_have_count(1)
         expect(page.locator("#statsPanel")).to_contain_text("Giocati")
     finally:
         context.close()
