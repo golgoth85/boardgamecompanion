@@ -1,17 +1,16 @@
 name: Temporary PR CI
 
-# Temporary hosted runner authorized for PR #109 only.
-
+# Temporary GitHub-hosted runner authorized for BoardGameCompanion PR #109 only.
 on:
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event.pull_request.number == 109 && github.head_ref == 'feature/personal-library-foundation-20261008'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
