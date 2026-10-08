@@ -1376,41 +1376,23 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         context.close()
 
 
-def test_physical_copy_detail_and_edit_flow(browser, live_server):
+def test_physical_copy_data_remains_available_but_manual_ui_is_hidden(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
-        expect(page.locator(".physical-copy-card")).not_to_be_visible()
-        page.locator(".copy-details-disclosure summary").click()
-        expect(page.locator(".physical-copy-card")).to_have_count(1)
-        expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Italian")
-
-        page.get_by_role("button", name="Modifica").click()
-        expect(page.locator("#copyDialog")).to_be_visible()
-        expect(page.locator("#copyBarcode")).to_have_value("1234567890123")
-        expect(page.locator("#copyLocation")).to_have_value("Kallax A1")
-
-        page.locator("#copyBarcode").fill("555-000-111")
-        page.locator("#copyLocation").fill("Kallax Z9")
-        page.locator("#copyNotes").fill("Copia aggiornata da UI")
-        page.get_by_role("button", name="Salva copia").click()
-
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_have_count(0)
+        expect(page.locator(".physical-copy-card")).to_have_count(0)
+        expect(page.get_by_role("button", name="+ Aggiungi copia")).to_have_count(0)
         expect(page.locator("#copyDialog")).not_to_be_visible()
-        expect(page.locator(".physical-copy-card")).to_contain_text("555-000-111")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax Z9")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Copia aggiornata da UI")
 
         response = page.request.get(f"{live_server}/api/games/900001/copies")
         assert response.ok
         items = response.json()["items"]
         assert len(items) == 1
-        assert items[0]["barcode_normalized"] == "555000111"
-        assert items[0]["inventory_location"] == "Kallax Z9"
+        assert items[0]["barcode_normalized"] == "1234567890123"
+        assert items[0]["inventory_location"] == "Kallax A1"
     finally:
         context.close()
 
