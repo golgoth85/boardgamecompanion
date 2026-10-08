@@ -37,16 +37,16 @@ def test_personal_rating_and_played_state_are_distinct_from_completion(
         _import_fixture(client)
         updated = client.patch(
             "/api/games/900001/personal-state",
-            json={"rating": 5, "played": True, "played_at": "2026-10-08"},
+            json={"rating": 3.5, "played": True, "played_at": "2026-10-08"},
         )
         assert updated.status_code == 200
         body = updated.json()
-        assert body["rating"] == 5
+        assert body["rating"] == 3.5
         assert body["played"] is True
         assert body["completed"] is False
 
         game = client.get("/api/games/900001").json()
-        assert game["progress"]["rating"] == 5
+        assert game["progress"]["rating"] == 3.5
         assert game["progress"]["played"] is True
         assert game["progress"]["completed"] is False
 
@@ -63,6 +63,18 @@ def test_personal_rating_and_played_state_are_distinct_from_completion(
         )
         assert cleared.status_code == 200
         assert cleared.json()["rating"] is None
+
+        invalid_step = client.patch(
+            "/api/games/900001/personal-state",
+            json={"rating": 3.25},
+        )
+        assert invalid_step.status_code == 422
+
+        invalid_date = client.patch(
+            "/api/games/900001/personal-state",
+            json={"played_at": "2026-99-99"},
+        )
+        assert invalid_date.status_code == 400
 
 
 def test_wishlist_supports_bgg_and_crowdfunding_sources(
@@ -113,7 +125,7 @@ def test_smart_and_manual_lists_share_catalog_filters(
         _import_fixture(client)
         client.patch(
             "/api/games/900001/personal-state",
-            json={"rating": 4, "played": True},
+            json={"rating": 4.5, "played": True},
         )
         smart = client.post(
             "/api/lists",
@@ -122,7 +134,7 @@ def test_smart_and_manual_lists_share_catalog_filters(
                 "kind": "smart",
                 "filters": {
                     "played": True,
-                    "personal_rating_min": 4,
+                    "personal_rating_min": 4.5,
                     "owned": True,
                 },
             },
@@ -274,6 +286,7 @@ def test_smart_list_rejects_invalid_filter_types_and_ranges(
             {"played": 1},
             {"supports_players": "two"},
             {"personal_rating_min": 6},
+            {"personal_rating_min": 3.25},
             {"personal_rating_min": 5, "personal_rating_max": 2},
             {"min_rating": "good"},
             {"weight": "impossible"},
