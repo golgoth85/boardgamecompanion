@@ -2,19 +2,22 @@ name: Temporary PR CI
 
 # Temporary GitHub-hosted runner authorized for BoardGameCompanion PR #109 only.
 on:
-  pull_request:
+  push:
     branches: [main]
 
 permissions:
   contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
-  test:
-    if: github.event.pull_request.number == 109 && github.head_ref == 'feature/personal-library-foundation-20261008'
+  test-pr-109:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/personal-library-foundation-20261008
 
       - uses: actions/setup-python@v5
         with:
@@ -27,4 +30,34 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run full test suite
-        run: pytest -q
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee /tmp/bgc-pytest.log
+
+      - name: Report result to PR #109
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          {
+            echo "### Temporary GitHub-hosted CI"
+            echo
+            echo "- tested ref: `feature/personal-library-foundation-20261008`"
+            echo "- checkout SHA: `$(git rev-parse HEAD)`"
+            echo "- pytest outcome: **$TEST_OUTCOME**"
+            echo
+            echo "<details><summary>pytest tail</summary>"
+            echo
+            echo '~~~text'
+            tail -n 120 /tmp/bgc-pytest.log || true
+            echo '~~~'
+            echo "</details>"
+          } > /tmp/pr-comment.md
+          gh pr comment 109 --repo golgoth85/boardgamecompanion --body-file /tmp/pr-comment.md
+
+      - name: Fail workflow when tests fail
+        if: steps.tests.outcome != 'success'
+        run: exit 1
