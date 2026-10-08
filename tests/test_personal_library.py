@@ -183,3 +183,23 @@ def test_universal_search_has_extensible_groups(monkeypatch, tmp_path: Path) -> 
         assert set(payload["groups"]) == {
             "games", "sections", "wishlist", "rulebooks", "crowdfunding"
         }
+
+
+def test_diagnostics_centralizes_technical_state(monkeypatch, tmp_path: Path) -> None:
+    with _client(monkeypatch, tmp_path) as client:
+        payload = client.get("/api/diagnostics")
+        assert payload.status_code == 200
+        body = payload.json()
+        assert body["schema_version"] == 18
+        assert set(body) == {
+            "schema_version",
+            "bgg",
+            "assistant",
+            "crowdfunding",
+            "suggestions",
+            "rulebooks",
+            "personal",
+        }
+        assert "cache" in body["suggestions"]
+        assert "generation_order" in body["assistant"]
+        assert "expansion_scans" in body["personal"]
