@@ -3002,10 +3002,11 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         import_csv(page, live_server)
         page.goto(f"{live_server}/games/900001")
 
-        rating = page.get_by_role("button", name="Valuta 4 stelle")
+        rating = page.get_by_role("button", name="Valuta 3,5 stelle")
         expect(rating).to_be_visible()
         rating.click()
-        expect(page.locator(".personal-rating-panel")).to_contain_text("4/5")
+        expect(page.locator(".personal-rating-panel")).to_contain_text("3.5/5")
+        expect(page.locator(".personal-star-control.is-half")).to_have_count(1)
 
         # The imported BGG fixture already reports numplays=3, so the game is
         # correctly considered played even without a local played_at marker.
