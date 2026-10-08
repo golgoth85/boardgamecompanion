@@ -52,6 +52,13 @@ SORT_SQL = {
     "completed_desc": (
         "p.completed_at IS NULL, p.completed_at DESC, g.title COLLATE NOCASE ASC"
     ),
+    "played_desc": (
+        "COALESCE(p.played_at,p.completed_at) IS NULL, "
+        "COALESCE(p.played_at,p.completed_at) DESC, g.title COLLATE NOCASE ASC"
+    ),
+    "personal_rating_desc": (
+        "p.personal_rating IS NULL, p.personal_rating DESC, g.title COLLATE NOCASE ASC"
+    ),
 }
 
 
@@ -144,8 +151,15 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             ),
         },
         "progress": {
+            "played": bool(
+                ("played_at" in row.keys() and row["played_at"])
+                or ("completed_at" in row.keys() and row["completed_at"])
+                or int(row["num_plays"] or 0) > 0
+            ),
+            "played_at": row["played_at"] if "played_at" in row.keys() else None,
             "completed": bool(row["completed_at"]) if "completed_at" in row.keys() else False,
             "completed_at": row["completed_at"] if "completed_at" in row.keys() else None,
+            "rating": row["personal_rating"] if "personal_rating" in row.keys() else None,
         },
         "gameplay_summary": (
             row["gameplay_summary"]
@@ -187,6 +201,18 @@ def _player_text_matches(value: str | None, player_count: int) -> bool:
 def _ideal_players_match(row, player_count: int) -> bool:
     if row["bgg_best_players"]:
         return _player_text_matches(row["bgg_best_players"], player_count)
+    if row["bgg_recommended_players"]:
+        return _player_text_matches(row["bgg_recommended_players"], player_count)
+    minimum = row["min_players"]
+    maximum = row["max_players"]
+    return bool(
+        minimum is not None
+        and maximum is not None
+        and int(minimum) <= player_count <= int(maximum)
+    )
+
+
+def _recommended_players_match(row, player_count: int) -> bool:
     if row["bgg_recommended_players"]:
         return _player_text_matches(row["bgg_recommended_players"], player_count)
     minimum = row["min_players"]
@@ -250,7 +276,7 @@ class Catalog:
                    c.version_publishers, c.version_year_published,
                    c.version_nickname, c.inventory_location, c.quantity,
                    c.acquisition_date, c.first_seen_at,
-                   p.completed_at,
+                   p.played_at, p.completed_at, p.personal_rating,
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
@@ -265,6 +291,7 @@ class Catalog:
         owned: bool | None = None,
         supports_players: int | None = None,
         ideal_players: int | None = None,
+        recommended_players: int | None = None,
         player_age: int | None = None,
         weight: str | None = None,
         max_minutes: int | None = None,
@@ -272,6 +299,9 @@ class Catalog:
         category: str | None = None,
         mechanic: str | None = None,
         completed: bool | None = None,
+        played: bool | None = None,
+        personal_rating_min: float | None = None,
+        personal_rating_max: float | None = None,
         sort: str = "title",
         limit: int = 50,
         offset: int = 0,
@@ -321,12 +351,29 @@ class Catalog:
             params.append(min_rating)
         if completed is not None:
             where.append("p.completed_at IS NOT NULL" if completed else "p.completed_at IS NULL")
+        if played is not None:
+            played_sql = (
+                "(p.played_at IS NOT NULL OR p.completed_at IS NOT NULL "
+                "OR COALESCE(c.num_plays,0) > 0)"
+            )
+            where.append(played_sql if played else f"NOT {played_sql}")
+        if personal_rating_min is not None:
+            where.append("p.personal_rating IS NOT NULL AND p.personal_rating >= ?")
+            params.append(float(personal_rating_min))
+        if personal_rating_max is not None:
+            where.append("p.personal_rating IS NOT NULL AND p.personal_rating <= ?")
+            params.append(float(personal_rating_max))
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
         from_sql = self._from_sql()
         select_sql = self._select_sql()
-        python_filter = ideal_players is not None or bool(category) or bool(mechanic)
+        python_filter = (
+            ideal_players is not None
+            or recommended_players is not None
+            or bool(category)
+            or bool(mechanic)
+        )
 
         with self.database.connect() as connection:
             if not python_filter:
@@ -359,6 +406,10 @@ class Catalog:
                     if (
                         ideal_players is None
                         or _ideal_players_match(row, ideal_players)
+                    )
+                    and (
+                        recommended_players is None
+                        or _recommended_players_match(row, recommended_players)
                     )
                     and _facet_match(row, category=category, mechanic=mechanic)
                 ]
@@ -1084,6 +1135,20 @@ class Catalog:
                   AND COALESCE(g.item_type,'standalone') != 'expansion'
                 """
             ).fetchone()["count"]
+            played = connection.execute(
+                """
+                SELECT COUNT(DISTINCT g.id) AS count
+                FROM board_games g
+                LEFT JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN game_progress p ON p.board_game_id=g.id
+                WHERE COALESCE(g.item_type,'standalone') != 'expansion'
+                  AND (
+                    p.played_at IS NOT NULL
+                    OR p.completed_at IS NOT NULL
+                    OR COALESCE(c.num_plays,0) > 0
+                  )
+                """
+            ).fetchone()["count"]
             rulebooks = connection.execute(
                 """
                 SELECT COUNT(DISTINCT board_game_id) AS count
@@ -1099,6 +1164,7 @@ class Catalog:
             "standalone_owned": owned_types["standalone_owned"] or 0,
             "expansions_owned": owned_types["expansions_owned"] or 0,
             "completed": completed or 0,
+            "played": played or 0,
             "rulebooks": rulebooks or 0,
         }
 

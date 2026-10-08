@@ -46,6 +46,8 @@ XML = b"""<?xml version='1.0'?>
  <link type='boardgamepublisher' value='Repos Production'/>
  <link type='boardgamedesigner' value='Antoine Bauza'/>
  <link type='boardgamecategory' value='Ancient'/>
+ <link type='boardgameexpansion' id='202976' value='7 Wonders Duel: Pantheon'/>
+ <link type='boardgameexpansion' id='236435' value='7 Wonders Duel: Agora'/>
 </item></items>"""
 
 
@@ -88,6 +90,10 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
     assert item["metadata"]["alternate_titles"] == [
         "7 Wonders: Duel",
         "7 Wonders Duello",
+    ]
+    assert item["metadata"]["expansions"] == [
+        {"bgg_id": 202976, "title": "7 Wonders Duel: Pantheon"},
+        {"bgg_id": 236435, "title": "7 Wonders Duel: Agora"},
     ]
     # Official minage wins over the community suggested_playerage poll.
     assert item["metadata"]["bgg_recommended_age"] == "10"

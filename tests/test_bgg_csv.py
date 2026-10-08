@@ -31,6 +31,7 @@ def test_import_is_idempotent(tmp_path: Path) -> None:
         "standalone_owned": 1,
         "expansions_owned": 1,
         "completed": 0,
+        "played": 1,
         "rulebooks": 0,
     }
 

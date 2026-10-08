@@ -72,11 +72,20 @@ from boardgamecompanion.copies import (
 from boardgamecompanion.crowdfunding import (
     ApifyKickstarterProvider,
     CrowdfundingError,
-    CrowdfundingService,
-    EcbFxProvider,
-    GamefoundProvider,
+)
+from boardgamecompanion.crowdfunding_notifications import (
+    CrowdfundingNotificationProducer,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.diagnostics import router as diagnostics_router
+from boardgamecompanion.routers.expansions import router as expansions_router
+from boardgamecompanion.routers.lists import router as lists_router
+from boardgamecompanion.routers.notifications import router as notifications_router
+from boardgamecompanion.routers.personal import router as personal_router
+from boardgamecompanion.routers.search import router as search_router
+from boardgamecompanion.routers.wishlist import router as wishlist_router
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
@@ -120,6 +129,11 @@ from boardgamecompanion.embedding_retrieval import (
     LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
+from boardgamecompanion.service_factories import (
+    get_bgg_metadata_store,
+    get_crowdfunding_service,
+    get_expansion_service,
+)
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
     RulebookReviewCorruptRecord,
@@ -159,34 +173,6 @@ WEB_DIR = Path(__file__).parent / "web"
 LOGGER = logging.getLogger(__name__)
 
 
-def get_database() -> Database:
-    return Database(settings.database_path)
-
-
-def get_crowdfunding_service() -> CrowdfundingService:
-    database = get_database()
-    database.initialize()
-    crowdfunding_settings = resolve_crowdfunding_settings(database)
-    return CrowdfundingService(
-        cache_path=settings.crowdfunding_cache_path,
-        cache_ttl_seconds=settings.crowdfunding_cache_ttl_seconds,
-        gamefound=GamefoundProvider(
-            base_url=settings.gamefound_public_api_url,
-            timeout_seconds=settings.crowdfunding_timeout_seconds,
-        ),
-        kickstarter=ApifyKickstarterProvider(
-            token=crowdfunding_settings.apify_token,
-            base_url=settings.kickstarter_apify_base_url,
-            actor=settings.kickstarter_apify_actor,
-            timeout_seconds=settings.kickstarter_apify_timeout_seconds,
-            max_items=settings.kickstarter_max_items,
-            max_pages=settings.kickstarter_max_pages,
-        ),
-        kickstarter_cache_ttl_seconds=settings.kickstarter_cache_ttl_seconds,
-        fx=EcbFxProvider(timeout_seconds=settings.crowdfunding_timeout_seconds),
-    )
-
-
 def get_rulebook_update_service() -> RulebookUpdateService:
     database = get_database()
     database.initialize()
@@ -221,30 +207,6 @@ def get_bgg_collection_sync_service() -> BggCollectionSyncService | None:
         database,
         client,
         interval_seconds=resolved.collection_sync_interval_seconds,
-    )
-
-
-def get_bgg_metadata_store() -> BggMetadataStore:
-    database = get_database()
-    database.initialize()
-    resolved = resolve_bgg_settings(database)
-    token = (resolved.application_token or "").strip()
-    client = (
-        BggApiClient(
-            BggApiConfig(
-                application_token=token,
-                timeout_seconds=resolved.timeout_seconds,
-                min_interval_seconds=resolved.min_interval_seconds,
-            ),
-            rate_limiter=PersistentRateLimiter(database).acquire,
-        )
-        if token
-        else None
-    )
-    return BggMetadataStore(
-        database,
-        client,
-        refresh_seconds=settings.bgg_metadata_refresh_seconds,
     )
 
 
@@ -597,6 +559,65 @@ async def _document_index_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled document indexing worker failed")
 
 
+async def _expansion_watch_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(
+                get_expansion_service().scan_due,
+                limit=settings.expansion_watch_batch_size,
+            )
+        except Exception:
+            LOGGER.exception("Scheduled expansion watch failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.expansion_watch_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
+def _scan_crowdfunding_notifications() -> dict[str, int]:
+    service = get_crowdfunding_service()
+    active = service.list_campaigns(
+        sort="top",
+        platform="all",
+        status="active",
+        limit=100,
+    )
+    upcoming = service.list_campaigns(
+        sort="upcoming",
+        platform="all",
+        status="upcoming",
+        limit=100,
+    )
+    merged: dict[str, dict[str, object]] = {}
+    for item in [*(active.get("items") or []), *(upcoming.get("items") or [])]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("id") or item.get("project_url") or "").strip()
+        if key:
+            merged[key] = item
+    return CrowdfundingNotificationProducer(get_database()).scan(list(merged.values()))
+
+
+async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.crowdfunding_notification_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+        try:
+            await asyncio.to_thread(_scan_crowdfunding_notifications)
+        except Exception:
+            LOGGER.exception("Scheduled crowdfunding notification scan failed")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -606,6 +627,8 @@ async def lifespan(_: FastAPI):
     worker_stop = asyncio.Event()
     worker_tasks.append(asyncio.create_task(_bgg_collection_sync_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
+    worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
+    worker_tasks.append(asyncio.create_task(_crowdfunding_notification_worker(worker_stop)))
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(
@@ -643,6 +666,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+app.include_router(personal_router)
+app.include_router(diagnostics_router)
+app.include_router(expansions_router)
+app.include_router(wishlist_router)
+app.include_router(lists_router)
+app.include_router(notifications_router)
+app.include_router(search_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -652,6 +682,16 @@ def web_home() -> FileResponse:
 
 @app.get("/games/{bgg_id}", include_in_schema=False)
 def web_game(bgg_id: int) -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/lists", include_in_schema=False)
+def web_lists() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/wishlist", include_in_schema=False)
+def web_wishlist() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -720,6 +760,7 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "version": __version__,
+        "schema_version": get_database().schema_version(),
         "storage": {
             "config": str(settings.config_dir),
             "import": str(settings.import_dir),
@@ -738,13 +779,20 @@ def list_crowdfunding(
     refresh: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
-        return get_crowdfunding_service().list_campaigns(
+        payload = get_crowdfunding_service().list_campaigns(
             sort=sort,
             platform=platform,
             status=status,
             limit=limit,
             refresh=refresh,
         )
+        try:
+            CrowdfundingNotificationProducer(get_database()).scan(
+                [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+            )
+        except Exception:
+            LOGGER.exception("Crowdfunding notification scan failed")
+        return payload
     except CrowdfundingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -785,6 +833,7 @@ def list_games(
     owned: bool | None = Query(default=None),
     supports_players: int | None = Query(default=None, ge=1, le=30),
     ideal_players: int | None = Query(default=None, ge=1, le=30),
+    recommended_players: int | None = Query(default=None, ge=1, le=30),
     player_age: int | None = Query(default=None, ge=3, le=99),
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
@@ -792,6 +841,9 @@ def list_games(
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     completed: bool | None = Query(default=None),
+    played: bool | None = Query(default=None),
+    personal_rating_min: float | None = Query(default=None, ge=0.5, le=5, multiple_of=0.5),
+    personal_rating_max: float | None = Query(default=None, ge=0.5, le=5, multiple_of=0.5),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
@@ -804,6 +856,7 @@ def list_games(
         owned=owned,
         supports_players=supports_players,
         ideal_players=ideal_players,
+        recommended_players=recommended_players,
         player_age=player_age,
         weight=weight,
         max_minutes=max_minutes,
@@ -811,6 +864,9 @@ def list_games(
         category=category,
         mechanic=mechanic,
         completed=completed,
+        played=played,
+        personal_rating_min=personal_rating_min,
+        personal_rating_max=personal_rating_max,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
@@ -963,40 +1019,28 @@ def update_game_completion(
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    now = datetime.now(UTC).isoformat()
-    with database.transaction(immediate=True) as connection:
-        row = connection.execute(
-            "SELECT id FROM board_games WHERE bgg_id=?",
-            (bgg_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Board game not found")
-        board_game_id = int(row["id"])
+    try:
+        store = PersonalStateStore(database)
         if payload.completed:
-            completed_at = payload.completed_at or datetime.now(UTC).date().isoformat()
-            connection.execute(
-                """
-                INSERT INTO game_progress(
-                    board_game_id,completed_at,created_at,updated_at
-                ) VALUES(?,?,?,?)
-                ON CONFLICT(board_game_id) DO UPDATE SET
-                    completed_at=excluded.completed_at,
-                    updated_at=excluded.updated_at
-                """,
-                (board_game_id, completed_at, now, now),
+            state = store.update(
+                bgg_id,
+                completed=True,
+                completed_at=(
+                    payload.completed_at or datetime.now(UTC).date().isoformat()
+                ),
             )
         else:
-            connection.execute(
-                "DELETE FROM game_progress WHERE board_game_id=?",
-                (board_game_id,),
-            )
-
-    game = Catalog(database).get_game(bgg_id)
-    if game is None:
-        raise HTTPException(status_code=404, detail="Board game not found")
+            state = store.update(bgg_id, completed=False)
+    except PersonalStateNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PersonalStateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "bgg_id": bgg_id,
-        "progress": game["progress"],
+        "progress": {
+            "completed": state["completed"],
+            "completed_at": state["completed_at"],
+        },
     }
 
 

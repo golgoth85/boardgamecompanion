@@ -386,6 +386,19 @@ class CrowdfundingService:
             return None
         return payload
 
+    def cached_campaigns(self) -> list[dict[str, object]]:
+        """Return known campaigns without triggering provider/network requests.
+
+        The universal-search endpoint calls this on every keystroke. It must
+        never refresh the remote providers or consume Apify quota.
+        """
+        cached = self._read_cache()
+        return [
+            dict(item)
+            for item in (cached or {}).get("campaigns", [])
+            if isinstance(item, dict)
+        ]
+
     def _write_cache(self, payload: dict[str, object]) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")

@@ -115,7 +115,7 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "object-fit:contain" in extra_css.text
     assert "Più diversi" in js.text
     assert 'openSettingsDialog("crowdfunding")' in js.text
-    assert "Configura Apify" in js.text
+    assert "Configura Kickstarter" in js.text
     assert "tutorialDiscoveryAction" in js.text
     assert "tutorialVideoCard" in js.text
     assert "tutorial-video-frame" in js.text

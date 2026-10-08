@@ -193,8 +193,11 @@ def test_generation_rejects_nonconforming_json_status_with_protocol_error(
 
 @pytest.mark.parametrize("invalid_status", [[], {}, None, False, 0])
 def test_generation_invalid_status_maps_to_http_502(
-    monkeypatch, invalid_status,
+    monkeypatch, tmp_path, invalid_status,
 ) -> None:
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    monkeypatch.setattr(settings, "import_dir", tmp_path / "import")
+    monkeypatch.setattr(settings, "manuals_dir", tmp_path / "manuals")
     provider = FakeProvider({"status": invalid_status, "claims": []})
     service = _service(
         _retrieval_payload([_result(chunk_id="chunk-1", text="Evidence.")]),
