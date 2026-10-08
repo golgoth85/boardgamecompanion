@@ -5485,6 +5485,17 @@ async function renderWishlist() {
         }).join("")
       : '<div class="empty"><strong>Wishlist vuota.</strong><span>Aggiungi titoli da Suggerimenti o Crowdfunding.</span></div>';
     bindWishlistActions(grid);
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (focus) {
+      const card = Array.from(grid.querySelectorAll(".wishlist-card")).find((item) => {
+        const button = item.querySelector("[data-wishlist-item-id]");
+        return button?.dataset.wishlistItemId === focus;
+      });
+      if (card) {
+        card.classList.add("is-highlighted");
+        card.scrollIntoView({behavior: "smooth", block: "center"});
+      }
+    }
   } catch (error) {
     grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
