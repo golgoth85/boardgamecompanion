@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -181,7 +182,7 @@ def test_universal_search_has_extensible_groups(monkeypatch, tmp_path: Path) -> 
         payload = result.json()
         assert payload["groups"]["games"][0]["bgg_id"] == 900001
         assert set(payload["groups"]) == {
-            "games", "sections", "wishlist", "rulebooks", "crowdfunding"
+            "games", "sections", "wishlist", "lists", "rulebooks", "crowdfunding"
         }
 
 
@@ -190,7 +191,7 @@ def test_diagnostics_centralizes_technical_state(monkeypatch, tmp_path: Path) ->
         payload = client.get("/api/diagnostics")
         assert payload.status_code == 200
         body = payload.json()
-        assert body["schema_version"] == 18
+        assert body["schema_version"] == 19
         assert set(body) == {
             "schema_version",
             "bgg",
@@ -203,3 +204,61 @@ def test_diagnostics_centralizes_technical_state(monkeypatch, tmp_path: Path) ->
         assert "cache" in body["suggestions"]
         assert "generation_order" in body["assistant"]
         assert "expansion_scans" in body["personal"]
+
+
+def test_universal_search_finds_documents_lists_and_cached_campaigns(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    with _client(monkeypatch, tmp_path) as client:
+        _import_fixture(client)
+        db = get_database()
+        with db.transaction() as connection:
+            game = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id=900001"
+            ).fetchone()
+            connection.execute(
+                """
+                INSERT INTO game_documents (
+                    id,board_game_id,document_type,language,title,
+                    original_filename,storage_path,sha256,size_bytes,
+                    mime_type,source_kind,is_official,provenance_json,
+                    created_at,updated_at
+                ) VALUES (
+                    'search-document',?,'rulebook','it','Regolamento Alpha',
+                    'alpha-rules.pdf','900001/alpha-rules.pdf',?,200,
+                    'application/pdf','manual_upload',1,'{}',
+                    'now','now'
+                )
+                """,
+                (game["id"], "a" * 64),
+            )
+        saved_list = client.post(
+            "/api/lists",
+            json={"name": "Alpha evening", "kind": "manual"},
+        )
+        assert saved_list.status_code == 201
+        settings.crowdfunding_cache_path.write_text(
+            json.dumps({
+                "schema_version": 2,
+                "campaigns": [{
+                    "id": "gamefound:alpha",
+                    "title": "Alpha: The Campaign",
+                    "platform": "gamefound",
+                    "project_url": "https://gamefound.com/alpha",
+                }],
+            }),
+            encoding="utf-8",
+        )
+
+        result = client.get("/api/search", params={"q": "alpha"})
+        assert result.status_code == 200
+        groups = result.json()["groups"]
+        assert groups["games"][0]["bgg_id"] == 900001
+        assert groups["rulebooks"][0]["id"] == "search-document"
+        assert groups["rulebooks"][0]["url"] == "/api/documents/search-document/file"
+        assert groups["lists"][0]["id"] == saved_list.json()["id"]
+        assert groups["crowdfunding"][0]["id"] == "gamefound:alpha"
+
+        wildcard = client.get("/api/search", params={"q": "%"})
+        assert wildcard.status_code == 200
+        assert wildcard.json()["groups"]["rulebooks"] == []
