@@ -322,13 +322,21 @@ def test_manual_list_rejects_known_but_unowned_games(
 
 def test_wishlist_rejects_non_http_links(monkeypatch, tmp_path: Path) -> None:
     with _client(monkeypatch, tmp_path) as client:
+        unsafe_values = (
+            "javascript:alert(1)",
+            "https://user:pass@example.com/private",
+            "https://exa mple.com/campaign",
+            "https://[broken",
+            "https://example.com:bad/campaign",
+        )
         for field in ("target_url", "cover_url"):
-            payload = {
-                "source_kind": "crowdfunding",
-                "source_key": f"unsafe-{field}",
-                "title": "Unsafe campaign",
-                field: "javascript:alert(1)",
-            }
-            response = client.post("/api/wishlist", json=payload)
-            assert response.status_code == 400
-            assert field in response.json()["detail"]
+            for index, value in enumerate(unsafe_values):
+                payload = {
+                    "source_kind": "crowdfunding",
+                    "source_key": f"unsafe-{field}-{index}",
+                    "title": "Unsafe campaign",
+                    field: value,
+                }
+                response = client.post("/api/wishlist", json=payload)
+                assert response.status_code == 400
+                assert field in response.json()["detail"]

@@ -23,12 +23,17 @@ def _optional_http_url(value: str | None, *, field: str) -> str | None:
     text = str(value).strip()
     if not text:
         return None
-    if any(ord(char) < 32 for char in text):
+    if any(ord(char) < 32 or char.isspace() for char in text):
         raise WishlistError(f"{field} must be an HTTP(S) URL")
-    parsed = urlsplit(text)
+    try:
+        parsed = urlsplit(text)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise WishlistError(f"{field} must be a valid HTTP(S) URL") from exc
     if (
         parsed.scheme.casefold() not in {"http", "https"}
-        or not parsed.netloc
+        or not hostname
         or parsed.username is not None
         or parsed.password is not None
     ):
