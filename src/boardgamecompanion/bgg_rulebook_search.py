@@ -242,7 +242,7 @@ class GeminiBggFileProvider:
                     raw = item.get("retryDelay")
                     if not isinstance(raw, str):
                         continue
-                    match = re.fullmatch(r"([0-9]+(?:\\.[0-9]+)?)s", raw.strip())
+                    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)s", raw.strip())
                     if match:
                         delay = max(delay, float(match.group(1)))
 
