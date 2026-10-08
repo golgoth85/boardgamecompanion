@@ -283,19 +283,21 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
     links = item.findall("link")
     grouped: dict[str, list[str]] = {}
     parent_bgg_id: int | None = None
+    linked_expansions: list[dict[str, Any]] = []
     for node in links:
         kind = node.attrib.get("type", "")
         value = _attribute(node)
         if kind and value and len(value) <= 500:
             grouped.setdefault(kind, []).append(value)
-        if (
-            kind == "boardgameexpansion"
-            and node.attrib.get("inbound") == "true"
-            and parent_bgg_id is None
-        ):
-            raw_parent = (node.attrib.get("id") or "").strip()
-            if raw_parent.isdigit():
-                parent_bgg_id = int(raw_parent)
+        if kind == "boardgameexpansion":
+            raw_linked_id = (node.attrib.get("id") or "").strip()
+            inbound = node.attrib.get("inbound") == "true"
+            if inbound and parent_bgg_id is None and raw_linked_id.isdigit():
+                parent_bgg_id = int(raw_linked_id)
+            elif not inbound and raw_linked_id.isdigit() and value:
+                linked_expansions.append(
+                    {"bgg_id": int(raw_linked_id), "title": value}
+                )
 
     raw_description = item.findtext("description") or ""
     description = html.unescape(raw_description).strip()[:20_000] or None
@@ -341,6 +343,7 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "bgg_recommended_players": recommended_players,
         "bgg_recommended_age": _official_min_age(item),
         "parent_bgg_id": parent_bgg_id,
+        "expansions": linked_expansions,
         "cover_url": image,
         "description": description,
         "publishers": grouped.get("boardgamepublisher", []),
