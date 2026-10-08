@@ -866,7 +866,7 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         page.get_by_role("button", name="Salva data").click()
         expect(page.locator("#completionDate")).to_have_value("2025-12-24")
 
-        page.get_by_role("link", name="Completati").click()
+        page.get_by_role("link", name="Sala dei trofei").click()
         expect(page).to_have_url(f"{live_server}/completed")
         expect(page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
         expect(page.locator(".trophy-card")).to_have_count(1)
@@ -874,7 +874,7 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         expect(page.locator(".trophy-card")).to_contain_text("24 dic 2025")
 
         page.goto(live_server)
-        expect(page.locator("#statsPanel")).to_contain_text("Completati")
+        expect(page.locator("#statsPanel")).to_contain_text("Giocati")
         expect(page.locator("#statsPanel")).not_to_contain_text("Posseduti")
         expect(page.locator("#achievementShowcase")).to_be_visible()
         expect(page.locator("#achievementShowcase .trophy-card")).to_have_count(1)
@@ -2992,5 +2992,198 @@ def test_suggestions_use_compact_hero_and_bgg_player_guidance(browser, live_serv
         expect(card.locator(".suggestion-quick-facts")).to_contain_text("Ideale in")
         expect(card.locator(".suggestion-quick-facts")).to_contain_text("4")
         assert card.locator(".suggestion-hero").bounding_box()["y"] < card.locator(".suggestion-editorial").bounding_box()["y"]
+    finally:
+        context.close()
+
+
+def test_personal_rating_and_played_status_flow(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.goto(f"{live_server}/games/900001")
+
+        rating = page.get_by_role("button", name="Valuta 4 stelle")
+        expect(rating).to_be_visible()
+        rating.click()
+        expect(page.locator(".personal-rating-panel")).to_contain_text("4/5")
+
+        played = page.get_by_role("button", name="Segna giocato")
+        expect(played).to_be_visible()
+        played.click()
+        expect(page.get_by_role("button", name="✓ Giocato")).to_be_visible()
+
+        page.get_by_role("link", name="Sala dei trofei").click()
+        expect(page).to_have_url(f"{live_server}/completed")
+        expect(page.locator(".trophy-card")).to_have_count(1)
+        expect(page.locator(".trophy-achievement")).to_contain_text("Giocato")
+        expect(page.locator(".trophy-achievement")).not_to_contain_text("Completato")
+
+        page.goto(live_server)
+        expect(page.locator(".personal-card-rating")).to_contain_text("Tu")
+        expect(page.locator(".personal-card-rating .personal-star.is-active")).to_have_count(4)
+        expect(page.locator("#statsPanel")).to_contain_text("Giocati")
+    finally:
+        context.close()
+
+
+def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+
+        created = page.request.post(
+            f"{live_server}/api/wishlist",
+            data={
+                "source_kind": "bgg",
+                "source_key": "900001",
+                "bgg_id": 900001,
+                "title": "Synthetic Alpha",
+                "year_published": 2020,
+                "target_url": "https://boardgamegeek.com/boardgame/900001",
+            },
+        )
+        assert created.ok
+
+        page.goto(f"{live_server}/wishlist")
+        expect(page.get_by_role("heading", name="Wishlist")).to_be_visible()
+        expect(page.locator(".wishlist-card")).to_have_count(1)
+        expect(page.locator(".wishlist-card")).to_contain_text("Synthetic Alpha")
+
+        page.keyboard.press("Control+k")
+        expect(page.locator("#globalSearchDialog")).to_be_visible()
+        page.locator("#globalSearchInput").fill("Synthetic Alpha")
+        expect(page.locator(".global-search-group")).to_contain_text("Giochi")
+        expect(page.locator(".global-search-group")).to_contain_text("Wishlist")
+        page.get_by_role("button", name="Chiudi ricerca").click()
+
+        page.goto(f"{live_server}/lists")
+        expect(page.get_by_role("heading", name="Liste")).to_be_visible()
+        page.locator("#gameListName").fill("Mai giocati")
+        page.locator("#gameListKind").select_option("smart")
+        page.locator("#listPlayed").select_option("false")
+        page.get_by_role("button", name="Crea lista").click()
+        expect(page.locator(".saved-list-card")).to_have_count(1)
+        expect(page.locator(".saved-list-card")).to_contain_text("Mai giocati")
+        page.locator("[data-open-list]").click()
+        expect(page.locator(".saved-list-game-grid .game-card")).to_have_count(2)
+    finally:
+        context.close()
+
+    mobile_context, mobile_page = new_page(browser, mobile=True)
+    try:
+        mobile_page.goto(f"{live_server}/wishlist")
+        expect(mobile_page.get_by_role("heading", name="Wishlist")).to_be_visible()
+        expect(mobile_page.locator("#mobileSearchButton")).to_be_visible()
+        mobile_page.locator("#mobileSearchButton").click()
+        expect(mobile_page.locator("#globalSearchDialog")).to_be_visible()
+        assert mobile_page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth + 1"
+        )
+    finally:
+        mobile_context.close()
+
+
+def test_relevant_expansions_are_operational_not_micro_addons(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.route(
+            "**/api/games/900001/expansions",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "bgg_id": 900001,
+                        "title": "Synthetic Alpha",
+                        "configured": True,
+                        "missing_count": 1,
+                        "owned_count": 1,
+                        "excluded_minor_count": 3,
+                        "items": [
+                            {
+                                "bgg_id": 990001,
+                                "title": "Synthetic Alpha: Major Expansion",
+                                "year_published": 2026,
+                                "cover_url": None,
+                                "owned": False,
+                                "url": "https://boardgamegeek.com/boardgame/990001",
+                            },
+                            {
+                                "bgg_id": 900002,
+                                "title": "Synthetic Beta Expansion",
+                                "year_published": 2021,
+                                "cover_url": None,
+                                "owned": True,
+                                "url": "https://boardgamegeek.com/boardgame/900002",
+                            },
+                        ],
+                    }
+                ),
+            ),
+        )
+
+        page.goto(f"{live_server}/games/900001")
+        section = page.locator("#relevantExpansionsSection")
+        expect(section).to_be_visible()
+        expect(section).to_contain_text("Synthetic Alpha: Major Expansion")
+        expect(section).to_contain_text("Non posseduta")
+        expect(section).to_contain_text("Synthetic Beta Expansion")
+        expect(section).to_contain_text("Posseduta")
+        expect(section).not_to_contain_text("Promo")
+        expect(section).not_to_contain_text("3 esclus")
+    finally:
+        context.close()
+
+
+def test_notification_center_badge_and_read_navigation(browser, live_server):
+    context, page = new_page(browser)
+    payload = {
+        "items": [
+            {
+                "id": "notice-1",
+                "category": "expansion",
+                "dedupe_key": "expansion:900001:990001",
+                "title": "Nuova espansione per Synthetic Alpha",
+                "body": "Synthetic Alpha: Major Expansion",
+                "target_url": "/games/900001?expansion=990001",
+                "related_bgg_id": 900001,
+                "read": False,
+                "read_at": None,
+                "metadata": {"expansion_bgg_id": 990001},
+                "created_at": "2026-10-08T10:00:00+00:00",
+            }
+        ],
+        "unread_count": 1,
+    }
+    read_calls = []
+
+    def notifications_route(route):
+        if route.request.method == "PATCH":
+            read_calls.append(route.request.url)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({**payload["items"][0], "read": True}),
+            )
+        else:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(payload),
+            )
+
+    try:
+        page.route(re.compile(r".*/api/notifications(?:\?.*|/.*)?$"), notifications_route)
+        page.goto(live_server)
+        expect(page.locator("#notificationBadge")).to_have_text("1")
+        page.locator("#notificationButton").click()
+        expect(page.locator("#notificationDialog")).to_be_visible()
+        expect(page.locator(".notification-item")).to_contain_text(
+            "Nuova espansione per Synthetic Alpha"
+        )
+        page.locator(".notification-item").click()
+        expect(page).to_have_url(re.compile(r"/games/900001\?expansion=990001$"))
+        assert read_calls
     finally:
         context.close()
