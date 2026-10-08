@@ -212,6 +212,18 @@ def _ideal_players_match(row, player_count: int) -> bool:
     )
 
 
+def _recommended_players_match(row, player_count: int) -> bool:
+    if row["bgg_recommended_players"]:
+        return _player_text_matches(row["bgg_recommended_players"], player_count)
+    minimum = row["min_players"]
+    maximum = row["max_players"]
+    return bool(
+        minimum is not None
+        and maximum is not None
+        and int(minimum) <= player_count <= int(maximum)
+    )
+
+
 def _ideal_players_label(row) -> str | None:
     raw = str(row["bgg_best_players"] or "").strip()
     if not raw:
@@ -279,6 +291,7 @@ class Catalog:
         owned: bool | None = None,
         supports_players: int | None = None,
         ideal_players: int | None = None,
+        recommended_players: int | None = None,
         player_age: int | None = None,
         weight: str | None = None,
         max_minutes: int | None = None,
@@ -355,7 +368,12 @@ class Catalog:
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
         from_sql = self._from_sql()
         select_sql = self._select_sql()
-        python_filter = ideal_players is not None or bool(category) or bool(mechanic)
+        python_filter = (
+            ideal_players is not None
+            or recommended_players is not None
+            or bool(category)
+            or bool(mechanic)
+        )
 
         with self.database.connect() as connection:
             if not python_filter:
@@ -388,6 +406,10 @@ class Catalog:
                     if (
                         ideal_players is None
                         or _ideal_players_match(row, ideal_players)
+                    )
+                    and (
+                        recommended_players is None
+                        or _recommended_players_match(row, recommended_players)
                     )
                     and _facet_match(row, category=category, mechanic=mechanic)
                 ]
