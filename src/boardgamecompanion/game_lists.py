@@ -32,9 +32,8 @@ _INTEGER_LIMITS = {
     "recommended_players": (1, 30),
     "player_age": (3, 99),
     "max_minutes": (1, 1440),
-    "personal_rating_min": (1, 5),
-    "personal_rating_max": (1, 5),
 }
+_HALF_STAR_FILTERS = {"personal_rating_min", "personal_rating_max"}
 _TEXT_LIMITS = {
     "query": 200, "item_type": 32, "weight": 32,
     "category": 500, "mechanic": 500, "sort": 64,
@@ -59,6 +58,13 @@ def _normalize_filters(value: dict[str, Any] | None) -> dict[str, Any]:
             minimum, maximum = _INTEGER_LIMITS[key]
             if type(item) is not int or not minimum <= item <= maximum:
                 raise GameListError(f"{key} must be an integer from {minimum} to {maximum}")
+        elif key in _HALF_STAR_FILTERS:
+            if type(item) not in (int, float):
+                raise GameListError(f"{key} must be a half-star rating")
+            numeric = float(item)
+            if not 0.5 <= numeric <= 5 or abs(numeric * 2 - round(numeric * 2)) > 1e-9:
+                raise GameListError(f"{key} must be between 0.5 and 5 in 0.5 steps")
+            item = round(numeric * 2) / 2
         elif key == "min_rating":
             if type(item) not in (int, float) or not 0 <= item <= 10:
                 raise GameListError("min_rating must be between 0 and 10")
