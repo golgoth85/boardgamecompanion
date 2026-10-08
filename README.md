@@ -8,6 +8,13 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Import or update a BoardGameGeek collection CSV directly from the web UI.
 - Search and filter by title, base game/expansion and ownership state.
 - Sort by title, year, BGG rating, BGG rank or complexity.
+- Personal 1–5 star ratings, explicit played/completed state and a unified **Sala dei trofei** that also respects imported BGG play counts.
+- Persistent smart/manual game lists, with manual lists constrained to owned titles.
+- A first-class wishlist fed by suggestions and crowdfunding results.
+- Universal Ctrl+K search across games, sections, wishlist, saved lists, archived rulebooks and cached crowdfunding campaigns.
+- Relevant missing-expansion discovery with minor promo/accessory filtering and baseline-safe expansion notifications.
+- Baseline-safe crowdfunding notifications for campaigns related to the owned/wishlisted catalog.
+- Technical integration state centralized under Settings → Diagnostica instead of ordinary browsing surfaces.
 - Dedicated game detail pages at `/games/{bgg_id}`.
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.

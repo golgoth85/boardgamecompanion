@@ -63,6 +63,35 @@ Suggested fields:
 
 Maps internal objects to optional external systems when a future adapter requires a durable association.
 
+## Personal library foundation
+
+Personal state is additive to imported collection data. A 1–5 `personal_rating`, local
+`played_at` marker and `completed_at` milestone live in `game_progress`; imported BGG
+`num_plays > 0` is also authoritative evidence that a title has been played. Clearing a
+local marker must not rewrite or deny imported play history. Completion implies played,
+but played does not imply completion, so repeatable/non-campaign games can appear in the
+Sala dei trofei without a false completion state.
+
+`personal_wishlist` stores source-stable BGG or crowdfunding references independently
+from the owned collection. Browser-facing target/cover links are restricted to credential-
+free HTTP(S) URLs; the UI applies the same fail-closed link policy to legacy rows.
+
+Saved lists are either smart (validated catalog filters persisted as JSON) or manual.
+Smart lists resolve against current catalog state at read time. Manual list membership is
+explicit and can only be added for currently owned games; removing an item remains allowed
+after ownership changes.
+
+Universal search is an aggregation API rather than a new search index. It searches local
+catalog data, persisted wishlist/list/document state and the existing crowdfunding cache.
+Keystroke search must not invoke external providers or consume crowdfunding/API quota.
+
+Expansion and crowdfunding notification producers use durable baseline state. The first
+valid discovery establishes a baseline without notifying for already-known items; empty,
+failed or unconfigured discovery must not falsely mark a source initialized. Expansion
+watching similarly refuses to establish an empty baseline when BGG relationship metadata
+is missing/stale after a failed refresh. Notification rows are deduplicated by stable keys
+and retain read state.
+
 ## Import
 
 BGG CSV must be accepted without BGG API access. Imports are idempotent and keyed primarily by BGG `objectid`.
