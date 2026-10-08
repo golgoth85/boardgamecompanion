@@ -1,39 +1,12 @@
 import {api} from "./api-client.js";
 import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
+import {shellRouteKey, shellSectionLabels} from "./routing.js";
 
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
 const sidebarToggle = document.querySelector("#sidebarToggle");
 const sidebarBackdrop = document.querySelector("#sidebarBackdrop");
 const mobileSectionTitle = document.querySelector("#mobileSectionTitle");
-
-const shellSectionLabels = {
-  catalog: "Ludoteca",
-  rankings: "Classifiche",
-  suggestions: "Suggerimenti",
-  crowdfunding: "Crowdfunding",
-  lists: "Liste",
-  wishlist: "Wishlist",
-  explore: "Esplora",
-  completed: "Sala dei trofei",
-  reviews: "Fonti da verificare",
-  updates: "Aggiornamenti regolamenti",
-  discovery: "Ricerca regolamenti",
-};
-
-function shellRouteKey(pathname = window.location.pathname) {
-  if (/^\/rankings\/?$/.test(pathname)) return "rankings";
-  if (/^\/suggestions\/?$/.test(pathname)) return "suggestions";
-  if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
-  if (/^\/lists\/?$/.test(pathname)) return "lists";
-  if (/^\/wishlist\/?$/.test(pathname)) return "wishlist";
-  if (/^\/completed\/?$/.test(pathname)) return "completed";
-  if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
-  if (/^\/reviews\/?$/.test(pathname)) return "reviews";
-  if (/^\/updates\/?$/.test(pathname)) return "updates";
-  if (/^\/discovery\/?$/.test(pathname)) return "discovery";
-  return "catalog";
-}
 
 function setSidebarOpen(open) {
   const expanded = Boolean(open);
