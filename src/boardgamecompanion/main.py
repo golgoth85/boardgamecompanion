@@ -78,7 +78,7 @@ from boardgamecompanion.crowdfunding_notifications import (
 )
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
-from boardgamecompanion.personal_state import PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, PersonalStateStore
 from boardgamecompanion.routers.diagnostics import router as diagnostics_router
 from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
@@ -1033,6 +1033,8 @@ def update_game_completion(
             state = store.update(bgg_id, completed=False)
     except PersonalStateNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PersonalStateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "bgg_id": bgg_id,
         "progress": {
