@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from boardgamecompanion.catalog import Catalog
+from boardgamecompanion.catalog import Catalog, SORT_SQL
 from boardgamecompanion.database import Database
 
 
@@ -25,6 +25,22 @@ ALLOWED_SMART_FILTERS = {
 }
 
 
+_BOOLEAN_FILTERS = {"owned", "completed", "played"}
+_INTEGER_LIMITS = {
+    "supports_players": (1, 30),
+    "ideal_players": (1, 30),
+    "recommended_players": (1, 30),
+    "player_age": (3, 99),
+    "max_minutes": (1, 1440),
+    "personal_rating_min": (1, 5),
+    "personal_rating_max": (1, 5),
+}
+_TEXT_LIMITS = {
+    "query": 200, "item_type": 32, "weight": 32,
+    "category": 500, "mechanic": 500, "sort": 64,
+}
+
+
 def _normalize_filters(value: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(value or {})
     unknown = set(raw) - ALLOWED_SMART_FILTERS
@@ -32,7 +48,38 @@ def _normalize_filters(value: dict[str, Any] | None) -> dict[str, Any]:
         raise GameListError(
             "unsupported smart-list filters: " + ", ".join(sorted(unknown))
         )
-    return {key: item for key, item in raw.items() if item not in ("", None)}
+    result: dict[str, Any] = {}
+    for key, item in raw.items():
+        if item is None or item == "":
+            continue
+        if key in _BOOLEAN_FILTERS:
+            if type(item) is not bool:
+                raise GameListError(f"{key} must be boolean")
+        elif key in _INTEGER_LIMITS:
+            minimum, maximum = _INTEGER_LIMITS[key]
+            if type(item) is not int or not minimum <= item <= maximum:
+                raise GameListError(f"{key} must be an integer from {minimum} to {maximum}")
+        elif key == "min_rating":
+            if type(item) not in (int, float) or not 0 <= item <= 10:
+                raise GameListError("min_rating must be between 0 and 10")
+        elif key in _TEXT_LIMITS:
+            if not isinstance(item, str) or len(item.strip()) > _TEXT_LIMITS[key]:
+                raise GameListError(f"{key} has an invalid value")
+            item = item.strip()
+            if key == "weight" and item not in {"light", "medium", "heavy"}:
+                raise GameListError("invalid weight filter")
+            if key == "sort" and item not in SORT_SQL:
+                raise GameListError("invalid sort order")
+            if key == "item_type" and item not in {"standalone", "expansion"}:
+                raise GameListError("invalid item type")
+        result[key] = item
+    if (
+        "personal_rating_min" in result
+        and "personal_rating_max" in result
+        and result["personal_rating_min"] > result["personal_rating_max"]
+    ):
+        raise GameListError("personal rating min cannot exceed max")
+    return result
 
 
 class GameListStore:
@@ -80,6 +127,8 @@ class GameListStore:
             raise GameListError("name is required")
         if kind not in {"smart", "manual"}:
             raise GameListError("kind must be smart or manual")
+        if kind == "manual" and filters:
+            raise GameListError("manual lists do not accept filters")
         normalized = _normalize_filters(filters) if kind == "smart" else {}
         now = datetime.now(UTC).isoformat()
         list_id = str(uuid4())
