@@ -1,3 +1,6 @@
+import {api} from "./api-client.js";
+import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
+
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
 const sidebarToggle = document.querySelector("#sidebarToggle");
@@ -9,8 +12,10 @@ const shellSectionLabels = {
   rankings: "Classifiche",
   suggestions: "Suggerimenti",
   crowdfunding: "Crowdfunding",
+  lists: "Liste",
+  wishlist: "Wishlist",
   explore: "Esplora",
-  completed: "Completati",
+  completed: "Sala dei trofei",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
@@ -20,6 +25,8 @@ function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
   if (/^\/suggestions\/?$/.test(pathname)) return "suggestions";
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
+  if (/^\/lists\/?$/.test(pathname)) return "lists";
+  if (/^\/wishlist\/?$/.test(pathname)) return "wishlist";
   if (/^\/completed\/?$/.test(pathname)) return "completed";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
@@ -174,6 +181,20 @@ const catalogAssistantResult = document.querySelector("#catalogAssistantResult")
 const closeCatalogAssistant = document.querySelector("#closeCatalogAssistant");
 const cancelCatalogAssistant = document.querySelector("#cancelCatalogAssistant");
 const askCatalogAssistant = document.querySelector("#askCatalogAssistant");
+const globalSearchButton = document.querySelector("#globalSearchButton");
+const mobileSearchButton = document.querySelector("#mobileSearchButton");
+const globalSearchDialog = document.querySelector("#globalSearchDialog");
+const globalSearchInput = document.querySelector("#globalSearchInput");
+const globalSearchResults = document.querySelector("#globalSearchResults");
+const closeGlobalSearch = document.querySelector("#closeGlobalSearch");
+const notificationButton = document.querySelector("#notificationButton");
+const mobileNotificationButton = document.querySelector("#mobileNotificationButton");
+const notificationDialog = document.querySelector("#notificationDialog");
+const notificationList = document.querySelector("#notificationList");
+const notificationBadge = document.querySelector("#notificationBadge");
+const mobileNotificationBadge = document.querySelector("#mobileNotificationBadge");
+const closeNotificationDialog = document.querySelector("#closeNotificationDialog");
+const diagnosticsPanel = document.querySelector("#diagnosticsPanel");
 const toast = document.querySelector("#toast");
 
 const catalogPageSizeValues = new Set(["20", "50", "100", "250", "all"]);
@@ -486,21 +507,6 @@ function closeImportDialog() {
   }
 }
 
-async function api(url, options) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    let message = `Errore HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      message = body.detail || message;
-    } catch (_) {}
-    const error = new Error(message);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
-}
-
 function setSettingsBusy(busy) {
   settingsBusy = busy;
   for (const control of [
@@ -527,7 +533,7 @@ function closeSettingsDialog() {
 }
 
 function setSettingsTab(name = "general") {
-  const active = ["general", "rulebooks", "providers", "crowdfunding"].includes(name)
+  const active = ["general", "rulebooks", "providers", "crowdfunding", "diagnostics"].includes(name)
     ? name
     : "general";
   settingsTabs.forEach((tab) => {
