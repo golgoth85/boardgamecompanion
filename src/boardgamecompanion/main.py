@@ -738,6 +738,7 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "version": __version__,
+        "schema_version": get_database().schema_version(),
         "storage": {
             "config": str(settings.config_dir),
             "import": str(settings.import_dir),
@@ -803,6 +804,7 @@ def list_games(
     owned: bool | None = Query(default=None),
     supports_players: int | None = Query(default=None, ge=1, le=30),
     ideal_players: int | None = Query(default=None, ge=1, le=30),
+    recommended_players: int | None = Query(default=None, ge=1, le=30),
     player_age: int | None = Query(default=None, ge=3, le=99),
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
@@ -825,6 +827,7 @@ def list_games(
         owned=owned,
         supports_players=supports_players,
         ideal_players=ideal_players,
+        recommended_players=recommended_players,
         player_age=player_age,
         weight=weight,
         max_minutes=max_minutes,
