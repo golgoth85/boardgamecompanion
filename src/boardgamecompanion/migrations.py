@@ -1344,6 +1344,109 @@ def _tutorial_videos(connection: sqlite3.Connection) -> None:
     )
 
 
+def _personal_library_foundation(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(game_progress)").fetchall()
+    }
+    if "played_at" not in columns:
+        connection.execute("ALTER TABLE game_progress ADD COLUMN played_at TEXT")
+    if "personal_rating" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE game_progress
+            ADD COLUMN personal_rating INTEGER
+                CHECK(personal_rating IS NULL OR personal_rating BETWEEN 1 AND 5)
+            """
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_progress_played
+        ON game_progress(played_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_progress_personal_rating
+        ON game_progress(personal_rating)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS personal_wishlist (
+            id TEXT PRIMARY KEY,
+            source_kind TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            bgg_id INTEGER,
+            title TEXT NOT NULL,
+            year_published INTEGER,
+            cover_url TEXT,
+            target_url TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_kind, source_key)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_personal_wishlist_bgg
+        ON personal_wishlist(bgg_id)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS saved_game_lists (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('smart','manual')),
+            filters_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS saved_game_list_items (
+            list_id TEXT NOT NULL
+                REFERENCES saved_game_lists(id) ON DELETE CASCADE,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY(list_id, board_game_id)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            category TEXT NOT NULL
+                CHECK(category IN ('expansion','crowdfunding')),
+            dedupe_key TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            target_url TEXT NOT NULL,
+            related_bgg_id INTEGER,
+            read_at TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_notifications_unread
+        ON notifications(read_at, created_at)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1362,6 +1465,7 @@ MIGRATIONS = (
     Migration(15, "personal-collection-progress", _personal_collection_progress),
     Migration(16, "gameplay-summaries", _gameplay_summaries),
     Migration(17, "tutorial-videos", _tutorial_videos),
+    Migration(18, "personal-library-foundation", _personal_library_foundation),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
