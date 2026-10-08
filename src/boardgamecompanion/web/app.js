@@ -6021,6 +6021,7 @@ verifyApifyToken.addEventListener("click", () => {
 
 importButton.addEventListener("click", () => {
   closeSidebar();
+  if (settingsDialog?.open) settingsDialog.close();
   resetImportDialog();
   importDialog.showModal();
 });
