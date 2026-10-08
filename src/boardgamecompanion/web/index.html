@@ -53,45 +53,22 @@
             <span>Wishlist</span>
           </a>
           <a class="nav-item nav-completed" href="/completed" data-nav data-route="completed">
-            <span class="nav-icon" aria-hidden="true">♛</span>
-            <span>Sala dei trofei</span>
+            <span class="nav-icon" aria-hidden="true">✓</span>
+            <span>Giochi giocati</span>
           </a>
           <button class="nav-item nav-button nav-ai" id="catalogAssistantButton" type="button">
             <span class="nav-icon" aria-hidden="true">✦</span>
             <span>Consigliami un gioco</span>
           </button>
-        </section>
-
-        <section class="nav-group" aria-labelledby="navToolsLabel">
-          <p class="nav-group-label" id="navToolsLabel">Strumenti</p>
-          <button class="nav-item nav-button" id="scannerButton" type="button">
-            <span class="nav-icon" aria-hidden="true">⌁</span>
-            <span>Scansiona barcode</span>
-          </button>
-          <button class="nav-item nav-button" id="importSidebarButton" type="button">
-            <span class="nav-icon" aria-hidden="true">⇧</span>
-            <span>Importa CSV BGG</span>
+          <button class="nav-item nav-button" id="settingsButton" type="button"
+                  aria-haspopup="dialog" aria-controls="settingsDialog">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            <span>Impostazioni</span>
           </button>
         </section>
       </nav>
 
       <div class="sidebar-footer">
-        <div class="sidebar-utility-row">
-          <button class="sidebar-utility-button" id="globalSearchButton" type="button"
-                  aria-haspopup="dialog" aria-controls="globalSearchDialog">
-            <span aria-hidden="true">⌕</span><span>Cerca</span><kbd>Ctrl K</kbd>
-          </button>
-          <button class="sidebar-notification-button" id="notificationButton" type="button"
-                  aria-haspopup="dialog" aria-controls="notificationDialog"
-                  aria-label="Apri notifiche">
-            <span aria-hidden="true">♢</span>
-            <span class="notification-badge" id="notificationBadge" hidden>0</span>
-          </button>
-        </div>
-        <button class="sidebar-settings-button" id="settingsButton" type="button"
-                aria-haspopup="dialog" aria-controls="settingsDialog">
-          <span aria-hidden="true">⚙</span><span>Impostazioni</span>
-        </button>
         <div class="catalog-sync-inline sidebar-sync-control" title="Sincronizzazione automatica BoardGameGeek">
           <span class="status-dot" id="catalogBggSyncDot" aria-hidden="true"></span>
           <span id="catalogBggSyncStatus">BGG</span>
@@ -121,6 +98,21 @@
           </button>
         </div>
       </header>
+
+      <div class="global-command-bar" aria-label="Comandi globali">
+        <button class="global-search-trigger" id="globalSearchButton" type="button"
+                aria-haspopup="dialog" aria-controls="globalSearchDialog">
+          <span class="global-command-icon" aria-hidden="true">⌕</span>
+          <span class="global-search-placeholder">Cerca giochi, sezioni, liste e wishlist…</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <button class="global-notification-trigger" id="notificationButton" type="button"
+                aria-haspopup="dialog" aria-controls="notificationDialog"
+                aria-label="Apri notifiche" title="Notifiche">
+          <span aria-hidden="true">♢</span>
+          <span class="notification-badge" id="notificationBadge" hidden>0</span>
+        </button>
+      </div>
 
       <main id="app" class="shell" aria-live="polite"></main>
     </div>
@@ -158,7 +150,6 @@
         <div>
           <p class="eyebrow">BoardGameCompanion</p>
           <h2 id="settingsDialogTitle">Impostazioni</h2>
-          <p class="muted settings-dialog-intro">Collezione, regolamenti e provider in un unico spazio.</p>
         </div>
         <button class="icon-button" id="closeSettings" type="button" aria-label="Chiudi impostazioni">×</button>
       </div>
@@ -213,6 +204,19 @@
           <div class="settings-inline-actions">
             <button class="button button-ghost" id="importButton" type="button">Importa CSV BGG</button>
           </div>
+        </section>
+
+        <section class="settings-card" id="catalogPreferencesSettings">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Catalogo</p>
+              <h3>Visualizzazione</h3>
+            </div>
+          </div>
+          <label class="settings-check">
+            <input id="settingsCollapseExpansions" type="checkbox">
+            <span>Raggruppa le espansioni sotto il gioco base</span>
+          </label>
         </section>
 
         <section class="settings-card" id="youtubeSettings">
