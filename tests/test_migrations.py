@@ -826,3 +826,40 @@ def test_v7_database_with_chunks_upgrades_to_v8_without_loss(tmp_path: Path) -> 
     assert embedding_runs == 0
     assert embeddings == 0
     assert fk_check == []
+
+
+def test_notification_baseline_upgrade_preserves_previous_watch_state(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "old-notifications.sqlite3")
+    database.initialize()
+    # Simulate a v18 installation that already saw a crowdfunding campaign.
+    with database.transaction() as connection:
+        connection.execute("DROP TABLE notification_scan_state")
+        connection.execute("DELETE FROM schema_migrations WHERE version=19")
+        connection.execute(
+            """
+            INSERT INTO crowdfunding_watch_state(
+                campaign_key,title,platform,target_url,related_bgg_id,
+                first_seen_at,last_seen_at
+            ) VALUES(
+                'old-project','Existing Project','gamefound',NULL,NULL,
+                'before','before'
+            )
+            """
+        )
+    database.initialize()
+
+    with database.connect() as connection:
+        baseline = connection.execute(
+            """
+            SELECT initialized_at FROM notification_scan_state
+            WHERE producer='crowdfunding'
+            """
+        ).fetchone()
+        previous = connection.execute(
+            "SELECT title FROM crowdfunding_watch_state WHERE campaign_key='old-project'"
+        ).fetchone()
+    assert database.schema_version() == 19
+    assert baseline is not None
+    assert previous["title"] == "Existing Project"
