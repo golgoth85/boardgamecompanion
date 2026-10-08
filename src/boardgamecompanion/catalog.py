@@ -52,6 +52,13 @@ SORT_SQL = {
     "completed_desc": (
         "p.completed_at IS NULL, p.completed_at DESC, g.title COLLATE NOCASE ASC"
     ),
+    "played_desc": (
+        "COALESCE(p.played_at,p.completed_at) IS NULL, "
+        "COALESCE(p.played_at,p.completed_at) DESC, g.title COLLATE NOCASE ASC"
+    ),
+    "personal_rating_desc": (
+        "p.personal_rating IS NULL, p.personal_rating DESC, g.title COLLATE NOCASE ASC"
+    ),
 }
 
 
@@ -144,8 +151,15 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             ),
         },
         "progress": {
+            "played": bool(
+                ("played_at" in row.keys() and row["played_at"])
+                or ("completed_at" in row.keys() and row["completed_at"])
+                or int(row["num_plays"] or 0) > 0
+            ),
+            "played_at": row["played_at"] if "played_at" in row.keys() else None,
             "completed": bool(row["completed_at"]) if "completed_at" in row.keys() else False,
             "completed_at": row["completed_at"] if "completed_at" in row.keys() else None,
+            "rating": row["personal_rating"] if "personal_rating" in row.keys() else None,
         },
         "gameplay_summary": (
             row["gameplay_summary"]
@@ -250,7 +264,7 @@ class Catalog:
                    c.version_publishers, c.version_year_published,
                    c.version_nickname, c.inventory_location, c.quantity,
                    c.acquisition_date, c.first_seen_at,
-                   p.completed_at,
+                   p.played_at, p.completed_at, p.personal_rating,
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
                    e.fetched_at AS metadata_fetched_at,
@@ -272,6 +286,9 @@ class Catalog:
         category: str | None = None,
         mechanic: str | None = None,
         completed: bool | None = None,
+        played: bool | None = None,
+        personal_rating_min: int | None = None,
+        personal_rating_max: int | None = None,
         sort: str = "title",
         limit: int = 50,
         offset: int = 0,
@@ -321,6 +338,18 @@ class Catalog:
             params.append(min_rating)
         if completed is not None:
             where.append("p.completed_at IS NOT NULL" if completed else "p.completed_at IS NULL")
+        if played is not None:
+            played_sql = (
+                "(p.played_at IS NOT NULL OR p.completed_at IS NOT NULL "
+                "OR COALESCE(c.num_plays,0) > 0)"
+            )
+            where.append(played_sql if played else f"NOT {played_sql}")
+        if personal_rating_min is not None:
+            where.append("p.personal_rating IS NOT NULL AND p.personal_rating >= ?")
+            params.append(int(personal_rating_min))
+        if personal_rating_max is not None:
+            where.append("p.personal_rating IS NOT NULL AND p.personal_rating <= ?")
+            params.append(int(personal_rating_max))
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
@@ -1084,6 +1113,20 @@ class Catalog:
                   AND COALESCE(g.item_type,'standalone') != 'expansion'
                 """
             ).fetchone()["count"]
+            played = connection.execute(
+                """
+                SELECT COUNT(DISTINCT g.id) AS count
+                FROM board_games g
+                LEFT JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN game_progress p ON p.board_game_id=g.id
+                WHERE COALESCE(g.item_type,'standalone') != 'expansion'
+                  AND (
+                    p.played_at IS NOT NULL
+                    OR p.completed_at IS NOT NULL
+                    OR COALESCE(c.num_plays,0) > 0
+                  )
+                """
+            ).fetchone()["count"]
             rulebooks = connection.execute(
                 """
                 SELECT COUNT(DISTINCT board_game_id) AS count
@@ -1099,6 +1142,7 @@ class Catalog:
             "standalone_owned": owned_types["standalone_owned"] or 0,
             "expansions_owned": owned_types["expansions_owned"] or 0,
             "completed": completed or 0,
+            "played": played or 0,
             "rulebooks": rulebooks or 0,
         }
 
