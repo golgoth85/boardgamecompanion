@@ -98,6 +98,7 @@ class ExpansionService:
         bgg_id: int,
         *,
         refresh: bool,
+        allow_stale: bool = True,
     ) -> dict[str, Any] | None:
         cached = self.metadata_store.get(bgg_id)
         cached_metadata = (cached or {}).get("metadata") or {}
@@ -106,7 +107,7 @@ class ExpansionService:
             try:
                 return self.metadata_store.refresh(bgg_id, force=True)
             except BggMetadataError:
-                if cached is not None:
+                if allow_stale and cached is not None:
                     return cached
                 raise
         return cached
@@ -229,7 +230,17 @@ class ExpansionService:
             return {"bgg_id": int(bgg_id), "skipped": "expansion"}
         current = datetime.now(UTC)
         try:
-            enrichment = self._base_metadata(int(bgg_id), refresh=True)
+            # An unavailable API or an unconfigured BGG client must never
+            # establish an empty baseline; otherwise existing expansions
+            # would be announced when the source comes back online.
+            if self.metadata_store.client is None:
+                raise BggMetadataError("BGG metadata client is not configured")
+            enrichment = self._base_metadata(
+                int(bgg_id), refresh=True, allow_stale=False
+            )
+            metadata = (enrichment or {}).get("metadata") or {}
+            if not isinstance(metadata.get("expansions"), list):
+                raise BggMetadataError("BGG expansion links are unavailable")
             links = self._linked_expansions(enrichment)
         except Exception as exc:
             self._record_scan(
@@ -331,7 +342,8 @@ class ExpansionService:
         baseline_complete: bool | None,
     ) -> None:
         current_iso = current.isoformat()
-        next_iso = (current + timedelta(seconds=self.refresh_seconds)).isoformat()
+        retry_seconds = min(self.refresh_seconds, 60 * 60) if error else self.refresh_seconds
+        next_iso = (current + timedelta(seconds=retry_seconds)).isoformat()
         with self.database.transaction(immediate=True) as connection:
             existing = connection.execute(
                 """
