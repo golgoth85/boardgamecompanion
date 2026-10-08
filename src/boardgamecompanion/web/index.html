@@ -44,9 +44,17 @@
             <span class="nav-icon" aria-hidden="true">◉</span>
             <span>Crowdfunding</span>
           </a>
+          <a class="nav-item" href="/lists" data-nav data-route="lists">
+            <span class="nav-icon" aria-hidden="true">☷</span>
+            <span>Liste</span>
+          </a>
+          <a class="nav-item" href="/wishlist" data-nav data-route="wishlist">
+            <span class="nav-icon" aria-hidden="true">♡</span>
+            <span>Wishlist</span>
+          </a>
           <a class="nav-item nav-completed" href="/completed" data-nav data-route="completed">
             <span class="nav-icon" aria-hidden="true">♛</span>
-            <span>Completati</span>
+            <span>Sala dei trofei</span>
           </a>
           <button class="nav-item nav-button nav-ai" id="catalogAssistantButton" type="button">
             <span class="nav-icon" aria-hidden="true">✦</span>
@@ -68,6 +76,18 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div class="sidebar-utility-row">
+          <button class="sidebar-utility-button" id="globalSearchButton" type="button"
+                  aria-haspopup="dialog" aria-controls="globalSearchDialog">
+            <span aria-hidden="true">⌕</span><span>Cerca</span><kbd>Ctrl K</kbd>
+          </button>
+          <button class="sidebar-notification-button" id="notificationButton" type="button"
+                  aria-haspopup="dialog" aria-controls="notificationDialog"
+                  aria-label="Apri notifiche">
+            <span aria-hidden="true">♢</span>
+            <span class="notification-badge" id="notificationBadge" hidden>0</span>
+          </button>
+        </div>
         <button class="sidebar-settings-button" id="settingsButton" type="button"
                 aria-haspopup="dialog" aria-controls="settingsDialog">
           <span aria-hidden="true">⚙</span><span>Impostazioni</span>
@@ -93,6 +113,12 @@
         <div class="mobile-brand">
           <strong>BoardGameCompanion</strong>
           <span id="mobileSectionTitle">Ludoteca</span>
+        </div>
+        <div class="mobile-global-actions">
+          <button class="icon-button" id="mobileSearchButton" type="button" aria-label="Cerca">⌕</button>
+          <button class="icon-button mobile-notification-button" id="mobileNotificationButton" type="button" aria-label="Notifiche">
+            ♢<span class="notification-badge" id="mobileNotificationBadge" hidden>0</span>
+          </button>
         </div>
       </header>
 
@@ -146,6 +172,8 @@
                 role="tab" aria-selected="false" data-settings-tab="providers">AI e provider</button>
         <button class="settings-tab" id="settingsTabCrowdfunding" type="button"
                 role="tab" aria-selected="false" data-settings-tab="crowdfunding">Crowdfunding</button>
+        <button class="settings-tab" id="settingsTabDiagnostics" type="button"
+                role="tab" aria-selected="false" data-settings-tab="diagnostics">Diagnostica</button>
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="general">
@@ -362,6 +390,24 @@
         </section>
       </div>
 
+      <div class="settings-tab-panel" data-settings-panel="diagnostics" hidden>
+        <section class="settings-card">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Avanzate</p>
+              <h3>Diagnostica</h3>
+            </div>
+          </div>
+          <p class="muted">
+            Stato tecnico e dettagli implementativi sono raccolti qui e non vengono mostrati
+            nelle schermate di uso quotidiano.
+          </p>
+          <div id="diagnosticsPanel" class="diagnostics-panel">
+            <span class="muted">Apri questa scheda per aggiornare la diagnostica.</span>
+          </div>
+        </section>
+      </div>
+
       <div id="settingsResult" class="import-result settings-result" hidden></div>
       <div class="dialog-actions settings-actions">
         <button class="button button-ghost" type="button" id="cancelSettings">Chiudi</button>
@@ -397,6 +443,41 @@
       <div class="dialog-actions">
         <button class="button button-ghost" id="cancelCatalogAssistant" type="button">Chiudi</button>
         <button class="button button-primary" id="askCatalogAssistant" type="submit">Chiedi all'AI</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="globalSearchDialog" class="dialog global-search-dialog" aria-labelledby="globalSearchTitle">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Ricerca universale</p>
+          <h2 id="globalSearchTitle">Cerca in BoardGameCompanion</h2>
+        </div>
+        <button class="icon-button" id="closeGlobalSearch" type="button" aria-label="Chiudi ricerca">×</button>
+      </div>
+      <label class="global-search-field">
+        <span class="visually-hidden">Cerca</span>
+        <input id="globalSearchInput" type="search" autocomplete="off"
+               placeholder="Giochi, sezioni e funzioni…" maxlength="200">
+      </label>
+      <div id="globalSearchResults" class="global-search-results" aria-live="polite">
+        <p class="muted">Scrivi almeno un carattere. Scorciatoia: Ctrl+K.</p>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="notificationDialog" class="dialog notification-dialog" aria-labelledby="notificationDialogTitle">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Centro notifiche</p>
+          <h2 id="notificationDialogTitle">Notifiche</h2>
+        </div>
+        <button class="icon-button" id="closeNotificationDialog" type="button" aria-label="Chiudi notifiche">×</button>
+      </div>
+      <div id="notificationList" class="notification-list" aria-live="polite">
+        <p class="muted">Caricamento…</p>
       </div>
     </form>
   </dialog>
@@ -574,6 +655,6 @@
   </dialog>
 
   <script src="/static/zxing-browser-0.2.1.min.js" defer></script>
-  <script src="/static/app.js" defer></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>
