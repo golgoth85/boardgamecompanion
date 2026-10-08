@@ -467,6 +467,7 @@ async function performGlobalSearch() {
     if (String(globalSearchInput?.value || "").trim() !== query) return;
     const games = payload.groups?.games || [];
     const sections = payload.groups?.sections || [];
+    const wishlist = payload.groups?.wishlist || [];
     globalSearchResults.innerHTML = `
       ${games.length ? `
         <section class="global-search-group">
@@ -483,6 +484,28 @@ async function performGlobalSearch() {
           `).join("")}
         </section>
       ` : ""}
+      ${wishlist.length ? `
+        <section class="global-search-group">
+          <h3>Wishlist</h3>
+          ${wishlist.map((item) => {
+            const target = item.bgg_id
+              ? `/wishlist?focus=${encodeURIComponent(item.id)}`
+              : (item.target_url || "/wishlist");
+            const internal = String(target).startsWith("/");
+            return `
+              <a class="global-search-result" href="${escapeHtml(target)}"
+                 ${internal ? "data-nav" : 'target="_blank" rel="noopener noreferrer"'}>
+                <span class="global-search-cover">
+                  ${item.cover_url
+                    ? `<img src="${escapeHtml(item.cover_url)}" alt="" referrerpolicy="no-referrer">`
+                    : `<span>♡</span>`}
+                </span>
+                <span><strong>${escapeHtml(item.title)}</strong><small>${item.source_kind === "crowdfunding" ? "Crowdfunding" : "Wishlist BGG"}</small></span>
+              </a>
+            `;
+          }).join("")}
+        </section>
+      ` : ""}
       ${sections.length ? `
         <section class="global-search-group">
           <h3>Sezioni</h3>
@@ -494,7 +517,7 @@ async function performGlobalSearch() {
           `).join("")}
         </section>
       ` : ""}
-      ${!games.length && !sections.length
+      ${!games.length && !wishlist.length && !sections.length
         ? '<div class="empty">Nessun risultato.</div>'
         : ""}
     `;
