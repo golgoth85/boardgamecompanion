@@ -69,3 +69,44 @@ def test_crowdfunding_notifications_baseline_dedupe_and_relation(tmp_path: Path)
     repeated = producer.scan([_campaign("new", "Mage Knight: New Adventures")])
     assert repeated["notified"] == 0
     assert producer.notifications.list()["unread_count"] == 1
+
+
+
+def test_unrelated_initial_scan_still_establishes_baseline(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    producer = CrowdfundingNotificationProducer(db)
+
+    assert producer.scan([_campaign("other", "An Unrelated Game")]) == {
+        "matched": 0, "created": 0, "notified": 0,
+    }
+    with db.connect() as connection:
+        row = connection.execute(
+            "SELECT initialized_at FROM notification_scan_state WHERE producer='crowdfunding'"
+        ).fetchone()
+    assert row is not None
+
+    result = producer.scan([_campaign("new", "Mage Knight: New Adventures")])
+    assert result == {"matched": 1, "created": 1, "notified": 1}
+
+
+def test_empty_initial_discovery_does_not_set_baseline(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    producer = CrowdfundingNotificationProducer(db)
+
+    assert producer.scan([]) == {"matched": 0, "created": 0, "notified": 0}
+    assert producer.scan([_campaign("first", "Mage Knight Reprint")]) == {
+        "matched": 1, "created": 1, "notified": 0,
+    }
+    assert producer.notifications.list()["unread_count"] == 0
+
+
+def test_description_mention_alone_does_not_match_game(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    producer = CrowdfundingNotificationProducer(db)
+    unrelated = _campaign("unrelated", "Original Fantasy Adventure")
+    unrelated["description"] = "Inspired by Mage Knight and many other games."
+
+    assert producer.scan([unrelated]) == {
+        "matched": 0, "created": 0, "notified": 0,
+    }
+    assert producer.notifications.list()["unread_count"] == 0
