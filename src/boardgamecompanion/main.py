@@ -77,6 +77,13 @@ from boardgamecompanion.crowdfunding import (
     GamefoundProvider,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.personal_state import PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.lists import router as lists_router
+from boardgamecompanion.routers.notifications import router as notifications_router
+from boardgamecompanion.routers.personal import router as personal_router
+from boardgamecompanion.routers.search import router as search_router
+from boardgamecompanion.routers.wishlist import router as wishlist_router
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
@@ -157,10 +164,6 @@ from boardgamecompanion.tutorial_videos import (
 
 WEB_DIR = Path(__file__).parent / "web"
 LOGGER = logging.getLogger(__name__)
-
-
-def get_database() -> Database:
-    return Database(settings.database_path)
 
 
 def get_crowdfunding_service() -> CrowdfundingService:
@@ -643,6 +646,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+app.include_router(personal_router)
+app.include_router(wishlist_router)
+app.include_router(lists_router)
+app.include_router(notifications_router)
+app.include_router(search_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -652,6 +660,16 @@ def web_home() -> FileResponse:
 
 @app.get("/games/{bgg_id}", include_in_schema=False)
 def web_game(bgg_id: int) -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/lists", include_in_schema=False)
+def web_lists() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/wishlist", include_in_schema=False)
+def web_wishlist() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
@@ -792,6 +810,9 @@ def list_games(
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     completed: bool | None = Query(default=None),
+    played: bool | None = Query(default=None),
+    personal_rating_min: int | None = Query(default=None, ge=1, le=5),
+    personal_rating_max: int | None = Query(default=None, ge=1, le=5),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
@@ -811,6 +832,9 @@ def list_games(
         category=category,
         mechanic=mechanic,
         completed=completed,
+        played=played,
+        personal_rating_min=personal_rating_min,
+        personal_rating_max=personal_rating_max,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
@@ -963,40 +987,26 @@ def update_game_completion(
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    now = datetime.now(UTC).isoformat()
-    with database.transaction(immediate=True) as connection:
-        row = connection.execute(
-            "SELECT id FROM board_games WHERE bgg_id=?",
-            (bgg_id,),
-        ).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Board game not found")
-        board_game_id = int(row["id"])
+    try:
+        store = PersonalStateStore(database)
         if payload.completed:
-            completed_at = payload.completed_at or datetime.now(UTC).date().isoformat()
-            connection.execute(
-                """
-                INSERT INTO game_progress(
-                    board_game_id,completed_at,created_at,updated_at
-                ) VALUES(?,?,?,?)
-                ON CONFLICT(board_game_id) DO UPDATE SET
-                    completed_at=excluded.completed_at,
-                    updated_at=excluded.updated_at
-                """,
-                (board_game_id, completed_at, now, now),
+            state = store.update(
+                bgg_id,
+                completed=True,
+                completed_at=(
+                    payload.completed_at or datetime.now(UTC).date().isoformat()
+                ),
             )
         else:
-            connection.execute(
-                "DELETE FROM game_progress WHERE board_game_id=?",
-                (board_game_id,),
-            )
-
-    game = Catalog(database).get_game(bgg_id)
-    if game is None:
-        raise HTTPException(status_code=404, detail="Board game not found")
+            state = store.update(bgg_id, completed=False)
+    except PersonalStateNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {
         "bgg_id": bgg_id,
-        "progress": game["progress"],
+        "progress": {
+            "completed": state["completed"],
+            "completed_at": state["completed_at"],
+        },
     }
 
 
