@@ -683,28 +683,71 @@ async function openNotificationCenter() {
 async function refreshDiagnostics() {
   if (!diagnosticsPanel) return;
   diagnosticsPanel.innerHTML = '<span class="muted">Aggiornamento diagnostica…</span>';
-  const [health, sync, stats, notifications] = await Promise.allSettled([
-    api("/health"),
-    api("/api/bgg-collection-sync"),
-    api("/api/catalog/stats"),
-    api("/api/notifications?limit=1"),
-  ]);
-  const value = (result) => result.status === "fulfilled" ? result.value : null;
-  const h = value(health);
-  const bggSync = value(sync);
-  const catalogStats = value(stats);
-  const notice = value(notifications);
-  diagnosticsPanel.innerHTML = `
-    <dl class="diagnostics-grid">
-      <div><dt>Applicazione</dt><dd>${h?.status === "ok" ? "OK" : "Non disponibile"}</dd></div>
-      <div><dt>Schema DB</dt><dd>${escapeHtml(h?.schema_version ?? "—")}</dd></div>
-      <div><dt>Ultima sync BGG</dt><dd>${escapeHtml(bggSync?.last_success_at || "Mai")}</dd></div>
-      <div><dt>Errore sync BGG</dt><dd>${escapeHtml(bggSync?.last_error || "Nessuno")}</dd></div>
-      <div><dt>Giochi catalogati</dt><dd>${formatNumber(catalogStats?.total || 0, 0)}</dd></div>
-      <div><dt>Regolamenti</dt><dd>${formatNumber(catalogStats?.rulebooks || 0, 0)}</dd></div>
-      <div><dt>Notifiche non lette</dt><dd>${formatNumber(notice?.unread_count || 0, 0)}</dd></div>
-    </dl>
-  `;
+  try {
+    const payload = await api("/api/diagnostics");
+    const bgg = payload.bgg || {};
+    const assistant = payload.assistant || {};
+    const crowdfunding = payload.crowdfunding || {};
+    const suggestions = payload.suggestions || {};
+    const rulebooks = payload.rulebooks || {};
+    const personal = payload.personal || {};
+    const cacheLabel = (cache) => {
+      if (!cache?.exists) return "Assente";
+      const date = cache.updated_at
+        ? new Date(cache.updated_at).toLocaleString("it-IT")
+        : "data ignota";
+      return `${date} · ${formatNumber(cache.bytes || 0, 0)} B`;
+    };
+    const statusSummary = (states = {}) => Object.entries(states)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(" · ") || "Nessun dato";
+
+    diagnosticsPanel.innerHTML = `
+      <div class="diagnostics-section">
+        <h4>Sistema</h4>
+        <dl class="diagnostics-grid">
+          <div><dt>Schema DB</dt><dd>${escapeHtml(String(payload.schema_version ?? "—"))}</dd></div>
+          <div><dt>BGG</dt><dd>${bgg.configured ? "Configurato" : "Non configurato"}</dd></div>
+          <div><dt>Sync collezione</dt><dd>${bgg.collection_sync_configured ? "Configurata" : "Non configurata"}</dd></div>
+          <div><dt>Ultima sync BGG</dt><dd>${escapeHtml(bgg.last_success_at || "Mai")}</dd></div>
+          <div class="diagnostics-wide"><dt>Ultimo errore BGG</dt><dd>${escapeHtml(bgg.last_error || "Nessuno")}</dd></div>
+        </dl>
+      </div>
+      <div class="diagnostics-section">
+        <h4>Assistente e indicizzazione</h4>
+        <dl class="diagnostics-grid">
+          <div><dt>Generazione</dt><dd>${escapeHtml((assistant.generation_order || []).join(" → ") || "—")}</dd></div>
+          <div><dt>Embedding</dt><dd>${escapeHtml((assistant.embedding_order || []).join(" → ") || "—")}</dd></div>
+          <div><dt>YouTube</dt><dd>${assistant.youtube_configured ? "Configurato" : "Non configurato"}</dd></div>
+          <div><dt>Job documenti</dt><dd>${escapeHtml(statusSummary(rulebooks.indexing))}</dd></div>
+          <div class="diagnostics-wide"><dt>Discovery regolamenti</dt><dd>${escapeHtml(statusSummary(rulebooks.discovery))}</dd></div>
+        </dl>
+      </div>
+      <div class="diagnostics-section">
+        <h4>Cache e provider</h4>
+        <dl class="diagnostics-grid">
+          <div><dt>Suggerimenti</dt><dd>${escapeHtml(cacheLabel(suggestions.cache))}</dd></div>
+          <div><dt>Editoriale suggerimenti</dt><dd>${escapeHtml(cacheLabel(suggestions.editorial_cache))}</dd></div>
+          <div><dt>Crowdfunding</dt><dd>${escapeHtml(cacheLabel(crowdfunding.cache))}</dd></div>
+          <div><dt>Kickstarter</dt><dd>${crowdfunding.kickstarter_configured ? "Configurato" : "Non configurato"}</dd></div>
+        </dl>
+      </div>
+      <div class="diagnostics-section">
+        <h4>Stato personale</h4>
+        <dl class="diagnostics-grid">
+          <div><dt>Liste</dt><dd>${formatNumber(personal.list_count || 0, 0)}</dd></div>
+          <div><dt>Wishlist</dt><dd>${formatNumber(personal.wishlist_count || 0, 0)}</dd></div>
+          <div><dt>Notifiche</dt><dd>${formatNumber(personal.notifications_total || 0, 0)}</dd></div>
+          <div><dt>Non lette</dt><dd>${formatNumber(personal.notifications_unread || 0, 0)}</dd></div>
+          <div><dt>Scan espansioni</dt><dd>${formatNumber(personal.expansion_scans || 0, 0)}</dd></div>
+          <div><dt>Baseline espansioni</dt><dd>${formatNumber(personal.expansion_baselines || 0, 0)}</dd></div>
+          <div><dt>Errori scan espansioni</dt><dd>${formatNumber(personal.expansion_scan_errors || 0, 0)}</dd></div>
+        </dl>
+      </div>
+    `;
+  } catch (error) {
+    diagnosticsPanel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function resetImportDialog() {
