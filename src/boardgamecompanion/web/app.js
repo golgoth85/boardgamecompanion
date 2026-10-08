@@ -3186,9 +3186,8 @@ async function renderDetail(bggId) {
   `;
   const requestedPath = window.location.pathname;
   try {
-    const [game, copies, documents, tutorials] = await Promise.all([
+    const [game, documents, tutorials] = await Promise.all([
       api(`/api/games/${bggId}`),
-      api(`/api/games/${bggId}/copies`),
       api(`/api/games/${bggId}/documents`),
       api(`/api/games/${bggId}/tutorial-videos`),
     ]);
@@ -3198,7 +3197,6 @@ async function renderDetail(bggId) {
     const collection = game.collection || {};
     const bgg = game.bgg || {};
     const metadata = game.bgg_metadata || {};
-    const copyItems = copies.items || [];
     const documentItems = documents.items || [];
     const tutorialItems = tutorials.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
@@ -3206,7 +3204,6 @@ async function renderDetail(bggId) {
     const description = italianDescription
       ? escapeHtml(italianDescription).replace(/\r?\n/g, "<br>")
       : "Traduzione italiana in preparazione…";
-    const copyLabel = copyItems.length === 1 ? "1 copia registrata" : `${copyItems.length} copie registrate`;
     const firstRulebook = rulebooks[0] || null;
 
     app.innerHTML = `
@@ -3364,7 +3361,7 @@ async function renderDetail(bggId) {
                 </div>
               </form>
               <div class="rag-result" id="ragResult" aria-live="polite">
-<div class="rag-empty"></div>
+<div class="rag-empty" hidden></div>
               </div>
             </section>
           </section>
@@ -3383,7 +3380,6 @@ async function renderDetail(bggId) {
       </section>
     `;
 
-    const openCopy = () => openCopyEditor(game.bgg_id, game.title);
     document.querySelector("#togglePlayed")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -3394,7 +3390,7 @@ async function renderDetail(bggId) {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({played: next}),
         });
-        showToast(next ? "Gioco aggiunto alla Giochi giocati come giocato." : "Stato giocato rimosso.");
+        showToast(next ? "Gioco segnato come giocato." : "Stato giocato rimosso.");
         await renderDetail(game.bgg_id);
       } catch (error) {
         showToast(error.message, true);
@@ -3457,12 +3453,6 @@ async function renderDetail(bggId) {
         showToast(error.message, true);
         button.disabled = false;
       }
-    });
-    document.querySelectorAll(".edit-copy").forEach((button) => {
-      button.addEventListener("click", () => {
-        const copy = copyItems.find((item) => item.id === button.dataset.copyId);
-        if (copy) openCopyEditor(game.bgg_id, game.title, copy);
-      });
     });
     document.querySelector("#addDocument")?.addEventListener("click", () => {
       openDocumentDialog(game.bgg_id, game.title);
@@ -3601,8 +3591,7 @@ async function renderDiscovery() {
     app.innerHTML = `
       <section class="admin-page review-page">
         <div class="review-page-head admin-page-head">
-          <div><p class="eyebrow">Regolamenti</p><h1>Ricerca regolamenti</h1>
-          <p class="muted">Controlla la copertura delle fonti note per il catalogo. Italiano prima di inglese; ogni candidato continua a passare dalla policy di fiducia.</p></div>
+          <div><p class="eyebrow">Regolamenti</p><h1>Ricerca regolamenti</h1></div>
           <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
@@ -3761,9 +3750,6 @@ async function renderReviews({reset = false} = {}) {
           <div>
             <p class="eyebrow">Regolamenti</p>
             <h1>Fonti da verificare</h1>
-            <p class="muted">
-              Decidi esplicitamente sulle fonti che non possono essere considerate attendibili in automatico.
-            </p>
           </div>
           <span class="review-counter">${pendingData.total} da verificare</span>
         </div>
@@ -4048,10 +4034,6 @@ async function renderUpdates({reset = false} = {}) {
           <div>
             <p class="eyebrow">Regolamenti</p>
             <h1>Aggiornamenti regolamenti</h1>
-            <p class="muted">
-              Le fonti già approvate vengono ricontrollate in sicurezza.
-              Una nuova versione viene archiviata solo quando cambia davvero il PDF.
-            </p>
           </div>
           <span class="review-counter">${data.total} monitorati</span>
         </div>
@@ -5348,7 +5330,6 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
         <div>
           <p class="eyebrow">Scopri</p>
           <h1>Crowdfunding</h1>
-          <p>I progetti tabletop più rilevanti del momento, ordinati con criteri leggibili e dati della fonte originale.</p>
         </div>
         <button class="button button-ghost" id="crowdfundingRefresh" type="button">↻ Aggiorna</button>
       </header>
