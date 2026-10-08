@@ -493,7 +493,7 @@ async function performGlobalSearch() {
         <section class="global-search-group">
           <h3>Liste</h3>
           ${lists.map((item) => `
-            <a class="global-search-result is-section" href="/lists" data-nav>
+            <a class="global-search-result is-section" href="/lists?focus=${encodeURIComponent(item.id)}" data-nav>
               <span aria-hidden="true">☷</span>
               <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? "Lista dinamica" : "Lista manuale"}</small></span>
             </a>
@@ -5706,6 +5706,10 @@ async function renderLists() {
     target.querySelectorAll("[data-open-list]").forEach((button) => {
       button.addEventListener("click", () => void openList(button.dataset.openList));
     });
+    const focusedId = new URLSearchParams(window.location.search).get("focus");
+    if (focusedId && items.some((item) => item.id === focusedId)) {
+      await openList(focusedId);
+    }
     target.querySelectorAll("[data-delete-list]").forEach((button) => {
       button.addEventListener("click", async () => {
         try {
