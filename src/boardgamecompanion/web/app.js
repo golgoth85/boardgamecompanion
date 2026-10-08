@@ -241,7 +241,7 @@ let documentBggId = null;
 let metadataBackfillRunning = false;
 
 // Human-reviewed web search: no Google API, scraping, or automatic PDF trust.
-function googleRulebookSearchUrl(title) {
+export function googleRulebookSearchUrl(title) {
   // URL encoding protects the href; this separately keeps untrusted game names
   // inside one quoted Google phrase (including names containing site: or quotes).
   const gameTitle = String(title ?? "")
@@ -3243,7 +3243,7 @@ async function renderDetail(bggId) {
             <div class="personal-rating-panel">
               <span>La tua valutazione</span>
               ${starRatingMarkup(game.progress?.rating, {interactive: true})}
-              <small>${game.progress?.rating ? `${game.progress.rating}/5` : "Non valutato"}</small>
+              <small>${game.progress?.rating ? `${String(game.progress.rating).replace(".", ",")}/5` : "Non valutato"}</small>
             </div>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
