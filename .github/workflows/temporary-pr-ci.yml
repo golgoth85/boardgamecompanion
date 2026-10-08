@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+env:
+  BGC_CONFIG_DIR: ${{ runner.temp }}/bgc-config
+  BGC_IMPORT_DIR: ${{ runner.temp }}/bgc-import
+  BGC_MANUALS_DIR: ${{ runner.temp }}/bgc-manuals
+
 jobs:
   regression:
     name: Python regression
