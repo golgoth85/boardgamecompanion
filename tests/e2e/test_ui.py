@@ -1464,7 +1464,7 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         assert sidebar_box["x"] >= 0
         assert sidebar_box["x"] + sidebar_box["width"] <= 390
         expect(page.locator("#appSidebar").get_by_role("button", name="Scansiona barcode")).to_have_count(0)
-        page.get_by_role("button", name="Chiudi navigazione").click()
+        page.locator("#sidebarToggle").click()
 
         open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
