@@ -300,8 +300,8 @@ class Catalog:
         mechanic: str | None = None,
         completed: bool | None = None,
         played: bool | None = None,
-        personal_rating_min: int | None = None,
-        personal_rating_max: int | None = None,
+        personal_rating_min: float | None = None,
+        personal_rating_max: float | None = None,
         sort: str = "title",
         limit: int = 50,
         offset: int = 0,
@@ -359,10 +359,10 @@ class Catalog:
             where.append(played_sql if played else f"NOT {played_sql}")
         if personal_rating_min is not None:
             where.append("p.personal_rating IS NOT NULL AND p.personal_rating >= ?")
-            params.append(int(personal_rating_min))
+            params.append(float(personal_rating_min))
         if personal_rating_max is not None:
             where.append("p.personal_rating IS NOT NULL AND p.personal_rating <= ?")
-            params.append(int(personal_rating_max))
+            params.append(float(personal_rating_max))
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         order_sql = SORT_SQL.get(sort, SORT_SQL["title"])
