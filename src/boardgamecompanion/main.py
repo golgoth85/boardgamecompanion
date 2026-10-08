@@ -72,13 +72,14 @@ from boardgamecompanion.copies import (
 from boardgamecompanion.crowdfunding import (
     ApifyKickstarterProvider,
     CrowdfundingError,
-    CrowdfundingService,
-    EcbFxProvider,
-    GamefoundProvider,
+)
+from boardgamecompanion.crowdfunding_notifications import (
+    CrowdfundingNotificationProducer,
 )
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.personal_state import PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
 from boardgamecompanion.routers.notifications import router as notifications_router
 from boardgamecompanion.routers.personal import router as personal_router
@@ -127,6 +128,11 @@ from boardgamecompanion.embedding_retrieval import (
     LMStudioEmbeddingProvider,
     OllamaEmbeddingProvider,
 )
+from boardgamecompanion.service_factories import (
+    get_bgg_metadata_store,
+    get_crowdfunding_service,
+    get_expansion_service,
+)
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
     RulebookReviewCorruptRecord,
@@ -166,30 +172,6 @@ WEB_DIR = Path(__file__).parent / "web"
 LOGGER = logging.getLogger(__name__)
 
 
-def get_crowdfunding_service() -> CrowdfundingService:
-    database = get_database()
-    database.initialize()
-    crowdfunding_settings = resolve_crowdfunding_settings(database)
-    return CrowdfundingService(
-        cache_path=settings.crowdfunding_cache_path,
-        cache_ttl_seconds=settings.crowdfunding_cache_ttl_seconds,
-        gamefound=GamefoundProvider(
-            base_url=settings.gamefound_public_api_url,
-            timeout_seconds=settings.crowdfunding_timeout_seconds,
-        ),
-        kickstarter=ApifyKickstarterProvider(
-            token=crowdfunding_settings.apify_token,
-            base_url=settings.kickstarter_apify_base_url,
-            actor=settings.kickstarter_apify_actor,
-            timeout_seconds=settings.kickstarter_apify_timeout_seconds,
-            max_items=settings.kickstarter_max_items,
-            max_pages=settings.kickstarter_max_pages,
-        ),
-        kickstarter_cache_ttl_seconds=settings.kickstarter_cache_ttl_seconds,
-        fx=EcbFxProvider(timeout_seconds=settings.crowdfunding_timeout_seconds),
-    )
-
-
 def get_rulebook_update_service() -> RulebookUpdateService:
     database = get_database()
     database.initialize()
@@ -224,30 +206,6 @@ def get_bgg_collection_sync_service() -> BggCollectionSyncService | None:
         database,
         client,
         interval_seconds=resolved.collection_sync_interval_seconds,
-    )
-
-
-def get_bgg_metadata_store() -> BggMetadataStore:
-    database = get_database()
-    database.initialize()
-    resolved = resolve_bgg_settings(database)
-    token = (resolved.application_token or "").strip()
-    client = (
-        BggApiClient(
-            BggApiConfig(
-                application_token=token,
-                timeout_seconds=resolved.timeout_seconds,
-                min_interval_seconds=resolved.min_interval_seconds,
-            ),
-            rate_limiter=PersistentRateLimiter(database).acquire,
-        )
-        if token
-        else None
-    )
-    return BggMetadataStore(
-        database,
-        client,
-        refresh_seconds=settings.bgg_metadata_refresh_seconds,
     )
 
 
@@ -600,6 +558,65 @@ async def _document_index_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled document indexing worker failed")
 
 
+async def _expansion_watch_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(
+                get_expansion_service().scan_due,
+                limit=settings.expansion_watch_batch_size,
+            )
+        except Exception:
+            LOGGER.exception("Scheduled expansion watch failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.expansion_watch_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
+def _scan_crowdfunding_notifications() -> dict[str, int]:
+    service = get_crowdfunding_service()
+    active = service.list_campaigns(
+        sort="top",
+        platform="all",
+        status="active",
+        limit=100,
+    )
+    upcoming = service.list_campaigns(
+        sort="upcoming",
+        platform="all",
+        status="upcoming",
+        limit=100,
+    )
+    merged: dict[str, dict[str, object]] = {}
+    for item in [*(active.get("items") or []), *(upcoming.get("items") or [])]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("id") or item.get("project_url") or "").strip()
+        if key:
+            merged[key] = item
+    return CrowdfundingNotificationProducer(get_database()).scan(list(merged.values()))
+
+
+async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(_scan_crowdfunding_notifications)
+        except Exception:
+            LOGGER.exception("Scheduled crowdfunding notification scan failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.crowdfunding_notification_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -609,6 +626,8 @@ async def lifespan(_: FastAPI):
     worker_stop = asyncio.Event()
     worker_tasks.append(asyncio.create_task(_bgg_collection_sync_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
+    worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
+    worker_tasks.append(asyncio.create_task(_crowdfunding_notification_worker(worker_stop)))
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(
@@ -647,6 +666,7 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
+app.include_router(expansions_router)
 app.include_router(wishlist_router)
 app.include_router(lists_router)
 app.include_router(notifications_router)
@@ -757,13 +777,20 @@ def list_crowdfunding(
     refresh: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
-        return get_crowdfunding_service().list_campaigns(
+        payload = get_crowdfunding_service().list_campaigns(
             sort=sort,
             platform=platform,
             status=status,
             limit=limit,
             refresh=refresh,
         )
+        try:
+            CrowdfundingNotificationProducer(get_database()).scan(
+                [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+            )
+        except Exception:
+            LOGGER.exception("Crowdfunding notification scan failed")
+        return payload
     except CrowdfundingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
