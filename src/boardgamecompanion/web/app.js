@@ -5729,6 +5729,7 @@ async function renderLists() {
 
   document.querySelector("#createGameListForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
     const listKind = document.querySelector("#gameListKind").value;
     const numberOrNull = (id) => {
       const value = String(document.querySelector(id)?.value || "").trim();
@@ -5761,7 +5762,7 @@ async function renderLists() {
         }),
       });
       showToast("Lista creata.");
-      event.currentTarget.reset();
+      form.reset();
       fields.hidden = false;
       await refreshListIndex();
     } catch (error) {
