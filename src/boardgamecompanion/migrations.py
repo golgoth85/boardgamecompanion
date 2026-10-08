@@ -1500,6 +1500,33 @@ def _personal_library_foundation(connection: sqlite3.Connection) -> None:
     )
 
 
+def _crowdfunding_notification_baseline(connection: sqlite3.Connection) -> None:
+    # A producer must record an initial scan even if none of the observed
+    # campaigns matched a game. Otherwise the first subsequent match would
+    # incorrectly be suppressed as part of the baseline.
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notification_scan_state (
+            producer TEXT PRIMARY KEY,
+            initialized_at TEXT NOT NULL
+        )
+        """
+    )
+    # Preserve the initialized state for installations that already ran the
+    # previous crowdfunding watcher before this schema version.
+    previous_scan = connection.execute(
+        "SELECT 1 FROM crowdfunding_watch_state LIMIT 1"
+    ).fetchone()
+    if previous_scan is not None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO notification_scan_state(producer,initialized_at)
+            VALUES ('crowdfunding', ?)
+            """,
+            (datetime.now(UTC).isoformat(),),
+        )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1519,6 +1546,7 @@ MIGRATIONS = (
     Migration(16, "gameplay-summaries", _gameplay_summaries),
     Migration(17, "tutorial-videos", _tutorial_videos),
     Migration(18, "personal-library-foundation", _personal_library_foundation),
+    Migration(19, "crowdfunding-notification-baseline", _crowdfunding_notification_baseline),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
