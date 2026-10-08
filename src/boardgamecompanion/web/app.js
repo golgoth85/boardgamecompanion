@@ -1796,7 +1796,10 @@ function gameCard(game, expansions = []) {
           </div>
           <div class="card-footer-meta">
             <span>${game.year_published || "—"}</span>
-            <span class="rating">★ ${rating}</span>
+            <span class="rating">BGG ★ ${rating}</span>
+            ${game.progress?.rating
+              ? `<span class="personal-card-rating">Tu ${starRatingMarkup(game.progress.rating, {compact: true})}</span>`
+              : ""}
           </div>
         </div>
       </a>
@@ -1837,6 +1840,10 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
       <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
       <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
+      <span class="list-personal-rating">
+        ${game.progress?.rating ? starRatingMarkup(game.progress.rating, {compact: true}) : "—"}
+        <small>Tu</small>
+      </span>
       ${expansions.length ? `
         <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
                 aria-expanded="${expanded ? "true" : "false"}"
@@ -2359,7 +2366,7 @@ function renderStats(stats) {
   const values = [
     [stats.standalone_owned, "Giochi base"],
     [stats.expansions_owned, "Espansioni"],
-    [stats.completed, "Completati"],
+    [stats.played ?? stats.completed, "Giocati"],
     [stats.rulebooks, "Regolamenti"],
   ];
   document.querySelector("#statsPanel").innerHTML = values.map(([value, label]) =>
