@@ -481,6 +481,232 @@ function showToast(message, isError = false) {
   window.setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
+let globalSearchTimer = null;
+let wishlistIndex = new Map();
+
+function wishlistKey(sourceKind, sourceKey) {
+  return `${String(sourceKind || "").toLowerCase()}:${String(sourceKey || "")}`;
+}
+
+async function refreshWishlistIndex() {
+  const payload = await api("/api/wishlist");
+  wishlistIndex = new Map(
+    (payload.items || []).map((item) => [
+      wishlistKey(item.source_kind, item.source_key),
+      item,
+    ]),
+  );
+  return payload;
+}
+
+function wishlistEntry(sourceKind, sourceKey) {
+  return wishlistIndex.get(wishlistKey(sourceKind, sourceKey)) || null;
+}
+
+async function toggleWishlistButton(button) {
+  const sourceKind = String(button.dataset.wishlistSourceKind || "");
+  const sourceKey = String(button.dataset.wishlistSourceKey || "");
+  const existing = wishlistEntry(sourceKind, sourceKey);
+  button.disabled = true;
+  try {
+    if (existing) {
+      await api(`/api/wishlist/${encodeURIComponent(existing.id)}`, {method: "DELETE"});
+      wishlistIndex.delete(wishlistKey(sourceKind, sourceKey));
+      button.classList.remove("is-active");
+      button.textContent = "♡ Wishlist";
+      button.dataset.wishlistItemId = "";
+      showToast("Rimosso dalla Wishlist.");
+      if (/^\/wishlist\/?$/.test(window.location.pathname)) void renderWishlist();
+      return;
+    }
+    const body = {
+      source_kind: sourceKind,
+      source_key: sourceKey,
+      title: button.dataset.wishlistTitle || "Titolo",
+      bgg_id: button.dataset.wishlistBggId
+        ? Number(button.dataset.wishlistBggId)
+        : null,
+      year_published: button.dataset.wishlistYear
+        ? Number(button.dataset.wishlistYear)
+        : null,
+      cover_url: button.dataset.wishlistCover || null,
+      target_url: button.dataset.wishlistTarget || null,
+      metadata: button.dataset.wishlistPlatform
+        ? {platform: button.dataset.wishlistPlatform}
+        : {},
+    };
+    const created = await api("/api/wishlist", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    wishlistIndex.set(wishlistKey(sourceKind, sourceKey), created);
+    button.classList.add("is-active");
+    button.textContent = "♥ In Wishlist";
+    button.dataset.wishlistItemId = created.id;
+    showToast("Aggiunto alla Wishlist.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function bindWishlistActions(root = document) {
+  root.querySelectorAll?.("[data-wishlist-source-kind]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void toggleWishlistButton(button);
+    });
+  });
+}
+
+function openGlobalSearchDialog() {
+  if (!globalSearchDialog) return;
+  if (!globalSearchDialog.open) globalSearchDialog.showModal();
+  globalSearchInput?.focus();
+  globalSearchInput?.select();
+}
+
+function closeGlobalSearchDialog() {
+  if (globalSearchDialog?.open) globalSearchDialog.close();
+}
+
+async function performGlobalSearch() {
+  const query = String(globalSearchInput?.value || "").trim();
+  if (!globalSearchResults) return;
+  if (!query) {
+    globalSearchResults.innerHTML =
+      '<p class="muted">Scrivi almeno un carattere. Scorciatoia: Ctrl+K.</p>';
+    return;
+  }
+  globalSearchResults.innerHTML = '<p class="muted">Ricerca…</p>';
+  try {
+    const payload = await api(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
+    if (String(globalSearchInput?.value || "").trim() !== query) return;
+    const games = payload.groups?.games || [];
+    const sections = payload.groups?.sections || [];
+    globalSearchResults.innerHTML = `
+      ${games.length ? `
+        <section class="global-search-group">
+          <h3>Giochi</h3>
+          ${games.map((game) => `
+            <a class="global-search-result" href="/games/${game.bgg_id}" data-nav>
+              <span class="global-search-cover">
+                ${game.bgg_metadata?.cover_url
+                  ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`
+                  : `<span>${escapeHtml(initials(game.title))}</span>`}
+              </span>
+              <span><strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"} · ${escapeHtml(personalStatusLabel(game.progress))}</small></span>
+            </a>
+          `).join("")}
+        </section>
+      ` : ""}
+      ${sections.length ? `
+        <section class="global-search-group">
+          <h3>Sezioni</h3>
+          ${sections.map((item) => `
+            <a class="global-search-result is-section" href="${escapeHtml(item.url)}" data-nav>
+              <span aria-hidden="true">→</span>
+              <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.description)}</small></span>
+            </a>
+          `).join("")}
+        </section>
+      ` : ""}
+      ${!games.length && !sections.length
+        ? '<div class="empty">Nessun risultato.</div>'
+        : ""}
+    `;
+  } catch (error) {
+    globalSearchResults.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function setNotificationBadge(count) {
+  const value = Math.max(0, Number(count) || 0);
+  for (const badge of [notificationBadge, mobileNotificationBadge]) {
+    if (!badge) continue;
+    badge.hidden = value === 0;
+    badge.textContent = value > 99 ? "99+" : String(value);
+  }
+}
+
+async function refreshNotificationBadge() {
+  try {
+    const payload = await api("/api/notifications?unread_only=true&limit=1");
+    setNotificationBadge(payload.unread_count || 0);
+  } catch (_) {
+    setNotificationBadge(0);
+  }
+}
+
+async function openNotificationCenter() {
+  if (!notificationDialog || !notificationList) return;
+  notificationDialog.showModal();
+  notificationList.innerHTML = '<p class="muted">Caricamento…</p>';
+  try {
+    const payload = await api("/api/notifications?limit=100");
+    setNotificationBadge(payload.unread_count || 0);
+    const items = payload.items || [];
+    notificationList.innerHTML = items.length
+      ? items.map((item) => {
+          const internal = String(item.target_url || "").startsWith("/");
+          return `
+            <a class="notification-item ${item.read ? "" : "is-unread"}"
+               href="${escapeHtml(item.target_url || "#")}"
+               ${internal ? "data-nav" : 'target="_blank" rel="noopener noreferrer"'}
+               data-notification-id="${escapeHtml(item.id)}">
+              <span class="notification-kind" aria-hidden="true">${item.category === "expansion" ? "＋" : "◉"}</span>
+              <span>
+                <strong>${escapeHtml(item.title)}</strong>
+                <small>${escapeHtml(item.body)}</small>
+              </span>
+            </a>
+          `;
+        }).join("")
+      : '<div class="empty"><strong>Nessuna notifica.</strong><span>Le novità rilevanti compariranno qui.</span></div>';
+    notificationList.querySelectorAll("[data-notification-id]").forEach((item) => {
+      item.addEventListener("click", () => {
+        void api(`/api/notifications/${encodeURIComponent(item.dataset.notificationId)}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({read: true}),
+        }).then(() => refreshNotificationBadge()).catch(() => {});
+      });
+    });
+  } catch (error) {
+    notificationList.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function refreshDiagnostics() {
+  if (!diagnosticsPanel) return;
+  diagnosticsPanel.innerHTML = '<span class="muted">Aggiornamento diagnostica…</span>';
+  const [health, sync, stats, notifications] = await Promise.allSettled([
+    api("/health"),
+    api("/api/bgg-collection-sync"),
+    api("/api/catalog/stats"),
+    api("/api/notifications?limit=1"),
+  ]);
+  const value = (result) => result.status === "fulfilled" ? result.value : null;
+  const h = value(health);
+  const bggSync = value(sync);
+  const catalogStats = value(stats);
+  const notice = value(notifications);
+  diagnosticsPanel.innerHTML = `
+    <dl class="diagnostics-grid">
+      <div><dt>Applicazione</dt><dd>${h?.status === "ok" ? "OK" : "Non disponibile"}</dd></div>
+      <div><dt>Schema DB</dt><dd>${escapeHtml(h?.schema_version ?? "—")}</dd></div>
+      <div><dt>Ultima sync BGG</dt><dd>${escapeHtml(bggSync?.last_success_at || "Mai")}</dd></div>
+      <div><dt>Errore sync BGG</dt><dd>${escapeHtml(bggSync?.last_error || "Nessuno")}</dd></div>
+      <div><dt>Giochi catalogati</dt><dd>${formatNumber(catalogStats?.total || 0, 0)}</dd></div>
+      <div><dt>Regolamenti</dt><dd>${formatNumber(catalogStats?.rulebooks || 0, 0)}</dd></div>
+      <div><dt>Notifiche non lette</dt><dd>${formatNumber(notice?.unread_count || 0, 0)}</dd></div>
+    </dl>
+  `;
+}
+
 function resetImportDialog() {
   importForm.reset();
   fileName.textContent = "Nessun file selezionato";
@@ -544,8 +770,9 @@ function setSettingsTab(name = "general") {
   settingsPanels.forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== active;
   });
-  if (saveSettings) saveSettings.hidden = active === "rulebooks";
+  if (saveSettings) saveSettings.hidden = ["rulebooks", "diagnostics"].includes(active);
   if (saveTestSettings) saveTestSettings.hidden = active !== "general";
+  if (active === "diagnostics") void refreshDiagnostics();
 }
 
 function applyBggSettingsToForm(data) {
