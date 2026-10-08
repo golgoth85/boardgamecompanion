@@ -3,9 +3,11 @@ name: Temporary PR CI
 on:
   push:
     branches: [feature/personal-library-foundation-20261008]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: temporary-pr-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
