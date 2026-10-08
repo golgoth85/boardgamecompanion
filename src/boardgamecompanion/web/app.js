@@ -80,7 +80,6 @@ const copyCondition = document.querySelector("#copyCondition");
 const copyNotes = document.querySelector("#copyNotes");
 const copyResult = document.querySelector("#copyResult");
 const scannerDialog = document.querySelector("#scannerDialog");
-const scannerButton = document.querySelector("#scannerButton");
 const closeScanner = document.querySelector("#closeScanner");
 const scannerForm = document.querySelector("#scannerForm");
 const scannerManualFallback = document.querySelector("#scannerManualFallback");
@@ -95,6 +94,7 @@ const scannerPhoto = document.querySelector("#scannerPhoto");
 const scannerPhotoButton = document.querySelector("#scannerPhotoButton");
 const settingsDialog = document.querySelector("#settingsDialog");
 const settingsButton = document.querySelector("#settingsButton");
+const settingsCollapseExpansions = document.querySelector("#settingsCollapseExpansions");
 const settingsForm = document.querySelector("#settingsForm");
 const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
@@ -970,6 +970,9 @@ function parseProviderOrder(value, label) {
 }
 
 async function openSettingsDialog(initialTab = "general") {
+  if (settingsCollapseExpansions) {
+    settingsCollapseExpansions.checked = Boolean(state.collapseExpansions);
+  }
   settingsDialog.querySelectorAll(".settings-provider").forEach((section) => {
     section.open = false;
   });
@@ -2110,8 +2113,7 @@ async function renderCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <p class="eyebrow">Ludoteca</p>
-        <h1>I tuoi giochi</h1>
-        <p class="page-lead">Trova rapidamente il gioco giusto per persone, tempo e serata.</p>
+        <h1>Catalogo</h1>
         ${activeFacet ? `
           <div class="catalog-hero-actions">
             <button class="active-facet-chip" id="clearFacet" type="button">
@@ -2131,7 +2133,7 @@ async function renderCatalog() {
 
     <section class="achievement-showcase" id="achievementShowcase" hidden>
       <div class="achievement-showcase-head">
-        <div><p class="eyebrow">Ultimi traguardi</p><h2>Dalla Sala dei trofei</h2></div>
+        <div><p class="eyebrow">Attività recente</p><h2>Giocati di recente</h2></div>
         <a class="button button-ghost" href="/completed" data-nav>Vedi tutti</a>
       </div>
       <div class="achievement-showcase-grid" id="achievementShowcaseGrid"></div>
@@ -2141,14 +2143,41 @@ async function renderCatalog() {
       <div class="catalog-head catalog-workspace-head">
         <div>
           <h2 id="catalogGamesHeading">Collezione</h2>
-          <p class="section-subtitle">Ricerca libera o filtri avanzati per trovare il tavolo giusto.</p>
         </div>
-        <div class="catalog-head-actions">
-          <label class="collapse-expansions-toggle">
-            <input id="collapseExpansions" type="checkbox" ${state.collapseExpansions ? "checked" : ""}>
-            <span>Raggruppa espansioni</span>
-          </label>
-          <span class="muted" id="resultCount">Caricamento…</span>
+        <div class="catalog-head-actions catalog-head-compact-actions">
+        <div class="catalog-density-controls" aria-label="Densità catalogo">
+          <div class="catalog-density-group" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
+            <span class="catalog-density-label">Riga</span>
+            <div class="catalog-density-options" role="group" aria-label="Card per riga">
+              <button class="catalog-density-button ${state.cardsPerRow === 3 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="3" aria-pressed="${state.cardsPerRow === 3 ? "true" : "false"}">3</button>
+              <button class="catalog-density-button ${state.cardsPerRow === 4 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="4" aria-pressed="${state.cardsPerRow === 4 ? "true" : "false"}">4</button>
+              <button class="catalog-density-button ${state.cardsPerRow === 5 ? "is-active" : ""}" type="button"
+                      data-catalog-columns="5" aria-pressed="${state.cardsPerRow === 5 ? "true" : "false"}">5</button>
+            </div>
+          </div>
+          <div class="catalog-density-group">
+            <span class="catalog-density-label">Pagina</span>
+            <div class="catalog-density-options" role="group" aria-label="Titoli per pagina">
+              <button class="catalog-density-button ${state.pageSize === "20" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="20" aria-pressed="${state.pageSize === "20" ? "true" : "false"}">20</button>
+              <button class="catalog-density-button ${state.pageSize === "50" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="50" aria-pressed="${state.pageSize === "50" ? "true" : "false"}">50</button>
+              <button class="catalog-density-button ${state.pageSize === "100" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="100" aria-pressed="${state.pageSize === "100" ? "true" : "false"}">100</button>
+              <button class="catalog-density-button ${state.pageSize === "250" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="250" aria-pressed="${state.pageSize === "250" ? "true" : "false"}">250</button>
+              <button class="catalog-density-button ${state.pageSize === "all" ? "is-active" : ""}" type="button"
+                      data-catalog-page-size="all" aria-pressed="${state.pageSize === "all" ? "true" : "false"}">Tutti</button>
+            </div>
+          </div>
+        </div>
+          <button class="icon-button catalog-scan-button" id="scannerButton" type="button"
+                  aria-label="Scansiona barcode" title="Scansiona barcode">
+            <span aria-hidden="true">⌁</span>
+          </button>
+          <span id="resultCount" hidden></span>
         </div>
       </div>
 
@@ -2189,34 +2218,6 @@ async function renderCatalog() {
                   type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
         </div>
 
-        <div class="catalog-density-controls" aria-label="Densità catalogo">
-          <div class="catalog-density-group" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
-            <span class="catalog-density-label">Riga</span>
-            <div class="catalog-density-options" role="group" aria-label="Card per riga">
-              <button class="catalog-density-button ${state.cardsPerRow === 3 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="3" aria-pressed="${state.cardsPerRow === 3 ? "true" : "false"}">3</button>
-              <button class="catalog-density-button ${state.cardsPerRow === 4 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="4" aria-pressed="${state.cardsPerRow === 4 ? "true" : "false"}">4</button>
-              <button class="catalog-density-button ${state.cardsPerRow === 5 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="5" aria-pressed="${state.cardsPerRow === 5 ? "true" : "false"}">5</button>
-            </div>
-          </div>
-          <div class="catalog-density-group">
-            <span class="catalog-density-label">Pagina</span>
-            <div class="catalog-density-options" role="group" aria-label="Titoli per pagina">
-              <button class="catalog-density-button ${state.pageSize === "20" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="20" aria-pressed="${state.pageSize === "20" ? "true" : "false"}">20</button>
-              <button class="catalog-density-button ${state.pageSize === "50" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="50" aria-pressed="${state.pageSize === "50" ? "true" : "false"}">50</button>
-              <button class="catalog-density-button ${state.pageSize === "100" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="100" aria-pressed="${state.pageSize === "100" ? "true" : "false"}">100</button>
-              <button class="catalog-density-button ${state.pageSize === "250" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="250" aria-pressed="${state.pageSize === "250" ? "true" : "false"}">250</button>
-              <button class="catalog-density-button ${state.pageSize === "all" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="all" aria-pressed="${state.pageSize === "all" ? "true" : "false"}">Tutti</button>
-            </div>
-          </div>
-        </div>
       </section>
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
         <summary>Ricerca avanzata</summary>
@@ -2285,6 +2286,10 @@ async function renderCatalog() {
 }
 
 function bindCatalogControls() {
+  document.querySelector("#scannerButton")?.addEventListener("click", () => {
+    openScannerDialog();
+  });
+
   const refreshFrom = (key, value) => {
     state[key] = String(value ?? "").trim();
     state.offset = 0;
@@ -2355,14 +2360,6 @@ function bindCatalogControls() {
     state.mechanic = "";
     state.offset = 0;
     event.currentTarget.remove();
-    refreshCatalog();
-  });
-
-  document.querySelector("#collapseExpansions")?.addEventListener("change", (event) => {
-    state.collapseExpansions = event.target.checked;
-    state.expandedGameGroups.clear();
-    state.offset = 0;
-    window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
     refreshCatalog();
   });
 
@@ -3222,6 +3219,10 @@ async function renderDetail(bggId) {
               ${metadata.cover_url
                 ? `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
                 : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
+              <div class="cover-rating-overlay" aria-label="Valutazione personale">
+                ${starRatingMarkup(game.progress?.rating, {interactive: true})}
+                <small>${game.progress?.rating ? `${String(game.progress.rating).replace(".", ",")}/5` : "Non valutato"}</small>
+              </div>
             </div>
           </div>
 
@@ -3240,11 +3241,6 @@ async function renderDetail(bggId) {
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
-            <div class="personal-rating-panel">
-              <span>La tua valutazione</span>
-              ${starRatingMarkup(game.progress?.rating, {interactive: true})}
-              <small>${game.progress?.rating ? `${String(game.progress.rating).replace(".", ",")}/5` : "Non valutato"}</small>
-            </div>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
                target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
@@ -3253,23 +3249,24 @@ async function renderDetail(bggId) {
 
         <article class="game-main detail-main">
           <header class="game-header game-header-player">
-            <div>
-              <p class="eyebrow">BGG #${game.bgg_id}</p>
+            <div class="game-title-block">
               <h1>${escapeHtml(game.title)}</h1>
-              ${game.original_title && game.original_title !== game.title
-                ? `<p class="game-original-title">${escapeHtml(game.original_title)}</p>`
-                : ""}
+              <span class="game-title-meta">BGG #${game.bgg_id}</span>
             </div>
             <div class="game-primary-actions">
-              <button class="button ${game.progress?.played ? "played-button is-played" : "button-ghost played-button"}"
+              <button class="game-state-icon ${game.progress?.played ? "played-button is-played" : "played-button"}"
                       id="togglePlayed" type="button"
-                      aria-pressed="${game.progress?.played ? "true" : "false"}">
-                ${game.progress?.played ? "✓ Giocato" : "Segna giocato"}
+                      aria-pressed="${game.progress?.played ? "true" : "false"}"
+                      aria-label="${game.progress?.played ? "Rimuovi stato giocato" : "Segna come giocato"}"
+                      title="${game.progress?.played ? "Giocato" : "Segna come giocato"}">
+                <span aria-hidden="true">✓</span>
               </button>
-              <button class="button ${game.progress?.completed ? "completion-button is-completed" : "button-ghost completion-button"}"
+              <button class="game-state-icon ${game.progress?.completed ? "completion-button is-completed" : "completion-button"}"
                       id="toggleCompleted" type="button"
-                      aria-pressed="${game.progress?.completed ? "true" : "false"}">
-                ${game.progress?.completed ? "♛ Completato" : "Segna completato"}
+                      aria-pressed="${game.progress?.completed ? "true" : "false"}"
+                      aria-label="${game.progress?.completed ? "Rimuovi completamento" : "Segna come completato"}"
+                      title="${game.progress?.completed ? "Completato" : "Segna come completato"}">
+                <span aria-hidden="true">♛</span>
               </button>
               ${game.progress?.completed ? `
                 <label class="completion-date-editor" for="completionDate">
@@ -3280,7 +3277,6 @@ async function renderDetail(bggId) {
                 </label>
                 <button class="button button-ghost completion-date-save" id="saveCompletionDate" type="button">Salva data</button>
               ` : ""}
-              <button class="button button-primary" id="addPhysicalCopy" type="button">+ Aggiungi copia</button>
             </div>
           </header>
 
@@ -3303,26 +3299,6 @@ async function renderDetail(bggId) {
             </div>
           </section>
 
-          <section class="copy-compact-panel" aria-label="Copie fisiche">
-            <div class="copy-compact-summary">
-              <div>
-                <strong>La tua copia</strong>
-                <span>${copyItems.length ? escapeHtml(copyLabel) : "Nessuna copia registrata"}</span>
-              </div>
-              <button class="button button-ghost" id="addPhysicalCopySecondary" type="button">
-                ${copyItems.length ? "+ Aggiungi altra copia" : "+ Aggiungi copia"}
-              </button>
-            </div>
-            ${copyItems.length ? `
-              <details class="copy-details-disclosure">
-                <summary>Gestisci ${escapeHtml(copyLabel)}</summary>
-                <div class="physical-copy-list" id="physicalCopyList">
-                  ${copyItems.map((copy, index) => physicalCopyCard(copy, index)).join("")}
-                </div>
-              </details>
-            ` : '<div id="physicalCopyList" hidden></div>'}
-          </section>
-
           <section class="game-section tutorial-videos-section" aria-labelledby="tutorialVideosTitle">
             <div class="simple-rulebook-head">
               <div>
@@ -3340,7 +3316,6 @@ async function renderDetail(bggId) {
                      ? "Nessun tutorial selezionato. Avvia la ricerca automatica per italiano e inglese."
                      : "Configura una YouTube Data API key per trovare automaticamente tutorial ufficiali e community."}
                  </div>`}
-            <p class="muted tutorial-video-note">Priorità ai canali ufficiali del publisher; per i video community viene preferito il tutorial pertinente con più visualizzazioni.</p>
           </section>
 
           <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
@@ -3389,7 +3364,7 @@ async function renderDetail(bggId) {
                 </div>
               </form>
               <div class="rag-result" id="ragResult" aria-live="polite">
-                <div class="rag-empty">Le risposte useranno il regolamento archiviato.</div>
+<div class="rag-empty"></div>
               </div>
             </section>
           </section>
@@ -3419,7 +3394,7 @@ async function renderDetail(bggId) {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({played: next}),
         });
-        showToast(next ? "Gioco aggiunto alla Sala dei trofei come giocato." : "Stato giocato rimosso.");
+        showToast(next ? "Gioco aggiunto alla Giochi giocati come giocato." : "Stato giocato rimosso.");
         await renderDetail(game.bgg_id);
       } catch (error) {
         showToast(error.message, true);
@@ -3483,8 +3458,6 @@ async function renderDetail(bggId) {
         button.disabled = false;
       }
     });
-    document.querySelector("#addPhysicalCopy")?.addEventListener("click", openCopy);
-    document.querySelector("#addPhysicalCopySecondary")?.addEventListener("click", openCopy);
     document.querySelectorAll(".edit-copy").forEach((button) => {
       button.addEventListener("click", () => {
         const copy = copyItems.find((item) => item.id === button.dataset.copyId);
@@ -4499,9 +4472,6 @@ async function renderRankings() {
       <div>
         <p class="eyebrow">Ludoteca</p>
         <h1>Classifiche</h1>
-        <p class="page-lead">
-          BGG indica il voto medio della community; l'Indice 0–100 è il punteggio calcolato dalla classifica attiva.
-        </p>
       </div>
       <div class="ranking-result-count" id="rankingResultCount">— giochi classificati</div>
     </section>
@@ -4620,10 +4590,7 @@ async function renderCompleted() {
     <section class="trophy-hero">
       <div>
         <p class="eyebrow">La mia ludoteca</p>
-        <h1>Sala dei trofei</h1>
-        <p class="page-lead">
-          I giochi che hai davvero portato al tavolo: campagne concluse e giochi giocati, senza forzare falsi “completamenti”.
-        </p>
+        <h1>Giochi giocati</h1>
       </div>
       <span class="trophy-hero-mark" aria-hidden="true">♛</span>
     </section>
@@ -4638,10 +4605,10 @@ async function renderCompleted() {
     target.innerHTML = payload.items.length
       ? payload.items.map((game) => trophyGameCard(game)).join("")
       : `<div class="empty trophy-empty">
-          <strong>La Sala dei trofei è ancora vuota.</strong>
-          <span>Apri la scheda di un gioco e usa “Segna giocato” oppure “Segna completato”.</span>
+          <strong>Nessun gioco registrato.</strong>
+          <span>I giochi segnati come giocati o completati compariranno qui.</span>
         </div>`;
-    document.title = "Sala dei trofei · BoardGameCompanion";
+    document.title = "Giochi giocati · BoardGameCompanion";
   } catch (error) {
     document.querySelector("#trophyWall").innerHTML =
       `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -4987,7 +4954,6 @@ async function renderExplore(initialTab = null) {
       <div>
         <p class="eyebrow">Ludoteca</p>
         <h1>Esplora</h1>
-        <p class="page-lead">Combina liberamente generi, meccaniche e parametri di gioco. Ogni scelta restringe l'intersezione dei titoli posseduti.</p>
       </div>
       <div class="explore-header-result">
         <strong id="exploreResultCount">— giochi corrispondenti</strong>
@@ -5213,15 +5179,16 @@ function suggestionCard(item, index) {
               <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
             </div>
             <div class="suggestion-heading-actions">
-              <div class="suggestion-score">
-                <strong>${formatNumber(item.suggestion_score || 0, 1)}</strong>
-                <small>affinità</small>
-              </div>
-              <a class="button button-ghost suggestion-open"
+              <a class="suggestion-bgg-link"
                  href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
-                 target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
-              <button class="button button-ghost wishlist-action ${wishlist ? "is-active" : ""}"
+                 target="_blank" rel="noopener noreferrer"
+                 aria-label="Apri ${escapeHtml(title)} su BoardGameGeek">
+                <span class="suggestion-bgg-mark">BGG</span><span aria-hidden="true">↗</span>
+              </a>
+              <button class="wishlist-heart ${wishlist ? "is-active" : ""}"
                       type="button"
+                      aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+                      title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
                       data-wishlist-source-kind="bgg"
                       data-wishlist-source-key="${escapeHtml(suggestionSourceKey)}"
                       data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
@@ -5230,7 +5197,7 @@ function suggestionCard(item, index) {
                       data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
                       data-wishlist-cover="${escapeHtml(item.cover_url || "")}"
                       data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
-                ${wishlist ? "♥ In Wishlist" : "♡ Wishlist"}
+                <span aria-hidden="true">${wishlist ? "♥" : "♡"}</span>
               </button>
             </div>
           </div>
@@ -5294,7 +5261,6 @@ async function renderSuggestions({forceRefresh = false} = {}) {
         <div>
           <p class="eyebrow">Scopri</p>
           <h1>Suggerimenti</h1>
-          <p>10 giochi che non possiedi, presentati con dati BGG verificati e una motivazione basata sulla tua ludoteca.</p>
         </div>
         <button class="button button-ghost" id="suggestionsRefresh" type="button">↻ Aggiorna</button>
       </header>
@@ -5338,10 +5304,10 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       ? profile.top_mechanics.slice(0, 4).map((entry) => entry?.[0]).filter(Boolean)
       : [];
     const sortLabel = {
-      for_you: "ordinati per affinità complessiva",
+      for_you: "selezionati per te",
       novelty: "ordinati per varietà rispetto alla tua ludoteca",
       bgg: "ordinati per valutazione BGG",
-    }[payload.sort || suggestionsState.sort] || "ordinati per affinità";
+    }[payload.sort || suggestionsState.sort] || "selezionati per te";
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
@@ -5488,7 +5454,6 @@ async function renderWishlist() {
       <div>
         <p class="eyebrow">Ludoteca personale</p>
         <h1>Wishlist</h1>
-        <p class="page-lead">Giochi e campagne che vuoi tenere d'occhio, indipendentemente dalla fonte.</p>
       </div>
     </section>
     <section class="wishlist-grid" id="wishlistGrid">${skeletons()}</section>
@@ -5569,7 +5534,6 @@ async function renderLists() {
       <div>
         <p class="eyebrow">Ludoteca personale</p>
         <h1>Liste</h1>
-        <p class="page-lead">Le liste dinamiche si ricalcolano sempre sui dati correnti; le liste manuali restano sotto il tuo controllo.</p>
       </div>
     </section>
     <section class="list-builder-card">
@@ -5897,10 +5861,6 @@ closeNotificationDialog?.addEventListener("click", () => closeDialog(notificatio
 bindDialogCancel(notificationDialog);
 void refreshNotificationBadge();
 
-scannerButton.addEventListener("click", () => {
-  closeSidebar();
-  openScannerDialog();
-});
 closeScanner.addEventListener("click", closeScannerDialog);
 scannerDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
@@ -5962,6 +5922,15 @@ documentFile.addEventListener("change", () => {
 settingsButton.addEventListener("click", () => {
   closeSidebar();
   void openSettingsDialog("general");
+});
+settingsCollapseExpansions?.addEventListener("change", (event) => {
+  state.collapseExpansions = Boolean(event.currentTarget.checked);
+  state.expandedGameGroups.clear();
+  state.offset = 0;
+  window.localStorage.setItem("bgc.collapseExpansions", state.collapseExpansions ? "true" : "false");
+  if (window.location.pathname === "/") {
+    void refreshCatalog();
+  }
 });
 settingsTabs.forEach((tab) => {
   tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
