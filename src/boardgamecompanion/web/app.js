@@ -14,6 +14,7 @@ import {
 } from "./state.js";
 import {escapeHtml, formatNumber, initials} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
+import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
@@ -425,14 +426,11 @@ function bindWishlistActions(root = document) {
 }
 
 function openGlobalSearchDialog() {
-  if (!globalSearchDialog) return;
-  if (!globalSearchDialog.open) globalSearchDialog.showModal();
-  globalSearchInput?.focus();
-  globalSearchInput?.select();
+  openDialog(globalSearchDialog, {focus: globalSearchInput, select: true});
 }
 
 function closeGlobalSearchDialog() {
-  if (globalSearchDialog?.open) globalSearchDialog.close();
+  closeDialog(globalSearchDialog);
 }
 
 async function performGlobalSearch() {
@@ -528,7 +526,7 @@ async function refreshNotificationBadge() {
 
 async function openNotificationCenter() {
   if (!notificationDialog || !notificationList) return;
-  notificationDialog.showModal();
+  openDialog(notificationDialog);
   notificationList.innerHTML = '<p class="muted">Caricamento…</p>';
   try {
     const payload = await api("/api/notifications?limit=100");
@@ -5826,21 +5824,15 @@ document.addEventListener("keydown", (event) => {
 globalSearchButton?.addEventListener("click", openGlobalSearchDialog);
 mobileSearchButton?.addEventListener("click", openGlobalSearchDialog);
 closeGlobalSearch?.addEventListener("click", closeGlobalSearchDialog);
-globalSearchDialog?.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  closeGlobalSearchDialog();
-});
+bindDialogCancel(globalSearchDialog, closeGlobalSearchDialog);
 globalSearchInput?.addEventListener("input", () => {
   window.clearTimeout(globalSearchTimer);
   globalSearchTimer = window.setTimeout(() => void performGlobalSearch(), 160);
 });
 notificationButton?.addEventListener("click", () => void openNotificationCenter());
 mobileNotificationButton?.addEventListener("click", () => void openNotificationCenter());
-closeNotificationDialog?.addEventListener("click", () => notificationDialog?.close());
-notificationDialog?.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  notificationDialog.close();
-});
+closeNotificationDialog?.addEventListener("click", () => closeDialog(notificationDialog));
+bindDialogCancel(notificationDialog);
 void refreshNotificationBadge();
 
 scannerButton.addEventListener("click", () => {
