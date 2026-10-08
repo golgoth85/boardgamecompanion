@@ -19,7 +19,7 @@ class GameListNotFound(GameListError):
 
 ALLOWED_SMART_FILTERS = {
     "query", "item_type", "owned", "supports_players", "ideal_players",
-    "player_age", "weight", "max_minutes", "min_rating", "category",
+    "recommended_players", "player_age", "weight", "max_minutes", "min_rating", "category",
     "mechanic", "completed", "played", "personal_rating_min",
     "personal_rating_max", "sort",
 }
