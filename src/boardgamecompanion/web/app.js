@@ -3014,6 +3014,11 @@ async function renderDetail(bggId) {
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
+            <div class="personal-rating-panel">
+              <span>La tua valutazione</span>
+              ${starRatingMarkup(game.progress?.rating, {interactive: true})}
+              <small>${game.progress?.rating ? `${game.progress.rating}/5` : "Non valutato"}</small>
+            </div>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
                target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
@@ -3030,6 +3035,11 @@ async function renderDetail(bggId) {
                 : ""}
             </div>
             <div class="game-primary-actions">
+              <button class="button ${game.progress?.played ? "played-button is-played" : "button-ghost played-button"}"
+                      id="togglePlayed" type="button"
+                      aria-pressed="${game.progress?.played ? "true" : "false"}">
+                ${game.progress?.played ? "✓ Giocato" : "Segna giocato"}
+              </button>
               <button class="button ${game.progress?.completed ? "completion-button is-completed" : "button-ghost completion-button"}"
                       id="toggleCompleted" type="button"
                       aria-pressed="${game.progress?.completed ? "true" : "false"}">
@@ -3160,6 +3170,40 @@ async function renderDetail(bggId) {
     `;
 
     const openCopy = () => openCopyEditor(game.bgg_id, game.title);
+    document.querySelector("#togglePlayed")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const next = !Boolean(game.progress?.played);
+        await api(`/api/games/${game.bgg_id}/personal-state`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({played: next}),
+        });
+        showToast(next ? "Gioco aggiunto alla Sala dei trofei come giocato." : "Stato giocato rimosso.");
+        await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
+    document.querySelectorAll("[data-personal-rating]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const selected = Number(button.dataset.personalRating);
+        const next = Number(game.progress?.rating || 0) === selected ? null : selected;
+        try {
+          await api(`/api/games/${game.bgg_id}/personal-state`, {
+            method: "PATCH",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({rating: next}),
+          });
+          showToast(next ? `Valutazione personale: ${next}/5.` : "Valutazione personale rimossa.");
+          await renderDetail(game.bgg_id);
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      });
+    });
     document.querySelector("#toggleCompleted")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -3170,7 +3214,7 @@ async function renderDetail(bggId) {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({completed: next}),
         });
-        showToast(next ? "Gioco aggiunto alla Sala dei trofei." : "Gioco rimosso dai completati.");
+        showToast(next ? "Gioco segnato come completato." : "Completamento rimosso; resta giocato se applicabile.");
         await renderDetail(game.bgg_id);
       } catch (error) {
         showToast(error.message, true);
