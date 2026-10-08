@@ -427,10 +427,18 @@
 .personal-rating-panel>span:first-child{color:var(--muted);font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
 .personal-rating-panel small{color:var(--muted);font-size:.58rem}
 .personal-stars{display:inline-flex;align-items:center;gap:.16rem}
-.personal-star{color:rgba(255,255,255,.18);font-size:.86rem}.personal-star.is-active{color:#f1c860}
+.personal-star,.personal-star-glyph{color:rgba(255,255,255,.18)}
+.personal-star{font-size:.86rem}.personal-star.is-active,.personal-star-control.is-active .personal-star-glyph{color:#f1c860}
+.personal-star.is-half,.personal-star-control.is-half .personal-star-glyph{
+  background:linear-gradient(90deg,#f1c860 0 50%,rgba(255,255,255,.18) 50% 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent
+}
 .personal-stars.is-compact{gap:.05rem}.personal-stars.is-compact .personal-star{font-size:.62rem}
-.personal-star-button{border:0;padding:.05rem;background:transparent;color:rgba(255,255,255,.22);font-size:1.15rem;cursor:pointer}
-.personal-star-button:hover,.personal-star-button:focus-visible,.personal-star-button.is-active{color:#f1c860}
+.personal-star-control{position:relative;display:inline-grid;width:1.2rem;height:1.35rem;place-items:center}
+.personal-star-glyph{font-size:1.15rem;line-height:1}
+.personal-star-hit{position:absolute;top:0;bottom:0;width:50%;border:0;padding:0;background:transparent;cursor:pointer}
+.personal-star-hit-left{left:0}.personal-star-hit-right{right:0}
+.personal-star-hit:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:4px}
 .personal-card-rating{display:inline-flex;align-items:center;gap:.22rem;color:var(--muted);font-size:.58rem}
 .list-personal-rating{display:grid;justify-items:center;gap:.1rem;min-width:4.6rem;color:var(--muted)}
 .list-personal-rating small{font-size:.5rem;text-transform:uppercase;letter-spacing:.04em}
