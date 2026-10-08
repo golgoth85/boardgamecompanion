@@ -203,7 +203,7 @@ def test_diagnostics_centralizes_technical_state(monkeypatch, tmp_path: Path) ->
         payload = client.get("/api/diagnostics")
         assert payload.status_code == 200
         body = payload.json()
-        assert body["schema_version"] == 19
+        assert body["schema_version"] == 20
         assert set(body) == {
             "schema_version",
             "bgg",
