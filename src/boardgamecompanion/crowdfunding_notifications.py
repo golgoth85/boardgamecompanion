@@ -100,14 +100,9 @@ class CrowdfundingNotificationProducer:
         campaign: dict[str, Any],
         targets: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        haystack = " ".join(
-            value
-            for value in (
-                str(campaign.get("title") or "").strip(),
-                str(campaign.get("description") or "").strip(),
-            )
-            if value
-        )
+        # Description text can mention many unrelated games. Matching it as
+        # though it were the project title generates false notifications.
+        haystack = str(campaign.get("title") or "").strip()
         if not haystack:
             return None
         matches = [
@@ -130,15 +125,12 @@ class CrowdfundingNotificationProducer:
         targets = self._targets()
         current = datetime.now(UTC).isoformat()
         with self.database.connect() as connection:
-            baseline = (
-                int(
-                    connection.execute(
-                        "SELECT COUNT(*) AS count FROM crowdfunding_watch_state"
-                    ).fetchone()["count"]
-                    or 0
-                )
-                == 0
-            )
+            baseline = connection.execute(
+                """
+                SELECT 1 FROM notification_scan_state
+                WHERE producer='crowdfunding'
+                """
+            ).fetchone() is None
             known = {
                 row["campaign_key"]
                 for row in connection.execute(
@@ -213,6 +205,23 @@ class CrowdfundingNotificationProducer:
                 },
             )
             notified += 1
+        # Record the first successful discovery independently of matches.
+        # Empty provider output can be transient and should not establish the
+        # baseline; a nonempty unrelated result is still a valid first scan.
+        if baseline and any(
+            isinstance(item, dict)
+            and str(item.get("id") or item.get("project_url") or "").strip()
+            for item in campaigns
+        ):
+            with self.database.transaction(immediate=True) as connection:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO notification_scan_state(
+                        producer,initialized_at
+                    ) VALUES('crowdfunding',?)
+                    """,
+                    (current,),
+                )
         return {
             "matched": matched,
             "created": created,
