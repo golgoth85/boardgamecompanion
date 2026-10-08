@@ -515,7 +515,7 @@ async function performGlobalSearch() {
         <section class="global-search-group">
           <h3>Crowdfunding</h3>
           ${crowdfunding.map((item) => {
-            const target = /^https?:\\/\\//i.test(String(item.project_url || ""))
+            const target = /^https?:\/\//i.test(String(item.project_url || ""))
               ? item.project_url : "/crowdfunding";
             const external = target !== "/crowdfunding";
             return `
