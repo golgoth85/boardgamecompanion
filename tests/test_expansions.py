@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from boardgamecompanion.database import Database
+from boardgamecompanion.bgg_metadata import BggMetadataError
 from boardgamecompanion.expansions import ExpansionService, minor_expansion_reason
 
 
@@ -161,3 +164,58 @@ def test_expansion_watch_baselines_then_notifies_only_new_relevant_links(
     third = service.scan_game(100)
     assert third["new_relevant_count"] == 0
     assert service.notifications.list()["unread_count"] == 1
+
+
+def test_failed_refresh_never_establishes_empty_or_stale_baseline(
+    tmp_path: Path,
+) -> None:
+    db = _database(tmp_path)
+
+    class FailingMetadataStore(FakeMetadataStore):
+        def refresh(self, bgg_id: int, *, force=False):
+            raise BggMetadataError("temporary BGG outage")
+
+    store = FailingMetadataStore(
+        100,
+        [{"bgg_id": 202, "title": "The Lost Kingdom"}],
+    )
+    service = ExpansionService(db, store, refresh_seconds=24 * 60 * 60)
+    with pytest.raises(BggMetadataError, match="temporary BGG outage"):
+        service.scan_game(100)
+
+    with db.connect() as connection:
+        scan = connection.execute(
+            "SELECT * FROM expansion_scan_state WHERE base_board_game_id=(SELECT id FROM board_games WHERE bgg_id=100)"
+        ).fetchone()
+        watches = connection.execute(
+            "SELECT COUNT(*) FROM expansion_watch_state"
+        ).fetchone()[0]
+    assert scan["baseline_complete"] == 0
+    assert scan["last_error"] == "temporary BGG outage"
+    assert watches == 0
+    next_due = datetime.fromisoformat(scan["next_check_at"])
+    checked = datetime.fromisoformat(scan["last_checked_at"])
+    assert (next_due - checked).total_seconds() == 3600
+
+    # After recovery, these existing links become the baseline, not alerts.
+    store.__class__ = FakeMetadataStore
+    baseline = service.scan_game(100)
+    assert baseline["new_relevant_count"] == 0
+    assert service.notifications.list()["unread_count"] == 0
+
+
+def test_missing_bgg_client_does_not_consume_initial_baseline(
+    tmp_path: Path,
+) -> None:
+    db = _database(tmp_path)
+    store = FakeMetadataStore(
+        100,
+        [{"bgg_id": 202, "title": "The Lost Kingdom"}],
+    )
+    original_client = store.client
+    store.client = None
+    service = ExpansionService(db, store)
+    with pytest.raises(BggMetadataError, match="not configured"):
+        service.scan_game(100)
+    store.client = original_client
+    assert service.scan_game(100)["new_relevant_count"] == 0
