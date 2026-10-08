@@ -2,6 +2,9 @@ name: Test
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/ui-polish-navigation-20261008
 
 permissions:
   contents: read
