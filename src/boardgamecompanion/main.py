@@ -79,6 +79,7 @@ from boardgamecompanion.crowdfunding_notifications import (
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.personal_state import PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.diagnostics import router as diagnostics_router
 from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
 from boardgamecompanion.routers.notifications import router as notifications_router
@@ -666,6 +667,7 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
+app.include_router(diagnostics_router)
 app.include_router(expansions_router)
 app.include_router(wishlist_router)
 app.include_router(lists_router)
