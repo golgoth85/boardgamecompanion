@@ -3007,9 +3007,11 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         rating.click()
         expect(page.locator(".personal-rating-panel")).to_contain_text("4/5")
 
-        played = page.get_by_role("button", name="Segna giocato")
+        played = page.get_by_role("button", name="✓ Giocato")
         expect(played).to_be_visible()
         played.click()
+        expect(page.get_by_role("button", name="Segna giocato")).to_be_visible()
+        page.get_by_role("button", name="Segna giocato").click()
         expect(page.get_by_role("button", name="✓ Giocato")).to_be_visible()
 
         page.get_by_role("link", name="Sala dei trofei").click()
@@ -3052,8 +3054,8 @@ def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
         page.keyboard.press("Control+k")
         expect(page.locator("#globalSearchDialog")).to_be_visible()
         page.locator("#globalSearchInput").fill("Synthetic Alpha")
-        expect(page.locator(".global-search-group")).to_contain_text("Giochi")
-        expect(page.locator(".global-search-group")).to_contain_text("Wishlist")
+        expect(page.get_by_role("heading", name="Giochi")).to_be_visible()
+        expect(page.get_by_role("heading", name="Wishlist")).to_be_visible()
         page.get_by_role("button", name="Chiudi ricerca").click()
 
         page.goto(f"{live_server}/lists")
