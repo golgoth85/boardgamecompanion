@@ -197,11 +197,19 @@ class GameListStore:
             raise GameListError("smart lists cannot be edited item by item")
         with self.database.transaction(immediate=True) as connection:
             game = connection.execute(
-                "SELECT id FROM board_games WHERE bgg_id=?",
+                """
+                SELECT g.id, COALESCE(MAX(c.own), 0) AS own
+                FROM board_games g
+                LEFT JOIN collection_entries c ON c.board_game_id=g.id
+                WHERE g.bgg_id=?
+                GROUP BY g.id
+                """,
                 (int(bgg_id),),
             ).fetchone()
             if game is None:
                 raise GameListError("Board game not found")
+            if present and not bool(game["own"]):
+                raise GameListError("Only owned games can be added to manual lists")
             if present:
                 connection.execute(
                     """

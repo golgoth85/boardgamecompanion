@@ -17,3 +17,16 @@ export function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString("it-IT", {maximumFractionDigits: digits});
 }
+
+export function safeExternalHref(value, fallback = "#") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  try {
+    const url = new URL(text);
+    if (!["http:", "https:"].includes(url.protocol)) return fallback;
+    if (url.username || url.password) return fallback;
+    return text;
+  } catch (_) {
+    return fallback;
+  }
+}

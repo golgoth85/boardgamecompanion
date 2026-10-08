@@ -293,3 +293,42 @@ def test_smart_list_rejects_invalid_filter_types_and_ranges(
         )
         assert manual.status_code == 400
         assert client.get("/api/lists").json()["total"] == 0
+
+
+def test_manual_list_rejects_known_but_unowned_games(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    with _client(monkeypatch, tmp_path) as client:
+        _import_fixture(client)
+        with get_database().transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                UPDATE collection_entries
+                SET own=0
+                WHERE board_game_id=(SELECT id FROM board_games WHERE bgg_id=900002)
+                """
+            )
+        manual = client.post(
+            "/api/lists",
+            json={"name": "Solo posseduti", "kind": "manual"},
+        )
+        assert manual.status_code == 201
+        rejected = client.put(
+            f"/api/lists/{manual.json()['id']}/items/900002"
+        )
+        assert rejected.status_code == 400
+        assert "owned" in rejected.json()["detail"].casefold()
+
+
+def test_wishlist_rejects_non_http_links(monkeypatch, tmp_path: Path) -> None:
+    with _client(monkeypatch, tmp_path) as client:
+        for field in ("target_url", "cover_url"):
+            payload = {
+                "source_kind": "crowdfunding",
+                "source_key": f"unsafe-{field}",
+                "title": "Unsafe campaign",
+                field: "javascript:alert(1)",
+            }
+            response = client.post("/api/wishlist", json=payload)
+            assert response.status_code == 400
+            assert field in response.json()["detail"]

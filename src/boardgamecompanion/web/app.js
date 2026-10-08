@@ -12,7 +12,7 @@ import {
   rankingState,
   state,
 } from "./state.js";
-import {escapeHtml, formatNumber, initials} from "./ui-utils.js";
+import {escapeHtml, formatNumber, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
@@ -473,7 +473,7 @@ async function performGlobalSearch() {
           ${wishlist.map((item) => {
             const target = item.bgg_id
               ? `/wishlist?focus=${encodeURIComponent(item.id)}`
-              : (item.target_url || "/wishlist");
+              : safeExternalHref(item.target_url, "/wishlist");
             const internal = String(target).startsWith("/");
             return `
               <a class="global-search-result" href="${escapeHtml(target)}"
@@ -576,10 +576,12 @@ async function openNotificationCenter() {
     const items = payload.items || [];
     notificationList.innerHTML = items.length
       ? items.map((item) => {
-          const internal = String(item.target_url || "").startsWith("/");
+          const rawTarget = String(item.target_url || "");
+          const internal = rawTarget.startsWith("/");
+          const target = internal ? rawTarget : safeExternalHref(rawTarget);
           return `
             <a class="notification-item ${item.read ? "" : "is-unread"}"
-               href="${escapeHtml(item.target_url || "#")}"
+               href="${escapeHtml(target)}"
                ${internal ? "data-nav" : 'target="_blank" rel="noopener noreferrer"'}
                data-notification-id="${escapeHtml(item.id)}">
               <span class="notification-kind" aria-hidden="true">${item.category === "expansion" ? "＋" : "◉"}</span>
@@ -5498,7 +5500,9 @@ async function renderWishlist() {
     grid.innerHTML = items.length
       ? items.map((item) => {
           const sourceLabel = item.source_kind === "crowdfunding" ? "Crowdfunding" : "BoardGameGeek";
-          const target = item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : "#");
+          const target = safeExternalHref(
+            item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : ""),
+          );
           return `
             <article class="wishlist-card">
               <a class="wishlist-cover" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">
@@ -5665,8 +5669,8 @@ async function renderLists() {
               const q = String(input.value || "").trim();
               if (!q) { searchTarget.innerHTML = ""; return; }
               try {
-                const search = await api(`/api/search?q=${encodeURIComponent(q)}&limit=6`);
-                const candidates = search.groups?.games || [];
+                const search = await api(`/api/games?q=${encodeURIComponent(q)}&owned=true&limit=6`);
+                const candidates = search.items || [];
                 searchTarget.innerHTML = candidates.map((game) => `
                   <button class="manual-list-search-item" type="button" data-add-bgg="${game.bgg_id}">
                     <strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"}</small><span>＋</span>

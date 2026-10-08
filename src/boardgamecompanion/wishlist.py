@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from boardgamecompanion.database import Database
@@ -14,6 +15,25 @@ class WishlistError(ValueError):
 
 class WishlistNotFound(WishlistError):
     pass
+
+
+def _optional_http_url(value: str | None, *, field: str) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if any(ord(char) < 32 for char in text):
+        raise WishlistError(f"{field} must be an HTTP(S) URL")
+    parsed = urlsplit(text)
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise WishlistError(f"{field} must be an HTTP(S) URL without credentials")
+    return text
 
 
 class WishlistStore:
@@ -71,6 +91,8 @@ class WishlistStore:
             raise WishlistError("bgg_id must be positive")
         if year_published is not None and not 1000 <= int(year_published) <= 3000:
             raise WishlistError("year_published is invalid")
+        cover_url = _optional_http_url(cover_url, field="cover_url")
+        target_url = _optional_http_url(target_url, field="target_url")
         now = datetime.now(UTC).isoformat()
         item_id = str(uuid4())
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True)
