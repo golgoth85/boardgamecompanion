@@ -605,10 +605,6 @@ def _scan_crowdfunding_notifications() -> dict[str, int]:
 async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
-            await asyncio.to_thread(_scan_crowdfunding_notifications)
-        except Exception:
-            LOGGER.exception("Scheduled crowdfunding notification scan failed")
-        try:
             await asyncio.wait_for(
                 stop_event.wait(),
                 timeout=settings.crowdfunding_notification_poll_seconds,
@@ -616,6 +612,10 @@ async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
             break
         except TimeoutError:
             pass
+        try:
+            await asyncio.to_thread(_scan_crowdfunding_notifications)
+        except Exception:
+            LOGGER.exception("Scheduled crowdfunding notification scan failed")
 
 
 @asynccontextmanager
