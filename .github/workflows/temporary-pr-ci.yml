@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 env:
-  BGC_CONFIG_DIR: ${{ runner.temp }}/bgc-config
-  BGC_IMPORT_DIR: ${{ runner.temp }}/bgc-import
-  BGC_MANUALS_DIR: ${{ runner.temp }}/bgc-manuals
+  BGC_CONFIG_DIR: /tmp/bgc-config
+  BGC_IMPORT_DIR: /tmp/bgc-import
+  BGC_MANUALS_DIR: /tmp/bgc-manuals
 
 jobs:
   regression:
