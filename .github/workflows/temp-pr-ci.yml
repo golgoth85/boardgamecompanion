@@ -1,5 +1,7 @@
 name: Temporary PR CI
 
+# Temporary hosted runner authorized for PR #109 only.
+
 on:
   pull_request:
     branches: [main]
