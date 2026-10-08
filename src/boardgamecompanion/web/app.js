@@ -5476,6 +5476,284 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
   }
 }
 
+async function renderWishlist() {
+  document.title = "Wishlist · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="page-header browse-header">
+      <div>
+        <p class="eyebrow">Ludoteca personale</p>
+        <h1>Wishlist</h1>
+        <p class="page-lead">Giochi e campagne che vuoi tenere d'occhio, indipendentemente dalla fonte.</p>
+      </div>
+    </section>
+    <section class="wishlist-grid" id="wishlistGrid">${skeletons()}</section>
+  `;
+  const grid = document.querySelector("#wishlistGrid");
+  try {
+    const payload = await refreshWishlistIndex();
+    const items = payload.items || [];
+    grid.innerHTML = items.length
+      ? items.map((item) => {
+          const sourceLabel = item.source_kind === "crowdfunding" ? "Crowdfunding" : "BoardGameGeek";
+          const target = item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : "#");
+          return `
+            <article class="wishlist-card">
+              <a class="wishlist-cover" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">
+                ${item.cover_url
+                  ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
+                  : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
+              </a>
+              <div class="wishlist-card-body">
+                <p class="eyebrow">${escapeHtml(sourceLabel)}</p>
+                <h2>${escapeHtml(item.title)}</h2>
+                <p class="muted">${item.year_published || "Anno non disponibile"}</p>
+                <div class="wishlist-card-actions">
+                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">Apri informazioni ↗</a>
+                  <button class="button button-ghost wishlist-action is-active"
+                          type="button"
+                          data-wishlist-source-kind="${escapeHtml(item.source_kind)}"
+                          data-wishlist-source-key="${escapeHtml(item.source_key)}"
+                          data-wishlist-item-id="${escapeHtml(item.id)}"
+                          data-wishlist-title="${escapeHtml(item.title)}">
+                    ♥ In Wishlist
+                  </button>
+                </div>
+              </div>
+            </article>
+          `;
+        }).join("")
+      : '<div class="empty"><strong>Wishlist vuota.</strong><span>Aggiungi titoli da Suggerimenti o Crowdfunding.</span></div>';
+    bindWishlistActions(grid);
+  } catch (error) {
+    grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function smartListFilterSummary(filters = {}) {
+  const labels = [];
+  if (filters.supports_players) labels.push(`${filters.supports_players} giocatori`);
+  if (filters.ideal_players) labels.push(`ideale in ${filters.ideal_players}`);
+  if (filters.recommended_players) labels.push(`raccomandato in ${filters.recommended_players}`);
+  if (filters.max_minutes) labels.push(`≤ ${filters.max_minutes} min`);
+  if (filters.weight) labels.push(String(filters.weight));
+  if (filters.personal_rating_min) labels.push(`tu ≥ ${filters.personal_rating_min}★`);
+  if (filters.played === true) labels.push("giocati");
+  if (filters.played === false) labels.push("mai giocati");
+  if (filters.category) labels.push(String(filters.category));
+  if (filters.mechanic) labels.push(String(filters.mechanic));
+  return labels.length ? labels.join(" · ") : "Tutta la ludoteca";
+}
+
+async function renderLists() {
+  document.title = "Liste · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="page-header browse-header lists-header">
+      <div>
+        <p class="eyebrow">Ludoteca personale</p>
+        <h1>Liste</h1>
+        <p class="page-lead">Le liste dinamiche si ricalcolano sempre sui dati correnti; le liste manuali restano sotto il tuo controllo.</p>
+      </div>
+    </section>
+    <section class="list-builder-card">
+      <form id="createGameListForm">
+        <div class="list-builder-head">
+          <label><span>Nome lista</span><input id="gameListName" type="text" maxlength="200" required placeholder="Es. Brevi in 2"></label>
+          <label><span>Tipo</span>
+            <select id="gameListKind">
+              <option value="smart">Dinamica</option>
+              <option value="manual">Manuale</option>
+            </select>
+          </label>
+          <button class="button button-primary" type="submit">Crea lista</button>
+        </div>
+        <div class="list-builder-filters" id="smartListFields">
+          <label><span>Giocatori</span><input id="listSupportsPlayers" type="number" min="1" max="30"></label>
+          <label><span>Ideale in</span><input id="listIdealPlayers" type="number" min="1" max="30"></label>
+          <label><span>Raccomandato in</span><input id="listRecommendedPlayers" type="number" min="1" max="30"></label>
+          <label><span>Max minuti</span><input id="listMaxMinutes" type="number" min="1" max="1440"></label>
+          <label><span>Complessità</span>
+            <select id="listWeight"><option value="">Qualsiasi</option><option value="light">Leggera</option><option value="medium">Media</option><option value="heavy">Impegnativa</option></select>
+          </label>
+          <label><span>Voto personale minimo</span>
+            <select id="listPersonalRating"><option value="">Qualsiasi</option><option value="1">1★</option><option value="2">2★</option><option value="3">3★</option><option value="4">4★</option><option value="5">5★</option></select>
+          </label>
+          <label><span>Stato</span>
+            <select id="listPlayed"><option value="">Qualsiasi</option><option value="true">Giocati</option><option value="false">Mai giocati</option></select>
+          </label>
+          <label><span>Rating BGG minimo</span><input id="listBggRating" type="number" min="0" max="10" step="0.1"></label>
+          <label><span>Categoria</span><input id="listCategory" type="text" maxlength="500"></label>
+          <label><span>Meccanica</span><input id="listMechanic" type="text" maxlength="500"></label>
+        </div>
+      </form>
+    </section>
+    <section class="saved-lists-layout">
+      <aside class="saved-lists-panel">
+        <div class="section-heading"><h2>Le tue liste</h2><span id="savedListCount" class="muted"></span></div>
+        <div id="savedLists">${skeletons()}</div>
+      </aside>
+      <div class="saved-list-results" id="savedListResults">
+        <div class="empty"><strong>Seleziona una lista.</strong><span>I risultati verranno calcolati sui dati attuali.</span></div>
+      </div>
+    </section>
+  `;
+
+  const kind = document.querySelector("#gameListKind");
+  const fields = document.querySelector("#smartListFields");
+  kind?.addEventListener("change", () => {
+    fields.hidden = kind.value !== "smart";
+  });
+
+  const refreshListIndex = async () => {
+    const payload = await api("/api/lists");
+    const target = document.querySelector("#savedLists");
+    const count = document.querySelector("#savedListCount");
+    const items = payload.items || [];
+    count.textContent = `${items.length} liste`;
+    target.innerHTML = items.length
+      ? items.map((item) => `
+          <article class="saved-list-card" data-list-id="${escapeHtml(item.id)}">
+            <button class="saved-list-open" type="button" data-open-list="${escapeHtml(item.id)}">
+              <span class="saved-list-icon" aria-hidden="true">${item.kind === "smart" ? "⌁" : "☷"}</span>
+              <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? escapeHtml(smartListFilterSummary(item.filters)) : "Lista manuale"}</small></span>
+            </button>
+            <button class="icon-button saved-list-delete" type="button" data-delete-list="${escapeHtml(item.id)}" aria-label="Elimina ${escapeHtml(item.name)}">×</button>
+          </article>
+        `).join("")
+      : '<div class="empty"><span>Nessuna lista salvata.</span></div>';
+
+    const openList = async (listId) => {
+      const result = document.querySelector("#savedListResults");
+      result.innerHTML = skeletons();
+      try {
+        const resolved = await api(`/api/lists/${encodeURIComponent(listId)}/games?limit=250`);
+        const list = resolved.list;
+        const games = resolved.items || [];
+        result.innerHTML = `
+          <header class="saved-list-result-head">
+            <div><p class="eyebrow">${list.kind === "smart" ? "Lista dinamica" : "Lista manuale"}</p><h2>${escapeHtml(list.name)}</h2><p class="muted">${list.kind === "smart" ? escapeHtml(smartListFilterSummary(list.filters)) : "Titoli scelti manualmente"}</p></div>
+            <strong>${formatNumber(resolved.total || 0, 0)} giochi</strong>
+          </header>
+          ${list.kind === "manual" ? `
+            <div class="manual-list-add">
+              <label><span>Aggiungi un gioco posseduto</span><input id="manualListSearch" type="search" placeholder="Cerca per titolo…" autocomplete="off"></label>
+              <div id="manualListSearchResults"></div>
+            </div>
+          ` : ""}
+          <div class="catalog-grid saved-list-game-grid">${games.length ? games.map((game) => gameCard(game)).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
+        `;
+        if (list.kind === "manual") {
+          const input = document.querySelector("#manualListSearch");
+          const searchTarget = document.querySelector("#manualListSearchResults");
+          let timer;
+          input?.addEventListener("input", () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(async () => {
+              const q = String(input.value || "").trim();
+              if (!q) { searchTarget.innerHTML = ""; return; }
+              try {
+                const search = await api(`/api/search?q=${encodeURIComponent(q)}&limit=6`);
+                const candidates = search.groups?.games || [];
+                searchTarget.innerHTML = candidates.map((game) => `
+                  <button class="manual-list-search-item" type="button" data-add-bgg="${game.bgg_id}">
+                    <strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"}</small><span>＋</span>
+                  </button>
+                `).join("") || '<span class="muted">Nessun gioco trovato.</span>';
+                searchTarget.querySelectorAll("[data-add-bgg]").forEach((button) => {
+                  button.addEventListener("click", async () => {
+                    await api(`/api/lists/${encodeURIComponent(listId)}/items/${button.dataset.addBgg}`, {method: "PUT"});
+                    showToast("Gioco aggiunto alla lista.");
+                    await openList(listId);
+                  });
+                });
+              } catch (error) {
+                searchTarget.innerHTML = `<span class="muted">${escapeHtml(error.message)}</span>`;
+              }
+            }, 180);
+          });
+          result.querySelectorAll(".game-card-wrap").forEach((card) => {
+            const bggId = card.dataset.gameId;
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "manual-list-remove";
+            remove.textContent = "×";
+            remove.title = "Rimuovi dalla lista";
+            remove.addEventListener("click", async () => {
+              await api(`/api/lists/${encodeURIComponent(listId)}/items/${bggId}`, {method: "DELETE"});
+              await openList(listId);
+            });
+            card.append(remove);
+          });
+        }
+      } catch (error) {
+        result.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    };
+
+    target.querySelectorAll("[data-open-list]").forEach((button) => {
+      button.addEventListener("click", () => void openList(button.dataset.openList));
+    });
+    target.querySelectorAll("[data-delete-list]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await api(`/api/lists/${encodeURIComponent(button.dataset.deleteList)}`, {method: "DELETE"});
+          showToast("Lista eliminata.");
+          await refreshListIndex();
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      });
+    });
+  };
+
+  document.querySelector("#createGameListForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const listKind = document.querySelector("#gameListKind").value;
+    const numberOrNull = (id) => {
+      const value = String(document.querySelector(id)?.value || "").trim();
+      return value ? Number(value) : null;
+    };
+    const filters = listKind === "smart" ? {
+      owned: true,
+      supports_players: numberOrNull("#listSupportsPlayers"),
+      ideal_players: numberOrNull("#listIdealPlayers"),
+      recommended_players: numberOrNull("#listRecommendedPlayers"),
+      max_minutes: numberOrNull("#listMaxMinutes"),
+      weight: document.querySelector("#listWeight").value || null,
+      personal_rating_min: numberOrNull("#listPersonalRating"),
+      played: document.querySelector("#listPlayed").value === ""
+        ? null
+        : document.querySelector("#listPlayed").value === "true",
+      min_rating: numberOrNull("#listBggRating"),
+      category: document.querySelector("#listCategory").value.trim() || null,
+      mechanic: document.querySelector("#listMechanic").value.trim() || null,
+    } : {};
+    Object.keys(filters).forEach((key) => filters[key] === null && delete filters[key]);
+    try {
+      await api("/api/lists", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          name: document.querySelector("#gameListName").value.trim(),
+          kind: listKind,
+          filters,
+        }),
+      });
+      showToast("Lista creata.");
+      event.currentTarget.reset();
+      fields.hidden = false;
+      await refreshListIndex();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
+
+  try {
+    await refreshListIndex();
+  } catch (error) {
+    document.querySelector("#savedLists").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function route() {
   catalogRequestController?.abort();
   exploreRequestController?.abort();
@@ -5507,6 +5785,14 @@ async function route() {
   }
   if (/^\/crowdfunding\/?$/.test(window.location.pathname)) {
     await renderCrowdfunding();
+    return;
+  }
+  if (/^\/lists\/?$/.test(window.location.pathname)) {
+    await renderLists();
+    return;
+  }
+  if (/^\/wishlist\/?$/.test(window.location.pathname)) {
+    await renderWishlist();
     return;
   }
   if (/^\/completed\/?$/.test(window.location.pathname)) {
@@ -5546,7 +5832,9 @@ document.addEventListener("click", (event) => {
   event.preventDefault();
   if (settingsDialog?.open && link.closest("#settingsDialog")) settingsDialog.close();
   if (catalogAssistantDialog?.open && link.closest("#catalogAssistantDialog")) catalogAssistantDialog.close();
-  history.pushState({}, "", url.pathname);
+  if (globalSearchDialog?.open) globalSearchDialog.close();
+  if (notificationDialog?.open) notificationDialog.close();
+  history.pushState({}, "", url.pathname + url.search);
   closeSidebar();
   route();
   window.scrollTo({top: 0});
@@ -5562,10 +5850,35 @@ window.addEventListener("resize", () => {
   if (window.innerWidth > 1040) closeSidebar();
 });
 document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    openGlobalSearchDialog();
+    return;
+  }
   if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
     closeSidebar();
   }
 });
+
+globalSearchButton?.addEventListener("click", openGlobalSearchDialog);
+mobileSearchButton?.addEventListener("click", openGlobalSearchDialog);
+closeGlobalSearch?.addEventListener("click", closeGlobalSearchDialog);
+globalSearchDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeGlobalSearchDialog();
+});
+globalSearchInput?.addEventListener("input", () => {
+  window.clearTimeout(globalSearchTimer);
+  globalSearchTimer = window.setTimeout(() => void performGlobalSearch(), 160);
+});
+notificationButton?.addEventListener("click", () => void openNotificationCenter());
+mobileNotificationButton?.addEventListener("click", () => void openNotificationCenter());
+closeNotificationDialog?.addEventListener("click", () => notificationDialog?.close());
+notificationDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  notificationDialog.close();
+});
+void refreshNotificationBadge();
 
 scannerButton.addEventListener("click", () => {
   closeSidebar();
