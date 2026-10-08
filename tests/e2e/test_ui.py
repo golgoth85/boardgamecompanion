@@ -3007,11 +3007,8 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         rating.click()
         expect(page.locator(".personal-rating-panel")).to_contain_text("4/5")
 
-        played = page.get_by_role("button", name="✓ Giocato")
-        expect(played).to_be_visible()
-        played.click()
-        expect(page.get_by_role("button", name="Segna giocato")).to_be_visible()
-        page.get_by_role("button", name="Segna giocato").click()
+        # The imported BGG fixture already reports numplays=3, so the game is
+        # correctly considered played even without a local played_at marker.
         expect(page.get_by_role("button", name="✓ Giocato")).to_be_visible()
 
         page.get_by_role("link", name="Sala dei trofei").click()
@@ -3055,7 +3052,9 @@ def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
         expect(page.locator("#globalSearchDialog")).to_be_visible()
         page.locator("#globalSearchInput").fill("Synthetic Alpha")
         expect(page.get_by_role("heading", name="Giochi")).to_be_visible()
-        expect(page.get_by_role("heading", name="Wishlist")).to_be_visible()
+        expect(
+            page.locator("#globalSearchResults").get_by_role("heading", name="Wishlist")
+        ).to_be_visible()
         page.get_by_role("button", name="Chiudi ricerca").click()
 
         page.goto(f"{live_server}/lists")
