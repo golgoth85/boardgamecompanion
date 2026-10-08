@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query
 
 from boardgamecompanion.catalog import Catalog
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.wishlist import WishlistStore
 
 router = APIRouter(tags=["search"])
 
@@ -37,12 +38,17 @@ def universal_search(
         for key, title, url, description in SECTIONS
         if folded in title.casefold() or folded in description.casefold()
     ][:6]
+    wishlist = [
+        item
+        for item in WishlistStore(get_database()).list()
+        if folded in str(item.get("title") or "").casefold()
+    ][:limit]
     return {
         "query": query,
         "groups": {
             "games": catalog["items"],
             "sections": sections,
-            "wishlist": [],
+            "wishlist": wishlist,
             "rulebooks": [],
             "crowdfunding": [],
         },
