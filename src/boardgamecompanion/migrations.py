@@ -1445,6 +1445,59 @@ def _personal_library_foundation(connection: sqlite3.Connection) -> None:
         ON notifications(read_at, created_at)
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS expansion_scan_state (
+            base_board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            baseline_complete INTEGER NOT NULL DEFAULT 0
+                CHECK(baseline_complete IN (0,1)),
+            last_checked_at TEXT,
+            next_check_at TEXT,
+            last_error TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_expansion_scan_due
+        ON expansion_scan_state(next_check_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS expansion_watch_state (
+            base_board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            expansion_bgg_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            is_relevant INTEGER NOT NULL DEFAULT 1
+                CHECK(is_relevant IN (0,1)),
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            PRIMARY KEY(base_board_game_id, expansion_bgg_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_expansion_watch_relevant
+        ON expansion_watch_state(base_board_game_id,is_relevant,last_seen_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS crowdfunding_watch_state (
+            campaign_key TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            platform TEXT,
+            target_url TEXT,
+            related_bgg_id INTEGER,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        )
+        """
+    )
 
 
 MIGRATIONS = (
