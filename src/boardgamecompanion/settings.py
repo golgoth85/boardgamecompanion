@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     crowdfunding_cache_ttl_seconds: int = Field(
         default=3 * 60 * 60, ge=15 * 60, le=24 * 60 * 60
     )
+    expansion_watch_refresh_seconds: int = Field(
+        default=24 * 60 * 60, ge=60 * 60, le=7 * 24 * 60 * 60
+    )
+    expansion_watch_poll_seconds: float = Field(
+        default=30 * 60, ge=5 * 60, le=24 * 60 * 60
+    )
+    expansion_watch_batch_size: int = Field(default=4, ge=1, le=20)
+    crowdfunding_notification_poll_seconds: float = Field(
+        default=6 * 60 * 60, ge=30 * 60, le=24 * 60 * 60
+    )
     crowdfunding_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     gamefound_public_api_url: str = "https://gamefound.com"
     apify_token: str | None = None
