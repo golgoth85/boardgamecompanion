@@ -3068,26 +3068,17 @@ async function prepareRagIndex(bggId, documentItems) {
   status.className = "rag-index-status";
   status.textContent = "Riprovo l'indicizzazione…";
   try {
-    const providerMessages = [];
     for (const item of documentItems) {
       try {
-        const indexed = await api(
+        await api(
           "/api/documents/" + encodeURIComponent(item.id) + "/auto-index/run",
           {method: "POST"},
         );
-        const providerMessage = indexed?.embeddings?.provider_message;
-        if (providerMessage && !providerMessages.includes(providerMessage)) {
-          providerMessages.push(providerMessage);
-        }
       } catch (error) {
         if (error.status !== 409) throw error;
       }
     }
-    showToast(
-      providerMessages.length
-        ? providerMessages.join(" · ")
-        : "Indicizzazione completata."
-    );
+    showToast("Indicizzazione completata.");
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -4234,7 +4225,6 @@ function renderCatalogAssistantResult(payload) {
         `).join("")}
       </div>
     ` : '<p class="muted">Nessun titolo del catalogo soddisfa abbastanza bene la richiesta.</p>'}
-    <small class="assistant-provider">Provider: ${escapeHtml(payload.provider || "AI")} · ${escapeHtml(payload.model || "")}</small>
   `;
 }
 
@@ -5204,19 +5194,19 @@ function crowdfundingProviderNotice(payload) {
   const kickstarter = payload.providers?.kickstarter || {};
   const notices = [];
   if (gamefound.status === "stale") {
-    notices.push("Gamefound temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
+    notices.push("Gamefound temporaneamente non aggiornabile: mostro gli ultimi dati disponibili.");
   } else if (gamefound.status === "error") {
-    notices.push("Gamefound non è al momento disponibile e non esiste ancora una cache valida.");
+    notices.push("Gamefound non è al momento disponibile.");
   }
   if (crowdfundingState.platform !== "gamefound") {
     if (kickstarter.status === "configuration_required") {
       notices.push(
-        'Kickstarter è predisposto tramite Apify ma non è configurato. <button class="button button-ghost" id="configureApifyFromCrowdfunding" type="button">Configura Apify</button>'
+        'Kickstarter non è configurato. <button class="button button-ghost" id="configureApifyFromCrowdfunding" type="button">Configura</button>'
       );
     } else if (kickstarter.status === "stale") {
-      notices.push("Kickstarter/Apify temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
+      notices.push("Kickstarter temporaneamente non aggiornabile: mostro gli ultimi dati disponibili.");
     } else if (kickstarter.status === "error") {
-      notices.push("Kickstarter/Apify non è al momento disponibile e non esiste ancora una cache valida.");
+      notices.push("Kickstarter non è al momento disponibile.");
     }
   }
   return notices.length
@@ -5530,10 +5520,10 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
           <p class="muted">${gamefoundOnlyUpcoming
             ? "La Public API documentata di Gamefound espone al momento solo le campagne attive."
             : kickstarterNeedsConfig
-              ? "Configura il token Apify nelle Impostazioni: il provider Kickstarter è già predisposto e supporta anche le campagne upcoming."
+              ? "Configura Kickstarter nelle Impostazioni per visualizzare anche le campagne upcoming."
               : "Prova un’altra piattaforma o classifica."}</p>
           ${kickstarterNeedsConfig
-            ? '<button class="button button-primary" id="configureApifyFromEmpty" type="button">Configura Apify</button>'
+            ? '<button class="button button-primary" id="configureApifyFromEmpty" type="button">Configura Kickstarter</button>'
             : ""}
         </div>
       `;
