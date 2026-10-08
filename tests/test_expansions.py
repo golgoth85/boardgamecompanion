@@ -172,8 +172,12 @@ def test_failed_refresh_never_establishes_empty_or_stale_baseline(
     db = _database(tmp_path)
 
     class FailingMetadataStore(FakeMetadataStore):
+        failing = True
+
         def refresh(self, bgg_id: int, *, force=False):
-            raise BggMetadataError("temporary BGG outage")
+            if self.failing:
+                raise BggMetadataError("temporary BGG outage")
+            return super().refresh(bgg_id, force=force)
 
     store = FailingMetadataStore(
         100,
@@ -198,7 +202,7 @@ def test_failed_refresh_never_establishes_empty_or_stale_baseline(
     assert (next_due - checked).total_seconds() == 3600
 
     # After recovery, these existing links become the baseline, not alerts.
-    store.__class__ = FakeMetadataStore
+    store.failing = False
     baseline = service.scan_game(100)
     assert baseline["new_relevant_count"] == 0
     assert service.notifications.list()["unread_count"] == 0
