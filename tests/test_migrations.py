@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 19
+    assert first_version == LATEST_SCHEMA_VERSION == 20
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -56,6 +56,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (17, "tutorial-videos"),
         (18, "personal-library-foundation"),
         (19, "crowdfunding-notification-baseline"),
+        (20, "half-star-personal-ratings"),
     ]
     assert {
         "board_games",
@@ -860,6 +861,81 @@ def test_notification_baseline_upgrade_preserves_previous_watch_state(
         previous = connection.execute(
             "SELECT title FROM crowdfunding_watch_state WHERE campaign_key='old-project'"
         ).fetchone()
-    assert database.schema_version() == 19
+    assert database.schema_version() == 20
     assert baseline is not None
     assert previous["title"] == "Existing Project"
+
+
+def test_v19_half_star_upgrade_preserves_existing_progress(tmp_path: Path) -> None:
+    path = tmp_path / "v19-half-stars.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+    for migration in MIGRATIONS[:19]:
+        migration.apply(connection)
+        connection.execute(
+            """
+            INSERT INTO schema_migrations(version,name,applied_at)
+            VALUES(?,?,'before')
+            """,
+            (migration.version, migration.name),
+        )
+
+    connection.execute(
+        """
+        INSERT INTO board_games(
+            bgg_id,title,source_metadata_json,created_at,updated_at
+        ) VALUES(990001,'Half Star Migration','{}','before','before')
+        """
+    )
+    game_id = connection.execute(
+        "SELECT id FROM board_games WHERE bgg_id=990001"
+    ).fetchone()["id"]
+    connection.execute(
+        """
+        INSERT INTO game_progress(
+            board_game_id,completed_at,created_at,updated_at,played_at,personal_rating
+        ) VALUES(?,NULL,'before','before','2026-10-01',4)
+        """,
+        (game_id,),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+
+    with database.transaction() as connection:
+        existing = connection.execute(
+            """
+            SELECT played_at,personal_rating FROM game_progress
+            WHERE board_game_id=?
+            """,
+            (game_id,),
+        ).fetchone()
+        connection.execute(
+            "UPDATE game_progress SET personal_rating=3.5 WHERE board_game_id=?",
+            (game_id,),
+        )
+        half = connection.execute(
+            "SELECT personal_rating FROM game_progress WHERE board_game_id=?",
+            (game_id,),
+        ).fetchone()["personal_rating"]
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE game_progress SET personal_rating=3.25 WHERE board_game_id=?",
+                (game_id,),
+            )
+
+    assert database.schema_version() == 20
+    assert dict(existing) == {"played_at": "2026-10-01", "personal_rating": 4.0}
+    assert half == 3.5
