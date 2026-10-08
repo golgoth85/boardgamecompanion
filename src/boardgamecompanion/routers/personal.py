@@ -15,7 +15,7 @@ router = APIRouter(tags=["personal"])
 
 
 class PersonalStatePayload(BaseModel):
-    rating: int | None = Field(default=None, ge=1, le=5)
+    rating: float | None = Field(default=None, ge=0.5, le=5, multiple_of=0.5)
     played: bool | None = None
     played_at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     completed: bool | None = None
