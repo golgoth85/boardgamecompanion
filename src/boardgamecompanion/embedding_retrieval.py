@@ -396,6 +396,19 @@ class LMStudioEmbeddingProvider:
                 "LM Studio Wake-on-LAN packet was only partially sent"
             )
 
+    def endpoint_ready(self) -> bool:
+        return self._tcp_ready()
+
+    def wake(self) -> dict[str, bool]:
+        if self.wol_mac is None:
+            raise EmbeddingProviderError(
+                "LM Studio Wake-on-LAN MAC is not configured"
+            )
+        if self._tcp_ready():
+            return {"sent": False, "already_ready": True}
+        self._send_magic_packet()
+        return {"sent": True, "already_ready": False}
+
     def _ensure_endpoint_ready(self) -> None:
         if self.wol_mac is None or self._tcp_ready():
             return
