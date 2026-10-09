@@ -3581,15 +3581,28 @@ async function setupGameDiscovery(bggId, gameTitle) {
     }
 
     button.disabled = true;
-    button.textContent = "Ricerca delle fonti note…";
+    button.textContent = "Ricerca e acquisizione…";
     try {
-      const result = await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
-      const found = Number(result.candidates_found || 0);
-      const failures = Number(result.provider_failures || 0);
-      const approved = (result.review_items || []).filter((value) => value.status === "approved").length;
-      const pending = (result.review_items || []).filter((value) => value.status === "pending").length;
-      if (found) {
-        showToast(`Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare. Il download dei PDF è separato dalla ricerca.`);
+      const result = await api(`/api/games/${bggId}/rulebook-acquire/run`, {method: "POST"});
+      const discovery = result.discovery || {};
+      const acquisition = result.acquisition || {};
+      const found = Number(discovery.candidates_found || 0);
+      const failures = Number(discovery.provider_failures || 0);
+      const pending = (discovery.review_items || []).filter((value) => value.status === "pending").length;
+      const runs = acquisition.results || [];
+      const created = runs.filter((value) => value.outcome === "created").length;
+      const unchanged = runs.filter((value) => value.outcome === "unchanged").length;
+      const acquisitionFailed = runs.filter((value) => value.outcome === "failed").length;
+      if (created) {
+        showToast("Regolamento ufficiale acquisito. Indicizzazione avviata automaticamente.");
+      } else if (unchanged) {
+        showToast("Il regolamento ufficiale è già archiviato ed è stato verificato.");
+      } else if (pending) {
+        showToast(`Trovata ${pending === 1 ? "una fonte da verificare" : `${pending} fonti da verificare`}. Nessun PDF dubbio è stato scaricato automaticamente.`);
+      } else if (acquisitionFailed) {
+        showToast("Fonte ufficiale trovata, ma l'acquisizione del PDF non è riuscita. Puoi riprovare.", true);
+      } else if (found) {
+        showToast("Fonti trovate, ma nessuna soddisfa i criteri per l'acquisizione automatica.");
       } else if (failures) {
         showToast("Nessuna fonte trovata; alcune fonti note non hanno risposto. Premi di nuovo per cercare il PDF su Google.");
       } else {
