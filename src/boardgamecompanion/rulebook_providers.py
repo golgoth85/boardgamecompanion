@@ -1330,6 +1330,217 @@ class AwakenRealmsProvider:
         )
 
 
+class MonolithBatmanProvider:
+    """Official Batman GCC booklets embedded in Monolith's DFlip catalogue."""
+
+    name = "monolith_batman"
+    _PAGE = "https://monolithedition.com/en/portfolio/batman-gotham-city-chronicles/"
+    _HOSTS = frozenset({"monolithedition.com", "www.monolithedition.com"})
+    _PUBLISHERS = ("Monolith Board Games",)
+    _DFLIP_RE = re.compile(
+        r"window\.df_option_[0-9]+\s*=\s*(\{.*?\})\s*;",
+        re.DOTALL,
+    )
+    _EXPANSION_MATCHES = {
+        "arkham asylum": ("arkham", "asylum"),
+        "wayne manor": ("wayne", "manor"),
+        "versus": ("versus",),
+    }
+
+    def __init__(self, http: ProviderHttpClient | None = None):
+        self.http = http or ProviderHttpClient(
+            browser_fallback_hosts=self._HOSTS,
+        )
+
+    @classmethod
+    def _wanted_key(cls, query: RulebookQuery) -> str | None:
+        if "expansion" not in _match_text(query.item_type):
+            return None
+        titles = (
+            *query.verified_titles,
+            query.title,
+            query.original_title,
+        )
+        for raw in titles:
+            title = _match_text(raw)
+            if not title:
+                continue
+            for key, tokens in cls._EXPANSION_MATCHES.items():
+                if all(token in title.split() for token in tokens):
+                    return key
+        return None
+
+    @staticmethod
+    def _language(source: str) -> str:
+        filename = urlsplit(source).path.rsplit("/", 1)[-1]
+        if re.search(r"(?:_|-)(?:EN|ENF)(?:[._-]|$)", filename, re.I):
+            return "en"
+        if re.search(r"(?:_|-)(?:IT|ITA)(?:[._-]|$)", filename, re.I):
+            return "it"
+        return "und"
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if not _verified_publisher_matches(query, self._PUBLISHERS):
+            return ()
+        wanted = self._wanted_key(query)
+        if wanted is None:
+            return ()
+
+        response = self.http.get(
+            self._PAGE,
+            allowed_hosts=self._HOSTS,
+            accepted_statuses=frozenset({200}),
+        )
+        try:
+            text = response.content.decode("utf-8", "strict")
+        except UnicodeDecodeError as exc:
+            raise RulebookProviderError("Monolith catalogue is not valid UTF-8") from exc
+
+        expected_tokens = self._EXPANSION_MATCHES[wanted]
+        candidates: list[RulebookCandidate] = []
+        seen: set[str] = set()
+        for raw in self._DFLIP_RE.findall(text):
+            try:
+                payload = json.loads(raw)
+            except (json.JSONDecodeError, RecursionError):
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            source = payload.get("source")
+            slug = payload.get("slug")
+            if not isinstance(source, str) or not isinstance(slug, str):
+                continue
+            label = _match_text(f"{slug} {urlsplit(source).path.rsplit('/', 1)[-1]}")
+            if not all(token in label.split() for token in expected_tokens):
+                continue
+            try:
+                url = canonical_http_url(source)
+            except ValueError:
+                continue
+            parts = urlsplit(url)
+            if (
+                parts.scheme != "https"
+                or (parts.hostname or "").lower() not in self._HOSTS
+                or not parts.path.casefold().endswith(".pdf")
+                or url in seen
+            ):
+                continue
+            language = self._language(url)
+            if language not in {"it", "en"}:
+                continue
+            seen.add(url)
+            candidates.append(
+                RulebookCandidate(
+                    provider=self.name,
+                    source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                    url=url,
+                    language=language,
+                    document_type="rulebook",
+                    official=True,
+                    confidence=100,
+                    title=f"{query.title} — Official booklet",
+                    bgg_id=query.bgg_id,
+                    game_title=query.title,
+                    year=query.year,
+                    publisher="Monolith Board Games",
+                    metadata={
+                        "official_page": response.url,
+                        "identity_evidence": (
+                            "curated_official_publisher_page",
+                            "bgg_verified_publisher",
+                            "expansion_booklet_label_exact",
+                        ),
+                        "catalog_item_type": query.item_type,
+                    },
+                )
+            )
+        return tuple(candidates)
+
+
+class SeriousPoulpProvider:
+    """Official 7th Continent download catalogue for expansion rulebooks."""
+
+    name = "serious_poulp"
+    _PAGE = "https://the7thcontinent.seriouspoulp.com/en/resources/downloads"
+    _HOSTS = frozenset({"the7thcontinent.seriouspoulp.com"})
+    _PUBLISHERS = ("Serious Poulp",)
+
+    def __init__(self, http: ProviderHttpClient | None = None):
+        self.http = http or ProviderHttpClient()
+
+    @staticmethod
+    def _is_wgumcd(query: RulebookQuery) -> bool:
+        if "expansion" not in _match_text(query.item_type):
+            return False
+        values = (
+            *query.verified_titles,
+            query.title,
+            query.original_title,
+        )
+        return any(
+            all(token in _match_text(value).split() for token in ("what", "goes", "up", "must", "come", "down"))
+            for value in values
+            if value
+        )
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if (
+            not _verified_publisher_matches(query, self._PUBLISHERS)
+            or not self._is_wgumcd(query)
+        ):
+            return ()
+
+        response = self.http.get(
+            self._PAGE,
+            allowed_hosts=self._HOSTS,
+            accepted_statuses=frozenset({200}),
+        )
+        page = _parse_official_page(response.content, link_limit=400)
+        candidates: list[RulebookCandidate] = []
+        for href, label in page.links:
+            observed = _match_text(f"{label} {href}")
+            if "wgumcd" not in observed.split():
+                continue
+            try:
+                url = canonical_http_url(urljoin(response.url, href))
+            except ValueError:
+                continue
+            parts = urlsplit(url)
+            if (
+                parts.scheme != "https"
+                or (parts.hostname or "").lower() not in self._HOSTS
+                or not parts.path.casefold().endswith(".pdf")
+            ):
+                continue
+            candidates.append(
+                RulebookCandidate(
+                    provider=self.name,
+                    source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                    url=url,
+                    language="en",
+                    document_type="rulebook",
+                    official=True,
+                    confidence=100,
+                    title=f"{query.title} — Official rulebook",
+                    bgg_id=query.bgg_id,
+                    game_title=query.title,
+                    year=query.year,
+                    publisher="Serious Poulp",
+                    metadata={
+                        "official_page": response.url,
+                        "identity_evidence": (
+                            "curated_official_publisher_download_catalog",
+                            "bgg_verified_publisher",
+                            "wgumcd_expansion_label_exact",
+                        ),
+                        "catalog_item_type": query.item_type,
+                    },
+                )
+            )
+        return tuple(candidates)
+
+
+
 class RuleBookOrgProvider:
     name = "rulebook_org"
     _ENDPOINT = "https://api.rule-book.org/games"
@@ -1459,6 +1670,10 @@ def production_official_rulebook_providers(
 
     return (
         *generic_providers,
+        MonolithBatmanProvider(
+            client(browser_fallback_hosts=MonolithBatmanProvider._HOSTS)
+        ),
+        SeriousPoulpProvider(client()),
         AwakenRealmsProvider(client()),
         ReposProductionProvider(
             client(browser_fallback_hosts=ReposProductionProvider._HOSTS)
