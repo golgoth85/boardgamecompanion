@@ -138,7 +138,9 @@ class FakeAcquireUpdates:
 
 def test_acquire_endpoint_prefers_exact_unattended_italian_candidate(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
+    configure(monkeypatch, tmp_path)
     discovery = FakeAcquireDiscovery(
         {
             "candidates_found": 3,
@@ -187,7 +189,9 @@ def test_acquire_endpoint_prefers_exact_unattended_italian_candidate(
 
 def test_acquire_endpoint_never_downloads_review_gated_candidate(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
+    configure(monkeypatch, tmp_path)
     discovery = FakeAcquireDiscovery(
         {
             "candidates_found": 1,
