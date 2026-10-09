@@ -12,6 +12,7 @@ from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
 from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
     AwakenRealmsProvider,
+    FantasyFlightAgotExpansionRulesProvider,
     MsEdizioniProvider,
     MonolithBatmanProvider,
     PendragonItaliaProvider,
@@ -204,6 +205,60 @@ def test_repos_nested_expansion_preserves_manual_review_without_verified_bgg_ide
 
 
 
+
+
+def test_ffg_agot_second_edition_deluxe_uses_shared_official_expansion_rules() -> None:
+    provider = FantasyFlightAgotExpansionRulesProvider()
+    q = query(
+        bgg_id=262638,
+        title=(
+            "A Game of Thrones: The Card Game (Second Edition) "
+            "– Kings of the Isles"
+        ),
+        item_type="boardgameexpansion",
+        publishers=("Fantasy Flight Games",),
+        verified_publishers=("Fantasy Flight Games",),
+        verified_titles=(
+            "A Game of Thrones: The Card Game (Second Edition) "
+            "– Kings of the Isles",
+        ),
+    )
+    candidates = tuple(provider.discover(q))
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.bgg_id == 262638
+    assert candidate.confidence == 100
+    assert candidate.language == "en"
+    assert candidate.official is True
+    assert candidate.metadata["shared_rulebook"] is True
+    assert candidate.metadata["shared_scope"] == (
+        "agot_lcg_second_edition_expansions"
+    )
+    assert candidate.url.endswith("/gt_expansion_rules.pdf")
+
+
+def test_ffg_agot_shared_rules_reject_unrelated_or_unknown_expansion() -> None:
+    provider = FantasyFlightAgotExpansionRulesProvider()
+    unrelated = query(
+        bgg_id=262638,
+        title="Different Game Expansion",
+        item_type="boardgameexpansion",
+        publishers=("Fantasy Flight Games",),
+        verified_publishers=("Fantasy Flight Games",),
+        verified_titles=("Different Game Expansion",),
+    )
+    unknown = query(
+        bgg_id=999999,
+        title="A Game of Thrones: The Card Game (Second Edition) – Future Box",
+        item_type="boardgameexpansion",
+        publishers=("Fantasy Flight Games",),
+        verified_publishers=("Fantasy Flight Games",),
+        verified_titles=(
+            "A Game of Thrones: The Card Game (Second Edition) – Future Box",
+        ),
+    )
+    assert tuple(provider.discover(unrelated)) == ()
+    assert tuple(provider.discover(unknown)) == ()
 
 
 def test_monolith_batman_provider_reads_dflip_expansion_booklet() -> None:

@@ -1330,6 +1330,85 @@ class AwakenRealmsProvider:
         )
 
 
+class FantasyFlightAgotExpansionRulesProvider:
+    """Shared official expansion-rules document for AGOT LCG second edition."""
+
+    name = "fantasy_flight_agot_expansion_rules"
+    _PUBLISHERS = ("Fantasy Flight Games",)
+    _URL = (
+        "https://images-cdn.fantasyflightgames.com/filer_public/06/c4/"
+        "06c495e8-1769-4d93-b5a9-7c2bdcbcc765/gt_expansion_rules.pdf"
+    )
+    _SUPPORTED_BGG_IDS = frozenset({
+        236435,  # House of Thorns
+        262638,  # Kings of the Isles
+        201277,  # Lions of Casterly Rock
+        245349,  # Sands of Dorne
+        217960,  # Watchers on the Wall
+        189169,  # Wolves of the North
+    })
+    @classmethod
+    def _identity_matches(cls, query: RulebookQuery) -> bool:
+        if query.bgg_id not in cls._SUPPORTED_BGG_IDS:
+            return False
+        if "expansion" not in _match_text(query.item_type):
+            return False
+        titles = (
+            *query.verified_titles,
+            query.title,
+            query.original_title,
+        )
+        return any(
+            {
+                "game", "thrones", "card"
+            }.issubset(set(_match_text(value).split()))
+            for value in titles
+            if value
+        )
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if (
+            not _verified_publisher_matches(query, self._PUBLISHERS)
+            or not self._identity_matches(query)
+        ):
+            return ()
+
+        return (
+            RulebookCandidate(
+                provider=self.name,
+                source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                url=self._URL,
+                language="en",
+                document_type="rulebook",
+                official=True,
+                confidence=100,
+                title=(
+                    "A Game of Thrones: The Card Game — "
+                    "Expansion Rules (shared)"
+                ),
+                bgg_id=query.bgg_id,
+                game_title=query.title,
+                year=query.year,
+                publisher="Fantasy Flight Games",
+                metadata={
+                    "official_page": (
+                        "https://www.fantasyflightgames.com/en/products/"
+                        "a-game-of-thrones-the-card-game-second-edition/"
+                    ),
+                    "identity_evidence": (
+                        "curated_official_family_support_page",
+                        "bgg_verified_publisher",
+                        "curated_supported_expansion_bgg_id",
+                    ),
+                    "shared_rulebook": True,
+                    "shared_scope": "agot_lcg_second_edition_expansions",
+                    "catalog_item_type": query.item_type,
+                },
+            ),
+        )
+
+
+
 class MonolithBatmanProvider:
     """Official Batman GCC booklets embedded in Monolith's DFlip catalogue."""
 
@@ -1670,6 +1749,7 @@ def production_official_rulebook_providers(
 
     return (
         *generic_providers,
+        FantasyFlightAgotExpansionRulesProvider(),
         MonolithBatmanProvider(
             client(browser_fallback_hosts=MonolithBatmanProvider._HOSTS)
         ),
