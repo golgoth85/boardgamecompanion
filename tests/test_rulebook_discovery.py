@@ -12,6 +12,7 @@ from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
 from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
     AwakenRealmsProvider,
+    DragoriTanaresProvider,
     FantasyFlightAgotExpansionRulesProvider,
     MsEdizioniProvider,
     MonolithBatmanProvider,
@@ -259,6 +260,49 @@ def test_ffg_agot_shared_rules_reject_unrelated_or_unknown_expansion() -> None:
     )
     assert tuple(provider.discover(unrelated)) == ()
     assert tuple(provider.discover(unknown)) == ()
+
+
+def test_dragori_tanares_provider_returns_exact_official_rulebook() -> None:
+    provider = DragoriTanaresProvider()
+    q = query(
+        bgg_id=298627,
+        title="Arena: The Contest – Tanares Adventures",
+        original_title="Arena: The Contest – Tanares Adventures",
+        item_type="expansion",
+        publishers=("Dragori Games",),
+        verified_publishers=("Dragori Games",),
+        verified_titles=("Arena: The Contest – Tanares Adventures",),
+    )
+    candidates = tuple(provider.discover(q))
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.bgg_id == 298627
+    assert candidate.official is True
+    assert candidate.confidence == 100
+    assert candidate.language == "en"
+    assert candidate.url == "https://www.dragorigames.com/tanares/rulebook.pdf"
+
+
+def test_dragori_tanares_provider_rejects_wrong_identity_or_publisher() -> None:
+    provider = DragoriTanaresProvider()
+    wrong_game = query(
+        bgg_id=312509,
+        title="Arena: The Contest – Dragon Collection",
+        item_type="expansion",
+        publishers=("Dragori Games",),
+        verified_publishers=("Dragori Games",),
+        verified_titles=("Arena: The Contest – Dragon Collection",),
+    )
+    wrong_publisher = query(
+        bgg_id=298627,
+        title="Arena: The Contest – Tanares Adventures",
+        item_type="expansion",
+        publishers=("Other Publisher",),
+        verified_publishers=("Other Publisher",),
+        verified_titles=("Arena: The Contest – Tanares Adventures",),
+    )
+    assert tuple(provider.discover(wrong_game)) == ()
+    assert tuple(provider.discover(wrong_publisher)) == ()
 
 
 def test_monolith_batman_provider_reads_dflip_expansion_booklet() -> None:
