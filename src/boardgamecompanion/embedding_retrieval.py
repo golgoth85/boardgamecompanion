@@ -800,72 +800,19 @@ class EmbeddingRetrievalService:
 
     def _source(self, document_id: str) -> dict[str, Any]:
         try:
-            status = self.chunk_service.status(document_id)
+            snapshot = self.chunk_service.snapshot_current(document_id)
         except ChunkIndexDocumentNotFound as exc:
             raise EmbeddingDocumentNotFound(str(exc)) from exc
         except ChunkIndexSourceNotReady as exc:
             raise EmbeddingSourceNotReady(str(exc)) from exc
         except ChunkIndexCorruptSource as exc:
             raise EmbeddingCorruptRecord(str(exc)) from exc
-        if status["current"] is None:
-            raise EmbeddingSourceNotReady(
-                "Document has no current P7B chunk index"
-            )
-        current = status["current"]
+
+        current = snapshot["current"]
         chunk_run_id = str(current["id"])
-
-        with self.database.connect() as connection:
-            document = connection.execute(
-                """
-                SELECT *
-                FROM game_documents
-                WHERE id = ?
-                """,
-                (document_id,),
-            ).fetchone()
-            if document is None:
-                raise EmbeddingDocumentNotFound(
-                    f"Document {document_id} not found"
-                )
-
-        chunks: list[dict[str, Any]] = []
-        offset = 0
-        while True:
-            try:
-                page = self.chunk_service.list_chunks(
-                    document_id,
-                    limit=500,
-                    offset=offset,
-                )
-            except ChunkIndexSourceNotReady as exc:
-                raise EmbeddingSourceNotReady(str(exc)) from exc
-            except ChunkIndexCorruptSource as exc:
-                raise EmbeddingCorruptRecord(str(exc)) from exc
-            summaries = page["items"]
-            if not summaries:
-                break
-            for summary in summaries:
-                try:
-                    detail = self.chunk_service.get_chunk(summary["id"])
-                except ChunkIndexSourceNotReady as exc:
-                    raise EmbeddingSourceNotReady(str(exc)) from exc
-                except ChunkIndexCorruptSource as exc:
-                    raise EmbeddingCorruptRecord(str(exc)) from exc
-                if detail is None:
-                    raise EmbeddingConflict(
-                        "Chunk disappeared while preparing embeddings"
-                    )
-                if detail["chunk_run_id"] != chunk_run_id:
-                    raise EmbeddingConflict(
-                        "Chunk index changed while preparing embeddings"
-                    )
-                chunks.append(detail)
-            offset += len(summaries)
-            if offset >= int(page["count"]):
-                break
-
+        chunks = snapshot["chunks"]
         return {
-            "document": dict(document),
+            "document": snapshot["document"],
             "chunk_run": current,
             "chunks": chunks,
             "input_set_sha256": _input_set_sha256(chunk_run_id, chunks),

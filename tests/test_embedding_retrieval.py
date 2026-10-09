@@ -230,6 +230,37 @@ def _prepare_document(
     return document
 
 
+def test_embedding_source_verifies_archive_once_per_snapshot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    provider = FakeProvider()
+    with TestClient(app) as client:
+        _import_game(client)
+        document = _prepare_document(
+            client,
+            text=_long_page("Setup") + " " + _long_page("Score"),
+        )
+
+    service = _service(provider)
+    service.build(document["id"])
+
+    calls = 0
+    original_verify = service.chunk_service._verify_archive
+
+    def counted_verify(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_verify(*args, **kwargs)
+
+    monkeypatch.setattr(service.chunk_service, "_verify_archive", counted_verify)
+    source = service._source(document["id"])
+
+    assert len(source["chunks"]) > 1
+    assert calls == 1
+
+
 def test_embedding_build_is_idempotent_and_pins_model_digest(
     monkeypatch,
     tmp_path: Path,
