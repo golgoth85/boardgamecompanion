@@ -31,4 +31,4 @@ Rules:
 - release/publish/deploy jobs requiring credentials are a separate trusted boundary;
 - infrastructure failures must not silently fall back to hosted CI.
 
-The activation E2E reference is added only after the v2 enrollment has completed successfully.
+Enrollment E2E: `golgoth85/nas-control#2137`, `ENROLLED`, `activated=true`, real isolated I3 guest `PASS` on the trusted `pytest-v1` v2 contract.
