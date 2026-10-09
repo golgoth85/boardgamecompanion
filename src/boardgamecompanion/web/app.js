@@ -3534,10 +3534,20 @@ async function setupGameDiscovery(bggId, gameTitle) {
     const candidates = Number(item?.candidates_found || 0);
     const failures = Number(item?.provider_failures || 0);
     const completed = Boolean(item?.last_finished_at);
+    const availability = item?.availability || null;
     const knownSourceMiss = completed && candidates === 0;
-    button.dataset.mode = knownSourceMiss ? "google" : "discovery";
+    const externalUrl = availability?.external_url || "";
+    if (availability?.action === "open_external" && externalUrl) {
+      button.dataset.mode = "external";
+      button.dataset.externalUrl = externalUrl;
+      button.textContent = "Apri manuale esterno ↗";
+      return;
+    }
+    button.dataset.mode = knownSourceMiss && !availability ? "google" : "discovery";
     button.dataset.googleUrl = googleUrl;
-    if (knownSourceMiss) {
+    if (knownSourceMiss && availability) {
+      button.textContent = "Riprova fonti ufficiali";
+    } else if (knownSourceMiss) {
       button.textContent = "Cerca PDF su Google ↗";
     } else if (failures > 0) {
       button.textContent = "Riprova ricerca automatica";
@@ -3561,7 +3571,11 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
       const candidates = Number(item.candidates_found || 0);
       const failures = Number(item.provider_failures || 0);
-      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti trovate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
+      const availability = item.availability || null;
+      const availabilityText = availability?.label ? ` · Stato: ${availability.label}` : "";
+      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti trovate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}${availabilityText}.`;
+      if (availability?.detail) status.title = availability.detail;
+      else status.removeAttribute("title");
       setButtonState(item);
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
@@ -3579,6 +3593,14 @@ async function setupGameDiscovery(bggId, gameTitle) {
       if (opened) opened.opener = null;
       return;
     }
+    if (button.dataset.mode === "external") {
+      const target = button.dataset.externalUrl;
+      if (target) {
+        const opened = window.open(target, "_blank", "noopener,noreferrer");
+        if (opened) opened.opener = null;
+      }
+      return;
+    }
 
     button.disabled = true;
     button.textContent = "Ricerca e acquisizione…";
@@ -3593,6 +3615,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const created = runs.filter((value) => value.outcome === "created").length;
       const unchanged = runs.filter((value) => value.outcome === "unchanged").length;
       const acquisitionFailed = runs.filter((value) => value.outcome === "failed").length;
+      const availability = result.availability || discovery.availability || null;
       if (created) {
         showToast("Regolamento ufficiale acquisito. Indicizzazione avviata automaticamente.");
       } else if (unchanged) {
@@ -3603,6 +3626,8 @@ async function setupGameDiscovery(bggId, gameTitle) {
         showToast("Fonte ufficiale trovata, ma l'acquisizione del PDF non è riuscita. Puoi riprovare.", true);
       } else if (found) {
         showToast("Fonti trovate, ma nessuna soddisfa i criteri per l'acquisizione automatica.");
+      } else if (availability?.label) {
+        showToast(availability.label);
       } else if (failures) {
         showToast("Nessuna fonte trovata; alcune fonti note non hanno risposto. Premi di nuovo per cercare il PDF su Google.");
       } else {
