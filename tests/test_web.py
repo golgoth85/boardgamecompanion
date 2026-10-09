@@ -19,7 +19,9 @@ def test_web_home_is_served(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "BoardGameCompanion" in response.text
-    assert "Scansiona barcode" in response.text
+    assert 'id="scannerDialog"' in response.text
+    assert 'id="settingsCollapseExpansions"' in response.text
+    assert "Giochi giocati" in response.text
     assert 'id="settingsDialogTitle">Impostazioni<' in response.text
     assert "Priorità provider" in response.text
     assert 'id="bggApplicationToken"' in response.text

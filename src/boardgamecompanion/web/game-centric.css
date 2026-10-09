@@ -551,3 +551,103 @@
   .relevant-expansion-card{grid-template-columns:4.8rem minmax(0,1fr)}
   .relevant-expansion-cover{width:4.8rem}
 }
+
+
+/* UI consolidation: global controls, compact catalog and game detail */
+.global-command-bar{
+  position:sticky;top:0;z-index:24;display:flex;align-items:center;justify-content:flex-end;gap:.55rem;
+  min-height:3.65rem;padding:.58rem clamp(1rem,2vw,1.5rem);box-sizing:border-box;
+  border-bottom:1px solid rgba(41,52,76,.68);
+  background:rgba(11,15,23,.88);backdrop-filter:blur(18px)
+}
+.global-search-trigger{
+  display:flex;flex:1 1 34rem;max-width:48rem;min-width:0;min-height:2.5rem;align-items:center;gap:.65rem;
+  padding:.48rem .72rem;border:1px solid var(--line);border-radius:12px;background:rgba(18,24,38,.78);
+  color:var(--text);font:inherit;text-align:left;cursor:pointer;box-shadow:0 8px 28px rgba(0,0,0,.12)
+}
+.global-search-trigger:hover,.global-search-trigger:focus-visible{border-color:rgba(73,190,132,.42);background:rgba(24,33,49,.9)}
+.global-command-icon{display:grid;width:1.7rem;height:1.7rem;place-items:center;color:#bfe8d0;font-size:1rem}
+.global-search-placeholder{min-width:0;overflow:hidden;color:#aab5c5;text-overflow:ellipsis;white-space:nowrap}
+.global-search-trigger kbd{
+  margin-left:auto;padding:.15rem .38rem;border:1px solid rgba(255,255,255,.1);border-radius:6px;
+  color:var(--muted);background:rgba(255,255,255,.035);font-size:.52rem
+}
+.global-notification-trigger{
+  position:relative;display:grid;width:2.55rem;height:2.55rem;place-items:center;flex:0 0 auto;
+  border:1px solid var(--line);border-radius:12px;background:rgba(18,24,38,.78);color:var(--text);
+  font:inherit;font-size:1.05rem;cursor:pointer
+}
+.global-notification-trigger:hover,.global-notification-trigger:focus-visible{border-color:rgba(73,190,132,.42);background:rgba(24,33,49,.9)}
+
+.catalog-head-compact-actions{gap:.5rem}
+.catalog-head-compact-actions .catalog-density-controls{grid-column:auto;justify-content:flex-end;gap:.45rem}
+.catalog-head-compact-actions .catalog-density-group{min-height:2.25rem;padding:.15rem .24rem .15rem .48rem}
+.catalog-scan-button{width:2.45rem;height:2.45rem;flex:0 0 auto;border-radius:11px;font-size:1rem}
+.catalog-scan-button:hover,.catalog-scan-button:focus-visible{border-color:rgba(73,190,132,.42);color:#c8f1d8}
+#resultCount[hidden]{display:none!important}
+
+.game-summary-cover .detail-cover{position:relative;overflow:hidden;background:rgba(5,9,15,.78)}
+.game-summary-cover .cover-image{object-fit:contain;background:rgba(5,9,15,.78)}
+.cover-rating-overlay{
+  position:absolute;left:.5rem;right:.5rem;bottom:.5rem;z-index:2;display:flex;align-items:center;justify-content:center;gap:.45rem;
+  min-height:2.35rem;padding:.38rem .52rem;border:1px solid rgba(255,255,255,.12);border-radius:11px;
+  background:rgba(8,12,19,.82);backdrop-filter:blur(10px);box-shadow:0 8px 24px rgba(0,0,0,.24)
+}
+.cover-rating-overlay .personal-stars{gap:.1rem}
+.cover-rating-overlay .personal-star-control{width:1.35rem;height:1.55rem}
+.cover-rating-overlay small{color:#e8edf5;font-size:.58rem;font-weight:750;white-space:nowrap}
+
+.game-header-player{align-items:center}
+.game-title-block{display:flex;min-width:0;flex:1 1 auto;align-items:baseline;gap:.7rem;flex-wrap:wrap}
+.game-title-block h1{min-width:0;margin:0;font-size:clamp(1.7rem,3.4vw,3rem);line-height:1.04;letter-spacing:-.035em}
+.game-title-meta{flex:0 0 auto;color:var(--muted);font-size:.58rem;font-weight:750;letter-spacing:.045em;text-transform:uppercase}
+.game-primary-actions{flex:0 0 auto}
+.game-state-icon{
+  display:grid;width:2.65rem;height:2.65rem;place-items:center;padding:0;border:1px solid var(--line);border-radius:12px;
+  background:rgba(18,24,38,.7);color:#aeb9c9;font:inherit;font-size:1rem;cursor:pointer;transition:.16s ease
+}
+.game-state-icon:hover,.game-state-icon:focus-visible{transform:translateY(-1px);border-color:rgba(73,190,132,.42);color:#e8f7ee}
+.game-state-icon.is-played{border-color:rgba(73,190,132,.38);background:rgba(73,190,132,.12);color:#c8f1d8}
+.game-state-icon.is-completed{border-color:rgba(241,200,96,.42);background:rgba(241,200,96,.1);color:#f5d981}
+.game-state-icon:disabled{opacity:.55;cursor:wait;transform:none}
+
+.suggestion-heading-actions{align-items:center}
+.suggestion-bgg-link{
+  display:inline-flex;min-height:2.35rem;align-items:center;gap:.42rem;padding:.42rem .62rem;
+  border:1px solid rgba(255,255,255,.11);border-radius:10px;background:rgba(255,255,255,.035);
+  color:#dfe6ef;text-decoration:none;font-size:.65rem;font-weight:800;letter-spacing:.015em
+}
+.suggestion-bgg-link:hover,.suggestion-bgg-link:focus-visible{border-color:rgba(86,156,214,.42);background:rgba(86,156,214,.08)}
+.suggestion-bgg-mark{display:grid;min-width:2rem;height:1.3rem;place-items:center;border-radius:5px;background:#5a3a1e;color:#f3dfc2;font-size:.52rem;letter-spacing:.06em}
+.wishlist-heart{
+  display:grid;width:2.35rem;height:2.35rem;place-items:center;padding:0;border:1px solid var(--line);border-radius:10px;
+  background:rgba(255,255,255,.025);color:#c6cfdb;font:inherit;font-size:1.2rem;line-height:1;cursor:pointer
+}
+.wishlist-heart:hover,.wishlist-heart:focus-visible{border-color:rgba(232,105,132,.42);color:#f0bdc8;background:rgba(232,105,132,.06)}
+.wishlist-heart.is-active{border-color:rgba(232,105,132,.42);background:rgba(232,105,132,.1);color:#f0bdc8}
+.wishlist-heart:disabled{opacity:.55;cursor:wait}
+
+@media(max-width:1040px){
+  .global-command-bar{display:none}
+}
+@media(max-width:980px){
+  .game-header-player{align-items:center;flex-direction:row}
+  .game-primary-actions{justify-content:flex-end}
+}
+@media(max-width:760px){
+  .catalog-workspace-head{align-items:flex-start;flex-direction:column}
+  .catalog-head-compact-actions{width:100%;justify-content:space-between}
+  .catalog-head-compact-actions .catalog-density-controls{justify-content:flex-start}
+  .game-title-block h1{font-size:clamp(1.55rem,7vw,2.3rem)}
+}
+@media(max-width:620px){
+  .catalog-head-compact-actions{align-items:stretch;flex-direction:column}
+  .catalog-head-compact-actions .catalog-density-controls{display:grid;width:100%;justify-content:stretch}
+  .catalog-head-compact-actions .catalog-density-group{width:100%;justify-content:space-between}
+  .catalog-scan-button{align-self:flex-end}
+  .game-header-player{align-items:flex-start;flex-direction:column}
+  .game-primary-actions{width:auto;justify-content:flex-start}
+  .cover-rating-overlay{left:.3rem;right:.3rem;bottom:.3rem;padding:.28rem .35rem}
+  .cover-rating-overlay small{display:none}
+  .suggestion-heading-actions{display:flex;justify-content:flex-end}
+}

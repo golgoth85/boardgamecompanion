@@ -131,18 +131,19 @@ def new_page(browser, *, mobile: bool = False):
     return context, context.new_page()
 
 
+def open_import_dialog(page) -> None:
+    settings_button = page.locator("#settingsButton")
+    if not settings_button.is_visible():
+        page.get_by_role("button", name="Apri navigazione").click()
+    settings_button.click()
+    expect(page.locator("#settingsDialog")).to_be_visible()
+    page.locator("#settingsDialog").get_by_role("button", name="Importa CSV BGG").click()
+    expect(page.locator("#importDialog")).to_be_visible()
+
+
 def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
     page.goto(base_url)
-    import_button = page.locator("#importSidebarButton")
-    in_viewport = import_button.evaluate(
-        """el => {
-            const r = el.getBoundingClientRect();
-            return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
-        }"""
-    )
-    if not in_viewport:
-        page.get_by_role("button", name="Apri navigazione").click()
-    import_button.click()
+    open_import_dialog(page)
     page.locator("#csvFile").set_input_files(str(path))
     page.get_by_role("button", name="Importa", exact=True).click()
     expect(page.locator("#importResult")).to_contain_text("Import completato.")
@@ -153,14 +154,7 @@ def import_csv(page, base_url: str, path: Path = SAMPLE) -> None:
 
 def open_barcode_scanner(page) -> None:
     scanner_button = page.locator("#scannerButton")
-    in_viewport = scanner_button.evaluate(
-        """el => {
-            const r = el.getBoundingClientRect();
-            return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
-        }"""
-    )
-    if not in_viewport:
-        page.get_by_role("button", name="Apri navigazione").click()
+    expect(scanner_button).to_be_visible()
     scanner_button.click()
 
 
@@ -218,7 +212,7 @@ def test_close_x_never_submits_and_dialog_resets(browser, live_server):
 
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         page.locator("#csvFile").set_input_files(str(SAMPLE))
         expect(page.locator("#fileName")).to_have_text(SAMPLE.name)
 
@@ -227,7 +221,7 @@ def test_close_x_never_submits_and_dialog_resets(browser, live_server):
         page.wait_for_timeout(250)
         assert import_requests == []
 
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         expect(page.locator("#fileName")).to_have_text("Nessun file selezionato")
         assert page.locator("#csvFile").input_value() == ""
 
@@ -271,7 +265,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
         expect(page.locator(".detail-main h1")).to_have_text("Synthetic Beta Expansion")
         expect(page.get_by_text("Espansione", exact=True)).to_be_visible()
 
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         page.locator("#csvFile").set_input_files(str(SAMPLE))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("0 nuovi")
@@ -487,7 +481,10 @@ def test_catalog_collapses_inferred_expansions_under_base_game(browser, live_ser
             "Root: The Riverfolk Expansion"
         )
 
-        page.locator("#collapseExpansions").uncheck()
+        page.locator("#settingsButton").click()
+        expect(page.locator("#settingsDialog")).to_be_visible()
+        page.locator("#settingsCollapseExpansions").uncheck()
+        page.locator("#closeSettings").click()
         expect(page.locator(".game-card")).to_have_count(2)
         assert any("limit=50" in url and "offset=0" in url for url in catalog_urls)
     finally:
@@ -498,7 +495,7 @@ def test_import_error_is_visible_and_recoverable(browser, live_server):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         page.locator("#csvFile").set_input_files(
             {
                 "name": "not-a-csv.txt",
@@ -512,7 +509,7 @@ def test_import_error_is_visible_and_recoverable(browser, live_server):
         page.get_by_role("button", name="Chiudi").click()
         expect(page.locator("#importDialog")).not_to_be_visible()
 
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         expect(page.locator("#importResult")).to_be_hidden()
         expect(page.locator("#fileName")).to_have_text("Nessun file selezionato")
     finally:
@@ -524,7 +521,7 @@ def test_pagination(browser, live_server, tmp_path: Path):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         page.locator("#csvFile").set_input_files(str(many))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("30 righe")
@@ -585,19 +582,20 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         sidebar = page.locator("#appSidebar")
         expect(sidebar).to_be_visible()
         expect(sidebar.get_by_text("Ludoteca", exact=True)).to_be_visible()
-        expect(sidebar.get_by_text("Strumenti", exact=True)).to_be_visible()
+        expect(sidebar.get_by_text("Strumenti", exact=True)).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
             "aria-current", "page"
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Sala dei trofei")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Giochi giocati")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Da giocare")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Novità")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Meccaniche")).to_have_count(0)
         expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
-        expect(sidebar.get_by_role("button", name="Scansiona barcode")).to_be_visible()
+        expect(sidebar.get_by_role("button", name="Scansiona barcode")).to_have_count(0)
+        expect(page.locator("#scannerButton")).to_be_visible()
         expect(sidebar.get_by_role("button", name="Impostazioni")).to_be_visible()
         expect(sidebar.get_by_text("Amministrazione", exact=True)).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Fonti da verificare")).to_have_count(0)
@@ -855,10 +853,10 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         import_csv(page, live_server)
 
         page.goto(f"{live_server}/games/900001")
-        completed_button = page.get_by_role("button", name="Segna completato")
+        completed_button = page.get_by_role("button", name="Segna come completato")
         expect(completed_button).to_be_visible()
         completed_button.click()
-        expect(page.get_by_role("button", name="♛ Completato")).to_be_visible()
+        expect(page.get_by_role("button", name="Rimuovi completamento")).to_be_visible()
 
         completion_date = page.locator("#completionDate")
         expect(completion_date).to_be_visible()
@@ -866,9 +864,9 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         page.get_by_role("button", name="Salva data").click()
         expect(page.locator("#completionDate")).to_have_value("2025-12-24")
 
-        page.get_by_role("link", name="Sala dei trofei").click()
+        page.get_by_role("link", name="Giochi giocati").click()
         expect(page).to_have_url(f"{live_server}/completed")
-        expect(page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
+        expect(page.get_by_role("heading", name="Giochi giocati")).to_be_visible()
         expect(page.locator(".trophy-card")).to_have_count(1)
         expect(page.locator(".trophy-achievement")).to_contain_text("Completato")
         expect(page.locator(".trophy-card")).to_contain_text("24 dic 2025")
@@ -884,7 +882,7 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
     mobile_context, mobile_page = new_page(browser, mobile=True)
     try:
         mobile_page.goto(f"{live_server}/completed")
-        expect(mobile_page.get_by_role("heading", name="Sala dei trofei")).to_be_visible()
+        expect(mobile_page.get_by_role("heading", name="Giochi giocati")).to_be_visible()
         expect(mobile_page.locator(".trophy-wall")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
@@ -1134,7 +1132,7 @@ def test_catalog_escapes_untrusted_titles(browser, live_server, tmp_path: Path):
     context, page = new_page(browser)
     try:
         page.goto(live_server)
-        page.get_by_role("button", name="Importa CSV BGG").click()
+        open_import_dialog(page)
         page.locator("#csvFile").set_input_files(str(malicious))
         page.get_by_role("button", name="Importa", exact=True).click()
         expect(page.locator("#importResult")).to_contain_text("Import completato.")
@@ -1360,8 +1358,10 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         assert description_box is not None and rules_box is not None
         assert description_box["y"] < rules_box["y"]
 
-        expect(page.get_by_role("button", name="+ Aggiungi copia").first).to_be_visible()
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="+ Aggiungi copia")).to_have_count(0)
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_have_count(0)
+        expect(page.locator(".cover-rating-overlay")).to_be_visible()
+        expect(page.locator(".game-title-block")).to_be_visible()
 
         expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
         expect(page.locator("#ragQuestion")).to_be_visible()
@@ -1376,41 +1376,23 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         context.close()
 
 
-def test_physical_copy_detail_and_edit_flow(browser, live_server):
+def test_physical_copy_data_remains_available_but_manual_ui_is_hidden(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_be_visible()
-        expect(page.locator(".physical-copy-card")).not_to_be_visible()
-        page.locator(".copy-details-disclosure summary").click()
-        expect(page.locator(".physical-copy-card")).to_have_count(1)
-        expect(page.locator(".physical-copy-card")).to_contain_text("1234567890123")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax A1")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Italian")
-
-        page.get_by_role("button", name="Modifica").click()
-        expect(page.locator("#copyDialog")).to_be_visible()
-        expect(page.locator("#copyBarcode")).to_have_value("1234567890123")
-        expect(page.locator("#copyLocation")).to_have_value("Kallax A1")
-
-        page.locator("#copyBarcode").fill("555-000-111")
-        page.locator("#copyLocation").fill("Kallax Z9")
-        page.locator("#copyNotes").fill("Copia aggiornata da UI")
-        page.get_by_role("button", name="Salva copia").click()
-
+        expect(page.get_by_text("1 copia registrata", exact=True)).to_have_count(0)
+        expect(page.locator(".physical-copy-card")).to_have_count(0)
+        expect(page.get_by_role("button", name="+ Aggiungi copia")).to_have_count(0)
         expect(page.locator("#copyDialog")).not_to_be_visible()
-        expect(page.locator(".physical-copy-card")).to_contain_text("555-000-111")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Kallax Z9")
-        expect(page.locator(".physical-copy-card")).to_contain_text("Copia aggiornata da UI")
 
         response = page.request.get(f"{live_server}/api/games/900001/copies")
         assert response.ok
         items = response.json()["items"]
         assert len(items) == 1
-        assert items[0]["barcode_normalized"] == "555000111"
-        assert items[0]["inventory_location"] == "Kallax Z9"
+        assert items[0]["barcode_normalized"] == "1234567890123"
+        assert items[0]["inventory_location"] == "Kallax A1"
     finally:
         context.close()
 
@@ -1471,10 +1453,9 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
         expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
-        expect(page.get_by_role("button", name="Scansiona barcode")).not_to_be_visible()
+        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
 
         page.get_by_role("button", name="Apri navigazione").click()
-        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
         page.wait_for_function(
             "document.querySelector('#appSidebar').getBoundingClientRect().x >= 0"
         )
@@ -1482,6 +1463,11 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         assert sidebar_box is not None
         assert sidebar_box["x"] >= 0
         assert sidebar_box["x"] + sidebar_box["width"] <= 390
+        expect(page.locator("#appSidebar").get_by_role("button", name="Scansiona barcode")).to_have_count(0)
+        backdrop = page.locator("#sidebarBackdrop")
+        backdrop_box = backdrop.bounding_box()
+        assert backdrop_box is not None
+        backdrop.click(position={"x": backdrop_box["width"] - 8, "y": 80})
 
         open_barcode_scanner(page)
         expect(page.locator("#scannerDialog")).to_be_visible()
@@ -3006,14 +2992,14 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         rating = page.get_by_role("button", name="Valuta 3,5 stelle")
         expect(rating).to_be_visible()
         rating.click()
-        expect(page.locator(".personal-rating-panel")).to_contain_text("3,5/5")
+        expect(page.locator(".cover-rating-overlay")).to_contain_text("3,5/5")
         expect(page.locator(".personal-star-control.is-half")).to_have_count(1)
 
         # The imported BGG fixture already reports numplays=3, so the game is
         # correctly considered played even without a local played_at marker.
-        expect(page.get_by_role("button", name="✓ Giocato")).to_be_visible()
+        expect(page.get_by_role("button", name="Rimuovi stato giocato")).to_be_visible()
 
-        page.get_by_role("link", name="Sala dei trofei").click()
+        page.get_by_role("link", name="Giochi giocati").click()
         expect(page).to_have_url(f"{live_server}/completed")
         expect(page.locator(".trophy-card")).to_have_count(1)
         expect(page.locator(".trophy-achievement")).to_contain_text("Giocato")
