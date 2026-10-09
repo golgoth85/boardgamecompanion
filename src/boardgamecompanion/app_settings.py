@@ -320,6 +320,9 @@ class ResolvedRagSettings:
     lmstudio_generation_max_tokens: int
     lmstudio_generation_disable_thinking: bool
     lmstudio_wol_enabled: bool
+    lmstudio_wol_mac: str | None
+    lmstudio_wol_broadcast: str
+    lmstudio_wol_port: int
     gemini_url: str
     gemini_api_key: str | None
     gemini_api_key_source: str | None
@@ -357,6 +360,9 @@ class ResolvedRagSettings:
                     "generation_max_tokens": self.lmstudio_generation_max_tokens,
                     "generation_disable_thinking": self.lmstudio_generation_disable_thinking,
                     "wol_enabled": self.lmstudio_wol_enabled,
+                    "wol_mac": self.lmstudio_wol_mac,
+                    "wol_broadcast": self.lmstudio_wol_broadcast,
+                    "wol_port": self.lmstudio_wol_port,
                 },
                 "gemini": {
                     "url": self.gemini_url,
@@ -385,6 +391,9 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
         "rag_lmstudio_generation_max_tokens",
         "rag_lmstudio_generation_disable_thinking",
         "rag_lmstudio_wol_enabled",
+        "rag_lmstudio_wol_mac",
+        "rag_lmstudio_wol_broadcast",
+        "rag_lmstudio_wol_port",
         "rag_gemini_url",
         "rag_gemini_api_key",
         "rag_gemini_embedding_model",
@@ -446,6 +455,15 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
             if values["rag_lmstudio_wol_enabled"] is not None
             else settings.lmstudio_wol_enabled
         ),
+        lmstudio_wol_mac=(
+            values["rag_lmstudio_wol_mac"] or settings.lmstudio_wol_mac
+        ),
+        lmstudio_wol_broadcast=(
+            values["rag_lmstudio_wol_broadcast"] or settings.lmstudio_wol_broadcast
+        ),
+        lmstudio_wol_port=int(
+            values["rag_lmstudio_wol_port"] or settings.lmstudio_wol_port
+        ),
         gemini_url=values["rag_gemini_url"] or settings.gemini_url,
         gemini_api_key=gemini_api_key,
         gemini_api_key_source=(
@@ -503,6 +521,9 @@ def save_rag_settings(
     lmstudio_generation_max_tokens: int,
     lmstudio_generation_disable_thinking: bool,
     lmstudio_wol_enabled: bool,
+    lmstudio_wol_mac: str | None,
+    lmstudio_wol_broadcast: str,
+    lmstudio_wol_port: int,
     gemini_url: str | None,
     gemini_api_key: str | None,
     clear_gemini_api_key: bool,
@@ -535,6 +556,9 @@ def save_rag_settings(
         "rag_lmstudio_wol_enabled": (
             "true" if lmstudio_wol_enabled else "false"
         ),
+        "rag_lmstudio_wol_mac": (lmstudio_wol_mac or "").strip() or None,
+        "rag_lmstudio_wol_broadcast": str(lmstudio_wol_broadcast or "").strip() or None,
+        "rag_lmstudio_wol_port": str(int(lmstudio_wol_port)),
         "rag_gemini_url": (gemini_url or "").strip() or None,
         "rag_gemini_embedding_model": (gemini_embedding_model or "").strip() or None,
         "rag_gemini_generation_model": (gemini_generation_model or "").strip() or None,
