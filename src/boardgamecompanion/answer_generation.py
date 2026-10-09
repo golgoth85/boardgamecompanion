@@ -41,6 +41,10 @@ class AnswerProtocolError(AnswerGenerationError):
     pass
 
 
+class AnswerSupportQuoteMismatch(AnswerProtocolError):
+    pass
+
+
 class AnswerSourceNotReady(AnswerGenerationError):
     pass
 
@@ -63,6 +67,7 @@ class GenerationProvider(Protocol):
         evidence: list[dict[str, Any]],
         descriptor: GenerationDescriptor,
         max_claims: int,
+        repair_instruction: str | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -131,6 +136,26 @@ Security and evidence rules:
   with an empty claims array.
 - Keep claims concise and directly responsive to the question.
 """
+
+
+SUPPORT_QUOTE_REPAIR_PROMPT = """The previous structured response contained at least one support.quote that
+was not a verbatim substring of the cited evidence. Regenerate the complete
+structured response once. For every support.quote, copy a short exact substring
+character-for-character from evidence[evidence_id].text. Do not normalize,
+correct, paraphrase, translate, re-punctuate, de-hyphenate, or otherwise alter
+the quoted source text. If you cannot copy an exact supporting substring, return
+status=not_found with an empty claims array.
+"""
+
+
+def _system_prompt(repair_instruction: str | None) -> str:
+    if not repair_instruction:
+        return SYSTEM_PROMPT
+    return (
+        SYSTEM_PROMPT
+        + "\nRetry correction (must be followed exactly):\n"
+        + repair_instruction.strip()
+    )
 
 
 class OllamaGenerationProvider:
@@ -222,6 +247,7 @@ class OllamaGenerationProvider:
         evidence: list[dict[str, Any]],
         descriptor: GenerationDescriptor,
         max_claims: int,
+        repair_instruction: str | None = None,
     ) -> dict[str, Any]:
         user_payload = {
             "question": query,
@@ -234,7 +260,10 @@ class OllamaGenerationProvider:
             json={
                 "model": descriptor.model,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "system",
+                        "content": _system_prompt(repair_instruction),
+                    },
                     {
                         "role": "user",
                         "content": json.dumps(
@@ -382,6 +411,7 @@ class LMStudioGenerationProvider:
         evidence: list[dict[str, Any]],
         descriptor: GenerationDescriptor,
         max_claims: int,
+        repair_instruction: str | None = None,
     ) -> dict[str, Any]:
         user_payload = {
             "question": query,
@@ -391,7 +421,10 @@ class LMStudioGenerationProvider:
         request_payload: dict[str, Any] = {
             "model": descriptor.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": _system_prompt(repair_instruction),
+                },
                 {
                     "role": "user",
                     "content": json.dumps(
@@ -616,6 +649,7 @@ class GeminiGenerationProvider:
         evidence: list[dict[str, Any]],
         descriptor: GenerationDescriptor,
         max_claims: int,
+        repair_instruction: str | None = None,
     ) -> dict[str, Any]:
         user_payload = {
             "question": query,
@@ -623,9 +657,10 @@ class GeminiGenerationProvider:
             "evidence": evidence,
         }
         endpoint = f"/v1beta/models/{descriptor.model}:generateContent"
+        system_prompt = _system_prompt(repair_instruction)
         request_body = {
             "systemInstruction": {
-                "parts": [{"text": SYSTEM_PROMPT}],
+                "parts": [{"text": system_prompt}],
             },
             "contents": [
                 {
@@ -678,7 +713,7 @@ class GeminiGenerationProvider:
             # Never accept unstructured prose: ask for exactly the same schema,
             # then let the caller validate every claim and verbatim citation.
             fallback_prompt = (
-                SYSTEM_PROMPT
+                system_prompt
                 + "\nReturn ONLY a single JSON object conforming exactly to "
                 + "the following schema, without markdown fences or prose: "
                 + json.dumps(ANSWER_SCHEMA, sort_keys=True, separators=(",", ":"))
@@ -835,7 +870,7 @@ def _canonical_source_quote(source_text: str, quote: str) -> str:
     normalized_source, mapping = _layout_normalize_with_mapping(source_text)
     normalized_quote = _layout_normalize(quote)
     if not normalized_quote:
-        raise AnswerProtocolError(
+        raise AnswerSupportQuoteMismatch(
             "Generated support quote is not present in cited evidence"
         )
 
@@ -849,14 +884,14 @@ def _canonical_source_quote(source_text: str, quote: str) -> str:
         offset = found + 1
 
     if len(positions) != 1:
-        raise AnswerProtocolError(
+        raise AnswerSupportQuoteMismatch(
             "Generated support quote is not present in cited evidence"
         )
 
     start = positions[0]
     finish = start + len(normalized_quote) - 1
     if start >= len(mapping) or finish >= len(mapping):
-        raise AnswerProtocolError(
+        raise AnswerSupportQuoteMismatch(
             "Generated support quote is not present in cited evidence"
         )
     source_start = mapping[start][0]
@@ -1130,15 +1165,39 @@ class AnswerGenerationService:
 
         self.retrieval.validate_retrieval_current(retrieval_payload)
 
-        status, claims = _validate_generation(
-            raw,
-            evidence_by_id=evidence_by_id,
-            max_claims=self.max_claims,
-        )
+        repair_attempted = False
+        try:
+            status, claims = _validate_generation(
+                raw,
+                evidence_by_id=evidence_by_id,
+                max_claims=self.max_claims,
+            )
+        except AnswerSupportQuoteMismatch:
+            repair_attempted = True
+            raw = self.provider.generate(
+                query=query,
+                evidence=evidence,
+                descriptor=descriptor,
+                max_claims=self.max_claims,
+                repair_instruction=SUPPORT_QUOTE_REPAIR_PROMPT,
+            )
+            descriptor_after_repair = self.provider.describe()
+            if descriptor_after_repair != descriptor:
+                raise AnswerProviderError(
+                    "Generation model changed while the answer was repaired"
+                )
+            self.retrieval.validate_retrieval_current(retrieval_payload)
+            status, claims = _validate_generation(
+                raw,
+                evidence_by_id=evidence_by_id,
+                max_claims=self.max_claims,
+            )
+
         generation = {
             "provider": descriptor.provider,
             "model": descriptor.model,
             "model_digest": descriptor.model_digest,
+            "repair_attempted": repair_attempted,
         }
         if status == "not_found":
             self.retrieval.validate_retrieval_current(retrieval_payload)

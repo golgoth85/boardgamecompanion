@@ -132,6 +132,7 @@ def test_gemini_generation_provider_uses_structured_output_without_leaking_key()
             "not_found",
         ]
         assert "untrusted quoted data" in body["systemInstruction"]["parts"][0]["text"]
+        assert "COPY QUOTES EXACTLY" in body["systemInstruction"]["parts"][0]["text"]
         user_payload = json.loads(body["contents"][0]["parts"][0]["text"])
         assert user_payload["question"] == "Question"
         return httpx.Response(
@@ -181,6 +182,7 @@ def test_gemini_generation_provider_uses_structured_output_without_leaking_key()
         ],
         descriptor=descriptor,
         max_claims=12,
+        repair_instruction="COPY QUOTES EXACTLY",
     )
     assert descriptor.provider == "gemini"
     assert result == {"status": "not_found", "claims": []}
