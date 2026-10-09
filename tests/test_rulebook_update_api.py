@@ -106,6 +106,118 @@ def update_service(database: Database, fetcher: ApiFetcher) -> RulebookUpdateSer
     )
 
 
+class FakeAcquireDiscovery:
+    def __init__(self, payload):
+        self.payload = payload
+        self.synchronized = 0
+        self.calls = []
+
+    def synchronize_catalog(self):
+        self.synchronized += 1
+
+    def run_game(self, bgg_id, *, force):
+        self.calls.append((bgg_id, force))
+        return self.payload
+
+
+class FakeAcquireUpdates:
+    def __init__(self):
+        self.runs = []
+
+    def synchronize_approved_targets(self):
+        return {"discovered": 2, "created": 2, "corrupt": 0}
+
+    def run_review_now(self, review_id):
+        self.runs.append(review_id)
+        return {
+            "review_item_id": review_id,
+            "outcome": "created",
+            "document": {"id": "doc-created"},
+        }
+
+
+def test_acquire_endpoint_prefers_exact_unattended_italian_candidate(
+    monkeypatch,
+) -> None:
+    discovery = FakeAcquireDiscovery(
+        {
+            "candidates_found": 3,
+            "provider_failures": 0,
+            "review_items": [
+                {
+                    "id": "review-en",
+                    "status": "approved",
+                    "policy_action": "unattended",
+                    "candidate": {"language": "en"},
+                },
+                {
+                    "id": "review-it",
+                    "status": "approved",
+                    "policy_action": "unattended",
+                    "candidate": {"language": "it"},
+                },
+                {
+                    "id": "review-pending",
+                    "status": "pending",
+                    "policy_action": "review",
+                    "candidate": {"language": "it"},
+                },
+            ],
+        }
+    )
+    updates = FakeAcquireUpdates()
+    monkeypatch.setattr(
+        main_module, "get_rulebook_discovery_service", lambda: discovery
+    )
+    monkeypatch.setattr(
+        main_module, "get_rulebook_update_service", lambda: updates
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/games/900001/rulebook-acquire/run")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert discovery.calls == [(900001, True)]
+    assert updates.runs == ["review-it"]
+    assert body["acquisition"]["selected_review_ids"] == ["review-it"]
+    assert body["acquisition"]["pending_review_ids"] == ["review-pending"]
+    assert body["acquisition"]["results"][0]["outcome"] == "created"
+
+
+def test_acquire_endpoint_never_downloads_review_gated_candidate(
+    monkeypatch,
+) -> None:
+    discovery = FakeAcquireDiscovery(
+        {
+            "candidates_found": 1,
+            "provider_failures": 0,
+            "review_items": [
+                {
+                    "id": "review-pending",
+                    "status": "pending",
+                    "policy_action": "review",
+                    "candidate": {"language": "it"},
+                }
+            ],
+        }
+    )
+    updates = FakeAcquireUpdates()
+    monkeypatch.setattr(
+        main_module, "get_rulebook_discovery_service", lambda: discovery
+    )
+    monkeypatch.setattr(
+        main_module, "get_rulebook_update_service", lambda: updates
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/games/900001/rulebook-acquire/run")
+
+    assert response.status_code == 200
+    assert updates.runs == []
+    assert response.json()["acquisition"]["selected_review_ids"] == []
+
+
 def test_manual_approval_creates_update_target(
     monkeypatch,
     tmp_path: Path,
