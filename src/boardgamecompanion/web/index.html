@@ -75,6 +75,11 @@
           <button class="sync-icon-button" id="catalogBggSync" type="button"
                   aria-label="Sincronizza ora con BoardGameGeek" title="Sincronizza ora">↻</button>
         </div>
+        <button class="sidebar-wol-control" id="lmstudioWakeButton" type="button"
+                aria-label="Accendi il PC di LM Studio" title="Wake-on-LAN: accendi il PC di LM Studio">
+          <span class="sidebar-wol-icon" aria-hidden="true">⏻</span>
+          <span>Accendi PC AI</span>
+        </button>
       </div>
     </aside>
 
@@ -332,6 +337,18 @@
                 <label class="settings-check copy-span-2">
                   <input id="lmstudioWolEnabled" type="checkbox">
                   <span>WoL automatico: riattiva il PC se LM Studio non è raggiungibile</span>
+                </label>
+                <label class="settings-field">
+                  <span>MAC PC (Wake-on-LAN)</span>
+                  <input id="lmstudioWolMac" type="text" autocomplete="off" placeholder="AA:BB:CC:DD:EE:FF">
+                </label>
+                <label class="settings-field">
+                  <span>Broadcast WoL</span>
+                  <input id="lmstudioWolBroadcast" type="text" autocomplete="off" placeholder="192.168.1.255">
+                </label>
+                <label class="settings-field">
+                  <span>Porta WoL</span>
+                  <input id="lmstudioWolPort" type="number" min="1" max="65535" step="1" placeholder="9">
                 </label>
               </div>
             </div>
