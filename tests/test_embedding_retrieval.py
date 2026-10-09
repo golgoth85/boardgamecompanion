@@ -670,6 +670,27 @@ def test_manual_lmstudio_wol_endpoint_uses_persisted_target(
     assert captured[-1]["wol_port"] == 9
 
 
+def test_manual_lmstudio_wake_always_sends_packet_when_endpoint_is_ready(
+    monkeypatch,
+) -> None:
+    provider = LMStudioEmbeddingProvider(
+        base_url="http://192.168.1.249:1234",
+        model="test-model",
+        requested_dimensions=None,
+        timeout_seconds=1.0,
+        verify_tls=False,
+        wol_mac="D8:5E:D3:5A:63:DA",
+    )
+    sent: list[bool] = []
+    monkeypatch.setattr(provider, "_tcp_ready", lambda: True)
+    monkeypatch.setattr(provider, "_send_magic_packet", lambda: sent.append(True))
+
+    result = provider.wake()
+
+    assert result == {"sent": True, "already_ready": True}
+    assert sent == [True]
+
+
 def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> None:
     requests: list[httpx.Request] = []
     sleeps: list[float] = []
