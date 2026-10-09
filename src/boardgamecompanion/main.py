@@ -1802,6 +1802,89 @@ def run_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/games/{bgg_id}/rulebook-acquire/run", tags=["rulebooks"])
+def run_game_rulebook_acquisition(bgg_id: int) -> dict[str, object]:
+    """Discover and immediately fetch the best unattended official rulebook.
+
+    Human-review candidates remain pending. When both Italian and English exact
+    official candidates are available, Italian wins and English remains an
+    approved update target for later fallback/refresh.
+    """
+    discovery_service = get_rulebook_discovery_service()
+    discovery_service.synchronize_catalog()
+    try:
+        discovery = discovery_service.run_game(bgg_id, force=True)
+    except RulebookDiscoveryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RulebookDiscoveryBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RulebookDiscoveryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    update_service = get_rulebook_update_service()
+    synchronized = update_service.synchronize_approved_targets()
+    reviews = discovery.get("review_items") or []
+    unattended = [
+        item for item in reviews
+        if isinstance(item, dict)
+        and item.get("status") == "approved"
+        and item.get("policy_action") == "unattended"
+        and isinstance(item.get("candidate"), dict)
+    ]
+    pending = [
+        item.get("id")
+        for item in reviews
+        if isinstance(item, dict) and item.get("status") == "pending"
+    ]
+
+    def language_rank(item: dict[str, object]) -> int:
+        candidate = item.get("candidate")
+        language = (
+            str(candidate.get("language") or "").split("-", 1)[0].lower()
+            if isinstance(candidate, dict)
+            else ""
+        )
+        return 0 if language == "it" else 1 if language == "en" else 2
+
+    selected: list[dict[str, object]] = []
+    if unattended:
+        ordered = sorted(unattended, key=language_rank)
+        best_language_rank = language_rank(ordered[0])
+        # One exact official manual is sufficient for the ordinary button flow.
+        # Keeping this bounded also avoids downloading duplicate provider hits.
+        selected = [
+            item for item in ordered
+            if language_rank(item) == best_language_rank
+        ][:1]
+
+    runs: list[dict[str, object]] = []
+    for item in selected:
+        review_id = str(item["id"])
+        try:
+            runs.append(update_service.run_review_now(review_id))
+        except RulebookUpdateError as exc:
+            runs.append(
+                {
+                    "review_item_id": review_id,
+                    "outcome": "failed",
+                    "failure_code": "acquisition",
+                    "failure_message": str(exc),
+                }
+            )
+
+    return {
+        "bgg_id": bgg_id,
+        "discovery": discovery,
+        "acquisition": {
+            "eligible_unattended": len(unattended),
+            "selected_review_ids": [str(item["id"]) for item in selected],
+            "pending_review_ids": [str(value) for value in pending if value],
+            "synchronized": synchronized,
+            "results": runs,
+        },
+    }
+
+
 @app.get("/api/games/{bgg_id}/rulebook-discovery", tags=["rulebooks"])
 def get_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
     result = get_rulebook_discovery_service().list_status(bgg_id=bgg_id, limit=1)

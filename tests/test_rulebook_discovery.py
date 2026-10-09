@@ -13,9 +13,11 @@ from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
     AwakenRealmsProvider,
     MsEdizioniProvider,
+    MonolithBatmanProvider,
     PendragonItaliaProvider,
     ProviderHttpClient,
     ReposProductionProvider,
+    SeriousPoulpProvider,
     production_rulebook_providers,
 )
 from boardgamecompanion.rulebook_review import RulebookReviewQueue
@@ -201,6 +203,95 @@ def test_repos_nested_expansion_preserves_manual_review_without_verified_bgg_ide
     )
 
 
+
+
+
+def test_monolith_batman_provider_reads_dflip_expansion_booklet() -> None:
+    html = b"""<html><script>
+    window.df_option_31424 = {"source":"https://monolithedition.com/wp-content/uploads/2025/02/BGCC_WayneManor_booklet_EN.pdf","slug":"bgcc-wayne-manor-booklet"};
+    window.df_option_31433 = {"source":"https://monolithedition.com/wp-content/uploads/2025/02/BGCC_Versus_Booklet_ENF.pdf","slug":"bgcc-versus-mode-booklet"};
+    window.df_option_31436 = {"source":"https://monolithedition.com/wp-content/uploads/2025/02/BGCC_ArkhamAsylum_booklet_ENF.pdf","slug":"bgcc-arkham-asylum-booklet"};
+    </script></html>"""
+    provider = MonolithBatmanProvider(
+        ProviderHttpClient(
+            client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=html, request=request)
+                )
+            ),
+            min_interval_seconds=0,
+        )
+    )
+    q = query(
+        bgg_id=248114,
+        title="Batman: Gotham City Chronicles – Wayne Manor Expansion",
+        item_type="boardgameexpansion",
+        publishers=("Monolith Board Games",),
+        verified_publishers=("Monolith Board Games",),
+        verified_titles=("Batman: Gotham City Chronicles – Wayne Manor Expansion",),
+    )
+    candidates = tuple(provider.discover(q))
+    assert len(candidates) == 1
+    assert candidates[0].bgg_id == 248114
+    assert candidates[0].language == "en"
+    assert candidates[0].confidence == 100
+    assert "WayneManor" in candidates[0].url
+
+
+def test_monolith_batman_provider_does_not_invent_unpublished_suicide_booklet() -> None:
+    html = b"""<script>
+    window.df_option_31436 = {"source":"https://monolithedition.com/wp-content/uploads/2025/02/BGCC_ArkhamAsylum_booklet_ENF.pdf","slug":"bgcc-arkham-asylum-booklet"};
+    </script>"""
+    provider = MonolithBatmanProvider(
+        ProviderHttpClient(
+            client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=html, request=request)
+                )
+            ),
+            min_interval_seconds=0,
+        )
+    )
+    q = query(
+        bgg_id=285922,
+        title="Batman: Gotham City Chronicles – Suicide Squad Expansion",
+        item_type="boardgameexpansion",
+        publishers=("Monolith Board Games",),
+        verified_publishers=("Monolith Board Games",),
+        verified_titles=("Batman: Gotham City Chronicles – Suicide Squad Expansion",),
+    )
+    assert tuple(provider.discover(q)) == ()
+
+
+def test_serious_poulp_provider_finds_exact_wgumcd_official_rulebook() -> None:
+    html = b"""<html><h1>Downloads</h1>
+    <a href="/documents/t7c/The7thContinent_rulebook.pdf">Rulebook - Collector Edition</a>
+    <a href="/documents/t7c/The7thContinent_WGUMCD_rulebook.pdf">Rulebook "WGUMCD" expansion box</a>
+    </html>"""
+    provider = SeriousPoulpProvider(
+        ProviderHttpClient(
+            client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, content=html, request=request)
+                )
+            ),
+            min_interval_seconds=0,
+        )
+    )
+    q = query(
+        bgg_id=236206,
+        title="The 7th Continent: What Goes Up, Must Come Down",
+        item_type="boardgameexpansion",
+        publishers=("Serious Poulp",),
+        verified_publishers=("Serious Poulp",),
+        verified_titles=("The 7th Continent: What Goes Up, Must Come Down",),
+    )
+    candidates = tuple(provider.discover(q))
+    assert len(candidates) == 1
+    assert candidates[0].bgg_id == 236206
+    assert candidates[0].confidence == 100
+    assert candidates[0].language == "en"
+    assert candidates[0].url.endswith("The7thContinent_WGUMCD_rulebook.pdf")
 
 
 def awaken_query(**overrides) -> RulebookQuery:
