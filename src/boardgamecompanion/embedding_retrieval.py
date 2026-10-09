@@ -400,14 +400,14 @@ class LMStudioEmbeddingProvider:
         return self._tcp_ready()
 
     def wake(self) -> dict[str, bool]:
+        """Manually send a WoL packet, matching Upscaler's explicit wake action."""
         if self.wol_mac is None:
             raise EmbeddingProviderError(
                 "LM Studio Wake-on-LAN MAC is not configured"
             )
-        if self._tcp_ready():
-            return {"sent": False, "already_ready": True}
+        already_ready = self._tcp_ready()
         self._send_magic_packet()
-        return {"sent": True, "already_ready": False}
+        return {"sent": True, "already_ready": already_ready}
 
     def _ensure_endpoint_ready(self) -> None:
         if self.wol_mac is None or self._tcp_ready():
