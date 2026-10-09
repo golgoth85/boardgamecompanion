@@ -1059,6 +1059,277 @@ class MsEdizioniProvider:
         return ()
 
 
+
+class AwakenRealmsProvider:
+    """Official Awaken Realms rulebook discovery via the publisher JSON catalog."""
+
+    name = "awaken_realms"
+    _INDEX = "https://awakenrealms.com/data/files.json"
+    _HOSTS = frozenset({"awakenrealms.com", "www.awakenrealms.com"})
+    _PUBLISHERS = ("Awaken Realms",)
+    _MAX_CATALOG_ITEMS = 3000
+    _GENERIC_EXPANSION_WORDS = frozenset(
+        {
+            "expansion",
+            "expansions",
+            "edition",
+            "pack",
+            "promo",
+            "box",
+            "campaign",
+        }
+    )
+    _LANGUAGE_CODES = {
+        "it": "it",
+        "ita": "it",
+        "en": "en",
+        "eng": "en",
+        "uk": "en",
+        "gb": "en",
+        "us": "en",
+    }
+
+    def __init__(self, http: ProviderHttpClient | None = None):
+        self.http = http or ProviderHttpClient()
+
+    @classmethod
+    def _language(cls, *, download_url: str, flag_url: object) -> str:
+        values: list[str] = []
+        if isinstance(flag_url, str):
+            values.extend(urlsplit(flag_url).path.split("/"))
+        values.extend(urlsplit(download_url).path.split("/"))
+        for value in reversed(values):
+            token = value.rsplit(".", 1)[0].strip().casefold()
+            language = cls._LANGUAGE_CODES.get(token)
+            if language:
+                return language
+        return "und"
+
+    @classmethod
+    def _query_match(
+        cls,
+        query: RulebookQuery,
+        catalog_game: str,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        game = _match_text(catalog_game)
+        if not game:
+            return None
+        titles = tuple(
+            dict.fromkeys(
+                value
+                for raw in (
+                    *query.verified_titles,
+                    query.title,
+                    query.original_title,
+                )
+                if raw and (value := _match_text(raw))
+            )
+        )
+        for title in titles:
+            if title == game:
+                return ("base", ())
+        if "expansion" not in _match_text(query.item_type):
+            return None
+        for title in titles:
+            prefix = f"{game} "
+            if not title.startswith(prefix):
+                continue
+            suffix = title[len(prefix):].strip()
+            tokens = tuple(
+                token
+                for token in suffix.split()
+                if token not in cls._GENERIC_EXPANSION_WORDS
+            )
+            if tokens:
+                return ("expansion", tokens)
+        return None
+
+    @classmethod
+    def _expansion_match_strength(
+        cls,
+        suffix_tokens: tuple[str, ...],
+        candidate_title: str,
+    ) -> str | None:
+        observed = tuple(_match_text(candidate_title).split())
+        if not observed:
+            return None
+
+        def variants(token: str) -> set[str]:
+            values = {token}
+            if len(token) > 4 and token.endswith("s"):
+                values.add(token[:-1])
+            return values
+
+        if all(any(value in observed for value in variants(token)) for token in suffix_tokens):
+            return "exact_suffix"
+
+        if len(suffix_tokens) >= 2:
+            initialism = "".join(token[0] for token in suffix_tokens if token)
+            if len(initialism) >= 2 and initialism in observed:
+                return "initialism"
+        return None
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if not _verified_publisher_matches(query, self._PUBLISHERS):
+            return ()
+
+        response = self.http.get(
+            self._INDEX,
+            allowed_hosts=self._HOSTS,
+            accepted_statuses=frozenset({200}),
+        )
+        try:
+            payload = json.loads(response.content.decode("utf-8", "strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+            raise RulebookProviderError(
+                "Awaken Realms catalog returned invalid JSON"
+            ) from exc
+        if not isinstance(payload, list):
+            raise RulebookProviderError("Awaken Realms catalog must be a list")
+        if len(payload) > self._MAX_CATALOG_ITEMS:
+            raise RulebookProviderError("Awaken Realms catalog is unexpectedly large")
+
+        matched: list[
+            tuple[
+                Mapping[str, Any],
+                str,
+                str,
+                tuple[str, ...],
+            ]
+        ] = []
+        for item in payload:
+            if not isinstance(item, Mapping):
+                continue
+            catalog_game = item.get("game")
+            category = item.get("category")
+            title = item.get("title")
+            raw_url = item.get("downloadUrl")
+            if not all(isinstance(value, str) for value in (catalog_game, category, title, raw_url)):
+                continue
+            if _match_text(category) not in {"rulebook", "rulebooks"}:
+                continue
+            query_match = self._query_match(query, catalog_game)
+            if query_match is None:
+                continue
+            mode, suffix_tokens = query_match
+            try:
+                download_url = canonical_http_url(urljoin(response.url, raw_url))
+            except ValueError:
+                continue
+            parts = urlsplit(download_url)
+            if (
+                parts.scheme != "https"
+                or (parts.hostname or "").lower() not in self._HOSTS
+                or not parts.path.casefold().endswith(".pdf")
+            ):
+                continue
+            language = self._language(
+                download_url=download_url,
+                flag_url=item.get("flagUrl"),
+            )
+            if language not in {"it", "en"}:
+                continue
+            matched.append((item, download_url, mode, suffix_tokens))
+
+        if not matched:
+            return ()
+
+        base_title: str | None = None
+        if any(mode == "base" for _, _, mode, _ in matched):
+            title_keys = {
+                _match_text(str(item["title"]))
+                for item, _, mode, _ in matched
+                if mode == "base"
+            }
+            if title_keys:
+                by_size = sorted(
+                    title_keys,
+                    key=lambda value: (len(value.split()), len(value), value),
+                )
+                minimum_size = len(by_size[0].split())
+                minimum = [
+                    value for value in by_size
+                    if len(value.split()) == minimum_size
+                ]
+                if len(minimum) == 1:
+                    base_title = minimum[0]
+
+        candidates: list[RulebookCandidate] = []
+        seen: set[tuple[str, str]] = set()
+        for item, download_url, mode, suffix_tokens in matched:
+            title = str(item["title"])
+            identity_evidence = [
+                "curated_official_publisher_catalog",
+                "bgg_verified_publisher",
+            ]
+            confidence = 90
+            bgg_id: int | None = None
+
+            if mode == "base":
+                if base_title is None or _match_text(title) != base_title:
+                    continue
+                confidence = 100
+                bgg_id = query.bgg_id
+                identity_evidence.extend(
+                    (
+                        "official_catalog_game_title_exact",
+                        "official_catalog_unique_base_rulebook",
+                    )
+                )
+            else:
+                strength = self._expansion_match_strength(suffix_tokens, title)
+                if strength is None:
+                    continue
+                identity_evidence.append(f"official_catalog_{strength}")
+                if strength == "exact_suffix":
+                    confidence = 100
+                    bgg_id = query.bgg_id
+                else:
+                    identity_evidence.append("abbreviation_requires_review")
+
+            language = self._language(
+                download_url=download_url,
+                flag_url=item.get("flagUrl"),
+            )
+            key = (download_url, language)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                RulebookCandidate(
+                    provider=self.name,
+                    source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                    url=download_url,
+                    language=language,
+                    document_type="rulebook",
+                    official=True,
+                    confidence=confidence,
+                    title=title,
+                    bgg_id=bgg_id,
+                    game_title=query.title,
+                    year=query.year,
+                    publisher="Awaken Realms",
+                    metadata={
+                        "official_catalog": response.url,
+                        "catalog_game": str(item["game"]),
+                        "identity_evidence": identity_evidence,
+                        "catalog_item_type": query.item_type,
+                    },
+                )
+            )
+
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda candidate: (
+                    0 if candidate.language == "it" else 1,
+                    candidate.title or "",
+                    candidate.url,
+                ),
+            )
+        )
+
+
 class RuleBookOrgProvider:
     name = "rulebook_org"
     _ENDPOINT = "https://api.rule-book.org/games"
@@ -1188,6 +1459,7 @@ def production_official_rulebook_providers(
 
     return (
         *generic_providers,
+        AwakenRealmsProvider(client()),
         ReposProductionProvider(
             client(browser_fallback_hosts=ReposProductionProvider._HOSTS)
         ),
