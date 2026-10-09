@@ -134,6 +134,7 @@ from boardgamecompanion.service_factories import (
     get_crowdfunding_service,
     get_expansion_service,
 )
+from boardgamecompanion.rulebook_availability import get_rulebook_availability
 from boardgamecompanion.rulebook_review import (
     RulebookReviewConflict,
     RulebookReviewCorruptRecord,
@@ -1769,6 +1770,9 @@ def list_rulebook_discovery(
     limit: int = Query(default=250, ge=1, le=500),
 ) -> dict[str, object]:
     payload = get_rulebook_discovery_service().list_status(bgg_id=bgg_id, limit=limit)
+    for item in payload.get("items", []):
+        if isinstance(item, dict) and item.get("bgg_id"):
+            item["availability"] = get_rulebook_availability(int(item["bgg_id"]))
     payload["worker"] = {
         "enabled": settings.rulebook_discovery_worker_enabled,
         "poll_seconds": settings.rulebook_discovery_poll_seconds,
@@ -1792,6 +1796,7 @@ def run_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
     service.synchronize_catalog()
     try:
         result = service.run_game(bgg_id, force=True)
+        result["availability"] = get_rulebook_availability(bgg_id)
         get_rulebook_update_service().synchronize_approved_targets()
         return result
     except RulebookDiscoveryNotFound as exc:
@@ -1872,8 +1877,10 @@ def run_game_rulebook_acquisition(bgg_id: int) -> dict[str, object]:
                 }
             )
 
+    discovery["availability"] = get_rulebook_availability(bgg_id)
     return {
         "bgg_id": bgg_id,
+        "availability": discovery["availability"],
         "discovery": discovery,
         "acquisition": {
             "eligible_unattended": len(unattended),
@@ -1890,7 +1897,9 @@ def get_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
     result = get_rulebook_discovery_service().list_status(bgg_id=bgg_id, limit=1)
     if not result["items"]:
         raise HTTPException(status_code=404, detail="Board game discovery state not found")
-    return result["items"][0]
+    item = result["items"][0]
+    item["availability"] = get_rulebook_availability(bgg_id)
+    return item
 
 
 @app.get("/api/games/{bgg_id}/bgg-metadata", tags=["catalog"])
