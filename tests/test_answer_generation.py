@@ -11,6 +11,7 @@ from boardgamecompanion.answer_generation import (
     AnswerGenerationService,
     AnswerProtocolError,
     AnswerProviderError,
+    AnswerSupportQuoteMismatch,
     GenerationDescriptor,
     LMStudioGenerationProvider,
     OllamaGenerationProvider,
@@ -53,6 +54,7 @@ class FakeProvider:
         self.describe_calls = 0
         self.generate_calls = 0
         self.last_evidence: list[dict] | None = None
+        self.repair_instructions: list[str | None] = []
 
     def describe(self) -> GenerationDescriptor:
         self.describe_calls += 1
@@ -63,10 +65,19 @@ class FakeProvider:
             endpoint="in-process",
         )
 
-    def generate(self, *, query, evidence, descriptor, max_claims):
+    def generate(
+        self,
+        *,
+        query,
+        evidence,
+        descriptor,
+        max_claims,
+        repair_instruction=None,
+    ):
         assert descriptor == self.describe_value()
         self.generate_calls += 1
         self.last_evidence = copy.deepcopy(evidence)
+        self.repair_instructions.append(repair_instruction)
         return copy.deepcopy(self.output)
 
     @staticmethod
@@ -77,6 +88,28 @@ class FakeProvider:
             model_digest="a" * 64,
             endpoint="in-process",
         )
+
+
+class SequentialProvider(FakeProvider):
+    def __init__(self, outputs: list[dict]) -> None:
+        super().__init__(outputs[0])
+        self.outputs = [copy.deepcopy(item) for item in outputs]
+
+    def generate(
+        self,
+        *,
+        query,
+        evidence,
+        descriptor,
+        max_claims,
+        repair_instruction=None,
+    ):
+        assert descriptor == self.describe_value()
+        self.generate_calls += 1
+        self.last_evidence = copy.deepcopy(evidence)
+        self.repair_instructions.append(repair_instruction)
+        index = min(self.generate_calls - 1, len(self.outputs) - 1)
+        return copy.deepcopy(self.outputs[index])
 
 
 class ChangingProvider(FakeProvider):
@@ -700,6 +733,137 @@ def test_generation_exact_quote_still_wins_before_ambiguity_scan() -> None:
     assert result["claims"][0]["supports"][0]["quote"] == "foo foo"
 
 
+def test_quote_mismatch_gets_one_strict_repair_attempt() -> None:
+    source_text = "Mescolate le tessere Stanza e piazzatele coperte."
+    provider = SequentialProvider(
+        [
+            {
+                "status": "answer",
+                "claims": [
+                    {
+                        "text": "Le tessere Stanza vanno mescolate.",
+                        "supports": [
+                            {
+                                "evidence_id": "E1",
+                                "quote": "Mescola le tessere Stanza.",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "status": "answer",
+                "claims": [
+                    {
+                        "text": "Le tessere Stanza vanno mescolate.",
+                        "supports": [
+                            {
+                                "evidence_id": "E1",
+                                "quote": "Mescolate le tessere Stanza",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+    result = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text=source_text)]),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Come preparo le tessere Stanza?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert provider.generate_calls == 2
+    assert provider.repair_instructions[0] is None
+    assert "verbatim substring" in provider.repair_instructions[1]
+    assert result["generation"]["repair_attempted"] is True
+    assert result["claims"][0]["supports"][0]["quote"] == (
+        "Mescolate le tessere Stanza"
+    )
+
+
+def test_quote_repair_still_fails_closed_after_one_retry() -> None:
+    provider = SequentialProvider(
+        [
+            {
+                "status": "answer",
+                "claims": [
+                    {
+                        "text": "Claim",
+                        "supports": [
+                            {"evidence_id": "E1", "quote": "Parafrasi uno."}
+                        ],
+                    }
+                ],
+            },
+            {
+                "status": "answer",
+                "claims": [
+                    {
+                        "text": "Claim",
+                        "supports": [
+                            {"evidence_id": "E1", "quote": "Parafrasi due."}
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+    service = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="Testo fonte esatto.")]
+        ),
+        provider,
+    )
+    with pytest.raises(AnswerSupportQuoteMismatch):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+    assert provider.generate_calls == 2
+
+
+def test_non_quote_protocol_error_does_not_retry_generation() -> None:
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [{"text": "Claim", "supports": []}],
+        }
+    )
+    service = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text="Testo fonte esatto.")]
+        ),
+        provider,
+    )
+    with pytest.raises(AnswerProtocolError, match="must cite evidence"):
+        service.answer(
+            bgg_id=900001,
+            query="Question",
+            requested_language="it",
+            document_type="rulebook",
+            version_label=None,
+            edition=None,
+            top_k=8,
+            min_score=0.0,
+        )
+    assert provider.generate_calls == 1
+    assert provider.repair_instructions == [None]
+
+
 def test_generation_model_digest_change_aborts_answer() -> None:
     provider = ChangingProvider(
         {
@@ -980,6 +1144,7 @@ def test_lmstudio_qwen3_generation_is_bounded_and_disables_thinking() -> None:
             assert payload["stream"] is False
             assert payload["response_format"]["type"] == "json_schema"
             assert payload["reasoning_effort"] == "none"
+            assert "COPY QUOTES EXACTLY" in payload["messages"][0]["content"]
             user_content = payload["messages"][1]["content"]
             decoded = json.loads(user_content)
             assert decoded["question"] == "Question"
@@ -1019,6 +1184,7 @@ def test_lmstudio_qwen3_generation_is_bounded_and_disables_thinking() -> None:
         evidence=[{"evidence_id": "E1", "text": "Evidence"}],
         descriptor=descriptor,
         max_claims=12,
+        repair_instruction="COPY QUOTES EXACTLY",
     )
 
     assert result == {"status": "not_found", "claims": []}
