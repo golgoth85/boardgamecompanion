@@ -1409,6 +1409,62 @@ class FantasyFlightAgotExpansionRulesProvider:
 
 
 
+class DragoriTanaresProvider:
+    """Exact official Tanares Adventures rulebook hosted by Dragori Games."""
+
+    name = "dragori_tanares"
+    _PUBLISHERS = ("Dragori Games",)
+    _BGG_ID = 298627
+    _RULEBOOK_URL = "https://www.dragorigames.com/tanares/rulebook.pdf"
+    _EVIDENCE_URL = "https://dragorigames.com/tanares/enhancements_v2.7.pdf"
+
+    @classmethod
+    def _identity_matches(cls, query: RulebookQuery) -> bool:
+        if query.bgg_id != cls._BGG_ID:
+            return False
+        if "expansion" not in _match_text(query.item_type):
+            return False
+        titles = (*query.verified_titles, query.title, query.original_title)
+        return any(
+            {"tanares", "adventures"}.issubset(set(_match_text(value).split()))
+            for value in titles
+            if value
+        )
+
+    def discover(self, query: RulebookQuery) -> Iterable[RulebookCandidate]:
+        if (
+            not _verified_publisher_matches(query, self._PUBLISHERS)
+            or not self._identity_matches(query)
+        ):
+            return ()
+
+        return (
+            RulebookCandidate(
+                provider=self.name,
+                source_kind=RulebookSource.OFFICIAL_PUBLISHER,
+                url=self._RULEBOOK_URL,
+                language="en",
+                document_type="rulebook",
+                official=True,
+                confidence=100,
+                title=f"{query.title} — Official rulebook",
+                bgg_id=query.bgg_id,
+                game_title=query.title,
+                year=query.year,
+                publisher="Dragori Games",
+                metadata={
+                    "official_evidence": self._EVIDENCE_URL,
+                    "identity_evidence": (
+                        "curated_official_rulebook_link",
+                        "bgg_verified_publisher",
+                        "exact_supported_bgg_id",
+                    ),
+                    "catalog_item_type": query.item_type,
+                },
+            ),
+        )
+
+
 class MonolithBatmanProvider:
     """Official Batman GCC booklets embedded in Monolith's DFlip catalogue."""
 
@@ -1750,6 +1806,7 @@ def production_official_rulebook_providers(
     return (
         *generic_providers,
         FantasyFlightAgotExpansionRulesProvider(),
+        DragoriTanaresProvider(),
         MonolithBatmanProvider(
             client(browser_fallback_hosts=MonolithBatmanProvider._HOSTS)
         ),

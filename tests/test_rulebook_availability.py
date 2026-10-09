@@ -33,5 +33,29 @@ def test_external_exact_manual_is_never_unattended() -> None:
     assert str(item["external_url"]).startswith("https://")
 
 
-def test_unresearched_game_has_no_curated_classification() -> None:
-    assert get_rulebook_availability(350624) is None
+def test_arena_boxes_are_classified_without_inventing_rulebooks() -> None:
+    for bgg_id in (312509, 309701, 303730):
+        item = get_rulebook_availability(bgg_id)
+        assert item is not None
+        assert item["status"] == "official_page_no_dedicated_pdf"
+        assert item["confidence"] == "high"
+
+
+def test_middara_bounties_are_physical_bounty_book_cases() -> None:
+    for bgg_id in (284955, 284716):
+        item = get_rulebook_availability(bgg_id)
+        assert item is not None
+        assert item["status"] == "physical_bounty_book"
+        assert item["action"] == "retry_official"
+
+
+def test_skyrim_expansions_use_cards_and_reference_material() -> None:
+    for bgg_id in (350624, 350623):
+        item = get_rulebook_availability(bgg_id)
+        assert item is not None
+        assert item["status"] == "rules_in_cards_reference"
+        assert item["confidence"] == "high"
+
+
+def test_unknown_game_has_no_curated_classification() -> None:
+    assert get_rulebook_availability(999999999) is None
