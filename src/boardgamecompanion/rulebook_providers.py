@@ -1347,10 +1347,6 @@ class FantasyFlightAgotExpansionRulesProvider:
         217960,  # Watchers on the Wall
         189169,  # Wolves of the North
     })
-    _FAMILY_TOKENS = frozenset({
-        "a", "game", "of", "thrones", "the", "card", "second", "edition"
-    })
-
     @classmethod
     def _identity_matches(cls, query: RulebookQuery) -> bool:
         if query.bgg_id not in cls._SUPPORTED_BGG_IDS:
