@@ -960,6 +960,45 @@ class ChunkIndexService:
             "latest_run": _row_to_run(latest),
         }
 
+    def snapshot_current(self, document_id: str) -> dict[str, Any]:
+        """Return the current validated chunk set with one archive verification."""
+        source = self._load_source(document_id)
+        document = source["document"]
+        parse_run = source["parse_run"]
+        with self.database.connect() as connection:
+            current = self._current_run_in_connection(
+                connection,
+                document_id=document_id,
+                parse_run_id=parse_run["id"],
+                document_sha256=document["sha256"],
+                metadata_sha256=source["metadata_sha256"],
+                source_pages_sha256=source["source_pages_sha256"],
+            )
+            if current is None:
+                raise ChunkIndexSourceNotReady(
+                    "Document has no current P7B chunk index"
+                )
+            rows = connection.execute(
+                self._chunk_select(
+                    "c.document_id = ? AND c.chunk_run_id = ?"
+                )
+                + """
+                ORDER BY c.page_number, c.chunk_index, c.id
+                """,
+                (document_id, current["id"]),
+            ).fetchall()
+
+        chunks = [_row_to_chunk(row, include_text=True) for row in rows]
+        if len(chunks) != int(current["chunk_count"]):
+            raise ChunkIndexCorruptSource(
+                "Current chunk run count does not match persisted chunks"
+            )
+        return {
+            "document": document,
+            "current": current,
+            "chunks": chunks,
+        }
+
     def list_chunks(
         self,
         document_id: str,
