@@ -11,6 +11,7 @@ from boardgamecompanion.database import Database
 from boardgamecompanion.rulebook_discovery import RulebookDiscoveryService
 from boardgamecompanion.rulebook_providers import (
     AsmodeeItaliaProvider,
+    AwakenRealmsProvider,
     MsEdizioniProvider,
     PendragonItaliaProvider,
     ProviderHttpClient,
@@ -198,6 +199,179 @@ def test_repos_nested_expansion_preserves_manual_review_without_verified_bgg_ide
         "official_nested_expansion_path_and_heading",
         "catalog_publisher_compatible",
     )
+
+
+
+
+def awaken_query(**overrides) -> RulebookQuery:
+    values = {
+        "bgg_id": 381248,
+        "title": "Nemesis: Retaliation",
+        "original_title": "Nemesis: Odplata",
+        "year": 2025,
+        "item_type": "boardgame",
+        "publishers": ("Awaken Realms",),
+        "verified_publishers": ("Awaken Realms",),
+        "verified_titles": ("Nemesis: Retaliation", "Nemesis: Odplata"),
+        "bgg_identity_verified": True,
+    }
+    values.update(overrides)
+    return RulebookQuery(**values)
+
+
+def awaken_catalog_provider(catalog, calls: list[str] | None = None) -> AwakenRealmsProvider:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if calls is not None:
+            calls.append(str(request.url))
+        return httpx.Response(
+            200,
+            json=catalog,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    return AwakenRealmsProvider(
+        ProviderHttpClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            min_interval_seconds=0,
+            max_attempts=1,
+        )
+    )
+
+
+def test_awaken_realms_catalog_finds_base_it_and_en_without_expansion_leakage() -> None:
+    catalog = [
+        {
+            "game": "Nemesis Retaliation",
+            "category": "FAQ & Errata",
+            "title": "FAQ v1.2",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/ENG/FAQ.pdf",
+            "flagUrl": "/images/icons/UK.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/ENG/Nemesis_RT_Rulebook.pdf",
+            "flagUrl": "/images/icons/UK.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Xyrians Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_Xyrians_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+    ]
+    candidates = tuple(awaken_catalog_provider(catalog).discover(awaken_query()))
+
+    assert [candidate.language for candidate in candidates] == ["it", "en"]
+    assert all(candidate.bgg_id == 381248 for candidate in candidates)
+    assert all(candidate.confidence == 100 for candidate in candidates)
+    assert all(candidate.source_kind.value == "official_publisher" for candidate in candidates)
+    assert all(candidate.official for candidate in candidates)
+    assert all("Xyrians" not in (candidate.title or "") for candidate in candidates)
+
+
+def test_awaken_realms_catalog_matches_expansion_suffix_with_exact_bgg_identity() -> None:
+    catalog = [
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Sangrevore Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_Sangrevore_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Sangrevore Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/ENG/Nemesis_RT_Sangrevore_Rulebook.pdf",
+            "flagUrl": "/images/icons/UK.png",
+        },
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT Xyrians Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_Xyrians_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+    ]
+    q = awaken_query(
+        bgg_id=408420,
+        title="Nemesis: Retaliation – Sangrevores Expansion",
+        original_title="Nemesis: Odwet – Krwiopijcy",
+        item_type="boardgameexpansion",
+        verified_titles=(
+            "Nemesis: Retaliation – Sangrevores Expansion",
+            "Nemesis: Odwet – Krwiopijcy",
+        ),
+    )
+
+    candidates = tuple(awaken_catalog_provider(catalog).discover(q))
+
+    assert [candidate.language for candidate in candidates] == ["it", "en"]
+    assert all(candidate.bgg_id == 408420 for candidate in candidates)
+    assert all(candidate.confidence == 100 for candidate in candidates)
+    assert all("Sangrevore" in (candidate.title or "") for candidate in candidates)
+
+
+def test_awaken_realms_abbreviation_match_is_official_but_review_gated() -> None:
+    catalog = [
+        {
+            "game": "Nemesis Retaliation",
+            "category": "Rulebooks",
+            "title": "Nemesis RT SS Rulebook",
+            "downloadUrl": "/images/download/Nemesis_Retaliation/IT/IT_Nemesis_RT_SS_Rulebook.pdf",
+            "flagUrl": "/images/icons/IT.png",
+        },
+    ]
+    q = awaken_query(
+        bgg_id=408263,
+        title="Nemesis: Retaliation – Support Squad Expansion",
+        original_title="Nemesis: Odplata – Podpůrná jednotka",
+        item_type="boardgameexpansion",
+        verified_titles=(
+            "Nemesis: Retaliation – Support Squad Expansion",
+            "Nemesis: Odplata – Podpůrná jednotka",
+        ),
+    )
+
+    candidates = tuple(awaken_catalog_provider(catalog).discover(q))
+
+    assert len(candidates) == 1
+    assert candidates[0].language == "it"
+    assert candidates[0].official is True
+    assert candidates[0].confidence == 90
+    assert candidates[0].bgg_id is None
+    assert "abbreviation_requires_review" in candidates[0].metadata["identity_evidence"]
+
+
+def test_awaken_realms_requires_bgg_verified_publisher_before_network_access() -> None:
+    calls: list[str] = []
+    provider = awaken_catalog_provider([], calls)
+    q = awaken_query(
+        verified_publishers=(),
+        bgg_identity_verified=False,
+    )
+
+    assert tuple(provider.discover(q)) == ()
+    assert calls == []
+
 
 
 def test_official_adapter_does_not_self_attest_bgg_identity_without_api_crosscheck() -> None:
