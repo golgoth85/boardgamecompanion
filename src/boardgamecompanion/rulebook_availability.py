@@ -10,6 +10,9 @@ AvailabilityStatus = Literal[
     "physical_rule_sheet",
     "physical_rules_insert",
     "external_exact_manual",
+    "official_page_no_dedicated_pdf",
+    "physical_bounty_book",
+    "rules_in_cards_reference",
 ]
 
 
@@ -159,6 +162,109 @@ _AVAILABILITY: dict[int, RulebookAvailability] = {
         evidence_url=(
             "https://www.fantasyflightgames.com/en/more/"
             "warhammer-40k-conquest-organized-play/"
+        ),
+    ),
+
+    # Dragori lists these Arena boxes as add-ons/components on the official
+    # extras page, without a dedicated downloadable rulebook.
+    312509: RulebookAvailability(
+        status="official_page_no_dedicated_pdf",
+        label="Add-on ufficiale senza rulebook pubblico dedicato",
+        detail=(
+            "Dragon Collection è presentata da Dragori come contenuto/add-on di Arena "
+            "con miniature e modalità aggiuntive. La pagina ufficiale verificata non "
+            "pubblica un PDF-rulebook dedicato."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url="https://dragorigames.com/arena-the-contest-extras/",
+    ),
+    309701: RulebookAvailability(
+        status="official_page_no_dedicated_pdf",
+        label="Add-on ufficiale senza rulebook pubblico dedicato",
+        detail=(
+            "Legendary Box è presentata da Dragori come box di eroi, villain, boss e "
+            "miniature aggiuntive. La pagina ufficiale verificata non pubblica un "
+            "PDF-rulebook dedicato."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url="https://dragorigames.com/arena-the-contest-extras/",
+    ),
+    303730: RulebookAvailability(
+        status="official_page_no_dedicated_pdf",
+        label="Add-on ufficiale senza rulebook pubblico dedicato",
+        detail=(
+            "Madness Box è presentata da Dragori come contenuto aggiuntivo per Arena/"
+            "Tanares. La pagina ufficiale verificata non pubblica un PDF-rulebook "
+            "dedicato."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url="https://dragorigames.com/arena-the-contest-extras/",
+    ),
+
+    # Middara bounty packs carry their scenario/build rules in the physical
+    # Bounty Book. Old public Dropbox material is beta/playtest-era and must not
+    # be promoted as the current retail rulebook.
+    284955: RulebookAvailability(
+        status="physical_bounty_book",
+        label="Regole nel Bounty Book fisico",
+        detail=(
+            "The Cave Sickle Queen include il Bounty Book con build guide e regole "
+            "per l'uso standalone. Non è stato verificato un PDF retail corrente "
+            "publisher-hosted; i vecchi file pubblici erano materiale beta/playtest."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url=(
+            "https://middara.com/products/"
+            "the-cave-sickle-queen-bounty-pack"
+        ),
+    ),
+    284716: RulebookAvailability(
+        status="physical_bounty_book",
+        label="Regole nel Bounty Book fisico",
+        detail=(
+            "The Pit Boss include le regole/build guide nel Bounty Book. Non è stato "
+            "verificato un PDF retail corrente publisher-hosted."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url="https://middara.com/products/the-pit-boss-bounty-pack",
+    ),
+
+    # Modiphius lists no standalone rulebook for these Skyrim Adventure Game
+    # expansions. Their product contents are cards, encounters, campaign material
+    # and reference cards, while the base game explicitly includes the rulebook.
+    350624: RulebookAvailability(
+        status="rules_in_cards_reference",
+        label="Regole in carte/materiali e reference card",
+        detail=(
+            "Dawnguard aggiunge fazioni, luoghi, carte, punchboard e reference cards; "
+            "la pagina ufficiale Modiphius non elenca un rulebook autonomo. Richiede "
+            "il gioco base."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url=(
+            "https://modiphius.net/en-us/products/"
+            "the-elder-scrolls-skyrim-adventure-board-game-dawnguard"
+        ),
+    ),
+    350623: RulebookAvailability(
+        status="rules_in_cards_reference",
+        label="Regole in carte/materiali e reference card",
+        detail=(
+            "From the Ashes aggiunge incontri, mini-campagne, carte, punchboard e una "
+            "reference card; la pagina ufficiale Modiphius non elenca un rulebook "
+            "autonomo. Richiede il gioco base."
+        ),
+        confidence="high",
+        action="retry_official",
+        evidence_url=(
+            "https://modiphius.net/products/"
+            "the-elder-scrolls-skyrim-adventure-board-game-from-the-ashes"
         ),
     ),
 
