@@ -503,12 +503,6 @@ def test_lmstudio_wol_setting_disables_magic_packet_configuration(
         lambda database, chunk_service, provider, **kwargs: provider,
     )
     monkeypatch.setattr(main_module, "get_chunk_index_service", lambda: object())
-    monkeypatch.setattr(
-        settings,
-        "lmstudio_wol_mac",
-        "D8:5E:D3:5A:63:DA",
-    )
-
     database = Database(tmp_path / "wol-setting.sqlite3")
     database.initialize()
     rag = SimpleNamespace(
@@ -516,6 +510,9 @@ def test_lmstudio_wol_setting_disables_magic_packet_configuration(
         lmstudio_embedding_model="text-embedding-qwen3-embedding-0.6b",
         lmstudio_api_key=None,
         lmstudio_wol_enabled=False,
+        lmstudio_wol_mac="D8:5E:D3:5A:63:DA",
+        lmstudio_wol_broadcast="192.168.1.255",
+        lmstudio_wol_port=9,
     )
 
     main_module._embedding_retrieval_service_for(database, rag, "lmstudio")
@@ -624,6 +621,53 @@ def test_lmstudio_embedding_wol_does_not_send_when_endpoint_is_ready(
     )
 
     provider._ensure_endpoint_ready()
+
+
+def test_manual_lmstudio_wol_endpoint_uses_persisted_target(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    captured: list[dict[str, object]] = []
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+        def wake(self):
+            return {"sent": True, "already_ready": False}
+
+    monkeypatch.setattr(main_module, "LMStudioEmbeddingProvider", FakeProvider)
+
+    payload = {
+        "embedding_provider_order": ["lmstudio", "gemini"],
+        "generation_provider_order": ["lmstudio", "gemini"],
+        "lmstudio_url": "http://192.168.1.249:1234",
+        "lmstudio_embedding_model": "text-embedding-qwen3-embedding-4b",
+        "lmstudio_generation_model": "qwen3-14b",
+        "lmstudio_generation_timeout_seconds": 300,
+        "lmstudio_generation_max_tokens": 512,
+        "lmstudio_generation_disable_thinking": True,
+        "lmstudio_wol_enabled": True,
+        "lmstudio_wol_mac": "D8:5E:D3:5A:63:DA",
+        "lmstudio_wol_broadcast": "192.168.1.255",
+        "lmstudio_wol_port": 9,
+        "gemini_url": "https://generativelanguage.googleapis.com",
+        "gemini_embedding_model": "gemini-embedding-2",
+        "gemini_generation_model": "gemini-3.5-flash-lite",
+    }
+
+    with TestClient(app) as client:
+        saved = client.put("/api/settings/rag", json=payload)
+        assert saved.status_code == 200
+        response = client.post("/api/system/lmstudio/wake")
+
+    assert response.status_code == 200
+    assert response.json()["packet_sent"] is True
+    assert response.json()["already_ready"] is False
+    assert captured[-1]["wol_mac"] == "D8:5E:D3:5A:63:DA"
+    assert captured[-1]["wol_broadcast"] == "192.168.1.255"
+    assert captured[-1]["wol_port"] == 9
 
 
 def test_gemini_embedding_retries_transient_429_then_succeeds(monkeypatch) -> None:

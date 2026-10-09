@@ -136,6 +136,10 @@ const lmstudioGenerationTimeout = document.querySelector("#lmstudioGenerationTim
 const lmstudioGenerationMaxTokens = document.querySelector("#lmstudioGenerationMaxTokens");
 const lmstudioDisableThinking = document.querySelector("#lmstudioDisableThinking");
 const lmstudioWolEnabled = document.querySelector("#lmstudioWolEnabled");
+const lmstudioWolMac = document.querySelector("#lmstudioWolMac");
+const lmstudioWolBroadcast = document.querySelector("#lmstudioWolBroadcast");
+const lmstudioWolPort = document.querySelector("#lmstudioWolPort");
+const lmstudioWakeButton = document.querySelector("#lmstudioWakeButton");
 const geminiUrl = document.querySelector("#geminiUrl");
 const geminiApiKey = document.querySelector("#geminiApiKey");
 const geminiApiKeyHint = document.querySelector("#geminiApiKeyHint");
@@ -945,6 +949,9 @@ function applyRagSettingsToForm(data) {
   lmstudioGenerationMaxTokens.value = lmstudio.generation_max_tokens ?? 512;
   lmstudioDisableThinking.checked = lmstudio.generation_disable_thinking !== false;
   lmstudioWolEnabled.checked = lmstudio.wol_enabled !== false;
+  lmstudioWolMac.value = lmstudio.wol_mac || "";
+  lmstudioWolBroadcast.value = lmstudio.wol_broadcast || "192.168.1.255";
+  lmstudioWolPort.value = lmstudio.wol_port ?? 9;
   lmstudioApiKey.value = "";
   lmstudioClearApiKey.checked = false;
   clearLmstudioApiKeyRow.hidden = lmstudio.api_key_source !== "stored";
@@ -1044,6 +1051,9 @@ async function persistSettings({verifyAfter = false} = {}) {
       lmstudio_generation_max_tokens: Number(lmstudioGenerationMaxTokens.value || 512),
       lmstudio_generation_disable_thinking: lmstudioDisableThinking.checked,
       lmstudio_wol_enabled: lmstudioWolEnabled.checked,
+      lmstudio_wol_mac: lmstudioWolMac.value.trim() || "",
+      lmstudio_wol_broadcast: lmstudioWolBroadcast.value.trim() || "192.168.1.255",
+      lmstudio_wol_port: Number(lmstudioWolPort.value || 9),
       gemini_url: geminiUrl.value.trim() || null,
       gemini_api_key:
         geminiClearApiKey.checked || !geminiApiKey.value.trim()
@@ -5984,6 +5994,29 @@ bggSyncSettingsNow.addEventListener("click", () => {
 
 document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
   void runCatalogBggSync();
+});
+
+async function wakeLmstudioHost() {
+  if (!lmstudioWakeButton || lmstudioWakeButton.disabled) return;
+  lmstudioWakeButton.disabled = true;
+  lmstudioWakeButton.classList.add("is-busy");
+  try {
+    const result = await api("/api/system/lmstudio/wake", {method: "POST"});
+    showToast(
+      result.already_ready
+        ? "LM Studio è già raggiungibile."
+        : "Segnale Wake-on-LAN inviato al PC di LM Studio.",
+    );
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    lmstudioWakeButton.disabled = false;
+    lmstudioWakeButton.classList.remove("is-busy");
+  }
+}
+
+lmstudioWakeButton?.addEventListener("click", () => {
+  void wakeLmstudioHost();
 });
 
 bggClearToken.addEventListener("change", () => {

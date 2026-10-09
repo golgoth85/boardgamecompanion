@@ -3526,6 +3526,33 @@ a { color: inherit; text-decoration: none; }
 .sidebar-sync-control .sync-icon-button {
   flex: 0 0 auto;
 }
+.sidebar-wol-control {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: .55rem;
+  padding: .45rem .65rem;
+  border: 1px solid rgba(120,140,255,.18);
+  border-radius: 12px;
+  color: inherit;
+  background: rgba(120,140,255,.055);
+  cursor: pointer;
+  font: inherit;
+  font-size: .78rem;
+  text-align: left;
+}
+.sidebar-wol-control:hover { background: rgba(120,140,255,.1); }
+.sidebar-wol-control:disabled { cursor: wait; opacity: .6; }
+.sidebar-wol-control.is-busy .sidebar-wol-icon { animation: spin .9s linear infinite; }
+.sidebar-wol-icon {
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: .95rem;
+}
 .nav-ai {
   border: 1px solid rgba(120,140,255,.2);
   background: rgba(120,140,255,.07);

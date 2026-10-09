@@ -388,6 +388,9 @@ class RagSettingsUpdate(BaseModel):
     lmstudio_generation_max_tokens: int = Field(default=512, ge=64, le=4096)
     lmstudio_generation_disable_thinking: bool = True
     lmstudio_wol_enabled: bool | None = None
+    lmstudio_wol_mac: str | None = Field(default=None, max_length=32)
+    lmstudio_wol_broadcast: str | None = Field(default=None, max_length=255)
+    lmstudio_wol_port: int | None = Field(default=None, ge=1, le=65535)
     gemini_url: str | None = Field(default=None, max_length=4096)
     gemini_api_key: str | None = Field(default=None, max_length=4096)
     clear_gemini_api_key: bool = False
@@ -1426,9 +1429,9 @@ def _embedding_retrieval_service_for(
             timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
             verify_tls=settings.lmstudio_verify_tls,
             api_key=rag.lmstudio_api_key,
-            wol_mac=settings.lmstudio_wol_mac if rag.lmstudio_wol_enabled else None,
-            wol_broadcast=settings.lmstudio_wol_broadcast,
-            wol_port=settings.lmstudio_wol_port,
+            wol_mac=rag.lmstudio_wol_mac if rag.lmstudio_wol_enabled else None,
+            wol_broadcast=rag.lmstudio_wol_broadcast,
+            wol_port=rag.lmstudio_wol_port,
             wol_wait_seconds=settings.lmstudio_wol_wait_seconds,
             wol_probe_interval_seconds=settings.lmstudio_wol_probe_interval_seconds,
         )
@@ -2100,6 +2103,21 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
                 if payload.lmstudio_wol_enabled is None
                 else payload.lmstudio_wol_enabled
             ),
+            lmstudio_wol_mac=(
+                current.lmstudio_wol_mac
+                if payload.lmstudio_wol_mac is None
+                else payload.lmstudio_wol_mac
+            ),
+            lmstudio_wol_broadcast=(
+                current.lmstudio_wol_broadcast
+                if payload.lmstudio_wol_broadcast is None
+                else payload.lmstudio_wol_broadcast
+            ),
+            lmstudio_wol_port=(
+                current.lmstudio_wol_port
+                if payload.lmstudio_wol_port is None
+                else payload.lmstudio_wol_port
+            ),
             gemini_url=payload.gemini_url,
             gemini_api_key=payload.gemini_api_key,
             clear_gemini_api_key=payload.clear_gemini_api_key,
@@ -2109,6 +2127,48 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return resolved.public_dict()
+
+
+@app.post("/api/system/lmstudio/wake", tags=["system"])
+def wake_lmstudio_host() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    if not rag.lmstudio_url:
+        raise HTTPException(
+            status_code=409,
+            detail="LM Studio URL is not configured",
+        )
+    if not rag.lmstudio_wol_mac:
+        raise HTTPException(
+            status_code=409,
+            detail="LM Studio Wake-on-LAN MAC is not configured",
+        )
+    try:
+        provider = LMStudioEmbeddingProvider(
+            base_url=rag.lmstudio_url,
+            model=rag.lmstudio_embedding_model or "wake-on-lan",
+            requested_dimensions=settings.lmstudio_embedding_dimensions,
+            timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
+            verify_tls=settings.lmstudio_verify_tls,
+            api_key=rag.lmstudio_api_key,
+            wol_mac=rag.lmstudio_wol_mac,
+            wol_broadcast=rag.lmstudio_wol_broadcast,
+            wol_port=rag.lmstudio_wol_port,
+            wol_wait_seconds=settings.lmstudio_wol_wait_seconds,
+            wol_probe_interval_seconds=settings.lmstudio_wol_probe_interval_seconds,
+        )
+        result = provider.wake()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EmbeddingProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "configured": True,
+        "packet_sent": bool(result["sent"]),
+        "already_ready": bool(result["already_ready"]),
+        "endpoint": rag.lmstudio_url,
+    }
 
 
 @app.get("/api/settings/crowdfunding", tags=["settings"])

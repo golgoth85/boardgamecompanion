@@ -30,6 +30,8 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert 'id="apifyToken"' in response.text
     assert 'id="verifyApifyToken"' in response.text
     assert 'id="lmstudioWolEnabled"' in response.text
+    assert 'id="lmstudioWolMac"' in response.text
+    assert 'id="lmstudioWakeButton"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
