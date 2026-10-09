@@ -1,3 +1,5 @@
+[Reading 659 lines from start (total: 659 lines, 0 remaining)]
+
 
 /* Supplemental game-centric UI */
 .sidebar-settings-button{display:flex;align-items:center;gap:.6rem;width:100%;min-height:2.6rem;padding:.6rem .72rem;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(255,255,255,.025);cursor:pointer;font:inherit;font-size:.78rem;font-weight:800}
@@ -651,3 +653,11 @@
   .cover-rating-overlay small{display:none}
   .suggestion-heading-actions{display:flex;justify-content:flex-end}
 }
+
+.sidebar-footer{grid-template-columns:1fr auto;align-items:center}
+.sidebar-wol-button{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;min-height:2.45rem;padding:.38rem .68rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:rgba(11,15,23,.5);font:inherit;cursor:pointer;white-space:nowrap}
+.sidebar-wol-button:hover{color:var(--text);background:rgba(73,190,132,.15)}
+.sidebar-wol-button:disabled{opacity:.45;cursor:wait}
+@media(max-width:760px){.sidebar-footer{grid-template-columns:1fr auto}}
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]

@@ -1,3 +1,5 @@
+[Reading 1452 lines from start (total: 1452 lines, 0 remaining)]
+
 from __future__ import annotations
 
 import hashlib
@@ -1420,3 +1422,35 @@ def test_archive_invalid_document_is_missing_and_never_a_retrieval_candidate(
     assert result["results"] == []
     assert result["policy"]["selected_tier"] is None
     assert len(provider.calls) == calls_after_build
+
+
+def test_lmstudio_manual_wake_sends_packet_without_waiting(monkeypatch) -> None:
+    sent: list[bool] = []
+    provider = LMStudioEmbeddingProvider(
+        base_url="http://192.168.1.249:1234/v1",
+        model="test-model",
+        requested_dimensions=None,
+        timeout_seconds=1.0,
+        verify_tls=False,
+        wol_mac="D8:5E:D3:5A:63:DA",
+    )
+    monkeypatch.setattr(provider, "_tcp_ready", lambda: False)
+    monkeypatch.setattr(provider, "_send_magic_packet", lambda: sent.append(True))
+    assert provider.wake() == {"sent": True, "already_reachable": False}
+    assert sent == [True]
+
+
+def test_lmstudio_manual_wake_skips_packet_when_reachable(monkeypatch) -> None:
+    provider = LMStudioEmbeddingProvider(
+        base_url="http://192.168.1.249:1234/v1",
+        model="test-model",
+        requested_dimensions=None,
+        timeout_seconds=1.0,
+        verify_tls=False,
+        wol_mac="D8:5E:D3:5A:63:DA",
+    )
+    monkeypatch.setattr(provider, "_tcp_ready", lambda: True)
+    monkeypatch.setattr(provider, "_send_magic_packet", lambda: (_ for _ in ()).throw(AssertionError("must not send")))
+    assert provider.wake() == {"sent": False, "already_reachable": True}
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]

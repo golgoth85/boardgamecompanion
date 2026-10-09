@@ -1,3 +1,5 @@
+[Reading 6100 lines from start (total: 6100 lines, 0 remaining)]
+
 import {api} from "./api-client.js";
 import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
 import {shellRouteKey, shellSectionLabels} from "./routing.js";
@@ -2447,6 +2449,23 @@ async function runCatalogBggSync() {
     if (document.querySelector("#catalogBggSync")) {
       document.querySelector("#catalogBggSync").disabled = false;
     }
+  }
+}
+
+async function wakeLmstudioHost() {
+  const button = document.querySelector("#lmstudioWakeButton");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  const original = button.innerHTML;
+  button.innerHTML = '<span aria-hidden="true">…</span><span>PC AI</span>';
+  try {
+    const result = await api("/api/lmstudio/wake", {method: "POST"});
+    showToast(result.already_reachable ? "PC AI già raggiungibile." : "Pacchetto Wake-on-LAN inviato al PC AI.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.innerHTML = original;
+    button.disabled = false;
   }
 }
 
@@ -5986,6 +6005,10 @@ document.querySelector("#catalogBggSync")?.addEventListener("click", () => {
   void runCatalogBggSync();
 });
 
+document.querySelector("#lmstudioWakeButton")?.addEventListener("click", () => {
+  void wakeLmstudioHost();
+});
+
 bggClearToken.addEventListener("change", () => {
   bggApplicationToken.disabled =
     bggClearToken.checked || Boolean(currentBggSettings?.overrides?.application_token);
@@ -6077,3 +6100,5 @@ importForm.addEventListener("submit", async (event) => {
 });
 
 route();
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]

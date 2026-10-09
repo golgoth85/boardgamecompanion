@@ -1,3 +1,5 @@
+[Reading 1891 lines from start (total: 1891 lines, 0 remaining)]
+
 from __future__ import annotations
 
 import hashlib
@@ -395,6 +397,15 @@ class LMStudioEmbeddingProvider:
             raise EmbeddingProviderError(
                 "LM Studio Wake-on-LAN packet was only partially sent"
             )
+
+    def wake(self) -> dict[str, bool]:
+        """Send one Wake-on-LAN magic packet unless the endpoint is already reachable."""
+        if self.wol_mac is None:
+            raise EmbeddingProviderError("LM Studio Wake-on-LAN MAC is not configured")
+        if self._tcp_ready():
+            return {"sent": False, "already_reachable": True}
+        self._send_magic_packet()
+        return {"sent": True, "already_reachable": False}
 
     def _ensure_endpoint_ready(self) -> None:
         if self.wol_mac is None or self._tcp_ready():
@@ -1880,3 +1891,5 @@ class EmbeddingRetrievalService:
         }
         self.validate_retrieval_current(response)
         return response
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]

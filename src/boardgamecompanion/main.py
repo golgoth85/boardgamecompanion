@@ -1,3 +1,5 @@
+[Reading 2317 lines from start (total: 2317 lines, 0 remaining)]
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -2111,6 +2113,35 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
     return resolved.public_dict()
 
 
+@app.post("/api/lmstudio/wake", tags=["settings"])
+def wake_lmstudio_host() -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    if not rag.lmstudio_url or not rag.lmstudio_embedding_model:
+        raise HTTPException(status_code=409, detail="LM Studio is not configured")
+    if not settings.lmstudio_wol_mac:
+        raise HTTPException(status_code=409, detail="LM Studio Wake-on-LAN MAC is not configured")
+    try:
+        provider = LMStudioEmbeddingProvider(
+            base_url=rag.lmstudio_url,
+            model=rag.lmstudio_embedding_model,
+            requested_dimensions=settings.lmstudio_embedding_dimensions,
+            timeout_seconds=settings.lmstudio_embedding_timeout_seconds,
+            verify_tls=settings.lmstudio_verify_tls,
+            api_key=rag.lmstudio_api_key,
+            wol_mac=settings.lmstudio_wol_mac,
+            wol_broadcast=settings.lmstudio_wol_broadcast,
+            wol_port=settings.lmstudio_wol_port,
+            wol_wait_seconds=settings.lmstudio_wol_wait_seconds,
+            wol_probe_interval_seconds=settings.lmstudio_wol_probe_interval_seconds,
+        )
+        result = provider.wake()
+    except (EmbeddingProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {**result, "host": rag.lmstudio_url}
+
+
 @app.get("/api/settings/crowdfunding", tags=["settings"])
 def get_crowdfunding_settings() -> dict[str, object]:
     database = get_database()
@@ -2286,3 +2317,5 @@ def verify_bgg_settings() -> dict[str, object]:
         "title": item.get("title") or game["title"],
     }
 
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]

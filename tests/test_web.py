@@ -1,3 +1,5 @@
+[Reading 126 lines from start (total: 126 lines, 0 remaining)]
+
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -30,6 +32,7 @@ def test_web_home_is_served(tmp_path: Path) -> None:
     assert 'id="apifyToken"' in response.text
     assert 'id="verifyApifyToken"' in response.text
     assert 'id="lmstudioWolEnabled"' in response.text
+    assert 'id="lmstudioWakeButton"' in response.text
     assert "Floppy" not in response.text
     assert 'src="/static/zxing-browser-0.2.1.min.js"' in response.text
     assert 'src="/static/app.js"' in response.text
@@ -123,3 +126,5 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "tutorial-video-frame" in js.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text
+
+[executed on device: NASdelPala (14e8ec6d-0dd2-48d2-ad6b-e2bfe88c43a3)]
