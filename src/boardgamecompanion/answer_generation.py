@@ -734,34 +734,134 @@ def _bounded_text(value: Any, *, label: str, max_chars: int) -> str:
     return text
 
 
+def _layout_normalize_with_mapping(
+    text: str,
+) -> tuple[str, list[tuple[int, int]]]:
+    """Normalize PDF layout artifacts without changing semantic characters.
+
+    The normalization is deliberately narrow: whitespace runs collapse, soft
+    hyphens disappear, explicit /uni00A0 extraction artifacts become spaces,
+    spaces before common punctuation are ignored, and a hyphen used only for
+    line-break word wrapping is removed. Case, punctuation characters, Unicode
+    letters, digits and word order are otherwise preserved exactly.
+    """
+    output: list[str] = []
+    mapping: list[tuple[int, int]] = []
+    index = 0
+    length = len(text)
+    punctuation = frozenset(",.;:!?")
+
+    while index < length:
+        if text.startswith("/uni00A0", index):
+            start = index
+            index += len("/uni00A0")
+            while index < length and text[index].isspace():
+                index += 1
+            if index < length and text[index] in punctuation:
+                continue
+            if not output or output[-1] != " ":
+                output.append(" ")
+                mapping.append((start, index))
+            continue
+
+        char = text[index]
+        if char == "\u00ad":
+            index += 1
+            continue
+
+        if char == "-":
+            probe = index + 1
+            saw_newline = False
+            while probe < length and text[probe].isspace():
+                if text[probe] in "\r\n":
+                    saw_newline = True
+                probe += 1
+            previous = output[-1] if output else ""
+            following = text[probe] if probe < length else ""
+            if saw_newline and previous.isalpha() and following.isalpha():
+                index = probe
+                continue
+
+        if char.isspace():
+            start = index
+            while index < length and text[index].isspace():
+                index += 1
+            if index < length and text[index] in punctuation:
+                continue
+            if not output or output[-1] != " ":
+                output.append(" ")
+                mapping.append((start, index))
+            continue
+
+        output.append(char)
+        mapping.append((index, index + 1))
+        index += 1
+
+    while output and output[0] == " ":
+        output.pop(0)
+        mapping.pop(0)
+    while output and output[-1] == " ":
+        output.pop()
+        mapping.pop()
+    return "".join(output), mapping
+
+
+def _layout_normalize(text: str) -> str:
+    normalized, _ = _layout_normalize_with_mapping(text)
+    return normalized
+
+
 def _canonical_source_quote(source_text: str, quote: str) -> str:
     """Return an exact source substring for a conservatively equivalent quote.
 
-    Exact matches are preferred. For Gemini's prompt-only JSON fallback, allow
-    only whitespace-run differences (for example PDF newlines vs spaces).
-    Punctuation, case, Unicode characters and word order must still match.
-    If whitespace normalization makes more than one source span possible, fail
-    closed rather than choosing an ambiguous citation.
+    Exact matches are preferred. Whitespace-only differences remain accepted.
+    As a final PDF-specific fallback, tolerate only non-semantic layout
+    artifacts: soft hyphens, line-break word wrapping, /uni00A0 markers and
+    spaces before punctuation. Case, punctuation characters, letters, digits
+    and word order must still match. Ambiguous normalized matches fail closed.
     """
     if quote in source_text:
         return quote
+
     tokens = quote.split()
-    if not tokens:
+    if tokens:
+        body = r"\s+".join(re.escape(token) for token in tokens)
+        pattern = re.compile(r"(?=(" + body + r"))")
+        matches = list(pattern.finditer(source_text))
+        if len(matches) == 1:
+            start, finish = matches[0].span(1)
+            return source_text[start:finish]
+
+    normalized_source, mapping = _layout_normalize_with_mapping(source_text)
+    normalized_quote = _layout_normalize(quote)
+    if not normalized_quote:
         raise AnswerProtocolError(
             "Generated support quote is not present in cited evidence"
         )
-    body = r"\s+".join(re.escape(token) for token in tokens)
-    # Zero-width lookahead lets us enumerate *overlapping* candidate spans.
-    # Example: source "foo\nfoo\tfoo", quote "foo foo" has two valid
-    # whitespace-only spans sharing the middle token and must fail closed.
-    pattern = re.compile(r"(?=(" + body + r"))")
-    matches = list(pattern.finditer(source_text))
-    if len(matches) != 1:
+
+    positions: list[int] = []
+    offset = 0
+    while True:
+        found = normalized_source.find(normalized_quote, offset)
+        if found < 0:
+            break
+        positions.append(found)
+        offset = found + 1
+
+    if len(positions) != 1:
         raise AnswerProtocolError(
             "Generated support quote is not present in cited evidence"
         )
-    start, end = matches[0].span(1)
-    return source_text[start:end]
+
+    start = positions[0]
+    finish = start + len(normalized_quote) - 1
+    if start >= len(mapping) or finish >= len(mapping):
+        raise AnswerProtocolError(
+            "Generated support quote is not present in cited evidence"
+        )
+    source_start = mapping[start][0]
+    source_end = mapping[finish][1]
+    return source_text[source_start:source_end]
 
 
 def _validate_generation(

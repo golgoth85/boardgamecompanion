@@ -489,6 +489,84 @@ def test_generation_accepts_whitespace_only_quote_drift_and_returns_exact_source
     assert result["citations"][0]["page"]["number"] == 1
 
 
+def test_generation_accepts_only_pdf_layout_hyphenation_changes() -> None:
+    source_text = (
+        "Mescolate ogni pila separa-\n"
+        "tamente e piazzate le pile coperte."
+    )
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Le pile vanno mescolate separatamente.",
+                    "supports": [
+                        {
+                            "evidence_id": "E1",
+                            "quote": (
+                                "Mescolate ogni pila separatamente "
+                                "e piazzate le pile coperte."
+                            ),
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    result = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text=source_text)]
+        ),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Come preparo le pile?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["claims"][0]["supports"][0]["quote"] == source_text
+
+
+def test_generation_accepts_pdf_nbsp_artifact_and_space_before_punctuation() -> None:
+    source_text = 'Scegliete A, B e/uni00A0“?”. Poi pescate una carta .'
+    provider = FakeProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "La preparazione include A, B e “?”.",
+                    "supports": [
+                        {
+                            "evidence_id": "E1",
+                            "quote": 'Scegliete A, B e “?”. Poi pescate una carta.',
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    result = _service(
+        _retrieval_payload(
+            [_result(chunk_id="chunk-1", text=source_text)]
+        ),
+        provider,
+    ).answer(
+        bgg_id=900001,
+        query="Quali pile scelgo?",
+        requested_language="it",
+        document_type="rulebook",
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["claims"][0]["supports"][0]["quote"] == source_text
+
+
 @pytest.mark.parametrize(
     ("source_text", "quote"),
     [
