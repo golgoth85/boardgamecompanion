@@ -352,11 +352,32 @@ class CatalogAssistantService:
         if not candidates:
             raise CatalogAssistantError("La ludoteca non contiene giochi posseduti utilizzabili")
 
+        constraints = _parse_hard_constraints(question)
+        filtered_candidates = [
+            candidate
+            for candidate in candidates
+            if _matches_hard_constraints(candidate, constraints)
+        ]
+        if not filtered_candidates:
+            return {
+                "answer": (
+                    "Non risultano giochi posseduti che soddisfino tutti i vincoli "
+                    "della richiesta con i dati disponibili."
+                ),
+                "recommendations": [],
+                "provider": "deterministic",
+                "model": "hard-constraint-filter-v1",
+                "constraints": constraints.as_payload(),
+                "candidate_count_before": len(candidates),
+                "candidate_count_after": 0,
+            }
+
         rag = resolve_rag_settings(self.database)
         provider = rag.generation_provider
         payload = {
             "question": question,
-            "catalog": _compact_candidates(candidates),
+            "hard_constraints": constraints.as_payload(),
+            "catalog": _compact_candidates(filtered_candidates),
         }
 
         if provider == "lmstudio":
@@ -368,7 +389,17 @@ class CatalogAssistantService:
         else:
             raise CatalogAssistantError("Provider AI non supportato")
 
-        return self._validate(structured, candidates, provider=provider, model=model)
+        result = self._validate(
+            structured,
+            filtered_candidates,
+            provider=provider,
+            model=model,
+            constraints=constraints,
+        )
+        result["constraints"] = constraints.as_payload()
+        result["candidate_count_before"] = len(candidates)
+        result["candidate_count_after"] = len(filtered_candidates)
+        return result
 
     def _lmstudio(self, payload: dict[str, Any], rag) -> tuple[dict[str, Any], str]:
         if not rag.lmstudio_url or not rag.lmstudio_generation_model:
@@ -535,6 +566,7 @@ class CatalogAssistantService:
         *,
         provider: str,
         model: str,
+        constraints: HardConstraints | None = None,
     ) -> dict[str, Any]:
         answer = structured.get("answer")
         raw_recommendations = structured.get("recommendations")
@@ -554,6 +586,10 @@ class CatalogAssistantService:
             except (TypeError, ValueError):
                 continue
             if bgg_id not in by_id or bgg_id in seen:
+                continue
+            if constraints is not None and not _matches_hard_constraints(
+                by_id[bgg_id], constraints
+            ):
                 continue
             reason = str(raw.get("reason") or "").strip()
             if not reason:
