@@ -17,7 +17,8 @@ def test_rulebook_diagnostics_separates_resolved_from_unresolved(
     with db.transaction() as connection:
         games = (
             (100001, "Unresolved Game"),
-            (100002, "Archived Game"),
+            (100002, "Official Archived Game"),
+            (100003, "Community Fallback Game"),
             (312509, "Arena: The Contest – Dragon Collection"),
         )
         for bgg_id, title in games:
@@ -30,7 +31,7 @@ def test_rulebook_diagnostics_separates_resolved_from_unresolved(
             )
 
     service = RulebookDiscoveryService(db, ())
-    assert service.synchronize_catalog() == 3
+    assert service.synchronize_catalog() == 4
     with db.transaction() as connection:
         connection.execute(
             "UPDATE rulebook_discovery_games SET status='partial'"
@@ -47,14 +48,29 @@ def test_rulebook_diagnostics_separates_resolved_from_unresolved(
                        '/tmp/archived-rules.pdf',?,1,'manual_upload',1,?,?)""",
             (archived_id, "b" * 64, now, now),
         )
+        fallback_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=100003"
+        ).fetchone()["id"]
+        connection.execute(
+            """INSERT INTO game_documents
+               (id,board_game_id,document_type,language,title,original_filename,
+                storage_path,sha256,size_bytes,source_kind,is_official,
+                created_at,updated_at)
+               VALUES ('fallback-doc',?,'rulebook','en','Community Rules',
+                       'community.pdf','/tmp/community-rules.pdf',?,1,
+                       'community',0,?,?)""",
+            (fallback_id, "c" * 64, now, now),
+        )
 
     with db.connect() as connection:
         discovery, resolution = _rulebook_discovery_counts(connection)
 
-    assert discovery == {"resolved": 2, "partial": 1}
+    assert discovery == {"resolved": 2, "searching_preferred": 2}
     assert resolution == {
-        "archived_pdf": 1,
+        "official_it_en_pdf": 1,
+        "fallback_pdf": 1,
         "classified_without_pdf": 1,
-        "resolved_total": 2,
-        "unresolved_total": 1,
+        "covered_total": 3,
+        "searching_preferred_total": 2,
+        "uncovered_total": 1,
     }
