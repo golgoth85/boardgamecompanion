@@ -343,6 +343,8 @@ class RulebookDiscoveryService:
                           SELECT 1 FROM game_documents doc
                           WHERE doc.board_game_id=d.board_game_id
                             AND doc.document_type='rulebook'
+                            AND doc.is_official=1
+                            AND lower(substr(doc.language,1,2)) IN ('it','en')
                       )
                       {classified_clause}
                     ORDER BY d.next_attempt_at,g.bgg_id
