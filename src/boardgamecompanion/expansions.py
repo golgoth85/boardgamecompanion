@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any
 
 from boardgamecompanion.bgg_metadata import BggMetadataError, BggMetadataStore
@@ -25,10 +26,16 @@ _MINOR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bcard (?:pack|set)\b", re.I), "card_pack"),
     (re.compile(r"\b(?:bounty|chapter|adventure|mythos|deck) pack\b", re.I), "content_pack"),
     (re.compile(r"\bstarter deck\b", re.I), "starter_deck"),
+    (re.compile(r"\b(?:pack|bundle)\b", re.I), "content_pack"),
     (re.compile(r"\bterrain (?:pack|set)\b|\bscenery\b", re.I), "terrain"),
     (re.compile(r"\breplacement\b|\bstickers?\b|\bpins?\b", re.I), "accessory"),
     (re.compile(r"\bart book\b|\bsoundtrack\b", re.I), "media"),
 )
+
+_MAX_IMPORTANT_EXPANSIONS = 12
+_IMPORTANCE_REFERENCE_RATIO = 0.25
+_IMPORTANCE_MIN_OWNED = 50
+_IMPORTANCE_MIN_STAT_SAMPLE = 3
 
 
 class ExpansionError(RuntimeError):
@@ -62,6 +69,80 @@ def is_relevant_expansion(title: str, metadata: dict[str, Any] | None = None) ->
         if item_type and item_type != "boardgameexpansion":
             return False
     return True
+
+
+def _owned_count(item: dict[str, Any]) -> int | None:
+    value = item.get("bgg_num_owned")
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _importance_sort_key(item: dict[str, Any]) -> tuple[object, ...]:
+    owned = _owned_count(item)
+    try:
+        rating = float(item.get("bgg_average") or 0.0)
+    except (TypeError, ValueError):
+        rating = 0.0
+    try:
+        year = int(item.get("year_published") or 0)
+    except (TypeError, ValueError):
+        year = 0
+    return (
+        -(owned if owned is not None else -1),
+        -rating,
+        -year,
+        str(item.get("title") or "").casefold(),
+    )
+
+
+def _select_important_expansions(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int | None, int | None]:
+    """Keep only the expansion cohort that is materially relevant on BGG.
+
+    BGG often links every promo, miniature and micro add-on as an expansion. Title
+    heuristics remove obvious accessories first; this second stage uses community
+    ownership as a stable cross-game proxy for material relevance. The cutoff is
+    relative to the strongest expansion of the same base game, so niche games are
+    not penalized by an absolute popularity threshold.
+
+    When BGG statistics are too sparse to make that comparison safely, fail open
+    only to the already strict title/type filter and cap the result.
+    """
+
+    if not items:
+        return [], None, None
+
+    with_stats = [item for item in items if _owned_count(item) is not None]
+    if len(with_stats) < _IMPORTANCE_MIN_STAT_SAMPLE:
+        ranked = sorted(items, key=_importance_sort_key)
+        return ranked[:_MAX_IMPORTANT_EXPANSIONS], None, None
+
+    reference_owned = max(_owned_count(item) or 0 for item in with_stats)
+    cutoff = max(
+        _IMPORTANCE_MIN_OWNED,
+        ceil(reference_owned * _IMPORTANCE_REFERENCE_RATIO),
+    )
+    selected = [
+        item
+        for item in with_stats
+        if (_owned_count(item) or 0) >= cutoff
+    ]
+
+    # Avoid turning a legitimate expansion section into a single arbitrary item
+    # when ownership is unusually concentrated. The two strongest candidates are
+    # still materially more useful than the long BGG tail of micro add-ons.
+    minimum = min(2, len(with_stats))
+    if len(selected) < minimum:
+        selected = sorted(with_stats, key=_importance_sort_key)[:minimum]
+
+    ranked = sorted(selected, key=_importance_sort_key)
+    return ranked[:_MAX_IMPORTANT_EXPANSIONS], cutoff, reference_owned
 
 
 class ExpansionService:
@@ -185,16 +266,16 @@ class ExpansionService:
                 except Exception:
                     continue
 
-        items: list[dict[str, Any]] = []
-        excluded_count = max(0, len(links) - len(relevant_links))
+        candidate_items: list[dict[str, Any]] = []
+        excluded_minor_count = max(0, len(links) - len(relevant_links))
         for link in relevant_links:
             identifier = int(link["bgg_id"])
             detail = detail_by_id.get(identifier) or {}
             title = str(detail.get("title") or link["title"]).strip()
             if not is_relevant_expansion(title, detail):
-                excluded_count += 1
+                excluded_minor_count += 1
                 continue
-            items.append(
+            candidate_items.append(
                 {
                     "bgg_id": identifier,
                     "title": title,
@@ -207,13 +288,10 @@ class ExpansionService:
                 }
             )
 
-        items.sort(
-            key=lambda item: (
-                bool(item["owned"]),
-                -(int(item["year_published"]) if item.get("year_published") else 0),
-                str(item["title"]).casefold(),
-            )
+        items, importance_cutoff_owned, importance_reference_owned = (
+            _select_important_expansions(candidate_items)
         )
+        excluded_unimportant_count = max(0, len(candidate_items) - len(items))
         return {
             "bgg_id": int(base["bgg_id"]),
             "title": base["title"],
@@ -221,7 +299,10 @@ class ExpansionService:
             "items": items,
             "missing_count": sum(1 for item in items if not item["owned"]),
             "owned_count": sum(1 for item in items if item["owned"]),
-            "excluded_minor_count": excluded_count,
+            "excluded_minor_count": excluded_minor_count,
+            "excluded_unimportant_count": excluded_unimportant_count,
+            "importance_cutoff_owned": importance_cutoff_owned,
+            "importance_reference_owned": importance_reference_owned,
         }
 
     def scan_game(self, bgg_id: int) -> dict[str, Any]:
