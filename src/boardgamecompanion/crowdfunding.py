@@ -355,6 +355,57 @@ class EcbFxProvider:
         return rates
 
 
+_BOARDGAME_POSITIVE_MARKERS = (
+    "board game",
+    "boardgame",
+    "tabletop game",
+    "card game",
+    "deckbuilding",
+    "deck-building",
+    "cooperative game",
+    "strategy game",
+    "worker placement",
+    "roll and write",
+    "roll & write",
+    "eurogame",
+    "dungeon crawler",
+    "campaign game",
+)
+
+_BOARDGAME_NEGATIVE_MARKERS = (
+    "staff-lamp",
+    "staff lamp",
+    "table lamp",
+    "desk lamp",
+    "dice tower",
+    "dice tray",
+    "gaming table",
+    "playmat",
+    "card sleeves",
+    "sleeves for",
+    "stl files",
+    "3d printable terrain",
+    "3d-printable terrain",
+    "terrain pack",
+    "rpg zine",
+    "roleplaying game",
+    "role-playing game",
+    "ttrpg",
+)
+
+
+def _boardgame_relevant(campaign: dict[str, object]) -> bool:
+    haystack = " ".join(
+        str(campaign.get(key) or "").casefold()
+        for key in ("title", "description", "creator")
+    )
+    positive = any(marker in haystack for marker in _BOARDGAME_POSITIVE_MARKERS)
+    negative = any(marker in haystack for marker in _BOARDGAME_NEGATIVE_MARKERS)
+    if negative and not positive:
+        return False
+    return True
+
+
 class CrowdfundingService:
     def __init__(
         self,
@@ -659,6 +710,14 @@ class CrowdfundingService:
             },
         }
 
+        before_relevance = len(campaigns)
+        campaigns = [
+            item
+            for item in campaigns
+            if _boardgame_relevant(item)
+        ]
+        relevance_filtered_count = before_relevance - len(campaigns)
+
         if platform != "all":
             campaigns = [item for item in campaigns if item.get("platform") == platform]
         if status == "active":
@@ -749,6 +808,7 @@ class CrowdfundingService:
                 "backers": "numero di finanziatori",
             },
             "providers": providers,
+            "relevance_filtered_count": relevance_filtered_count,
             "count": min(len(campaigns), limit),
             "total_matching": len(campaigns),
             "items": campaigns[:limit],
