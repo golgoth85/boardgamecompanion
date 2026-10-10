@@ -429,3 +429,75 @@ def test_apify_provider_verifies_token_with_bearer_header() -> None:
         "username": "marco-test",
         "user_id": "user-123",
     }
+
+
+
+def test_crowdfunding_filters_obvious_non_boardgame_tabletop_noise(
+    tmp_path: Path,
+) -> None:
+    subject = service(tmp_path)
+    subject.kickstarter = FakeKickstarter(
+        [
+            {
+                **kickstarter_campaign(
+                    "wizard-lamp",
+                    funds=100_000,
+                    currency="EUR",
+                    backers=2_000,
+                    hours_left=120,
+                ),
+                "title": "Wizard's Light: A Staff-Lamp That Brings Magic to Your Space",
+                "description": "A handcrafted staff lamp for your gaming room.",
+            },
+            {
+                **kickstarter_campaign(
+                    "real-boardgame",
+                    funds=80_000,
+                    currency="EUR",
+                    backers=1_500,
+                    hours_left=120,
+                ),
+                "title": "Real Adventure",
+                "description": "A cooperative board game with miniatures.",
+            },
+        ]
+    )
+
+    payload = subject.list_campaigns(sort="top", refresh=True)
+
+    ids = {item["platform_project_id"] for item in payload["items"]}
+    assert "wizard-lamp" not in ids
+    assert "real-boardgame" in ids
+    assert payload["relevance_filtered_count"] == 1
+
+
+def test_boardgame_positive_signal_overrides_accessory_word_in_description(
+    tmp_path: Path,
+) -> None:
+    subject = service(tmp_path)
+    subject.kickstarter = FakeKickstarter(
+        [
+            {
+                **kickstarter_campaign(
+                    "miniature-game",
+                    funds=60_000,
+                    currency="EUR",
+                    backers=1_000,
+                    hours_left=96,
+                ),
+                "title": "Miniature Realms",
+                "description": (
+                    "A strategic board game with miniatures and optional "
+                    "3D printable terrain."
+                ),
+            }
+        ]
+    )
+
+    payload = subject.list_campaigns(sort="top", refresh=True)
+
+    assert any(
+        item["platform_project_id"] == "miniature-game"
+        for item in payload["items"]
+    )
+    assert payload["relevance_filtered_count"] == 0
