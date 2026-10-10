@@ -6,7 +6,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from boardgamecompanion.database import Database
@@ -360,6 +360,134 @@ class YouTubeTutorialService:
                 )
             )
         return result
+
+    def discover_due(
+        self,
+        *,
+        limit: int = 3,
+        refresh_seconds: int = 45 * 24 * 60 * 60,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        if not self.configured:
+            raise TutorialVideoNotConfigured("YouTube Data API key is not configured")
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        cutoff = (
+            current - timedelta(seconds=max(3600, int(refresh_seconds)))
+        ).isoformat()
+        cap = max(1, min(int(limit), 20))
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT g.bgg_id,g.title,
+                       COUNT(v.youtube_video_id) AS video_count,
+                       MAX(v.verified_at) AS last_verified_at,
+                       s.last_attempt_at
+                FROM board_games g
+                JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN game_tutorial_videos v ON v.board_game_id=g.id
+                LEFT JOIN tutorial_discovery_state s ON s.board_game_id=g.id
+                WHERE COALESCE(c.own,0)=1
+                  AND COALESCE(g.item_type,'standalone') != 'expansion'
+                GROUP BY g.id
+                HAVING s.last_attempt_at IS NULL
+                    OR s.last_attempt_at<=?
+                ORDER BY (COUNT(v.youtube_video_id)=0) DESC,
+                         (s.last_attempt_at IS NULL) DESC,
+                         COALESCE(s.last_attempt_at,'') ASC,
+                         g.title COLLATE NOCASE
+                LIMIT ?
+                """,
+                (cutoff, cap),
+            ).fetchall()
+
+        items: list[dict[str, object]] = []
+        stopped_for_quota = False
+        for row in rows:
+            bgg_id = int(row["bgg_id"])
+            try:
+                result = self.discover(bgg_id)
+                result_count = int(result.get("count") or 0)
+                finished_at = datetime.now(UTC).isoformat()
+                with self.database.transaction(immediate=True) as connection:
+                    game_row = connection.execute(
+                        "SELECT id FROM board_games WHERE bgg_id=?",
+                        (bgg_id,),
+                    ).fetchone()
+                    if game_row is not None:
+                        connection.execute(
+                            """
+                            INSERT INTO tutorial_discovery_state(
+                                board_game_id,last_attempt_at,last_success_at,
+                                last_result_count,last_error
+                            ) VALUES(?,?,?,?,NULL)
+                            ON CONFLICT(board_game_id) DO UPDATE SET
+                                last_attempt_at=excluded.last_attempt_at,
+                                last_success_at=excluded.last_success_at,
+                                last_result_count=excluded.last_result_count,
+                                last_error=NULL
+                            """,
+                            (
+                                int(game_row["id"]),
+                                finished_at,
+                                finished_at,
+                                result_count,
+                            ),
+                        )
+                items.append(
+                    {
+                        "bgg_id": bgg_id,
+                        "title": str(row["title"]),
+                        "status": "succeeded",
+                        "count": result_count,
+                    }
+                )
+            except TutorialVideoError as exc:
+                message = str(exc)
+                finished_at = datetime.now(UTC).isoformat()
+                with self.database.transaction(immediate=True) as connection:
+                    game_row = connection.execute(
+                        "SELECT id FROM board_games WHERE bgg_id=?",
+                        (bgg_id,),
+                    ).fetchone()
+                    if game_row is not None:
+                        connection.execute(
+                            """
+                            INSERT INTO tutorial_discovery_state(
+                                board_game_id,last_attempt_at,last_success_at,
+                                last_result_count,last_error
+                            ) VALUES(?,?,NULL,NULL,?)
+                            ON CONFLICT(board_game_id) DO UPDATE SET
+                                last_attempt_at=excluded.last_attempt_at,
+                                last_error=excluded.last_error
+                            """,
+                            (
+                                int(game_row["id"]),
+                                finished_at,
+                                message[:1000],
+                            ),
+                        )
+                items.append(
+                    {
+                        "bgg_id": bgg_id,
+                        "title": str(row["title"]),
+                        "status": "failed",
+                        "error": message[:500],
+                    }
+                )
+                lowered = message.casefold()
+                if "http 403" in lowered or "quota" in lowered:
+                    stopped_for_quota = True
+                    break
+        return {
+            "attempted": len(items),
+            "succeeded": sum(
+                1 for item in items if item["status"] == "succeeded"
+            ),
+            "failed": sum(1 for item in items if item["status"] == "failed"),
+            "stopped_for_quota": stopped_for_quota,
+            "items": items,
+        }
+
 
     def discover(self, bgg_id: int) -> dict[str, object]:
         if not self.configured:
