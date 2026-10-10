@@ -1385,6 +1385,36 @@ function configureZxingFormats(reader) {
 }
 
 
+function scannerPhotoCanvas(bitmap, rotation = 0, highContrast = false) {
+  const quarterTurn = Math.abs(rotation) % 180 === 90;
+  const canvas = document.createElement("canvas");
+  canvas.width = quarterTurn ? bitmap.height : bitmap.width;
+  canvas.height = quarterTurn ? bitmap.width : bitmap.height;
+  const context = canvas.getContext("2d", {willReadFrequently: highContrast});
+  context.translate(canvas.width / 2, canvas.height / 2);
+  context.rotate((rotation * Math.PI) / 180);
+  context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+
+  if (highContrast) {
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const data = image.data;
+    for (let offset = 0; offset < data.length; offset += 4) {
+      const gray = Math.round(
+        (0.299 * data[offset]) +
+        (0.587 * data[offset + 1]) +
+        (0.114 * data[offset + 2]),
+      );
+      const value = gray < 145 ? 0 : 255;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+    }
+    context.putImageData(image, 0, 0);
+  }
+  return canvas;
+}
+
 async function decodeScannerPhoto(file) {
   if (!file || scannerBusy) return;
   const Reader = window.ZXingBrowser?.BrowserMultiFormatReader;
@@ -1393,21 +1423,69 @@ async function decodeScannerPhoto(file) {
     scannerManualFallback.open = true;
     return;
   }
+
   const objectUrl = URL.createObjectURL(file);
+  let bitmap = null;
   scannerPhotoButton?.classList.add("is-busy");
   cameraHint.textContent = "Leggo il barcode dalla foto…";
   try {
+    if (typeof createImageBitmap === "function") {
+      try {
+        bitmap = await createImageBitmap(file);
+      } catch (_) {
+        bitmap = null;
+      }
+    }
+
+    if (bitmap && typeof window.BarcodeDetector === "function") {
+      try {
+        const detector = await createNativeScannerDetector();
+        const nativeResults = detector ? await detector.detect(bitmap) : [];
+        const nativeText = nativeResults?.[0]?.rawValue?.trim();
+        if (nativeText) {
+          acceptScannerDetection(nativeText);
+          return;
+        }
+      } catch (_) {
+        // Continue with the local ZXing multipass fallback.
+      }
+    }
+
     const reader = new Reader();
     configureZxingFormats(reader);
-    const result = await reader.decodeFromImageUrl(objectUrl);
-    const text = result?.getText?.() ?? result?.text;
-    if (!text) throw new Error("Barcode non trovato");
-    acceptScannerDetection(text);
+    const urls = [objectUrl];
+    if (bitmap) {
+      for (const rotation of [0, 90, -90, 180]) {
+        for (const highContrast of [false, true]) {
+          const canvas = scannerPhotoCanvas(bitmap, rotation, highContrast);
+          urls.push(canvas.toDataURL("image/jpeg", 0.96));
+        }
+      }
+    }
+
+    for (let index = 0; index < urls.length; index += 1) {
+      cameraHint.textContent =
+        index === 0
+          ? "Leggo il barcode dalla foto…"
+          : `Analisi barcode… tentativo ${index + 1}/${urls.length}`;
+      try {
+        const result = await reader.decodeFromImageUrl(urls[index]);
+        const text = result?.getText?.() ?? result?.text;
+        if (text) {
+          acceptScannerDetection(text);
+          return;
+        }
+      } catch (_) {
+        // Try the next rotation/contrast variant.
+      }
+    }
+    throw new Error("Barcode non trovato");
   } catch (_) {
     cameraHint.textContent =
-      "Non riesco a leggere il barcode dalla foto. Riprova più vicino oppure inseriscilo manualmente.";
+      "Non riesco a leggere il barcode dalla foto. Prova a riempire l'inquadratura col solo codice, senza riflessi, oppure inseriscilo manualmente.";
     scannerManualFallback.open = true;
   } finally {
+    bitmap?.close?.();
     URL.revokeObjectURL(objectUrl);
     if (scannerPhoto) scannerPhoto.value = "";
     scannerPhotoButton?.classList.remove("is-busy");
@@ -1696,22 +1774,56 @@ function renderScannerMatches(result) {
   scannerResult.querySelector("#scannerNextBarcode")?.addEventListener("click", beginNextScannerImport);
 }
 
-function renderScannerUnmatched(barcode) {
+function renderScannerUnmatched(barcode, lookup = null) {
+  const product = lookup?.product || null;
+  const candidates = lookup?.candidates || [];
+  const externalFailed = lookup?.external_lookup === "failed";
   scannerResult.innerHTML = `
     <div class="scanner-unmatched">
-      <strong>Barcode non associato</strong>
-      <p class="muted">
-        Cerca un gioco posseduto e assegna il codice <code>${escapeHtml(barcode)}</code>
-        a una copia fisica.
-      </p>
+      <strong>${product ? "Prodotto identificato, gioco da confermare" : "Barcode non riconosciuto automaticamente"}</strong>
+      ${product ? `
+        <p class="muted">
+          EAN/UPC: <code>${escapeHtml(barcode)}</code><br>
+          Prodotto: <strong>${escapeHtml(product.title || "Titolo non disponibile")}</strong>
+          ${product.brand ? ` · ${escapeHtml(product.brand)}` : ""}
+        </p>
+      ` : `
+        <p class="muted">
+          Non ho trovato un'associazione affidabile per <code>${escapeHtml(barcode)}</code>.
+          ${externalFailed ? "Il servizio di lookup esterno non era raggiungibile; puoi comunque scegliere il gioco manualmente." : "Puoi scegliere il gioco manualmente."}
+        </p>
+      `}
+      ${candidates.length ? `
+        <div class="scanner-game-results">
+          <p class="muted">Possibili corrispondenze nella tua ludoteca:</p>
+          ${candidates.map((game) => `
+            <button class="scanner-game-choice scanner-resolved-choice" type="button"
+                    data-bgg="${escapeHtml(game.bgg_id)}"
+                    data-title="${escapeHtml(game.title)}">
+              <strong>${escapeHtml(game.title)}</strong>
+              <span class="muted">Confidenza ${Math.round(Number(game.confidence || 0) * 100)}%</span>
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
       <div class="inline-input-action">
         <input id="scannerGameSearch" type="search" autocomplete="off"
-               placeholder="Cerca gioco posseduto…">
+               placeholder="Cerca gioco posseduto…"
+               value="${escapeHtml(product?.title || "")}">
         <button class="button button-ghost" id="scannerSearchGames" type="button">Cerca</button>
       </div>
       <div id="scannerGameResults" class="scanner-game-results"></div>
     </div>
   `;
+  scannerResult.querySelectorAll(".scanner-resolved-choice").forEach((button) => {
+    button.addEventListener("click", () => {
+      void assignScannedBarcodeToGame(
+        Number(button.dataset.bgg),
+        button.dataset.title,
+        barcode,
+      );
+    });
+  });
   const searchInput = scannerResult.querySelector("#scannerGameSearch");
   scannerResult.querySelector("#scannerSearchGames")?.addEventListener("click", () => {
     void searchScannerGames(searchInput.value, barcode);
@@ -1722,7 +1834,13 @@ function renderScannerUnmatched(barcode) {
       void searchScannerGames(searchInput.value, barcode);
     }
   });
-  window.setTimeout(() => searchInput?.focus(), 0);
+  if (product?.title && !candidates.length) {
+    window.setTimeout(() => {
+      void searchScannerGames(product.title, barcode);
+    }, 0);
+  } else {
+    window.setTimeout(() => searchInput?.focus(), 0);
+  }
 }
 
 async function lookupScannerBarcode(rawBarcode = null) {
@@ -1741,8 +1859,21 @@ async function lookupScannerBarcode(rawBarcode = null) {
     });
     if (result.count) {
       renderScannerMatches(result);
+    } else if (result.auto_match) {
+      scannerResult.innerHTML = `
+        <p class="muted">
+          Barcode riconosciuto come <strong>${escapeHtml(result.auto_match.title)}</strong>
+          · confidenza ${Math.round(Number(result.auto_match.confidence || 0) * 100)}%.
+          Associazione in corso…
+        </p>
+      `;
+      await assignScannedBarcodeToGame(
+        Number(result.auto_match.bgg_id),
+        result.auto_match.title,
+        barcode,
+      );
     } else {
-      renderScannerUnmatched(barcode);
+      renderScannerUnmatched(barcode, result);
     }
   } catch (error) {
     scannerResult.innerHTML =
