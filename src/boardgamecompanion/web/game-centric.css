@@ -582,7 +582,7 @@
 .catalog-head-compact-actions{gap:.5rem}
 .catalog-head-compact-actions .catalog-density-controls{grid-column:auto;justify-content:flex-end;gap:.45rem}
 .catalog-head-compact-actions .catalog-density-group{min-height:2.25rem;padding:.15rem .24rem .15rem .48rem}
-.catalog-scan-button{width:2.45rem;height:2.45rem;flex:0 0 auto;border-radius:11px;font-size:1rem}
+.catalog-scan-button{width:auto;min-width:2.45rem;height:2.45rem;flex:0 0 auto;gap:.38rem;padding:0 .65rem;border-radius:11px;font-size:1rem}
 .catalog-scan-button:hover,.catalog-scan-button:focus-visible{border-color:rgba(73,190,132,.42);color:#c8f1d8}
 #resultCount[hidden]{display:none!important}
 
@@ -644,7 +644,7 @@
   .catalog-head-compact-actions{align-items:stretch;flex-direction:column}
   .catalog-head-compact-actions .catalog-density-controls{display:grid;width:100%;justify-content:stretch}
   .catalog-head-compact-actions .catalog-density-group{width:100%;justify-content:space-between}
-  .catalog-scan-button{align-self:flex-end}
+  .catalog-scan-button{width:2.45rem;padding:0;align-self:flex-end}.catalog-scan-button span:last-child{display:none}
   .game-header-player{align-items:flex-start;flex-direction:column}
   .game-primary-actions{width:auto;justify-content:flex-start}
   .cover-rating-overlay{left:.3rem;right:.3rem;bottom:.3rem;padding:.28rem .35rem}
