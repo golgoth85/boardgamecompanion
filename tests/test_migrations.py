@@ -938,6 +938,6 @@ def test_v19_half_star_upgrade_preserves_existing_progress(tmp_path: Path) -> No
                 (game_id,),
             )
 
-    assert database.schema_version() == 20
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert dict(existing) == {"played_at": "2026-10-01", "personal_rating": 4.0}
     assert half == 3.5
