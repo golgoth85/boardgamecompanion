@@ -2325,9 +2325,10 @@ async function renderCatalog() {
             </div>
           </div>
         </div>
-          <button class="icon-button catalog-scan-button" id="scannerButton" type="button"
+          <button class="button button-ghost catalog-scan-button" id="scannerButton" type="button"
                   aria-label="Scansiona barcode" title="Scansiona barcode">
             <span aria-hidden="true">⌁</span>
+            <span>Scansiona</span>
           </button>
           <span id="resultCount" hidden></span>
         </div>
