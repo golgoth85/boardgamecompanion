@@ -12,6 +12,7 @@ from boardgamecompanion.app_settings import (
     resolve_youtube_settings,
 )
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.rulebook_availability import rulebook_availability_bgg_ids
 from boardgamecompanion.settings import settings
 
 router = APIRouter(tags=["diagnostics"])
@@ -23,6 +24,61 @@ def _status_counts(connection, table: str) -> dict[str, int]:
     ).fetchall()
     return {str(row["status"]): int(row["count"]) for row in rows}
 
+
+def _rulebook_discovery_counts(
+    connection,
+) -> tuple[dict[str, int], dict[str, int]]:
+    rows = connection.execute(
+        """
+        SELECT d.status,g.bgg_id,
+               EXISTS(
+                   SELECT 1 FROM game_documents doc
+                   WHERE doc.board_game_id=d.board_game_id
+                     AND doc.document_type='rulebook'
+               ) AS has_any_rulebook,
+               EXISTS(
+                   SELECT 1 FROM game_documents doc
+                   WHERE doc.board_game_id=d.board_game_id
+                     AND doc.document_type='rulebook'
+                     AND doc.is_official=1
+                     AND lower(substr(doc.language,1,2)) IN ('it','en')
+               ) AS has_preferred_rulebook
+        FROM rulebook_discovery_games d
+        JOIN board_games g ON g.id=d.board_game_id
+        """
+    ).fetchall()
+    classified = rulebook_availability_bgg_ids()
+    preferred_official_pdf = 0
+    fallback_pdf = 0
+    classified_without_pdf = 0
+    uncovered = 0
+    for row in rows:
+        if bool(row["has_preferred_rulebook"]):
+            preferred_official_pdf += 1
+            continue
+        if int(row["bgg_id"]) in classified:
+            classified_without_pdf += 1
+            continue
+        if bool(row["has_any_rulebook"]):
+            fallback_pdf += 1
+        else:
+            uncovered += 1
+
+    resolved = preferred_official_pdf + classified_without_pdf
+    searching_preferred = fallback_pdf + uncovered
+    discovery: dict[str, int] = {}
+    if resolved:
+        discovery["resolved"] = resolved
+    if searching_preferred:
+        discovery["searching_preferred"] = searching_preferred
+    return discovery, {
+        "official_it_en_pdf": preferred_official_pdf,
+        "fallback_pdf": fallback_pdf,
+        "classified_without_pdf": classified_without_pdf,
+        "covered_total": preferred_official_pdf + fallback_pdf + classified_without_pdf,
+        "searching_preferred_total": searching_preferred,
+        "uncovered_total": uncovered,
+    }
 
 def _cache_info(path: Path) -> dict[str, object]:
     try:
@@ -76,7 +132,9 @@ def diagnostics() -> dict[str, object]:
             ).fetchone()["count"]
             or 0
         )
-        rulebook_discovery = _status_counts(connection, "rulebook_discovery_games")
+        rulebook_discovery, rulebook_resolution = _rulebook_discovery_counts(
+            connection
+        )
         document_indexing = _status_counts(connection, "document_index_jobs")
 
     return {
@@ -102,6 +160,7 @@ def diagnostics() -> dict[str, object]:
         },
         "rulebooks": {
             "discovery": rulebook_discovery,
+            "resolution": rulebook_resolution,
             "indexing": document_indexing,
         },
         "personal": {

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from boardgamecompanion.bgg_metadata import BggMetadataStore
 from boardgamecompanion.database import Database
+from boardgamecompanion.rulebook_availability import rulebook_availability_bgg_ids
 from boardgamecompanion.rulebook_review import RulebookReviewQueue
 from boardgamecompanion.rulebooks import (
     OFFICIAL_SOURCES,
@@ -323,15 +324,32 @@ class RulebookDiscoveryService:
     def run_due(self, *, limit: int = 5) -> dict[str, Any]:
         self.synchronize_catalog()
         current = _now().isoformat()
+        cap = max(1, min(int(limit), 100))
+        classified = tuple(sorted(rulebook_availability_bgg_ids()))
+        classified_clause = (
+            " AND g.bgg_id NOT IN (" + ",".join("?" for _ in classified) + ")"
+            if classified
+            else ""
+        )
         with self.database.connect() as connection:
             rows = connection.execute(
-                """SELECT g.bgg_id FROM rulebook_discovery_games d JOIN board_games g ON g.id=d.board_game_id
-                   WHERE d.enabled=1 AND d.next_attempt_at<=? AND (d.lease_until IS NULL OR d.lease_until<=?)
-                   ORDER BY EXISTS(
-                       SELECT 1 FROM game_documents doc
-                       WHERE doc.board_game_id=d.board_game_id
-                         AND doc.document_type='rulebook'
-                   ), d.next_attempt_at,g.bgg_id LIMIT ?""", (current, current, max(1, min(int(limit), 100)))
+                f"""SELECT g.bgg_id
+                    FROM rulebook_discovery_games d
+                    JOIN board_games g ON g.id=d.board_game_id
+                    WHERE d.enabled=1
+                      AND d.next_attempt_at<=?
+                      AND (d.lease_until IS NULL OR d.lease_until<=?)
+                      AND NOT EXISTS(
+                          SELECT 1 FROM game_documents doc
+                          WHERE doc.board_game_id=d.board_game_id
+                            AND doc.document_type='rulebook'
+                            AND doc.is_official=1
+                            AND lower(substr(doc.language,1,2)) IN ('it','en')
+                      )
+                      {classified_clause}
+                    ORDER BY d.next_attempt_at,g.bgg_id
+                    LIMIT ?""",
+                (current, current, *classified, cap),
             ).fetchall()
         items = []
         for row in rows:

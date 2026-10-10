@@ -1135,6 +1135,69 @@ def test_discovery_routes_candidates_through_policy_and_rediscovery_is_idempoten
     assert community["policy_action"] == "review"
 
 
+def test_scheduled_discovery_skips_archived_and_curated_resolutions(
+    tmp_path: Path,
+) -> None:
+    db = database(tmp_path)
+    now = datetime.now(UTC).isoformat()
+    with db.transaction() as connection:
+        connection.execute(
+            """INSERT INTO board_games
+               (bgg_id,title,original_title,year_published,item_type,
+                source_metadata_json,created_at,updated_at)
+               VALUES (312509,'Arena: The Contest – Dragon Collection',
+                       'Arena: The Contest – Dragon Collection',2023,
+                       'boardgameexpansion','{}',?,?)""",
+            (now, now),
+        )
+        classified_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=312509"
+        ).fetchone()["id"]
+        connection.execute(
+            """INSERT INTO collection_entries
+               (board_game_id,own,version_publishers,source_metadata_json,
+                created_at,updated_at)
+               VALUES (?,1,'Dragori Games','{}',?,?)""",
+            (classified_id, now, now),
+        )
+        archived_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=173346"
+        ).fetchone()["id"]
+        connection.execute(
+            """INSERT INTO game_documents
+               (id,board_game_id,document_type,language,title,original_filename,
+                storage_path,sha256,size_bytes,source_kind,is_official,
+                created_at,updated_at)
+               VALUES ('archived-rules',?,'rulebook','en','Rules','rules.pdf',
+                       '/tmp/rules.pdf',?,1,'manual_upload',1,?,?)""",
+            (archived_id, "a" * 64, now, now),
+        )
+
+    provider = CountingProvider("official-primary", ())
+    service = RulebookDiscoveryService(db, (provider,))
+    assert service.synchronize_catalog() == 2
+
+    scheduled = service.run_due(limit=10)
+
+    assert scheduled == {"attempted": 0, "items": []}
+    assert provider.calls == 0
+
+    # A community-only fallback must not stop the periodic search for a
+    # preferred official IT/EN source.
+    with db.transaction() as connection:
+        connection.execute(
+            "UPDATE game_documents SET is_official=0 WHERE id='archived-rules'"
+        )
+    fallback_search = service.run_due(limit=10)
+    assert fallback_search["attempted"] == 1
+    assert fallback_search["items"][0]["bgg_id"] == 173346
+    assert provider.calls == 1
+
+    forced = service.run_game(312509, force=True)
+    assert forced["bgg_id"] == 312509
+    assert provider.calls == 2
+
+
 def test_discovery_status_read_does_not_resynchronize_catalog(tmp_path: Path) -> None:
     db = database(tmp_path)
     service = RulebookDiscoveryService(db, discovery_providers())
