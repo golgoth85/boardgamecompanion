@@ -96,6 +96,7 @@ def test_major_expansion_filter_excludes_minor_addons() -> None:
     assert minor_expansion_reason("Game: Metal Coins") == "coins"
     assert minor_expansion_reason("Middara: Bounty Pack – The Pit Boss") == "content_pack"
     assert minor_expansion_reason("Living Card Game: Chapter Pack") == "content_pack"
+    assert minor_expansion_reason("Arena: The Contest – Tanares Villain Pack") == "content_pack"
     assert minor_expansion_reason("Game: The Lost Kingdom") is None
 
 
@@ -132,6 +133,79 @@ def test_expansion_list_marks_owned_and_filters_micro_addons(tmp_path: Path) -> 
     assert payload["missing_count"] == 1
     assert payload["owned_count"] == 1
     assert payload["excluded_minor_count"] == 1
+
+
+def test_expansion_list_keeps_only_major_bgg_cohort(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    store = FakeMetadataStore(
+        100,
+        [
+            {"bgg_id": 204, "title": "Tanares Adventures"},
+            {"bgg_id": 205, "title": "Dragon Collection"},
+            {"bgg_id": 206, "title": "Madness Box"},
+            {"bgg_id": 207, "title": "Legendary Box"},
+            {"bgg_id": 208, "title": "The Silver Dragon"},
+            {"bgg_id": 209, "title": "Tanares Character Pack"},
+        ],
+        details={
+            204: {
+                "bgg_id": 204,
+                "title": "Tanares Adventures",
+                "item_type": "boardgameexpansion",
+                "year_published": 2023,
+                "bgg_average": 8.2,
+                "bgg_num_owned": 2500,
+            },
+            205: {
+                "bgg_id": 205,
+                "title": "Dragon Collection",
+                "item_type": "boardgameexpansion",
+                "year_published": 2023,
+                "bgg_average": 8.4,
+                "bgg_num_owned": 830,
+            },
+            206: {
+                "bgg_id": 206,
+                "title": "Madness Box",
+                "item_type": "boardgameexpansion",
+                "year_published": 2023,
+                "bgg_average": 8.0,
+                "bgg_num_owned": 700,
+            },
+            207: {
+                "bgg_id": 207,
+                "title": "Legendary Box",
+                "item_type": "boardgameexpansion",
+                "year_published": 2023,
+                "bgg_average": 8.1,
+                "bgg_num_owned": 661,
+            },
+            208: {
+                "bgg_id": 208,
+                "title": "The Silver Dragon",
+                "item_type": "boardgameexpansion",
+                "year_published": 2024,
+                "bgg_average": 8.0,
+                "bgg_num_owned": 257,
+            },
+            209: {
+                "bgg_id": 209,
+                "title": "Tanares Character Pack",
+                "item_type": "boardgameexpansion",
+                "year_published": 2023,
+                "bgg_average": 8.1,
+                "bgg_num_owned": 553,
+            },
+        },
+    )
+
+    payload = ExpansionService(db, store).list_for_game(100)
+
+    assert [item["bgg_id"] for item in payload["items"]] == [204, 205, 206, 207]
+    assert payload["importance_reference_owned"] == 2500
+    assert payload["importance_cutoff_owned"] == 625
+    assert payload["excluded_minor_count"] == 1
+    assert payload["excluded_unimportant_count"] == 1
 
 
 def test_expansion_watch_baselines_then_notifies_only_new_relevant_links(
