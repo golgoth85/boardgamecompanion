@@ -12,6 +12,7 @@ from boardgamecompanion.app_settings import (
     resolve_youtube_settings,
 )
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.rulebook_availability import rulebook_availability_bgg_ids
 from boardgamecompanion.settings import settings
 
 router = APIRouter(tags=["diagnostics"])
@@ -22,6 +23,45 @@ def _status_counts(connection, table: str) -> dict[str, int]:
         f"SELECT status,COUNT(*) AS count FROM {table} GROUP BY status"
     ).fetchall()
     return {str(row["status"]): int(row["count"]) for row in rows}
+
+
+def _rulebook_discovery_counts(
+    connection,
+) -> tuple[dict[str, int], dict[str, int]]:
+    rows = connection.execute(
+        """
+        SELECT d.status,g.bgg_id,
+               EXISTS(
+                   SELECT 1 FROM game_documents doc
+                   WHERE doc.board_game_id=d.board_game_id
+                     AND doc.document_type='rulebook'
+               ) AS has_rulebook
+        FROM rulebook_discovery_games d
+        JOIN board_games g ON g.id=d.board_game_id
+        """
+    ).fetchall()
+    classified = rulebook_availability_bgg_ids()
+    unresolved: dict[str, int] = {}
+    archived_pdf = 0
+    classified_without_pdf = 0
+    for row in rows:
+        if bool(row["has_rulebook"]):
+            archived_pdf += 1
+            continue
+        if int(row["bgg_id"]) in classified:
+            classified_without_pdf += 1
+            continue
+        status = str(row["status"])
+        unresolved[status] = unresolved.get(status, 0) + 1
+
+    resolved = archived_pdf + classified_without_pdf
+    discovery = ({"resolved": resolved} if resolved else {}) | unresolved
+    return discovery, {
+        "archived_pdf": archived_pdf,
+        "classified_without_pdf": classified_without_pdf,
+        "resolved_total": resolved,
+        "unresolved_total": sum(unresolved.values()),
+    }
 
 
 def _cache_info(path: Path) -> dict[str, object]:
@@ -76,7 +116,9 @@ def diagnostics() -> dict[str, object]:
             ).fetchone()["count"]
             or 0
         )
-        rulebook_discovery = _status_counts(connection, "rulebook_discovery_games")
+        rulebook_discovery, rulebook_resolution = _rulebook_discovery_counts(
+            connection
+        )
         document_indexing = _status_counts(connection, "document_index_jobs")
 
     return {
@@ -102,6 +144,7 @@ def diagnostics() -> dict[str, object]:
         },
         "rulebooks": {
             "discovery": rulebook_discovery,
+            "resolution": rulebook_resolution,
             "indexing": document_indexing,
         },
         "personal": {
