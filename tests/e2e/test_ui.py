@@ -158,6 +158,33 @@ def open_barcode_scanner(page) -> None:
     scanner_button.click()
 
 
+def route_unresolved_barcode_lookup(page) -> None:
+    """Keep scanner UI E2E deterministic; backend resolver has dedicated tests."""
+
+    def lookup(route):
+        payload = route.request.post_data_json or {}
+        barcode = str(payload.get("barcode") or "")
+        normalized = re.sub(r"[^0-9A-Za-z]+", "", barcode)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "count": 0,
+                    "normalized": normalized,
+                    "items": [],
+                    "resolution": "unresolved",
+                    "product": None,
+                    "auto_match": None,
+                    "candidates": [],
+                    "external_lookup": "test_stub",
+                }
+            ),
+        )
+
+    page.route(re.compile(r".*/api/barcodes/lookup$"), lookup)
+
+
 def make_many_games_csv(path: Path, count: int = 30) -> Path:
     with SAMPLE.open("r", encoding="utf-8", newline="") as source:
         reader = csv.DictReader(source)
@@ -1417,6 +1444,7 @@ def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
 
 def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live_server):
     context, page = new_page(browser)
+    route_unresolved_barcode_lookup(page)
     try:
         import_csv(page, live_server)
 
@@ -1424,7 +1452,7 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
         page.locator("#scannerBarcode").fill("222-222-222")
         page.get_by_role("button", name="Cerca", exact=True).click()
 
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
         page.locator("#scannerGameSearch").fill("Beta")
         page.locator("#scannerSearchGames").click()
         expect(page.locator(".scanner-game-choice")).to_have_count(1)
@@ -2126,12 +2154,13 @@ def _install_camera_stub(page, *, native_code: str | None = None) -> None:
 def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, live_server):
     context, page = new_page(browser, mobile=True)
     _install_camera_stub(page, native_code="8001234567890")
+    route_unresolved_barcode_lookup(page)
     try:
         page.goto(live_server)
         open_barcode_scanner(page)
 
         expect(page.locator("#scannerDialog")).to_be_visible()
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
         expect(page.locator("#scannerBarcode")).to_have_value("8001234567890")
         assert page.evaluate("window.__bgcCameraRequests") == 1
         assert page.evaluate("window.__bgcNativeFormats") == [
@@ -2177,10 +2206,11 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
         ),
     )
 
+    route_unresolved_barcode_lookup(page)
     try:
         page.goto(live_server)
         open_barcode_scanner(page)
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
         expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
         assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
         constraints = page.evaluate("window.__bgcZxingConstraints")
@@ -2208,6 +2238,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
         };
         """
     )
+    route_unresolved_barcode_lookup(page)
     try:
         page.goto(live_server)
         open_barcode_scanner(page)
@@ -2216,7 +2247,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
         page.locator("#scannerBarcode").fill("1234567890123")
         page.locator("#lookupBarcode").click()
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non associato")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
         expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
 
         page.evaluate(
@@ -2733,8 +2764,13 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
             status=200,
             content_type="application/json",
             body=json.dumps({
-                **state,
-                "review_items": [],
+                "bgg_id": 900001,
+                "availability": None,
+                "discovery": {
+                    **state,
+                    "review_items": [],
+                },
+                "acquisition": {"results": []},
             }),
         )
 
@@ -2745,7 +2781,7 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
             discovery_status,
         )
         page.route(
-            re.compile(r".*/api/games/900001/rulebook-discovery/run$"),
+            re.compile(r".*/api/games/900001/rulebook-acquire/run$"),
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
@@ -2826,7 +2862,12 @@ def test_rulebook_search_allows_google_after_completed_miss_with_provider_failur
         route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({**state, "review_items": []}),
+            body=json.dumps({
+                "bgg_id": 900001,
+                "availability": None,
+                "discovery": {**state, "review_items": []},
+                "acquisition": {"results": []},
+            }),
         )
 
     try:
@@ -2836,7 +2877,7 @@ def test_rulebook_search_allows_google_after_completed_miss_with_provider_failur
             discovery_status,
         )
         page.route(
-            re.compile(r".*/api/games/900001/rulebook-discovery/run$"),
+            re.compile(r".*/api/games/900001/rulebook-acquire/run$"),
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
@@ -2881,11 +2922,16 @@ def test_rulebook_search_candidates_keep_single_known_source_action(
             status=200,
             content_type="application/json",
             body=json.dumps({
-                **state,
-                "review_items": [
-                    {"status": "approved"},
-                    {"status": "pending"},
-                ],
+                "bgg_id": 900001,
+                "availability": None,
+                "discovery": {
+                    **state,
+                    "review_items": [
+                        {"status": "approved"},
+                        {"status": "pending"},
+                    ],
+                },
+                "acquisition": {"results": []},
             }),
         )
 
@@ -2896,13 +2942,13 @@ def test_rulebook_search_candidates_keep_single_known_source_action(
             discovery_status,
         )
         page.route(
-            re.compile(r".*/api/games/900001/rulebook-discovery/run$"),
+            re.compile(r".*/api/games/900001/rulebook-acquire/run$"),
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         page.get_by_role("button", name="Cerca automaticamente").click()
         expect(page.locator("#toast")).to_contain_text(
-            "Trovate 2 fonti: 1 approvate, 1 da verificare"
+            "Trovata una fonte da verificare"
         )
         expect(
             page.get_by_role("button", name="Aggiorna ricerca automatica")
