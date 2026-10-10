@@ -1386,14 +1386,24 @@ function configureZxingFormats(reader) {
 
 
 function scannerPhotoCanvas(bitmap, rotation = 0, highContrast = false) {
+  const maxSide = 2600;
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const sourceWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const sourceHeight = Math.max(1, Math.round(bitmap.height * scale));
   const quarterTurn = Math.abs(rotation) % 180 === 90;
   const canvas = document.createElement("canvas");
-  canvas.width = quarterTurn ? bitmap.height : bitmap.width;
-  canvas.height = quarterTurn ? bitmap.width : bitmap.height;
+  canvas.width = quarterTurn ? sourceHeight : sourceWidth;
+  canvas.height = quarterTurn ? sourceWidth : sourceHeight;
   const context = canvas.getContext("2d", {willReadFrequently: highContrast});
   context.translate(canvas.width / 2, canvas.height / 2);
   context.rotate((rotation * Math.PI) / 180);
-  context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  context.drawImage(
+    bitmap,
+    -sourceWidth / 2,
+    -sourceHeight / 2,
+    sourceWidth,
+    sourceHeight,
+  );
   context.setTransform(1, 0, 0, 1, 0, 0);
 
   if (highContrast) {
@@ -1453,30 +1463,42 @@ async function decodeScannerPhoto(file) {
 
     const reader = new Reader();
     configureZxingFormats(reader);
-    const urls = [objectUrl];
-    if (bitmap) {
-      for (const rotation of [0, 90, -90, 180]) {
-        for (const highContrast of [false, true]) {
-          const canvas = scannerPhotoCanvas(bitmap, rotation, highContrast);
-          urls.push(canvas.toDataURL("image/jpeg", 0.96));
-        }
+    try {
+      const result = await reader.decodeFromImageUrl(objectUrl);
+      const text = result?.getText?.() ?? result?.text;
+      if (text) {
+        acceptScannerDetection(text);
+        return;
       }
+    } catch (_) {
+      // Continue with processed variants.
     }
 
-    for (let index = 0; index < urls.length; index += 1) {
-      cameraHint.textContent =
-        index === 0
-          ? "Leggo il barcode dalla foto…"
-          : `Analisi barcode… tentativo ${index + 1}/${urls.length}`;
-      try {
-        const result = await reader.decodeFromImageUrl(urls[index]);
-        const text = result?.getText?.() ?? result?.text;
-        if (text) {
-          acceptScannerDetection(text);
-          return;
+    if (bitmap) {
+      const variants = [];
+      for (const rotation of [0, 90, -90, 180]) {
+        for (const highContrast of [false, true]) {
+          variants.push({rotation, highContrast});
         }
-      } catch (_) {
-        // Try the next rotation/contrast variant.
+      }
+      for (let index = 0; index < variants.length; index += 1) {
+        const {rotation, highContrast} = variants[index];
+        cameraHint.textContent =
+          `Analisi barcode… tentativo ${index + 2}/${variants.length + 1}`;
+        const canvas = scannerPhotoCanvas(bitmap, rotation, highContrast);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.94);
+        try {
+          const result = await reader.decodeFromImageUrl(dataUrl);
+          const text = result?.getText?.() ?? result?.text;
+          if (text) {
+            acceptScannerDetection(text);
+            return;
+          }
+        } catch (_) {
+          // Try the next rotation/contrast variant.
+        }
+        canvas.width = 1;
+        canvas.height = 1;
       }
     }
     throw new Error("Barcode non trovato");
