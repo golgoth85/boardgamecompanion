@@ -24,8 +24,10 @@ Manual barcode entry remains available as a fallback, not the primary path.
 - Stop every scan loop and media track after a result, dialog close, or manual stop.
 - Prevent duplicate handling of the same frame/result with a per-session detection lock.
 - Distinguish permission denied, no camera, busy camera and insecure-context failures.
-- Keep existing known-barcode and unknown-barcode association behavior unchanged.
-- Keep manual lookup operational even if every camera path fails.
+- Keep existing known-barcode behavior unchanged.
+- For an unknown EAN/UPC, resolve product metadata through a bounded external barcode lookup, cache the result locally, and compare it only against owned games.
+- Auto-associate only a high-confidence, unambiguous owned-game match; otherwise present candidates and retain manual selection.
+- Keep manual lookup operational even if every camera or external lookup path fails.
 
 ## Dependency rule
 
@@ -35,7 +37,7 @@ There is no runtime CDN dependency. Its MIT license and the bundled
 
 ## Out of scope
 
-- External EAN/UPC product databases.
+- Automatic import of a game that is not already in the owned catalog.
 - Treating a BGG product code as a UPC/EAN/ISBN.
 - Automatic reassignment of an already-barcoded physical copy.
 - BGG credentials or metadata enrichment.

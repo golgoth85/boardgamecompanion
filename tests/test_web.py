@@ -123,5 +123,8 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "tutorialDiscoveryAction" in js.text
     assert "tutorialVideoCard" in js.text
     assert "tutorial-video-frame" in js.text
+    assert "scannerPhotoCanvas" in js.text
+    assert "result.auto_match" in js.text
+    assert "Scansiona</span>" in js.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text

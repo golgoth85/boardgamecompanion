@@ -38,6 +38,7 @@ from boardgamecompanion.bgg_collection_sync import (
     BggCollectionSyncService,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
+from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
     BggApiClient,
     BggApiConfig,
@@ -1122,7 +1123,7 @@ def lookup_barcode(payload: BarcodeLookupRequest) -> dict[str, object]:
     database = get_database()
     database.initialize()
     try:
-        return PhysicalCopyStore(database).lookup_barcode(payload.barcode)
+        return BarcodeResolver(database).lookup(payload.barcode)
     except PhysicalCopyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
