@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 20
+    assert first_version == LATEST_SCHEMA_VERSION == 21
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -57,6 +57,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (18, "personal-library-foundation"),
         (19, "crowdfunding-notification-baseline"),
         (20, "half-star-personal-ratings"),
+        (21, "tutorial-discovery-state"),
     ]
     assert {
         "board_games",
@@ -87,6 +88,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "game_progress",
         "board_game_gameplay_summaries",
         "game_tutorial_videos",
+        "tutorial_discovery_state",
         "personal_wishlist",
         "saved_game_lists",
         "saved_game_list_items",
@@ -861,7 +863,7 @@ def test_notification_baseline_upgrade_preserves_previous_watch_state(
         previous = connection.execute(
             "SELECT title FROM crowdfunding_watch_state WHERE campaign_key='old-project'"
         ).fetchone()
-    assert database.schema_version() == 20
+    assert database.schema_version() == LATEST_SCHEMA_VERSION
     assert baseline is not None
     assert previous["title"] == "Existing Project"
 
