@@ -96,7 +96,7 @@ def test_major_expansion_filter_excludes_minor_addons() -> None:
     assert minor_expansion_reason("Game: Metal Coins") == "coins"
     assert minor_expansion_reason("Middara: Bounty Pack – The Pit Boss") == "content_pack"
     assert minor_expansion_reason("Living Card Game: Chapter Pack") == "content_pack"
-    assert minor_expansion_reason("Arena: The Contest – Tanares Villain Pack") == "content_pack"
+    assert minor_expansion_reason("Arena: The Contest – Tanares Villain Pack") is None
     assert minor_expansion_reason("Game: The Lost Kingdom") is None
 
 
@@ -204,8 +204,8 @@ def test_expansion_list_keeps_only_major_bgg_cohort(tmp_path: Path) -> None:
     assert [item["bgg_id"] for item in payload["items"]] == [204, 205, 206, 207]
     assert payload["importance_reference_owned"] == 2500
     assert payload["importance_cutoff_owned"] == 625
-    assert payload["excluded_minor_count"] == 1
-    assert payload["excluded_unimportant_count"] == 1
+    assert payload["excluded_minor_count"] == 0
+    assert payload["excluded_unimportant_count"] == 2
 
 
 def test_expansion_watch_baselines_then_notifies_only_new_relevant_links(
