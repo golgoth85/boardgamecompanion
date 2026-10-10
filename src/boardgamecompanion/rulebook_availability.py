@@ -289,6 +289,12 @@ _AVAILABILITY: dict[int, RulebookAvailability] = {
 }
 
 
+def rulebook_availability_bgg_ids() -> frozenset[int]:
+    """Return curated BGG IDs whose lack of a standalone PDF is already resolved."""
+
+    return frozenset(_AVAILABILITY)
+
+
 def get_rulebook_availability(bgg_id: int) -> dict[str, object] | None:
     item = _AVAILABILITY.get(int(bgg_id))
     return item.as_payload() if item is not None else None
