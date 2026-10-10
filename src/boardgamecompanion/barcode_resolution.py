@@ -207,10 +207,11 @@ class BarcodeResolver:
             rows = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
-                       g.cover_url,
+                       e.cover_url,
                        GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
                 FROM board_games g
                 JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
                 WHERE COALESCE(c.own,0)=1
                 GROUP BY g.id
                 ORDER BY g.title COLLATE NOCASE
