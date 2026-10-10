@@ -52,7 +52,7 @@ def test_unknown_barcode_resolves_owned_game_from_product_title(tmp_path: Path) 
     lookup = FakeLookup(
         {
             "barcode": "4000000000001",
-            "title": "Example Publisher Alpha Game Board Game English Edition",
+            "title": "Example Publisher Synthetic Alpha Board Game English Edition",
             "brand": "Example Publisher",
             "category": "Toys & Games",
             "description": "Tabletop strategy game",
@@ -77,7 +77,7 @@ def test_external_result_is_cached_in_app_settings(tmp_path: Path) -> None:
     lookup = FakeLookup(
         {
             "barcode": "4000000000002",
-            "title": "Alpha Game Board Game",
+            "title": "Synthetic Alpha Board Game",
             "brand": "Example Publisher",
             "category": "Toys & Games",
             "description": None,
