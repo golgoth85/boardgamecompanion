@@ -1,110 +1,185 @@
-# BoardGameCompanion roadmap after P7, P5 remediation and standalone consolidation
+# BoardGameCompanion — current roadmap
 
-This roadmap is based on the repository state after P6B, not on historical chat state.
+This document reflects the live application and repository audit completed on
+2026-10-10. Older phase documents remain useful as architectural history, but
+they must not be read as unfinished product milestones.
 
-## Current status — pre-UI-redesign freeze
+## Current product state
 
-The P3B, direct BGG metadata, provider discovery, guarded rulebook lifecycle and
-P7 ingest/retrieval/RAG work described below are implemented on current `main`.
-They are retained here as architectural history and regression boundaries, not as
-an ordered list of unfinished milestones.
+BoardGameCompanion is a standalone, self-hosted companion for a physical board-game
+collection. The major product areas below are implemented on `main` and were
+present in the live application during the audit:
 
-The next major product phase is a full information-architecture/UI redesign.
-Before that redesign, the consolidation change tracked in PR #54 reduces the
-game-detail rulebook workflow to one known-source-first action with Google as a
-second-click human-reviewed fallback after a completed zero-candidate search.
-See `docs/PRE_UI_REDESIGN_READINESS.md`.
+- BGG collection synchronization, metadata enrichment, catalog search/filtering,
+  rankings and Explore views;
+- personal ratings, played/completed state, lists, wishlist, global search and
+  notifications;
+- barcode/copy workflow;
+- game-centric detail pages;
+- rulebook discovery, review, guarded acquisition, archival, scheduled updates,
+  PDF ingest, chunking, embeddings, retrieval and grounded Q&A;
+- YouTube tutorial discovery and persisted video metadata;
+- personalized Suggestions for games not already owned;
+- owned-catalog AI recommendations ("Consigliami un gioco");
+- Gamefound/Kickstarter crowdfunding discovery;
+- relevant-expansion discovery and notifications;
+- LM Studio/Gemini provider configuration, diagnostics and Wake-on-LAN.
 
-Known-provider coverage is intentionally not treated as universal: live
-pre-redesign sampling demonstrated that some publisher sites fail or expose no
-usable candidate. Those cases are a normal reason to enter the Google/manual
-upload fallback rather than a reason to add publisher-specific UI controls.
+The full information-architecture/UI redesign is no longer a future phase: the
+current UI already incorporates the redesign and subsequent simplification work.
 
-## Architectural boundary: standalone BGC
+## Rulebooks — completed core work
 
-BoardGameCompanion owns the complete board-game workflow: catalog import, physical
-copies, local barcode mappings, direct BGG metadata enrichment, documents, rulebook
-lifecycle, retrieval and RAG. No external catalog manager is required for core
-operation.
+The 2026-10-10 live audit found 154 owned catalog titles and no uncovered title:
 
-BGC may use its own approved BGG XML API2 Application Token for exact-ID metadata
-enrichment. The token can be stored from the web UI or supplied through the
-`BGC_BGG_APPLICATION_TOKEN` runtime override; it is optional and never committed.
-BGC owns its cache, five-second rate gate, bounded retries and exact-identity
-validation. CSV import and all local domain workflows remain usable without it.
-Private BGG JSON APIs and authenticated scraping remain prohibited.
+- 120 have an official Italian or English rulebook PDF;
+- 10 have a usable fallback PDF while background discovery continues looking for
+  a preferred official IT/EN source;
+- 24 are curated cases where a normal standalone PDF is not expected or where
+  rules are carried by another official artifact (components/cards, physical
+  booklet, shared/external exact manual, etc.);
+- `uncovered_total = 0`.
 
-BGG version product codes must not be treated as UPC/EAN/ISBN identifiers. The
-local invariant remains:
+Periodic discovery now stops for games already resolved by an official IT/EN PDF
+or a curated no-standalone-PDF classification, while fallback-only titles remain
+eligible for improvement. Manual forced discovery remains available.
 
-barcode -> OwnedCopy -> BoardGame
+RAG was verified live end to end: LM Studio embeddings + Gemini generation returned
+a grounded Italian answer from an official Italian rulebook with a page-level
+citation and no version conflict.
 
-and must continue to work when BGG is offline.
+Rulebook work is therefore maintenance rather than a product phase. Remaining
+activity is opportunistic: replace the 10 fallback documents with preferred
+official IT/EN sources when exact identity can be verified.
 
-## Ordered work
+## Expansions — major-only policy
 
-### P3B — camera-first barcode hardening
+The game-detail expansion box intentionally does not mirror every BGG expansion
+link. It first rejects obvious micro-content (promos, packs, accessories, minis,
+replacement/media items, etc.) and then selects the materially relevant cohort
+using BGG ownership relative to the most widely owned expansion for that base
+game, with a bounded result set.
 
-Native BarcodeDetector is used when available, with a bundled local ZXing fallback
-and manual entry as the final fallback. The scanner supports repeated import:
-unknown codes can be assigned to an unbarcoded owned copy or create a new physical
-copy, then the same session continues with the next barcode.
-### M1 — direct optional BGG metadata enrichment
+Live verification on Arena: The Contest reduced the linked expansion set to six
+material expansions and filtered fifteen marginal entries.
 
-Use the official XML API2 directly from BoardGameCompanion for exact canonical IDs.
+## Residual roadmap
 
-Initial enrichment scope:
-- cover image;
-- description;
+### P1 — Recommendation quality
+
+#### Suggestions candidate universe
+
+The Suggestions module is implemented, grounded and live, but its current discovery
+pool is BGG Hot with a default candidate limit of 50. Expand the bounded candidate
+universe beyond the current Hot list so "Per te" and "Più diversi" can discover
+high-quality games outside short-term popularity.
+
+Target properties:
+
+- bounded/cached pool rather than full-database ingestion;
+- deterministic exclusion of owned titles and expansions where inappropriate;
+- diversity across mechanics, categories, weight, duration and age;
+- stable scoring before AI editorial generation;
+- rotation/pagination so refresh does not simply recycle the same small cohort.
+
+#### Owned-catalog assistant constraints
+
+"Consigliami un gioco" correctly restricts IDs to owned catalog entries, but the
+AI currently interprets hard constraints itself. The live audit produced a
+cooperative-game request that included Sagrada despite its metadata not declaring
+the Cooperative Game mechanic.
+
+Add deterministic constraint extraction/filtering or a strict post-validator for
+hard requirements such as:
+
+- cooperative vs competitive;
 - player count;
-- play time;
-- rating and rating count;
-- categories;
-- designers;
-- publisher;
-- source/provenance and fetched/refreshed timestamps.
+- maximum duration;
+- age;
+- complexity/weight;
+- requested/excluded mechanics or categories.
 
-Refresh must be controlled and cached. CSV import remains independently usable.
-BGG outage or an absent token must not make the local catalog unusable.
+The model should explain/rank already valid candidates, not redefine their factual
+properties.
 
-Edition, language, version and product-code enrichment are deferred until the
-provider boundary exposes trustworthy data for them.
+### P1 — Tutorial coverage
 
-### P5 remediation — concrete provider discovery
+The tutorial-video feature and YouTube integration are implemented and configured,
+but persisted coverage is sparse: the audit found videos already stored for only
+6 of 154 owned games.
 
-Add isolated Repos Production, Asmodee Italia and RuleBook.org adapters; a
-persistent bounded catalog scheduler; per-provider failure audit; IT/EN discovery;
-and the existing resolver → P6A → P5B/P6B path. RuleBook.org remains community
-trust and cannot be auto-promoted. A separate persistent worker automatically
-runs the existing P7 ingest, chunk and embedding stages after archival.
+Add bounded catalog-wide/background discovery with:
 
-### P7A — PDF parsing and page model
+- IT first, then EN;
+- official channels preferred where available;
+- existing relevance/review/unboxing/playthrough filters retained;
+- rate-limit-aware batching and retry;
+- no requirement for the user to open each game page manually to populate videos.
 
-Ingest archived PDFs only after archive safety. Preserve document identity, exact
-page identity, faithful extracted text, language, version, edition, document type,
-official/community provenance and parser diagnostics. No ingest-time summarization.
-### P7B — chunking and index persistence
+### P1 — Crowdfunding relevance
 
-Persist chunks with game, document, page, language, version/edition, document type,
-source/trust and deterministic content identity. No chunk may exist without provenance.
+Gamefound and Kickstarter/Apify are live, but the audit found a Kickstarter
+Tabletop false positive that was not a board game. Add a board-game relevance
+filter before ranking/notification so category noise cannot enter the normal
+feed.
 
-### P7C — embeddings and retrieval
+### P2 — CI coverage
 
-Benchmark local embedding choices and vector storage before committing to Ollama
-or Qdrant. Retrieval policy prefers current official documents in the requested
-language, then official English, then explicitly marked community material.
-Contradictory versions or editions are never silently mixed.
+Universal Local CI is the ordinary application gate, but the current BGC
+`pytest-v1` profile runs Python tests with `tests/e2e` excluded. It also does not
+make real Node/JavaScript syntax validation a required BGC gate.
 
-### P7D — answer generation and citations
+Extend the trusted Local CI profile to include:
 
-Generate answers only from retrieved evidence, cite document and page, surface
-official/community status and version conflicts, and return not-found rather than
-fabricating an answer.
+- JavaScript syntax validation;
+- Playwright desktop/mobile E2E;
+- the existing Python suite;
+- the same exact-source-SHA and cleanup attestation guarantees.
 
-### P7E — query UI
+Do not restore routine GitHub-hosted application CI.
 
-Add the game-scoped query experience, evidence/citation navigation, document
-version/language visibility, and explicit conflict/not-found states.
+### P2 — Container publishing
 
-Every phase remains independently reviewable and follows the branch -> tests ->
-PR -> exact-HEAD CI -> independent review -> merge gate.
+Trusted NAS image build and smoke tests work, and deployment can use the immutable
+local image. GHCR push currently fails because the token used at the release
+boundary lacks the required package-write scope.
+
+Fix the GHCR credential/scope so immutable images can also be published normally.
+This is an infrastructure issue, not an application blocker.
+
+### P2 — Wake-on-LAN acceptance
+
+The BGC endpoint successfully emits the magic packet and LM Studio is reachable
+after the request. Complete one physical acceptance test with the gaming PC
+actually asleep/off:
+
+`sleep/off -> BGC wake -> PC online -> LM Studio ready -> AI operation succeeds`.
+
+### P3 — Maintenance and documentation
+
+- keep this roadmap and README aligned with the current UI terminology and runtime;
+- periodically review the 10 fallback-only rulebooks for preferred official IT/EN
+  replacements;
+- keep notification volume/retention under review as background producers grow;
+- continue removing obsolete historical branches/PRs rather than treating them as
+  active roadmap items.
+
+## Architectural invariants
+
+- BGC remains standalone for core board-game workflows.
+- BGG `objectid` is the canonical external game identity.
+- BGG version product codes are not UPC/EAN/ISBN identifiers.
+- The physical-copy invariant remains:
+
+  `barcode -> OwnedCopy -> BoardGame`
+
+- Rulebook auto-acquisition remains fail-closed: exact identity, trusted source and
+  policy approval are required.
+- Community or lower-confidence documents never silently replace authoritative
+  sources.
+- RAG answers remain grounded in archived evidence with page citations and explicit
+  conflict/not-found behavior.
+- External provider failures must degrade gracefully without making the local
+  catalog unusable.
+
+Changes continue to follow branch -> tests -> PR -> exact-HEAD Local CI -> merge.
