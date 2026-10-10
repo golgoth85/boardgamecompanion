@@ -35,34 +35,50 @@ def _rulebook_discovery_counts(
                    SELECT 1 FROM game_documents doc
                    WHERE doc.board_game_id=d.board_game_id
                      AND doc.document_type='rulebook'
-               ) AS has_rulebook
+               ) AS has_any_rulebook,
+               EXISTS(
+                   SELECT 1 FROM game_documents doc
+                   WHERE doc.board_game_id=d.board_game_id
+                     AND doc.document_type='rulebook'
+                     AND doc.is_official=1
+                     AND lower(substr(doc.language,1,2)) IN ('it','en')
+               ) AS has_preferred_rulebook
         FROM rulebook_discovery_games d
         JOIN board_games g ON g.id=d.board_game_id
         """
     ).fetchall()
     classified = rulebook_availability_bgg_ids()
-    unresolved: dict[str, int] = {}
-    archived_pdf = 0
+    preferred_official_pdf = 0
+    fallback_pdf = 0
     classified_without_pdf = 0
+    uncovered = 0
     for row in rows:
-        if bool(row["has_rulebook"]):
-            archived_pdf += 1
+        if bool(row["has_preferred_rulebook"]):
+            preferred_official_pdf += 1
             continue
         if int(row["bgg_id"]) in classified:
             classified_without_pdf += 1
             continue
-        status = str(row["status"])
-        unresolved[status] = unresolved.get(status, 0) + 1
+        if bool(row["has_any_rulebook"]):
+            fallback_pdf += 1
+        else:
+            uncovered += 1
 
-    resolved = archived_pdf + classified_without_pdf
-    discovery = ({"resolved": resolved} if resolved else {}) | unresolved
+    resolved = preferred_official_pdf + classified_without_pdf
+    searching_preferred = fallback_pdf + uncovered
+    discovery: dict[str, int] = {}
+    if resolved:
+        discovery["resolved"] = resolved
+    if searching_preferred:
+        discovery["searching_preferred"] = searching_preferred
     return discovery, {
-        "archived_pdf": archived_pdf,
+        "official_it_en_pdf": preferred_official_pdf,
+        "fallback_pdf": fallback_pdf,
         "classified_without_pdf": classified_without_pdf,
-        "resolved_total": resolved,
-        "unresolved_total": sum(unresolved.values()),
+        "covered_total": preferred_official_pdf + fallback_pdf + classified_without_pdf,
+        "searching_preferred_total": searching_preferred,
+        "uncovered_total": uncovered,
     }
-
 
 def _cache_info(path: Path) -> dict[str, object]:
     try:
