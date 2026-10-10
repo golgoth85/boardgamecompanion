@@ -82,6 +82,7 @@ class SuggestionsService:
         editorial_service: SuggestionEditorialService | None = None,
         cache_ttl_seconds: int = 24 * 60 * 60,
         candidate_limit: int = 50,
+        candidate_pool_limit: int = 500,
     ) -> None:
         self.database = database
         self.client = client
@@ -89,6 +90,10 @@ class SuggestionsService:
         self.editorial_service = editorial_service
         self.cache_ttl_seconds = int(cache_ttl_seconds)
         self.candidate_limit = max(20, min(int(candidate_limit), 100))
+        self.candidate_pool_limit = max(
+            self.candidate_limit,
+            min(int(candidate_pool_limit), 1000),
+        )
 
     def _owned_ids(self) -> set[int]:
         with self.database.connect() as connection:
@@ -384,7 +389,7 @@ class SuggestionsService:
         return (
             payload
             if isinstance(payload, dict)
-            and payload.get("schema_version") == 2
+            and payload.get("schema_version") in {2, 3}
             and isinstance(payload.get("items"), list)
             else None
         )
@@ -418,6 +423,37 @@ class SuggestionsService:
         )
         temporary.replace(self.cache_path)
 
+    @staticmethod
+    def _cached_item_to_metadata(item: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            bgg_id = int(item["bgg_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        players = item.get("players") or {}
+        play_time = item.get("play_time") or {}
+        bgg = item.get("bgg") or {}
+        return {
+            "bgg_id": bgg_id,
+            "title": item.get("title"),
+            "year_published": item.get("year_published"),
+            "parent_bgg_id": None,
+            "cover_url": item.get("cover_url"),
+            "min_players": players.get("min"),
+            "max_players": players.get("max"),
+            "playing_time": play_time.get("playing"),
+            "min_play_time": play_time.get("min"),
+            "max_play_time": play_time.get("max"),
+            "bgg_average": bgg.get("average"),
+            "bgg_bayes_average": bgg.get("bayes_average"),
+            "bgg_average_weight": bgg.get("average_weight"),
+            "bgg_rank": bgg.get("rank"),
+            "bgg_best_players": players.get("best"),
+            "bgg_recommended_players": players.get("recommended"),
+            "categories": list(item.get("categories") or []),
+            "mechanics": list(item.get("mechanics") or []),
+            "description": item.get("source_description"),
+        }
+
     def _refresh(self) -> dict[str, Any]:
         if self.client is None:
             raise SuggestionsError(
@@ -428,18 +464,25 @@ class SuggestionsService:
         owned_ids = self._owned_ids()
         owned_games = Catalog(self.database).assistant_candidates(limit=250)
         profile = self._profile(owned_games)
+        previous = self._read_cache()
+        previous_items = [
+            item
+            for item in (previous or {}).get("items", [])
+            if isinstance(item, dict)
+        ]
+
         try:
             hot = self.client.hot(limit=self.candidate_limit)
-            candidate_ids = [
+            current_hot_ids = [
                 int(item["bgg_id"])
                 for item in hot
                 if int(item["bgg_id"]) not in owned_ids
             ]
             metadata_by_id: dict[int, dict[str, Any]] = {}
-            for start in range(0, len(candidate_ids), 20):
+            for start in range(0, len(current_hot_ids), 20):
                 metadata_by_id.update(
                     self.client.things(
-                        candidate_ids[start : start + 20]
+                        current_hot_ids[start : start + 20]
                     )
                 )
         except BggMetadataError as exc:
@@ -449,8 +492,27 @@ class SuggestionsService:
             int(item["bgg_id"]): item
             for item in hot
         }
+
+        history_order: list[int] = []
+        historical_metadata: dict[int, dict[str, Any]] = {}
+        for item in previous_items:
+            metadata = self._cached_item_to_metadata(item)
+            if metadata is None:
+                continue
+            bgg_id = int(metadata["bgg_id"])
+            if bgg_id in owned_ids or bgg_id in metadata_by_id:
+                continue
+            history_order.append(bgg_id)
+            historical_metadata[bgg_id] = metadata
+
+        pool_ids = list(dict.fromkeys([*current_hot_ids, *history_order]))
+        pool_ids = pool_ids[: self.candidate_pool_limit]
+        for bgg_id in pool_ids:
+            if bgg_id not in metadata_by_id and bgg_id in historical_metadata:
+                metadata_by_id[bgg_id] = historical_metadata[bgg_id]
+
         ranked: list[dict[str, Any]] = []
-        for bgg_id in candidate_ids:
+        for bgg_id in pool_ids:
             metadata = metadata_by_id.get(bgg_id)
             if not metadata:
                 continue
@@ -527,14 +589,25 @@ class SuggestionsService:
             )
         )
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "generated_at": (
                 datetime.now(UTC)
                 .isoformat()
                 .replace("+00:00", "Z")
             ),
-            "source": "bgg_xml_api2_hot",
-            "candidate_count": len(hot),
+            "source": "bgg_xml_api2_hot_history",
+            "candidate_count": len(ranked),
+            "current_hot_count": len(hot),
+            "candidate_pool_limit": self.candidate_pool_limit,
+            "history_retained_count": max(
+                0,
+                len(ranked)
+                - sum(
+                    1
+                    for item in ranked
+                    if int(item["bgg_id"]) in hot_by_id
+                ),
+            ),
             "owned_excluded_count": sum(
                 1
                 for item in hot

@@ -238,3 +238,132 @@ def test_suggestions_cache_survives_without_live_bgg_client(tmp_path: Path) -> N
 
     assert cached["cache_state"] == "fresh"
     assert cached["items"] == first["items"]
+
+
+class RotatingBggClient:
+    def __init__(self) -> None:
+        self.round = 1
+        self.thing_calls = 0
+
+    def hot(self, *, limit: int = 50):
+        rows = (
+            [
+                {"bgg_id": 200, "title": "First Wave", "hot_rank": 1},
+                {"bgg_id": 300, "title": "Second Wave", "hot_rank": 2},
+            ]
+            if self.round == 1
+            else [
+                {"bgg_id": 500, "title": "Third Wave", "hot_rank": 1},
+                {"bgg_id": 600, "title": "Fourth Wave", "hot_rank": 2},
+            ]
+        )
+        return rows[:limit]
+
+    def things(self, bgg_ids):
+        self.thing_calls += 1
+        result = {}
+        for bgg_id in bgg_ids:
+            result[bgg_id] = {
+                "bgg_id": bgg_id,
+                "title": f"Candidate {bgg_id}",
+                "year_published": 2026,
+                "parent_bgg_id": None,
+                "cover_url": None,
+                "min_players": 1,
+                "max_players": 4,
+                "playing_time": 60,
+                "min_play_time": 45,
+                "max_play_time": 60,
+                "bgg_average": 7.5 + (bgg_id % 3) / 10,
+                "bgg_bayes_average": 7.2,
+                "bgg_average_weight": 2.7,
+                "bgg_rank": 100 + bgg_id,
+                "bgg_best_players": "2",
+                "bgg_recommended_players": "1, 2, 3, 4",
+                "categories": ["Fantasy"],
+                "mechanics": ["Deck Building"],
+                "description": f"Description {bgg_id}",
+            }
+        return result
+
+
+def test_suggestions_pool_retains_previous_hot_candidates(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    client = RotatingBggClient()
+    service = SuggestionsService(
+        database,
+        client,
+        cache_path=tmp_path / "suggestions.json",
+        cache_ttl_seconds=0,
+        candidate_limit=50,
+        candidate_pool_limit=500,
+    )
+
+    first = service.list_suggestions(limit=10, refresh=True)
+    assert first["source"] == "bgg_xml_api2_hot_history"
+    assert first["candidate_count"] == 2
+    assert first["history_retained_count"] == 0
+
+    client.round = 2
+    second = service.list_suggestions(limit=10, refresh=True)
+    ids = {item["bgg_id"] for item in second["items"]}
+
+    assert ids == {200, 300, 500, 600}
+    assert second["candidate_count"] == 4
+    assert second["current_hot_count"] == 2
+    assert second["history_retained_count"] == 2
+    assert second["candidate_pool_limit"] == 500
+
+
+def test_suggestions_history_pool_is_bounded(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    cache_path = tmp_path / "suggestions.json"
+    cached_items = []
+    for bgg_id in range(1000, 1010):
+        cached_items.append(
+            {
+                "bgg_id": bgg_id,
+                "title": f"Old {bgg_id}",
+                "year_published": 2025,
+                "cover_url": None,
+                "players": {"min": 1, "max": 4, "best": "2", "recommended": "1, 2"},
+                "play_time": {"playing": 60, "min": 60, "max": 60},
+                "bgg": {
+                    "average": 7.5,
+                    "bayes_average": 7.2,
+                    "average_weight": 2.5,
+                    "rank": 100,
+                },
+                "categories": ["Fantasy"],
+                "mechanics": ["Deck Building"],
+                "source_description": "Old candidate",
+                "suggestion_score": 50.0,
+                "score_parts": {"novelty": 0.2},
+            }
+        )
+    cache_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "items": cached_items,
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = RotatingBggClient()
+    service = SuggestionsService(
+        database,
+        client,
+        cache_path=cache_path,
+        cache_ttl_seconds=0,
+        candidate_limit=20,
+        candidate_pool_limit=5,
+    )
+
+    payload = service.list_suggestions(limit=25, refresh=True)
+
+    # candidate_pool_limit is never allowed below candidate_limit, so the
+    # bounded pool contains at most 20 entries here.
+    assert payload["candidate_pool_limit"] == 20
+    assert payload["candidate_count"] <= 20
