@@ -1182,9 +1182,20 @@ def test_scheduled_discovery_skips_archived_and_curated_resolutions(
     assert scheduled == {"attempted": 0, "items": []}
     assert provider.calls == 0
 
+    # A community-only fallback must not stop the periodic search for a
+    # preferred official IT/EN source.
+    with db.transaction() as connection:
+        connection.execute(
+            "UPDATE game_documents SET is_official=0 WHERE id='archived-rules'"
+        )
+    fallback_search = service.run_due(limit=10)
+    assert fallback_search["attempted"] == 1
+    assert fallback_search["items"][0]["bgg_id"] == 173346
+    assert provider.calls == 1
+
     forced = service.run_game(312509, force=True)
     assert forced["bgg_id"] == 312509
-    assert provider.calls == 1
+    assert provider.calls == 2
 
 
 def test_discovery_status_read_does_not_resynchronize_catalog(tmp_path: Path) -> None:
