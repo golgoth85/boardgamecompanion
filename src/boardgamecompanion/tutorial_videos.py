@@ -443,29 +443,32 @@ class YouTubeTutorialService:
                 )
             except TutorialVideoError as exc:
                 message = str(exc)
+                lowered = message.casefold()
+                quota_limited = "http 403" in lowered or "quota" in lowered
                 finished_at = datetime.now(UTC).isoformat()
-                with self.database.transaction(immediate=True) as connection:
-                    game_row = connection.execute(
-                        "SELECT id FROM board_games WHERE bgg_id=?",
-                        (bgg_id,),
-                    ).fetchone()
-                    if game_row is not None:
-                        connection.execute(
-                            """
-                            INSERT INTO tutorial_discovery_state(
-                                board_game_id,last_attempt_at,last_success_at,
-                                last_result_count,last_error
-                            ) VALUES(?,?,NULL,NULL,?)
-                            ON CONFLICT(board_game_id) DO UPDATE SET
-                                last_attempt_at=excluded.last_attempt_at,
-                                last_error=excluded.last_error
-                            """,
-                            (
-                                int(game_row["id"]),
-                                finished_at,
-                                message[:1000],
-                            ),
-                        )
+                if not quota_limited:
+                    with self.database.transaction(immediate=True) as connection:
+                        game_row = connection.execute(
+                            "SELECT id FROM board_games WHERE bgg_id=?",
+                            (bgg_id,),
+                        ).fetchone()
+                        if game_row is not None:
+                            connection.execute(
+                                """
+                                INSERT INTO tutorial_discovery_state(
+                                    board_game_id,last_attempt_at,last_success_at,
+                                    last_result_count,last_error
+                                ) VALUES(?,?,NULL,NULL,?)
+                                ON CONFLICT(board_game_id) DO UPDATE SET
+                                    last_attempt_at=excluded.last_attempt_at,
+                                    last_error=excluded.last_error
+                                """,
+                                (
+                                    int(game_row["id"]),
+                                    finished_at,
+                                    message[:1000],
+                                ),
+                            )
                 items.append(
                     {
                         "bgg_id": bgg_id,
@@ -474,8 +477,9 @@ class YouTubeTutorialService:
                         "error": message[:500],
                     }
                 )
-                lowered = message.casefold()
-                if "http 403" in lowered or "quota" in lowered:
+                if quota_limited:
+                    # A provider-wide quota condition is transient and unrelated
+                    # to this game. Leave it due so the next worker poll retries it.
                     stopped_for_quota = True
                     break
         return {
