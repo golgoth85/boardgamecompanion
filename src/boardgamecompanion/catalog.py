@@ -101,18 +101,25 @@ def game_title_search_clause(
         f"THEN {enrichment_alias}.metadata_json ELSE '{{}}' END"
     )
     return f"""(
-        {game_alias}.title LIKE ? COLLATE NOCASE
-        OR {game_alias}.original_title LIKE ? COLLATE NOCASE
+        {game_alias}.title COLLATE NOCASE LIKE ? ESCAPE '\\'
+        OR {game_alias}.original_title COLLATE NOCASE LIKE ? ESCAPE '\\'
         OR EXISTS (
             SELECT 1
             FROM json_each({metadata}, '$.alternate_titles') AS game_alias_title
-            WHERE CAST(game_alias_title.value AS TEXT) LIKE ? COLLATE NOCASE
+            WHERE CAST(game_alias_title.value AS TEXT) COLLATE NOCASE
+                  LIKE ? ESCAPE '\\'
         )
     )"""
 
 
 def game_title_search_params(query: str) -> list[str]:
-    wildcard = f"%{query}%"
+    escaped = (
+        str(query)
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    wildcard = f"%{escaped}%"
     return [wildcard, wildcard, wildcard]
 
 
