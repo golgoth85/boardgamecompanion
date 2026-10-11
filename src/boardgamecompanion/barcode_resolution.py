@@ -464,7 +464,7 @@ class BarcodeResolver:
             row = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
-                       e.cover_url,e.metadata_json,
+                       e.cover_url,
                        GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id=g.id
@@ -495,7 +495,7 @@ class BarcodeResolver:
             rows = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
-                       e.cover_url,
+                       e.cover_url,e.metadata_json,
                        GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
                 FROM board_games g
                 JOIN collection_entries c ON c.board_game_id=g.id
