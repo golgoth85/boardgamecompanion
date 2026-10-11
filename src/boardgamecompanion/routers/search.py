@@ -87,7 +87,7 @@ def universal_search(
     # Bound params avoid treating a user-supplied '%' or '_' as a wildcard.
     with database.connect() as connection:
         document_rows = connection.execute(
-            """
+            f"""
             SELECT d.id, g.bgg_id, g.title AS game_title,
                    d.title AS title, d.language
             FROM game_documents d
