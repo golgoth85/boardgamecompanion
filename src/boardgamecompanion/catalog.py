@@ -473,6 +473,7 @@ class Catalog:
                    OR e.next_refresh_at <= ?
                    OR e.metadata_json NOT LIKE '%"parent_bgg_id"%'
                    OR e.metadata_json NOT LIKE '%"mechanics"%'
+                   OR e.metadata_json NOT LIKE '%"alternate_titles"%'
                 ORDER BY
                     e.board_game_id IS NOT NULL,
                     g.title COLLATE NOCASE,
