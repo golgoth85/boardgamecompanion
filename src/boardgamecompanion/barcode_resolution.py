@@ -578,47 +578,59 @@ class BarcodeResolver:
                 auto_match = best
         return candidates, auto_match
 
-    def _lookup_products(self, barcode: str) -> list[dict[str, Any]]:
-        if isinstance(self.product_lookup, FallbackBarcodeLookup):
-            return self.product_lookup.lookup_all(barcode)
-        product = self.product_lookup.lookup(barcode)
-        return [product] if product is not None else []
-
-    def _choose_product(
+    def _lookup_best_product(
         self,
-        products: list[dict[str, Any]],
+        barcode: str,
     ) -> tuple[
         dict[str, Any] | None,
         list[dict[str, Any]],
         dict[str, Any] | None,
     ]:
+        if not isinstance(self.product_lookup, FallbackBarcodeLookup):
+            product = self.product_lookup.lookup(barcode)
+            if product is None:
+                return None, [], None
+            candidates, auto_match = self._evaluate_product(product)
+            return product, candidates, auto_match
+
+        errors: list[str] = []
+        completed_provider = False
         best_product: dict[str, Any] | None = None
         best_candidates: list[dict[str, Any]] = []
         best_auto_match: dict[str, Any] | None = None
-        best_rank: tuple[int, float, int, int] | None = None
+        best_rank: tuple[float, int] | None = None
 
-        for index, product in enumerate(products):
+        for index, lookup in enumerate(self.product_lookup.lookups):
+            try:
+                product = lookup.lookup(barcode)
+            except BarcodeProductLookupError as exc:
+                errors.append(str(exc))
+                continue
+            completed_provider = True
+            if product is None:
+                continue
+
             candidates, auto_match = self._evaluate_product(product)
+            if auto_match is not None:
+                return product, candidates, auto_match
+
             top_score = (
-                float(auto_match["confidence"])
-                if auto_match is not None
-                else float(candidates[0]["confidence"])
+                float(candidates[0]["confidence"])
                 if candidates
                 else 0.0
             )
-            rank = (
-                1 if auto_match is not None else 0,
-                top_score,
-                1 if str(product.get("source") or "") == "verified_catalog" else 0,
-                -index,
-            )
+            rank = (top_score, -index)
             if best_rank is None or rank > best_rank:
                 best_rank = rank
                 best_product = product
                 best_candidates = candidates
-                best_auto_match = auto_match
+                best_auto_match = None
 
-        return best_product, best_candidates, best_auto_match
+        if best_product is not None:
+            return best_product, best_candidates, best_auto_match
+        if not completed_provider and errors:
+            raise BarcodeProductLookupError("; ".join(errors))
+        return None, [], None
 
     def lookup(self, barcode: str) -> dict[str, Any]:
         local = PhysicalCopyStore(self.database).lookup_barcode(barcode)
@@ -653,8 +665,7 @@ class BarcodeResolver:
                 candidates, auto_match = self._evaluate_product(product)
         else:
             try:
-                products = self._lookup_products(normalized)
-                product, candidates, auto_match = self._choose_product(products)
+                product, candidates, auto_match = self._lookup_best_product(normalized)
                 self._write_cache(normalized, product)
                 if product is not None:
                     external_lookup = str(product.get("source") or "providers")
