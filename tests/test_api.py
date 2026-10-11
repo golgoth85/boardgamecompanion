@@ -32,6 +32,46 @@ def test_upload_and_catalog_api(tmp_path: Path) -> None:
         assert games.json()["total"] == 1
         assert games.json()["items"][0]["bgg_id"] == 900001
 
+        database = get_database()
+        with database.transaction(immediate=True) as connection:
+            game = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id=900001"
+            ).fetchone()
+            connection.execute(
+                "UPDATE board_games SET title='Nome in Codice',original_title=NULL WHERE id=?",
+                (game["id"],),
+            )
+            connection.execute(
+                """
+                INSERT INTO board_game_enrichments(
+                    board_game_id,source,external_id,metadata_json,
+                    next_refresh_at,created_at,updated_at
+                )
+                VALUES (?,'bgg_xml_api2','900001',?,'2099-01-01T00:00:00+00:00',
+                        '2026-10-11T00:00:00+00:00','2026-10-11T00:00:00+00:00')
+                """,
+                (
+                    game["id"],
+                    '{"alternate_titles":["Codenames","Nome in Codice"]}',
+                ),
+            )
+
+        localized = client.get("/api/games", params={"q": "Nome in Codice"})
+        assert localized.status_code == 200
+        assert localized.json()["total"] == 1
+        assert localized.json()["items"][0]["title"] == "Nome in Codice"
+
+        canonical_alias = client.get("/api/games", params={"q": "Codenames"})
+        assert canonical_alias.status_code == 200
+        assert canonical_alias.json()["total"] == 1
+        assert canonical_alias.json()["items"][0]["title"] == "Nome in Codice"
+        assert "Codenames" in canonical_alias.json()["items"][0]["alternate_titles"]
+
+        global_alias = client.get("/api/search", params={"q": "Codenames"})
+        assert global_alias.status_code == 200
+        assert global_alias.json()["groups"]["games"][0]["bgg_id"] == 900001
+        assert global_alias.json()["groups"]["games"][0]["title"] == "Nome in Codice"
+
         sorted_games = client.get("/api/games", params={"sort": "rating_desc"})
         assert sorted_games.status_code == 200
         assert sorted_games.json()["sort"] == "rating_desc"
