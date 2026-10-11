@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -315,17 +316,66 @@ def test_discover_due_stops_batch_on_youtube_quota_error(
 ) -> None:
     database = _database(tmp_path)
     service = YouTubeTutorialService(database, api_key="secret-key")
+    calls: list[int] = []
 
     def quota_error(bgg_id: int):
+        calls.append(bgg_id)
         raise TutorialVideoError("YouTube API HTTP 403: quotaExceeded")
 
     monkeypatch.setattr(service, "discover", quota_error)
 
-    result = service.discover_due(limit=3)
+    first = service.discover_due(limit=3)
+    second = service.discover_due(limit=3)
 
-    assert result["attempted"] == 1
-    assert result["failed"] == 1
-    assert result["stopped_for_quota"] is True
+    assert first["attempted"] == 1
+    assert first["failed"] == 1
+    assert first["stopped_for_quota"] is True
+    assert second["attempted"] == 1
+    assert second["stopped_for_quota"] is True
+    assert calls == [329082, 329082]
+
+
+def test_tutorial_worker_retries_if_youtube_is_configured_after_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import boardgamecompanion.main as main_module
+
+    async def scenario() -> int:
+        stop_event = asyncio.Event()
+        calls = 0
+
+        class FakeService:
+            def discover_due(self, **_kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise TutorialVideoNotConfigured(
+                        "YouTube Data API key is not configured"
+                    )
+                stop_event.set()
+                return {"attempted": 0, "succeeded": 0, "failed": 0, "items": []}
+
+        service = FakeService()
+
+        async def direct_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr(
+            main_module,
+            "get_youtube_tutorial_service",
+            lambda: service,
+        )
+        monkeypatch.setattr(main_module.asyncio, "to_thread", direct_to_thread)
+        monkeypatch.setattr(
+            main_module.settings,
+            "youtube_tutorial_worker_poll_seconds",
+            0.001,
+        )
+
+        await main_module._tutorial_video_worker(stop_event)
+        return calls
+
+    assert asyncio.run(scenario()) == 2
 
 
 def test_empty_tutorial_discovery_is_not_retried_immediately(
