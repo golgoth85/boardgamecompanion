@@ -91,6 +91,31 @@ def _metadata_list(metadata: dict[str, Any], key: str) -> list[str]:
     ]
 
 
+def game_title_search_clause(
+    game_alias: str = "g",
+    enrichment_alias: str = "e",
+) -> str:
+    """SQL predicate matching canonical, original and all BGG alternate titles."""
+    metadata = (
+        f"CASE WHEN json_valid({enrichment_alias}.metadata_json) "
+        f"THEN {enrichment_alias}.metadata_json ELSE '{}' END"
+    )
+    return f"""(
+        {game_alias}.title LIKE ? COLLATE NOCASE
+        OR {game_alias}.original_title LIKE ? COLLATE NOCASE
+        OR EXISTS (
+            SELECT 1
+            FROM json_each({metadata}, '$.alternate_titles') AS game_alias_title
+            WHERE CAST(game_alias_title.value AS TEXT) LIKE ? COLLATE NOCASE
+        )
+    )"""
+
+
+def game_title_search_params(query: str) -> list[str]:
+    wildcard = f"%{query}%"
+    return [wildcard, wildcard, wildcard]
+
+
 def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     if metadata is None:
         metadata = _metadata_from_row(row)
@@ -99,6 +124,7 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
         "parent_bgg_id": metadata.get("parent_bgg_id"),
         "title": row["title"],
         "original_title": row["original_title"],
+        "alternate_titles": _metadata_list(metadata, "alternate_titles"),
         "year_published": row["year_published"],
         "item_type": row["item_type"],
         "players": {"min": row["min_players"], "max": row["max_players"]},
@@ -309,9 +335,8 @@ class Catalog:
         where: list[str] = []
         params: list[Any] = []
         if query:
-            where.append("(g.title LIKE ? COLLATE NOCASE OR g.original_title LIKE ? COLLATE NOCASE)")
-            wildcard = f"%{query}%"
-            params.extend([wildcard, wildcard])
+            where.append(game_title_search_clause())
+            params.extend(game_title_search_params(query))
         if item_type:
             where.append("g.item_type = ?")
             params.append(item_type)
