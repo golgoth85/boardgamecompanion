@@ -225,45 +225,57 @@ The hardened control agent can perform controlled Docker list/inspect/logs/start
 
 This section is a point-in-time operational handoff. Re-read current `main` and current NAS Control status before acting, because parallel agents may advance infrastructure independently.
 
-### Current repository state
+### Current repository and deployment state
 
-- Canonical `main`: `9da2e71213a0479748ef5858df18bbc42ab20f0f`.
-- PR #134, tutorial background runtime recovery, is merged. Exact PR head `7fc4841e543bc32a6101dc6c39d207a812b80b2b` passed Universal Local CI with profile `pytest-browser-v1`, lifecycle `CLEANED`, `cleanup_attested=true`.
-- PR #135, Italian/European barcode fallback, is merged. Exact PR head `73f214d65e8e7eece81f2737d75c36a1b67ec414` passed the same Local CI gate.
-- Integrated `main` `9da2e71213a0...` also passed Universal Local CI with `pytest-browser-v1`, `CLEANED`, and cleanup attestation.
-- Immutable BoardGameCompanion image for `9da2e71213a0479748ef5858df18bbc42ab20f0f` was published successfully through typed NAS Control operation `boardgamecompanion_publish_image` (NAS Control issue #2866).
-- The first deploy attempt for that exact revision (NAS Control issue #2874) did **not** reach application deployment. It failed at the control-plane boundary with `privileged executor unavailable: URLError`. Do not interpret that as an application failure and do not rebuild a different revision as a workaround.
-- Last checked control plane was not coherent: agent and executor were on `e242486896dd...`, broker and Telegram bridge on `1c1738081b2d...`. Re-check current status before retrying deploy; use existing remediation if one is already running.
+- Canonical application `main`: `192cc04dede0fc5d5c30ea4edb7a583725828cfa` (PR #139 merged).
+- PR #138 (`9c1cad50a96c70f62c693d34d38be62d2e147ca8`) hardened public Uplay discovery through Uplay search → Google → DuckDuckGo. Exact PR head passed Universal Local CI; integrated `main` `554105d298e14cfdd000e97978058faa4c62dd17` also passed `pytest-browser-v1`, lifecycle `CLEANED`, `cleanup_attested=true`.
+- Live production validation on `554105d2...` still returned `resolution=unresolved` for EAN `3558380049463`; this proved the remaining problem was provider discovery, not matching logic.
+- PR #139 adds a small audited verified-GTIN catalog ahead of network providers, seeds `3558380049463` → BGG `184151`, bypasses fuzzy title matching when that verified BGG game exists locally, and bumps barcode cache to v5.
+- Integrated `main` `192cc04d...` passed Universal Local CI on NAS Control issue #3065 with profile `pytest-browser-v1`, lifecycle `CLEANED`, and `cleanup_attested=true`.
+- Immutable image for `192cc04d...` was published successfully through NAS Control issue #3073 (run `38165791946`).
+- The same exact revision was deployed successfully through NAS Control issue #3074 (run `38166017673`).
+- Production health after deploy: HTTP 200, app status `ok`, schema version `21` (NAS Control issue #3077).
+- Production diagnostics after deploy: HTTP 200, schema `21`, BGG configured and collection sync configured; no startup failure was observed (issue #3078).
+- Post-deploy container logs (issue #3079) show application startup complete and repeated `/health` 200 responses, with no immediate repeated tutorial-discovery error loop.
 
-### Tutorial background discovery — merged behavior
+### Barcode resolver — production-verified behavior
 
-- Background tutorial discovery is present and should keep polling even when YouTube is not configured at process start.
-- Provider-wide YouTube quota/HTTP 403 must stop the current batch without recording a per-game attempt, so the game remains due after quota recovery.
-- Batch discovery remains bounded, prioritizes owned games missing videos, and uses the existing IT/EN tutorial policy.
-- After successful deployment, verify schema 21, worker startup, bounded backfill behavior, and absence of immediate repeated errors.
+- Barcode lookup first checks locally registered physical copies, then external product resolution.
+- Provider order now starts with `VerifiedBarcodeLookup`, then UPCitemdb, then Uplay/public-search fallback.
+- Verified-catalog entries are intentionally small and audited; they must carry a primary-source URL and exact BGG identity.
+- Cache namespace is v5, so stale negative v4 results cannot mask the verified-catalog fix.
+- Live regression EAN `3558380049463` now succeeds in production:
+  - `resolution=owned_game`;
+  - `external_lookup=verified_catalog`;
+  - product title `La Leggenda dei Cinque Anelli: Il Gioco di Carte`;
+  - auto-match BGG `184151` (`Legend of the Five Rings: The Card Game`);
+  - confidence `1.0`.
+  Evidence: NAS Control issue #3075 / run `38166097149`.
+- Existing positive regression EAN `5425016924242` still succeeds:
+  - `resolution=owned_game`;
+  - `external_lookup=upcitemdb`;
+  - auto-match BGG `173346` (`7 Wonders Duel`);
+  - confidence `0.842`.
+  Evidence: NAS Control issue #3076 / run `38166099856`.
+- Do not reopen the L5R barcode incident unless a new live regression appears. The original unresolved production case is closed by PR #139 and the v5 deployment.
 
-### Barcode resolver — merged behavior
+### Tutorial background discovery — merged and postflight-checked
 
-- Barcode workflow first checks locally registered physical copies, then external product resolution.
-- UPCitemdb remains the primary external provider.
-- PR #135 adds a bounded public Uplay catalog fallback for Italian/European board-game EANs.
-- Uplay fallback accepts only `uplay.it` product URLs and requires the exact barcode to be present on the product page before accepting a result.
-- Alternative titles from Uplay are included in matching so localized Italian editions can match owned BGG titles/original titles.
-- Barcode lookup cache is versioned to v2; stale v1 negative results are ignored. Negative TTL is reduced from 7 days to 1 day.
-- Regression barcode: `3558380049463` = `La Leggenda dei Cinque Anelli: Il Gioco di Carte` (Italian edition). This must be tested live after deployment.
-- Existing positive regression: EAN `5425016924242` previously resolved to `7 Wonders Duel`.
+- Background tutorial discovery remains enabled by default.
+- Default bounded batch size is `3`; default poll interval is 6 hours.
+- If YouTube is not configured at process start, the worker stays alive and retries on a shortened interval instead of requiring restart.
+- Provider-wide YouTube quota/HTTP 403 stops the current batch without burning through the remaining queue, leaving the item due for retry.
+- Production schema is `21`; the post-v5 container started normally and showed no immediate repeated tutorial-worker errors.
+- A future deeper acceptance may inspect actual backlog progression over time, but no runtime blocker remains from the worker startup/retry implementation.
 
 ### Immediate next steps
 
-1. Read this file and current `main` before any new source write.
-2. Check NAS Control `control_status`; do not create duplicate maintenance requests if another infrastructure agent is already restoring coherence/executor reachability.
-3. When privileged executor is reachable, retry typed `boardgamecompanion_deploy` for **exact revision** `9da2e71213a0479748ef5858df18bbc42ab20f0f`; do not republish unless immutable-image evidence is lost.
-4. After deploy, verify the live BGC health endpoint and deployed revision.
-5. Test live barcode endpoint with `3558380049463`; expected outcome is product identification for the Italian `La Leggenda dei Cinque Anelli: Il Gioco di Carte`, ideally matched to the owned game if present.
-6. Also run regression checks for barcode `5425016924242`, assistant hard constraints, Suggestions bounded-history pool, crowdfunding relevance filter, and tutorial worker/backfill.
-7. Verify schema 21 and tutorial worker runtime recovery behavior.
-8. Keep WoL physical acceptance separate: only test when the operator intentionally puts the gaming PC to sleep; do not redesign WoL before that physical acceptance.
-9. Update this handoff section whenever a major milestone changes `main`, deployment state, runtime behavior, or the next blocking condition.
+1. Treat `192cc04dede0fc5d5c30ea4edb7a583725828cfa` as the deployed production baseline unless a newer merged `main` is verified.
+2. Before any new source write, re-read this file and current `main`; parallel agents may advance the repository.
+3. For future barcode additions, prefer audited exact GTIN→BGG mappings only when a trustworthy primary source verifies the GTIN; keep generic provider lookup for all other products.
+4. Optional regression work: re-run Assistant hard-constraint, Suggestions bounded-history, and Crowdfunding relevance smokes when those areas are next touched; they are not blockers for the completed barcode v5 deployment.
+5. Keep WoL physical acceptance separate: only test when the operator intentionally puts the gaming PC to sleep; do not redesign WoL before that physical acceptance.
+6. Complete the README/ROADMAP cleanup below when convenient.
 
 ### Known documentation cleanup still pending
 
