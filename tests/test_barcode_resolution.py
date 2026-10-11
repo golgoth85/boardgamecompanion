@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
+
 from boardgamecompanion.barcode_resolution import (
     BarcodeProductLookupError,
     BarcodeResolver,
+    FallbackBarcodeLookup,
+    UplayBarcodeLookup,
 )
 from boardgamecompanion.bgg_csv import BggCsvImporter
 from boardgamecompanion.database import Database
@@ -133,3 +137,94 @@ def test_external_lookup_failure_keeps_manual_fallback_available(
     assert result["resolution"] == "unresolved"
     assert result["external_lookup"] == "failed"
     assert "rate limit" in result["external_error"].lower()
+
+
+
+def test_fallback_lookup_uses_second_provider_after_primary_miss() -> None:
+    primary = FakeLookup(product=None)
+    secondary = FakeLookup(
+        {
+            "barcode": "3558380049463",
+            "title": "La Leggenda dei Cinque Anelli: Il Gioco di Carte",
+            "source": "uplay",
+        }
+    )
+
+    product = FallbackBarcodeLookup(primary, secondary).lookup("3558380049463")
+
+    assert product is not None
+    assert product["source"] == "uplay"
+    assert primary.calls == ["3558380049463"]
+    assert secondary.calls == ["3558380049463"]
+
+
+def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
+    search_html = """
+    <html><body>
+      <a href="/it/gioco-da-tavolo-la-leggenda-dei-cinque-anelli--il-gioco-di-carte.html">
+        La Leggenda dei Cinque Anelli
+      </a>
+    </body></html>
+    """
+    product_html = """
+    <html><body>
+      <h1>La Leggenda dei Cinque Anelli: Il Gioco di Carte</h1>
+      <div>Editore: Asmodee Italia</div>
+      <div>Nomi alternativi:
+        Legend of the Five Rings: The Card Game
+        La Leggenda dei Cinque Anelli: Il Gioco di Carte
+      </div>
+      <div>BARCODE: 3558380049463</div>
+    </body></html>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/it/search":
+            assert request.url.params["query"] == "3558380049463"
+            return httpx.Response(200, text=search_html, request=request)
+        assert "gioco-da-tavolo-la-leggenda-dei-cinque-anelli" in request.url.path
+        return httpx.Response(200, text=product_html, request=request)
+
+    lookup = UplayBarcodeLookup(transport=httpx.MockTransport(handler))
+    product = lookup.lookup("3558380049463")
+
+    assert product is not None
+    assert product["barcode"] == "3558380049463"
+    assert product["title"] == "La Leggenda dei Cinque Anelli: Il Gioco di Carte"
+    assert product["source"] == "uplay"
+    assert "Legend of the Five Rings: The Card Game" in product["description"]
+
+
+def test_v1_negative_barcode_cache_is_ignored_after_provider_upgrade(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    barcode = "4000000000099"
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings(key,value,sensitive,updated_at)
+            VALUES(?,?,0,CURRENT_TIMESTAMP)
+            """,
+            (
+                f"barcode_product_lookup:{barcode}",
+                '{"schema_version":1,"product":null}',
+            ),
+        )
+
+    lookup = FakeLookup(
+        {
+            "barcode": barcode,
+            "title": "Synthetic Alpha Board Game",
+            "brand": "Example Publisher",
+            "category": "Toys & Games",
+            "description": None,
+            "images": [],
+            "source": "upcitemdb",
+        }
+    )
+    result = BarcodeResolver(database, product_lookup=lookup).lookup(barcode)
+
+    assert lookup.calls == [barcode]
+    assert result["resolution"] == "owned_game"
+    assert result["external_lookup"] == "upcitemdb"
