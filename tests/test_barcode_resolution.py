@@ -198,6 +198,71 @@ def test_fallback_lookup_uses_second_provider_after_primary_miss() -> None:
     assert secondary.calls == ["3558380049463"]
 
 
+def test_resolver_continues_after_unmatched_product_until_alias_match(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    with database.transaction(immediate=True) as connection:
+        game = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=900001"
+        ).fetchone()
+        connection.execute(
+            "UPDATE board_games SET title='Codenames',original_title=NULL WHERE id=?",
+            (game["id"],),
+        )
+        connection.execute(
+            """
+            INSERT INTO board_game_enrichments(
+                board_game_id,source,external_id,metadata_json,
+                next_refresh_at,created_at,updated_at
+            )
+            VALUES (?,'bgg_xml_api2','900001',?,'2099-01-01T00:00:00+00:00',
+                    '2026-10-11T00:00:00+00:00','2026-10-11T00:00:00+00:00')
+            """,
+            (
+                game["id"],
+                '{"alternate_titles":["Nome in Codice","Codenames"]}',
+            ),
+        )
+
+    upc = FakeLookup(
+        {
+            "barcode": "8034055580424",
+            "title": "Name In Code, Game Cards, By Cranio, Edition Italian",
+            "brand": "Varie",
+            "category": "Board Games",
+            "description": None,
+            "images": [],
+            "source": "upcitemdb",
+        }
+    )
+    uplay = FakeLookup(
+        {
+            "barcode": "8034055580424",
+            "title": "Nome in Codice",
+            "brand": "Cranio Creations",
+            "category": "Board Games",
+            "description": "Codenames",
+            "images": [],
+            "source": "uplay",
+        }
+    )
+
+    result = BarcodeResolver(
+        database,
+        product_lookup=FallbackBarcodeLookup(upc, uplay),
+    ).lookup("8034055580424")
+
+    assert upc.calls == ["8034055580424"]
+    assert uplay.calls == ["8034055580424"]
+    assert result["resolution"] == "owned_game"
+    assert result["external_lookup"] == "uplay"
+    assert result["product"]["title"] == "Nome in Codice"
+    assert result["auto_match"]["bgg_id"] == 900001
+    assert result["auto_match"]["matched_title"] == "Nome in Codice"
+    assert result["auto_match"]["confidence"] >= 0.98
+
+
 def _duckduckgo_search_result(product_url: str) -> str:
     from urllib.parse import quote
 
@@ -302,7 +367,53 @@ def test_uplay_lookup_resolves_known_italian_verdant_barcode() -> None:
     assert product["source"] == "uplay"
 
 
-def test_v4_negative_barcode_cache_is_ignored_after_provider_upgrade(
+def test_uplay_continues_search_after_unrelated_product_link() -> None:
+    wrong_url = "https://www.uplay.it/it/gioco-da-tavolo-altro.html"
+    correct_url = "https://www.uplay.it/it/gioco-da-tavolo-sagrada.html"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.uplay.it" and request.url.path == "/it/search":
+            return httpx.Response(
+                200,
+                text=f'<a href="{wrong_url}">Altro gioco</a>',
+                request=request,
+            )
+        if request.url.path.endswith("/gioco-da-tavolo-altro.html"):
+            return httpx.Response(
+                200,
+                text="<h1>Altro</h1><div>BARCODE: 0000000000000</div>",
+                request=request,
+            )
+        if request.url.host == "www.google.com":
+            return httpx.Response(
+                200,
+                text=_google_search_result(correct_url),
+                request=request,
+            )
+        if request.url.path.endswith("/gioco-da-tavolo-sagrada.html"):
+            return httpx.Response(
+                200,
+                text=(
+                    "<h1>Sagrada</h1><div>Editore: Cranio Creations</div>"
+                    "<div>BARCODE: 8034055581032</div>"
+                ),
+                request=request,
+            )
+        if request.url.host == "html.duckduckgo.com":
+            return httpx.Response(200, text="<html></html>", request=request)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    product = UplayBarcodeLookup(
+        transport=httpx.MockTransport(handler)
+    ).lookup("8034055581032")
+
+    assert product is not None
+    assert product["barcode"] == "8034055581032"
+    assert product["title"] == "Sagrada"
+    assert product["source"] == "uplay"
+
+
+def test_v5_negative_barcode_cache_is_ignored_after_provider_upgrade(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
@@ -314,8 +425,8 @@ def test_v4_negative_barcode_cache_is_ignored_after_provider_upgrade(
             VALUES(?,?,0,CURRENT_TIMESTAMP)
             """,
             (
-                f"barcode_product_lookup:v4:{barcode}",
-                '{"schema_version":4,"product":null}',
+                f"barcode_product_lookup:v5:{barcode}",
+                '{"schema_version":5,"product":null}',
             ),
         )
 
