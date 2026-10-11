@@ -9,6 +9,7 @@ from boardgamecompanion.barcode_resolution import (
     BarcodeResolver,
     FallbackBarcodeLookup,
     UplayBarcodeLookup,
+    VerifiedBarcodeLookup,
 )
 from boardgamecompanion.bgg_csv import BggCsvImporter
 from boardgamecompanion.database import Database
@@ -140,6 +141,45 @@ def test_external_lookup_failure_keeps_manual_fallback_available(
 
 
 
+def test_verified_catalog_resolves_known_l5r_without_network() -> None:
+    network = FakeLookup(error=AssertionError("network fallback must not run"))
+    product = FallbackBarcodeLookup(
+        VerifiedBarcodeLookup(),
+        network,
+    ).lookup("3558380049463")
+
+    assert product is not None
+    assert product["bgg_id"] == 184151
+    assert product["title"] == "La Leggenda dei Cinque Anelli: Il Gioco di Carte"
+    assert product["source"] == "verified_catalog"
+    assert network.calls == []
+
+
+def test_verified_bgg_id_bypasses_fuzzy_title_matching(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    lookup = FakeLookup(
+        {
+            "barcode": "4000000000005",
+            "bgg_id": 900001,
+            "title": "Completely Different Localized Product Title",
+            "brand": "Verified Publisher",
+            "category": "Board Games",
+            "description": None,
+            "images": [],
+            "source": "verified_catalog",
+        }
+    )
+
+    result = BarcodeResolver(database, product_lookup=lookup).lookup(
+        "4000000000005"
+    )
+
+    assert result["resolution"] == "owned_game"
+    assert result["auto_match"]["bgg_id"] == 900001
+    assert result["auto_match"]["confidence"] == 1.0
+    assert result["external_lookup"] == "verified_catalog"
+
+
 def test_fallback_lookup_uses_second_provider_after_primary_miss() -> None:
     primary = FakeLookup(product=None)
     secondary = FakeLookup(
@@ -262,7 +302,7 @@ def test_uplay_lookup_resolves_known_italian_verdant_barcode() -> None:
     assert product["source"] == "uplay"
 
 
-def test_v3_negative_barcode_cache_is_ignored_after_provider_upgrade(
+def test_v4_negative_barcode_cache_is_ignored_after_provider_upgrade(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
@@ -274,8 +314,8 @@ def test_v3_negative_barcode_cache_is_ignored_after_provider_upgrade(
             VALUES(?,?,0,CURRENT_TIMESTAMP)
             """,
             (
-                f"barcode_product_lookup:v3:{barcode}",
-                '{"schema_version":3,"product":null}',
+                f"barcode_product_lookup:v4:{barcode}",
+                '{"schema_version":4,"product":null}',
             ),
         )
 

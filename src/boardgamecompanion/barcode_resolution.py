@@ -83,6 +83,35 @@ def _title_score(product_text: str, candidate_title: str) -> float:
     return round(max(phrase, (0.72 * coverage) + (0.28 * sequence)), 4)
 
 
+_VERIFIED_BARCODE_PRODUCTS: dict[str, dict[str, Any]] = {
+    "3558380049463": {
+        "barcode": "3558380049463",
+        "bgg_id": 184151,
+        "title": "La Leggenda dei Cinque Anelli: Il Gioco di Carte",
+        "brand": "Asmodee Italia",
+        "category": "Board Games",
+        "description": "Legend of the Five Rings: The Card Game",
+        "images": [],
+        "source": "verified_catalog",
+        "source_url": (
+            "https://www.uplay.it/it/"
+            "gioco-da-tavolo-la-leggenda-dei-cinque-anelli--il-gioco-di-carte.html"
+        ),
+    },
+}
+
+
+class VerifiedBarcodeLookup:
+    """Small audited GTIN catalog for products with a verified primary source."""
+
+    def lookup(self, barcode: str) -> dict[str, Any] | None:
+        normalized = normalize_barcode(barcode)
+        if normalized is None:
+            return None
+        product = _VERIFIED_BARCODE_PRODUCTS.get(normalized)
+        return dict(product) if product is not None else None
+
+
 class UpcItemDbLookup:
     endpoint = "https://api.upcitemdb.com/prod/trial/lookup"
 
@@ -367,6 +396,7 @@ class BarcodeResolver:
     ) -> None:
         self.database = database
         self.product_lookup = product_lookup or FallbackBarcodeLookup(
+            VerifiedBarcodeLookup(),
             UpcItemDbLookup(),
             UplayBarcodeLookup(),
         )
@@ -375,7 +405,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v4:{barcode}"
+        return f"barcode_product_lookup:v5:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -400,7 +430,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 4, "product": product},
+            {"schema_version": 5, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -416,6 +446,46 @@ class BarcodeResolver:
                 """,
                 (self._cache_key(barcode), value, now),
             )
+
+    def _verified_candidate(
+        self,
+        product: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        raw_bgg_id = product.get("bgg_id")
+        if isinstance(raw_bgg_id, bool):
+            return None
+        try:
+            bgg_id = int(raw_bgg_id)
+        except (TypeError, ValueError):
+            return None
+        if bgg_id < 1:
+            return None
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT g.bgg_id,g.title,g.original_title,g.year_published,
+                       e.cover_url,
+                       GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
+                FROM board_games g
+                LEFT JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
+                WHERE g.bgg_id=?
+                GROUP BY g.id
+                """,
+                (bgg_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "bgg_id": int(row["bgg_id"]),
+            "title": str(row["title"]),
+            "original_title": row["original_title"],
+            "year_published": row["year_published"],
+            "cover_url": row["cover_url"],
+            "publishers": row["publishers"],
+            "confidence": 1.0,
+        }
 
     def _owned_candidates(self, product: dict[str, Any]) -> list[dict[str, Any]]:
         product_text = " ".join(
@@ -518,15 +588,24 @@ class BarcodeResolver:
                 "external_lookup": external_lookup,
             }
 
-        candidates = self._owned_candidates(product)
-        best = candidates[0] if candidates else None
-        second = candidates[1] if len(candidates) > 1 else None
-        auto_match = None
-        if best is not None:
-            best_score = float(best["confidence"])
-            margin = best_score - float(second["confidence"]) if second else best_score
-            if best_score >= 0.82 and margin >= 0.08:
-                auto_match = best
+        verified_candidate = self._verified_candidate(product)
+        if verified_candidate is not None:
+            candidates = [verified_candidate]
+            auto_match = verified_candidate
+        else:
+            candidates = self._owned_candidates(product)
+            best = candidates[0] if candidates else None
+            second = candidates[1] if len(candidates) > 1 else None
+            auto_match = None
+            if best is not None:
+                best_score = float(best["confidence"])
+                margin = (
+                    best_score - float(second["confidence"])
+                    if second
+                    else best_score
+                )
+                if best_score >= 0.82 and margin >= 0.08:
+                    auto_match = best
 
         return {
             **local,
