@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from html import unescape
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin, urlparse
 
 import httpx
 
@@ -140,6 +141,181 @@ class UpcItemDbLookup:
         }
 
 
+class UplayBarcodeLookup:
+    """Board-game-specific public-catalog fallback for Italian/European GTINs."""
+
+    search_endpoint = "https://www.uplay.it/it/search"
+    allowed_hosts = {"uplay.it", "www.uplay.it"}
+    _href_pattern = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
+    _tag_pattern = re.compile(r"<[^>]+>")
+    _h1_pattern = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 8.0,
+        transport: Any | None = None,
+    ) -> None:
+        self.timeout_seconds = max(2.0, min(float(timeout_seconds), 20.0))
+        self.transport = transport
+
+    @classmethod
+    def _text(cls, html: str) -> str:
+        value = cls._tag_pattern.sub(" ", html)
+        value = unescape(value)
+        return re.sub(r"\s+", " ", value).strip()
+
+    @classmethod
+    def _product_urls(cls, base_url: str, html: str) -> list[str]:
+        urls: list[str] = []
+        for raw_href in cls._href_pattern.findall(html):
+            href = unescape(raw_href)
+            candidate = urljoin(base_url, href)
+            parsed = urlparse(candidate)
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            if (parsed.hostname or "").casefold() not in cls.allowed_hosts:
+                continue
+            if not parsed.path.startswith("/it/"):
+                continue
+            if "gioco-da-tavolo-" not in parsed.path or not parsed.path.endswith(".html"):
+                continue
+            normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            if normalized not in urls:
+                urls.append(normalized)
+            if len(urls) >= 5:
+                break
+        return urls
+
+    @classmethod
+    def _parse_product_page(
+        cls,
+        html: str,
+        barcode: str,
+        *,
+        source_url: str,
+    ) -> dict[str, Any] | None:
+        text = cls._text(html)
+        if not re.search(
+            rf"\bBARCODE\b[\s:|]*{re.escape(barcode)}\b",
+            text,
+            re.IGNORECASE,
+        ):
+            return None
+
+        title_match = cls._h1_pattern.search(html)
+        title = cls._text(title_match.group(1)) if title_match else ""
+        if not title:
+            return None
+
+        aliases_match = re.search(
+            r"Nomi alternativi\s*:\s*(.*?)\s*BARCODE\s*:",
+            text,
+            re.IGNORECASE,
+        )
+        aliases = aliases_match.group(1).strip() if aliases_match else ""
+        publisher_match = re.search(
+            r"Editore\s*:\s*([^|]{1,120}?)(?:\s{2,}|La |Prezzo|Disponibile|$)",
+            text,
+            re.IGNORECASE,
+        )
+        publisher = publisher_match.group(1).strip() if publisher_match else None
+
+        return {
+            "barcode": barcode,
+            "title": title,
+            "brand": publisher,
+            "category": "Board Games",
+            "description": aliases or None,
+            "images": [],
+            "source": "uplay",
+            "source_url": source_url,
+        }
+
+    def lookup(self, barcode: str) -> dict[str, Any] | None:
+        normalized = normalize_barcode(barcode)
+        if normalized is None or not normalized.isdigit():
+            return None
+
+        headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "BoardGameCompanion/0.1 barcode-resolver",
+        }
+        try:
+            with httpx.Client(
+                timeout=self.timeout_seconds,
+                headers=headers,
+                follow_redirects=True,
+                transport=self.transport,
+            ) as client:
+                response = client.get(
+                    self.search_endpoint,
+                    params={"query": normalized},
+                )
+                if response.status_code == 404:
+                    return None
+                if response.status_code == 429:
+                    raise BarcodeProductLookupError("Uplay rate limit reached")
+                if response.status_code >= 400:
+                    raise BarcodeProductLookupError(
+                        f"Uplay HTTP {response.status_code}"
+                    )
+
+                response_url = str(response.url)
+                parsed_response = urlparse(response_url)
+                if (
+                    (parsed_response.hostname or "").casefold() in self.allowed_hosts
+                    and "gioco-da-tavolo-" in parsed_response.path
+                    and parsed_response.path.endswith(".html")
+                ):
+                    product_urls = [
+                        f"{parsed_response.scheme}://{parsed_response.netloc}{parsed_response.path}"
+                    ]
+                else:
+                    product_urls = self._product_urls(response_url, response.text)
+
+                for product_url in product_urls:
+                    page = client.get(product_url)
+                    if page.status_code >= 400:
+                        continue
+                    product = self._parse_product_page(
+                        page.text,
+                        normalized,
+                        source_url=product_url,
+                    )
+                    if product is not None:
+                        return product
+        except BarcodeProductLookupError:
+            raise
+        except httpx.HTTPError as exc:
+            raise BarcodeProductLookupError(f"Uplay lookup failed: {exc}") from exc
+        return None
+
+
+class FallbackBarcodeLookup:
+    def __init__(self, *lookups: BarcodeProductLookup) -> None:
+        if not lookups:
+            raise ValueError("at least one barcode lookup is required")
+        self.lookups = lookups
+
+    def lookup(self, barcode: str) -> dict[str, Any] | None:
+        errors: list[str] = []
+        completed_provider = False
+        for lookup in self.lookups:
+            try:
+                product = lookup.lookup(barcode)
+            except BarcodeProductLookupError as exc:
+                errors.append(str(exc))
+                continue
+            completed_provider = True
+            if product is not None:
+                return product
+
+        if not completed_provider and errors:
+            raise BarcodeProductLookupError("; ".join(errors))
+        return None
+
+
 class BarcodeResolver:
     def __init__(
         self,
@@ -147,16 +323,19 @@ class BarcodeResolver:
         *,
         product_lookup: BarcodeProductLookup | None = None,
         positive_cache_days: int = 30,
-        negative_cache_days: int = 7,
+        negative_cache_days: int = 1,
     ) -> None:
         self.database = database
-        self.product_lookup = product_lookup or UpcItemDbLookup()
+        self.product_lookup = product_lookup or FallbackBarcodeLookup(
+            UpcItemDbLookup(),
+            UplayBarcodeLookup(),
+        )
         self.positive_cache_days = max(1, int(positive_cache_days))
         self.negative_cache_days = max(1, int(negative_cache_days))
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:{barcode}"
+        return f"barcode_product_lookup:v2:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -181,7 +360,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 1, "product": product},
+            {"schema_version": 2, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -271,11 +450,13 @@ class BarcodeResolver:
             }
 
         cached, product = self._read_cache(normalized)
-        external_lookup = "cache" if cached else "upcitemdb"
+        external_lookup = "cache" if cached else "providers"
         if not cached:
             try:
                 product = self.product_lookup.lookup(normalized)
                 self._write_cache(normalized, product)
+                if product is not None:
+                    external_lookup = str(product.get("source") or "providers")
             except BarcodeProductLookupError as exc:
                 return {
                     **local,
