@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from boardgamecompanion.catalog import Catalog
+from boardgamecompanion.catalog import (
+    Catalog,
+    game_title_search_clause,
+    game_title_search_params,
+)
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.game_lists import GameListStore
 from boardgamecompanion.service_factories import get_crowdfunding_service
@@ -44,6 +48,19 @@ def universal_search(
         limit=limit,
         offset=0,
     )
+    with database.connect() as connection:
+        matched_game_rows = connection.execute(
+            f"""
+            SELECT DISTINCT g.bgg_id
+            FROM board_games g
+            LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
+            WHERE {game_title_search_clause()}
+            LIMIT 250
+            """,
+            game_title_search_params(query),
+        ).fetchall()
+    matched_game_ids = {int(row["bgg_id"]) for row in matched_game_rows}
+
     sections = [
         {"key": key, "title": title, "url": url, "description": description}
         for key, title, url, description in SECTIONS
@@ -52,7 +69,13 @@ def universal_search(
     wishlist = [
         item
         for item in WishlistStore(database).list()
-        if folded in str(item.get("title") or "").casefold()
+        if (
+            folded in str(item.get("title") or "").casefold()
+            or (
+                str(item.get("bgg_id") or "").isdigit()
+                and int(item["bgg_id"]) in matched_game_ids
+            )
+        )
     ][:limit]
     lists = [
         item
@@ -69,9 +92,10 @@ def universal_search(
                    d.title AS title, d.language
             FROM game_documents d
             JOIN board_games g ON g.id=d.board_game_id
+            LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
             WHERE d.document_type='rulebook'
               AND (
-                  instr(lower(g.title),lower(?))>0
+                  {game_title_search_clause()}
                   OR instr(lower(COALESCE(d.title,'')),lower(?))>0
                   OR instr(lower(d.original_filename),lower(?))>0
               )
@@ -80,7 +104,12 @@ def universal_search(
                      d.created_at DESC
             LIMIT ?
             """,
-            (query, query, query, limit),
+            (
+                *game_title_search_params(query),
+                query,
+                query,
+                limit,
+            ),
         ).fetchall()
     rulebooks = [
         {
@@ -103,7 +132,13 @@ def universal_search(
             "project_url": item.get("project_url"),
         }
         for item in get_crowdfunding_service().cached_campaigns()
-        if folded in str(item.get("title") or "").casefold()
+        if (
+            folded in str(item.get("title") or "").casefold()
+            or (
+                str(item.get("related_bgg_id") or "").isdigit()
+                and int(item["related_bgg_id"]) in matched_game_ids
+            )
+        )
     ][:limit]
 
     return {
