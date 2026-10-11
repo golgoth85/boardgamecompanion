@@ -1583,6 +1583,27 @@ def _half_star_personal_ratings(connection: sqlite3.Connection) -> None:
     )
 
 
+def _tutorial_discovery_state(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tutorial_discovery_state (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            last_result_count INTEGER,
+            last_error TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_tutorial_discovery_attempt
+        ON tutorial_discovery_state(last_attempt_at)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1604,6 +1625,7 @@ MIGRATIONS = (
     Migration(18, "personal-library-foundation", _personal_library_foundation),
     Migration(19, "crowdfunding-notification-baseline", _crowdfunding_notification_baseline),
     Migration(20, "half-star-personal-ratings", _half_star_personal_ratings),
+    Migration(21, "tutorial-discovery-state", _tutorial_discovery_state),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

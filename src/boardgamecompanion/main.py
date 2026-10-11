@@ -623,6 +623,28 @@ async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
             LOGGER.exception("Scheduled crowdfunding notification scan failed")
 
 
+async def _tutorial_video_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(
+                get_youtube_tutorial_service().discover_due,
+                limit=settings.youtube_tutorial_worker_batch_size,
+                refresh_seconds=settings.youtube_tutorial_refresh_seconds,
+            )
+        except TutorialVideoNotConfigured:
+            return
+        except Exception:
+            LOGGER.exception("Scheduled tutorial-video discovery failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.youtube_tutorial_worker_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -634,6 +656,8 @@ async def lifespan(_: FastAPI):
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
     worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_crowdfunding_notification_worker(worker_stop)))
+    if settings.youtube_tutorial_worker_enabled:
+        worker_tasks.append(asyncio.create_task(_tutorial_video_worker(worker_stop)))
     if settings.rulebook_update_worker_enabled:
         try:
             await asyncio.to_thread(

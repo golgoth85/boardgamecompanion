@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     youtube_api_key: str | None = None
     youtube_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     youtube_search_results: int = Field(default=12, ge=4, le=25)
+    youtube_tutorial_worker_enabled: bool = True
+    youtube_tutorial_worker_poll_seconds: float = Field(
+        default=6 * 60 * 60,
+        ge=30 * 60,
+        le=24 * 60 * 60,
+    )
+    youtube_tutorial_worker_batch_size: int = Field(default=3, ge=1, le=10)
+    youtube_tutorial_refresh_seconds: int = Field(
+        default=45 * 24 * 60 * 60,
+        ge=24 * 60 * 60,
+        le=365 * 24 * 60 * 60,
+    )
     crowdfunding_cache_ttl_seconds: int = Field(
         default=3 * 60 * 60, ge=15 * 60, le=24 * 60 * 60
     )

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.main import app
+from boardgamecompanion.migrations import LATEST_SCHEMA_VERSION
 from boardgamecompanion.notifications import NotificationStore
 from boardgamecompanion.settings import settings
 
@@ -203,7 +204,7 @@ def test_diagnostics_centralizes_technical_state(monkeypatch, tmp_path: Path) ->
         payload = client.get("/api/diagnostics")
         assert payload.status_code == 200
         body = payload.json()
-        assert body["schema_version"] == 20
+        assert body["schema_version"] == LATEST_SCHEMA_VERSION
         assert set(body) == {
             "schema_version",
             "bgg",
