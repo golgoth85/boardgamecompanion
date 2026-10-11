@@ -158,14 +158,24 @@ def test_fallback_lookup_uses_second_provider_after_primary_miss() -> None:
     assert secondary.calls == ["3558380049463"]
 
 
-def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
-    search_html = """
+def _uplay_search_result(product_url: str) -> str:
+    from urllib.parse import quote
+
+    return f"""
     <html><body>
-      <a href="/it/gioco-da-tavolo-la-leggenda-dei-cinque-anelli--il-gioco-di-carte.html">
-        La Leggenda dei Cinque Anelli
+      <a class="result__a"
+         href="//duckduckgo.com/l/?uddg={quote(product_url, safe='')}">
+        Board game result
       </a>
     </body></html>
     """
+
+
+def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
+    product_url = (
+        "https://www.uplay.it/it/"
+        "gioco-da-tavolo-la-leggenda-dei-cinque-anelli--il-gioco-di-carte.html"
+    )
     product_html = """
     <html><body>
       <h1>La Leggenda dei Cinque Anelli: Il Gioco di Carte</h1>
@@ -179,9 +189,14 @@ def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/it/search":
-            assert request.url.params["query"] == "3558380049463"
-            return httpx.Response(200, text=search_html, request=request)
+        if request.url.host == "html.duckduckgo.com":
+            assert "3558380049463" in request.url.params["q"]
+            return httpx.Response(
+                200,
+                text=_uplay_search_result(product_url),
+                request=request,
+            )
+        assert request.url.host == "www.uplay.it"
         assert "gioco-da-tavolo-la-leggenda-dei-cinque-anelli" in request.url.path
         return httpx.Response(200, text=product_html, request=request)
 
@@ -195,7 +210,38 @@ def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
     assert "Legend of the Five Rings: The Card Game" in product["description"]
 
 
-def test_v1_negative_barcode_cache_is_ignored_after_provider_upgrade(
+def test_uplay_lookup_resolves_known_italian_verdant_barcode() -> None:
+    product_url = "https://www.uplay.it/it/gioco-da-tavolo-verdant.html"
+    product_html = """
+    <html><body>
+      <h1>Verdant</h1>
+      <div>Editore: Oliphante</div>
+      <div>BARCODE: 787790612193</div>
+    </body></html>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "html.duckduckgo.com":
+            assert "787790612193" in request.url.params["q"]
+            return httpx.Response(
+                200,
+                text=_uplay_search_result(product_url),
+                request=request,
+            )
+        assert request.url.host == "www.uplay.it"
+        assert request.url.path.endswith("/gioco-da-tavolo-verdant.html")
+        return httpx.Response(200, text=product_html, request=request)
+
+    lookup = UplayBarcodeLookup(transport=httpx.MockTransport(handler))
+    product = lookup.lookup("787790612193")
+
+    assert product is not None
+    assert product["barcode"] == "787790612193"
+    assert product["title"] == "Verdant"
+    assert product["source"] == "uplay"
+
+
+def test_v2_negative_barcode_cache_is_ignored_after_provider_upgrade(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
@@ -207,8 +253,8 @@ def test_v1_negative_barcode_cache_is_ignored_after_provider_upgrade(
             VALUES(?,?,0,CURRENT_TIMESTAMP)
             """,
             (
-                f"barcode_product_lookup:{barcode}",
-                '{"schema_version":1,"product":null}',
+                f"barcode_product_lookup:v2:{barcode}",
+                '{"schema_version":2,"product":null}',
             ),
         )
 
