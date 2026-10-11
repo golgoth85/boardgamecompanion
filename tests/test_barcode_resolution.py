@@ -335,3 +335,75 @@ def test_v4_negative_barcode_cache_is_ignored_after_provider_upgrade(
     assert lookup.calls == [barcode]
     assert result["resolution"] == "owned_game"
     assert result["external_lookup"] == "upcitemdb"
+
+
+def test_resolver_continues_after_weak_primary_product(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    primary = FakeLookup(
+        {
+            "barcode": "4000000000100",
+            "title": "Generic Product Cards Italian Edition",
+            "brand": "Varie",
+            "category": "Toys & Games",
+            "description": None,
+            "images": [],
+            "source": "upcitemdb",
+        }
+    )
+    secondary = FakeLookup(
+        {
+            "barcode": "4000000000100",
+            "title": "Synthetic Alpha Board Game",
+            "brand": "Example Publisher",
+            "category": "Board Games",
+            "description": "Synthetic Alpha",
+            "images": [],
+            "source": "uplay",
+        }
+    )
+
+    result = BarcodeResolver(
+        database,
+        product_lookup=FallbackBarcodeLookup(primary, secondary),
+    ).lookup("4000000000100")
+
+    assert primary.calls == ["4000000000100"]
+    assert secondary.calls == ["4000000000100"]
+    assert result["resolution"] == "owned_game"
+    assert result["external_lookup"] == "uplay"
+    assert result["auto_match"]["bgg_id"] == 900001
+
+
+def test_v5_negative_barcode_cache_is_ignored_after_provider_ranking_upgrade(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    barcode = "4000000000101"
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings(key,value,sensitive,updated_at)
+            VALUES(?,?,0,CURRENT_TIMESTAMP)
+            """,
+            (
+                f"barcode_product_lookup:v5:{barcode}",
+                '{"schema_version":5,"product":null}',
+            ),
+        )
+
+    lookup = FakeLookup(
+        {
+            "barcode": barcode,
+            "title": "Synthetic Alpha Board Game",
+            "brand": "Example Publisher",
+            "category": "Board Games",
+            "description": None,
+            "images": [],
+            "source": "uplay",
+        }
+    )
+    result = BarcodeResolver(database, product_lookup=lookup).lookup(barcode)
+
+    assert lookup.calls == [barcode]
+    assert result["resolution"] == "owned_game"
+    assert result["external_lookup"] == "uplay"
