@@ -625,6 +625,7 @@ async def _crowdfunding_notification_worker(stop_event: asyncio.Event) -> None:
 
 async def _tutorial_video_worker(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
+        sleep_seconds = float(settings.youtube_tutorial_worker_poll_seconds)
         try:
             await asyncio.to_thread(
                 get_youtube_tutorial_service().discover_due,
@@ -632,13 +633,15 @@ async def _tutorial_video_worker(stop_event: asyncio.Event) -> None:
                 refresh_seconds=settings.youtube_tutorial_refresh_seconds,
             )
         except TutorialVideoNotConfigured:
-            return
+            # The API key can be stored from the UI after process startup.
+            # Keep the worker alive and re-check soon instead of requiring a restart.
+            sleep_seconds = min(sleep_seconds, 5 * 60)
         except Exception:
             LOGGER.exception("Scheduled tutorial-video discovery failed")
         try:
             await asyncio.wait_for(
                 stop_event.wait(),
-                timeout=settings.youtube_tutorial_worker_poll_seconds,
+                timeout=sleep_seconds,
             )
             break
         except TimeoutError:
