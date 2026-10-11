@@ -9,7 +9,10 @@ from typing import Any, Iterable
 def normalize_title_text(value: object) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(char for char in text if not unicodedata.combining(char))
-    text = re.sub(r"[^a-z0-9]+", " ", text.casefold())
+    text = "".join(
+        char if char.isalnum() else " "
+        for char in text.casefold()
+    )
     return re.sub(r"\s+", " ", text).strip()
 
 
