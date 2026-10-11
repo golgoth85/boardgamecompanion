@@ -220,3 +220,52 @@ The hardened control agent can perform controlled Docker list/inspect/logs/start
 - Untrusted PR/source code must not execute directly on persistent credential-bearing self-hosted runners. Use the disposable I3 sandbox.
 - Release/publish/deploy jobs requiring credentials are a separate trusted boundary and do not replace Local CI validation.
 - New application repositories must be registered in the Local CI repository registry and contain `LOCAL_CI.md` before CI is considered configured.
+
+## Current handoff state — 2026-10-11
+
+This section is a point-in-time operational handoff. Re-read current `main` and current NAS Control status before acting, because parallel agents may advance infrastructure independently.
+
+### Current repository state
+
+- Canonical `main`: `9da2e71213a0479748ef5858df18bbc42ab20f0f`.
+- PR #134, tutorial background runtime recovery, is merged. Exact PR head `7fc4841e543bc32a6101dc6c39d207a812b80b2b` passed Universal Local CI with profile `pytest-browser-v1`, lifecycle `CLEANED`, `cleanup_attested=true`.
+- PR #135, Italian/European barcode fallback, is merged. Exact PR head `73f214d65e8e7eece81f2737d75c36a1b67ec414` passed the same Local CI gate.
+- Integrated `main` `9da2e71213a0...` also passed Universal Local CI with `pytest-browser-v1`, `CLEANED`, and cleanup attestation.
+- Immutable BoardGameCompanion image for `9da2e71213a0479748ef5858df18bbc42ab20f0f` was published successfully through typed NAS Control operation `boardgamecompanion_publish_image` (NAS Control issue #2866).
+- The first deploy attempt for that exact revision (NAS Control issue #2874) did **not** reach application deployment. It failed at the control-plane boundary with `privileged executor unavailable: URLError`. Do not interpret that as an application failure and do not rebuild a different revision as a workaround.
+- Last checked control plane was not coherent: agent and executor were on `e242486896dd...`, broker and Telegram bridge on `1c1738081b2d...`. Re-check current status before retrying deploy; use existing remediation if one is already running.
+
+### Tutorial background discovery — merged behavior
+
+- Background tutorial discovery is present and should keep polling even when YouTube is not configured at process start.
+- Provider-wide YouTube quota/HTTP 403 must stop the current batch without recording a per-game attempt, so the game remains due after quota recovery.
+- Batch discovery remains bounded, prioritizes owned games missing videos, and uses the existing IT/EN tutorial policy.
+- After successful deployment, verify schema 21, worker startup, bounded backfill behavior, and absence of immediate repeated errors.
+
+### Barcode resolver — merged behavior
+
+- Barcode workflow first checks locally registered physical copies, then external product resolution.
+- UPCitemdb remains the primary external provider.
+- PR #135 adds a bounded public Uplay catalog fallback for Italian/European board-game EANs.
+- Uplay fallback accepts only `uplay.it` product URLs and requires the exact barcode to be present on the product page before accepting a result.
+- Alternative titles from Uplay are included in matching so localized Italian editions can match owned BGG titles/original titles.
+- Barcode lookup cache is versioned to v2; stale v1 negative results are ignored. Negative TTL is reduced from 7 days to 1 day.
+- Regression barcode: `3558380049463` = `La Leggenda dei Cinque Anelli: Il Gioco di Carte` (Italian edition). This must be tested live after deployment.
+- Existing positive regression: EAN `5425016924242` previously resolved to `7 Wonders Duel`.
+
+### Immediate next steps
+
+1. Read this file and current `main` before any new source write.
+2. Check NAS Control `control_status`; do not create duplicate maintenance requests if another infrastructure agent is already restoring coherence/executor reachability.
+3. When privileged executor is reachable, retry typed `boardgamecompanion_deploy` for **exact revision** `9da2e71213a0479748ef5858df18bbc42ab20f0f`; do not republish unless immutable-image evidence is lost.
+4. After deploy, verify the live BGC health endpoint and deployed revision.
+5. Test live barcode endpoint with `3558380049463`; expected outcome is product identification for the Italian `La Leggenda dei Cinque Anelli: Il Gioco di Carte`, ideally matched to the owned game if present.
+6. Also run regression checks for barcode `5425016924242`, assistant hard constraints, Suggestions bounded-history pool, crowdfunding relevance filter, and tutorial worker/backfill.
+7. Verify schema 21 and tutorial worker runtime recovery behavior.
+8. Keep WoL physical acceptance separate: only test when the operator intentionally puts the gaming PC to sleep; do not redesign WoL before that physical acceptance.
+9. Update this handoff section whenever a major milestone changes `main`, deployment state, runtime behavior, or the next blocking condition.
+
+### Known documentation cleanup still pending
+
+When convenient, audit README/ROADMAP against current behavior: browser Local CI activation is complete, GHCR publication is working, Assistant hard constraints are implemented, Suggestions history pool and crowdfunding filtering are implemented, and tutorial background discovery is implemented. Avoid leaving roadmap items marked future when already completed.
+
