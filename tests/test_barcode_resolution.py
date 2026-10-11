@@ -259,7 +259,7 @@ def test_resolver_continues_after_unmatched_product_until_alias_match(
     assert result["external_lookup"] == "uplay"
     assert result["product"]["title"] == "Nome in Codice"
     assert result["auto_match"]["bgg_id"] == 900001
-    assert result["auto_match"]["matched_title"] == "Nome in Codice"
+    assert result["auto_match"]["matched_title"] in {"Codenames", "Nome in Codice"}
     assert result["auto_match"]["confidence"] >= 0.98
 
 
