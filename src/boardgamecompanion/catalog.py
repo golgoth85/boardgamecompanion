@@ -98,7 +98,7 @@ def game_title_search_clause(
     """SQL predicate matching canonical, original and all BGG alternate titles."""
     metadata = (
         f"CASE WHEN json_valid({enrichment_alias}.metadata_json) "
-        f"THEN {enrichment_alias}.metadata_json ELSE '{}' END"
+        f"THEN {enrichment_alias}.metadata_json ELSE '{{}}' END"
     )
     return f"""(
         {game_alias}.title LIKE ? COLLATE NOCASE
