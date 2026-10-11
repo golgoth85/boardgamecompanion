@@ -125,6 +125,9 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "tutorial-video-frame" in js.text
     assert "scannerPhotoCanvas" in js.text
     assert "result.auto_match" in js.text
-    assert "Scansiona</span>" in js.text
+    assert 'aria-label="Scansiona barcode"' in js.text
+    assert '<span aria-hidden="true">+</span>' in js.text
+    assert "aspect-ratio: 4 / 3" in css.text
+    assert "-webkit-line-clamp: 2" in css.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text
