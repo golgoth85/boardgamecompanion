@@ -144,16 +144,20 @@ class UpcItemDbLookup:
 class UplayBarcodeLookup:
     """Board-game-specific public-web fallback for Italian/European GTINs.
 
-    Uplay exposes reliable product pages containing exact BARCODE fields, but its
-    internal search endpoint is not stable for server-side lookup. Resolve the
-    exact GTIN through a bounded public search-index query, then trust a result
-    only after fetching an allowlisted Uplay product page and verifying the
-    barcode verbatim in that page.
+    Uplay product pages expose exact BARCODE fields, but no single search surface
+    is reliable for server-side barcode discovery. Use a bounded sequence of the
+    public Uplay search plus public search indexes, then trust a result only after
+    fetching an allowlisted Uplay product page and verifying the barcode verbatim.
     """
 
-    search_endpoint = "https://html.duckduckgo.com/html/"
+    search_endpoints = (
+        ("https://www.uplay.it/it/search", "query"),
+        ("https://www.google.com/search", "q"),
+        ("https://html.duckduckgo.com/html/", "q"),
+    )
     allowed_hosts = {"uplay.it", "www.uplay.it"}
-    search_hosts = {"duckduckgo.com", "html.duckduckgo.com"}
+    duckduckgo_hosts = {"duckduckgo.com", "html.duckduckgo.com"}
+    google_hosts = {"google.com", "www.google.com"}
     _href_pattern = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
     _tag_pattern = re.compile(r"<[^>]+>")
     _h1_pattern = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
@@ -179,8 +183,16 @@ class UplayBarcodeLookup:
         candidate = urljoin(base_url, href)
         parsed = urlparse(candidate)
         hostname = (parsed.hostname or "").casefold()
-        if hostname in cls.search_hosts:
+        if hostname in cls.duckduckgo_hosts:
             redirect = parse_qs(parsed.query).get("uddg", [])
+            if not redirect:
+                return None
+            candidate = redirect[0]
+            parsed = urlparse(candidate)
+            hostname = (parsed.hostname or "").casefold()
+        elif hostname in cls.google_hosts and parsed.path == "/url":
+            query = parse_qs(parsed.query)
+            redirect = query.get("q", []) or query.get("url", [])
             if not redirect:
                 return None
             candidate = redirect[0]
@@ -266,7 +278,7 @@ class UplayBarcodeLookup:
                 "+self-hosted-barcode-resolver)"
             ),
         }
-        queries = (
+        public_queries = (
             f'"{normalized}" site:uplay.it/it/gioco-da-tavolo',
             f"{normalized} uplay gioco da tavolo",
         )
@@ -278,21 +290,25 @@ class UplayBarcodeLookup:
                 transport=self.transport,
             ) as client:
                 product_urls: list[str] = []
-                for query in queries:
-                    response = client.get(self.search_endpoint, params={"q": query})
-                    if response.status_code == 429:
-                        raise BarcodeProductLookupError(
-                            "public board-game search rate limit reached"
-                        )
-                    if response.status_code >= 400:
-                        continue
-                    for product_url in self._product_urls(
-                        str(response.url),
-                        response.text,
-                    ):
-                        if product_url not in product_urls:
-                            product_urls.append(product_url)
-                        if len(product_urls) >= 5:
+                for endpoint, parameter in self.search_endpoints:
+                    queries = (
+                        (normalized,)
+                        if endpoint.startswith("https://www.uplay.it/")
+                        else public_queries
+                    )
+                    for query in queries:
+                        response = client.get(endpoint, params={parameter: query})
+                        if response.status_code >= 400:
+                            continue
+                        for product_url in self._product_urls(
+                            str(response.url),
+                            response.text,
+                        ):
+                            if product_url not in product_urls:
+                                product_urls.append(product_url)
+                            if len(product_urls) >= 5:
+                                break
+                        if product_urls:
                             break
                     if product_urls:
                         break
@@ -359,7 +375,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v3:{barcode}"
+        return f"barcode_product_lookup:v4:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -384,7 +400,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 3, "product": product},
+            {"schema_version": 4, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )

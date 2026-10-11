@@ -158,13 +158,25 @@ def test_fallback_lookup_uses_second_provider_after_primary_miss() -> None:
     assert secondary.calls == ["3558380049463"]
 
 
-def _uplay_search_result(product_url: str) -> str:
+def _duckduckgo_search_result(product_url: str) -> str:
     from urllib.parse import quote
 
     return f"""
     <html><body>
       <a class="result__a"
          href="//duckduckgo.com/l/?uddg={quote(product_url, safe='')}">
+        Board game result
+      </a>
+    </body></html>
+    """
+
+
+def _google_search_result(product_url: str) -> str:
+    from urllib.parse import quote
+
+    return f"""
+    <html><body>
+      <a href="/url?q={quote(product_url, safe='')}&sa=U">
         Board game result
       </a>
     </body></html>
@@ -189,11 +201,14 @@ def test_uplay_lookup_resolves_known_italian_l5r_barcode() -> None:
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "html.duckduckgo.com":
+        if request.url.host == "www.uplay.it" and request.url.path == "/it/search":
+            assert request.url.params["query"] == "3558380049463"
+            return httpx.Response(200, text="<html>No barcode result</html>", request=request)
+        if request.url.host == "www.google.com":
             assert "3558380049463" in request.url.params["q"]
             return httpx.Response(
                 200,
-                text=_uplay_search_result(product_url),
+                text=_google_search_result(product_url),
                 request=request,
             )
         assert request.url.host == "www.uplay.it"
@@ -221,11 +236,17 @@ def test_uplay_lookup_resolves_known_italian_verdant_barcode() -> None:
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.uplay.it" and request.url.path == "/it/search":
+            assert request.url.params["query"] == "787790612193"
+            return httpx.Response(200, text="<html>No barcode result</html>", request=request)
+        if request.url.host == "www.google.com":
+            assert "787790612193" in request.url.params["q"]
+            return httpx.Response(503, request=request)
         if request.url.host == "html.duckduckgo.com":
             assert "787790612193" in request.url.params["q"]
             return httpx.Response(
                 200,
-                text=_uplay_search_result(product_url),
+                text=_duckduckgo_search_result(product_url),
                 request=request,
             )
         assert request.url.host == "www.uplay.it"
@@ -241,7 +262,7 @@ def test_uplay_lookup_resolves_known_italian_verdant_barcode() -> None:
     assert product["source"] == "uplay"
 
 
-def test_v2_negative_barcode_cache_is_ignored_after_provider_upgrade(
+def test_v3_negative_barcode_cache_is_ignored_after_provider_upgrade(
     tmp_path: Path,
 ) -> None:
     database = _database(tmp_path)
@@ -253,8 +274,8 @@ def test_v2_negative_barcode_cache_is_ignored_after_provider_upgrade(
             VALUES(?,?,0,CURRENT_TIMESTAMP)
             """,
             (
-                f"barcode_product_lookup:v2:{barcode}",
-                '{"schema_version":2,"product":null}',
+                f"barcode_product_lookup:v3:{barcode}",
+                '{"schema_version":3,"product":null}',
             ),
         )
 
