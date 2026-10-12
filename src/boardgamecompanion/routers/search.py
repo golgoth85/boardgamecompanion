@@ -39,11 +39,21 @@ def universal_search(
     database = get_database()
     database.initialize()
     folded = query.casefold()
-    catalog = Catalog(database).list_games(
+    catalog_matches = Catalog(database).list_games(
         query=query,
-        limit=limit,
+        limit=200,
         offset=0,
     )
+    matched_bgg_ids = {
+        int(item["bgg_id"])
+        for item in catalog_matches["items"]
+        if item.get("bgg_id") is not None
+    }
+    catalog = {
+        **catalog_matches,
+        "items": catalog_matches["items"][:limit],
+        "limit": limit,
+    }
     sections = [
         {"key": key, "title": title, "url": url, "description": description}
         for key, title, url, description in SECTIONS
@@ -52,7 +62,13 @@ def universal_search(
     wishlist = [
         item
         for item in WishlistStore(database).list()
-        if folded in str(item.get("title") or "").casefold()
+        if (
+            folded in str(item.get("title") or "").casefold()
+            or (
+                item.get("bgg_id") is not None
+                and int(item["bgg_id"]) in matched_bgg_ids
+            )
+        )
     ][:limit]
     lists = [
         item
@@ -63,8 +79,15 @@ def universal_search(
     # Search persisted manuals, not merely the game titles in the catalog.
     # Bound params avoid treating a user-supplied '%' or '_' as a wildcard.
     with database.connect() as connection:
+        rulebook_params: list[object] = [query, query, query]
+        alias_clause = ""
+        if matched_bgg_ids:
+            placeholders = ",".join("?" for _ in matched_bgg_ids)
+            alias_clause = f" OR g.bgg_id IN ({placeholders})"
+            rulebook_params.extend(sorted(matched_bgg_ids))
+        rulebook_params.append(limit)
         document_rows = connection.execute(
-            """
+            f"""
             SELECT d.id, g.bgg_id, g.title AS game_title,
                    d.title AS title, d.language
             FROM game_documents d
@@ -74,13 +97,14 @@ def universal_search(
                   instr(lower(g.title),lower(?))>0
                   OR instr(lower(COALESCE(d.title,'')),lower(?))>0
                   OR instr(lower(d.original_filename),lower(?))>0
+                  {alias_clause}
               )
             ORDER BY d.is_official DESC,
                      CASE WHEN d.language='it' THEN 0 ELSE 1 END,
                      d.created_at DESC
             LIMIT ?
             """,
-            (query, query, query, limit),
+            rulebook_params,
         ).fetchall()
     rulebooks = [
         {

@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 from boardgamecompanion.database import Database
+from boardgamecompanion.title_search import game_title_terms, title_query_matches
 
 
 SORT_SQL = {
@@ -89,6 +90,23 @@ def _metadata_list(metadata: dict[str, Any], key: str) -> list[str]:
         for item in value
         if (text := str(item).strip()) and len(text) <= 500
     ]
+
+
+def _row_title_terms(row) -> list[str]:
+    metadata_json = (
+        row["enriched_metadata_json"]
+        if "enriched_metadata_json" in row.keys()
+        else None
+    )
+    extras = []
+    if "version_nickname" in row.keys():
+        extras.append(row["version_nickname"])
+    return game_title_terms(
+        title=row["title"],
+        original_title=row["original_title"],
+        metadata_json=metadata_json,
+        extra_terms=extras,
+    )
 
 
 def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -308,10 +326,7 @@ class Catalog:
     ) -> dict[str, Any]:
         where: list[str] = []
         params: list[Any] = []
-        if query:
-            where.append("(g.title LIKE ? COLLATE NOCASE OR g.original_title LIKE ? COLLATE NOCASE)")
-            wildcard = f"%{query}%"
-            params.extend([wildcard, wildcard])
+        search_query = str(query or "").strip()
         if item_type:
             where.append("g.item_type = ?")
             params.append(item_type)
@@ -369,7 +384,8 @@ class Catalog:
         from_sql = self._from_sql()
         select_sql = self._select_sql()
         python_filter = (
-            ideal_players is not None
+            bool(search_query)
+            or ideal_players is not None
             or recommended_players is not None
             or bool(category)
             or bool(mechanic)
@@ -404,6 +420,10 @@ class Catalog:
                     row
                     for row in candidates
                     if (
+                        not search_query
+                        or title_query_matches(search_query, _row_title_terms(row))
+                    )
+                    and (
                         ideal_players is None
                         or _ideal_players_match(row, ideal_players)
                     )
@@ -453,6 +473,7 @@ class Catalog:
                    OR e.next_refresh_at <= ?
                    OR e.metadata_json NOT LIKE '%"parent_bgg_id"%'
                    OR e.metadata_json NOT LIKE '%"mechanics"%'
+                   OR e.metadata_json NOT LIKE '%"alternate_titles"%'
                 ORDER BY
                     e.board_game_id IS NOT NULL,
                     g.title COLLATE NOCASE,

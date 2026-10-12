@@ -13,6 +13,7 @@ import httpx
 
 from boardgamecompanion.copies import PhysicalCopyStore, normalize_barcode
 from boardgamecompanion.database import Database
+from boardgamecompanion.title_search import game_title_terms
 
 
 class BarcodeProductLookupError(RuntimeError):
@@ -367,6 +368,34 @@ class FallbackBarcodeLookup:
             raise ValueError("at least one barcode lookup is required")
         self.lookups = lookups
 
+    def lookup_all(self, barcode: str) -> list[dict[str, Any]]:
+        errors: list[str] = []
+        completed_provider = False
+        products: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for lookup in self.lookups:
+            try:
+                product = lookup.lookup(barcode)
+            except BarcodeProductLookupError as exc:
+                errors.append(str(exc))
+                continue
+            completed_provider = True
+            if product is None:
+                continue
+            key = (
+                str(product.get("source") or ""),
+                str(product.get("title") or ""),
+                str(product.get("source_url") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            products.append(product)
+
+        if not completed_provider and errors:
+            raise BarcodeProductLookupError("; ".join(errors))
+        return products
+
     def lookup(self, barcode: str) -> dict[str, Any] | None:
         errors: list[str] = []
         completed_provider = False
@@ -405,7 +434,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v5:{barcode}"
+        return f"barcode_product_lookup:v6:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -430,7 +459,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 5, "product": product},
+            {"schema_version": 6, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -465,7 +494,7 @@ class BarcodeResolver:
             row = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
-                       e.cover_url,
+                       e.cover_url,e.metadata_json,
                        GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id=g.id
@@ -496,7 +525,7 @@ class BarcodeResolver:
             rows = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
-                       e.cover_url,
+                       e.cover_url,e.metadata_json,
                        GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
                 FROM board_games g
                 JOIN collection_entries c ON c.board_game_id=g.id
@@ -509,12 +538,15 @@ class BarcodeResolver:
 
         candidates: list[dict[str, Any]] = []
         for row in rows:
-            title_score = _title_score(product_text, str(row["title"] or ""))
-            original_score = _title_score(
-                product_text,
-                str(row["original_title"] or ""),
+            terms = game_title_terms(
+                title=row["title"],
+                original_title=row["original_title"],
+                metadata_json=row["metadata_json"],
             )
-            score = max(title_score, original_score)
+            score = max(
+                (_title_score(product_text, term) for term in terms),
+                default=0.0,
+            )
             if score < 0.45:
                 continue
             candidates.append(
@@ -535,6 +567,83 @@ class BarcodeResolver:
             )
         )
         return candidates[:5]
+
+    def _evaluate_product(
+        self,
+        product: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        verified_candidate = self._verified_candidate(product)
+        if verified_candidate is not None:
+            return [verified_candidate], verified_candidate
+
+        candidates = self._owned_candidates(product)
+        best = candidates[0] if candidates else None
+        second = candidates[1] if len(candidates) > 1 else None
+        auto_match = None
+        if best is not None:
+            best_score = float(best["confidence"])
+            margin = (
+                best_score - float(second["confidence"])
+                if second
+                else best_score
+            )
+            if best_score >= 0.82 and margin >= 0.08:
+                auto_match = best
+        return candidates, auto_match
+
+    def _lookup_best_product(
+        self,
+        barcode: str,
+    ) -> tuple[
+        dict[str, Any] | None,
+        list[dict[str, Any]],
+        dict[str, Any] | None,
+    ]:
+        if not isinstance(self.product_lookup, FallbackBarcodeLookup):
+            product = self.product_lookup.lookup(barcode)
+            if product is None:
+                return None, [], None
+            candidates, auto_match = self._evaluate_product(product)
+            return product, candidates, auto_match
+
+        errors: list[str] = []
+        completed_provider = False
+        best_product: dict[str, Any] | None = None
+        best_candidates: list[dict[str, Any]] = []
+        best_auto_match: dict[str, Any] | None = None
+        best_rank: tuple[float, int] | None = None
+
+        for index, lookup in enumerate(self.product_lookup.lookups):
+            try:
+                product = lookup.lookup(barcode)
+            except BarcodeProductLookupError as exc:
+                errors.append(str(exc))
+                continue
+            completed_provider = True
+            if product is None:
+                continue
+
+            candidates, auto_match = self._evaluate_product(product)
+            if auto_match is not None:
+                return product, candidates, auto_match
+
+            top_score = (
+                float(candidates[0]["confidence"])
+                if candidates
+                else 0.0
+            )
+            rank = (top_score, -index)
+            if best_rank is None or rank > best_rank:
+                best_rank = rank
+                best_product = product
+                best_candidates = candidates
+                best_auto_match = None
+
+        if best_product is not None:
+            return best_product, best_candidates, best_auto_match
+        if not completed_provider and errors:
+            raise BarcodeProductLookupError("; ".join(errors))
+        return None, [], None
 
     def lookup(self, barcode: str) -> dict[str, Any]:
         local = PhysicalCopyStore(self.database).lookup_barcode(barcode)
@@ -561,9 +670,15 @@ class BarcodeResolver:
 
         cached, product = self._read_cache(normalized)
         external_lookup = "cache" if cached else "providers"
-        if not cached:
+        candidates: list[dict[str, Any]] = []
+        auto_match: dict[str, Any] | None = None
+
+        if cached:
+            if product:
+                candidates, auto_match = self._evaluate_product(product)
+        else:
             try:
-                product = self.product_lookup.lookup(normalized)
+                product, candidates, auto_match = self._lookup_best_product(normalized)
                 self._write_cache(normalized, product)
                 if product is not None:
                     external_lookup = str(product.get("source") or "providers")
@@ -587,25 +702,6 @@ class BarcodeResolver:
                 "candidates": [],
                 "external_lookup": external_lookup,
             }
-
-        verified_candidate = self._verified_candidate(product)
-        if verified_candidate is not None:
-            candidates = [verified_candidate]
-            auto_match = verified_candidate
-        else:
-            candidates = self._owned_candidates(product)
-            best = candidates[0] if candidates else None
-            second = candidates[1] if len(candidates) > 1 else None
-            auto_match = None
-            if best is not None:
-                best_score = float(best["confidence"])
-                margin = (
-                    best_score - float(second["confidence"])
-                    if second
-                    else best_score
-                )
-                if best_score >= 0.82 and margin >= 0.08:
-                    auto_match = best
 
         return {
             **local,
