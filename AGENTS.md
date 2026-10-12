@@ -221,63 +221,80 @@ The hardened control agent can perform controlled Docker list/inspect/logs/start
 - Release/publish/deploy jobs requiring credentials are a separate trusted boundary and do not replace Local CI validation.
 - New application repositories must be registered in the Local CI repository registry and contain `LOCAL_CI.md` before CI is considered configured.
 
-## Current handoff state — 2026-10-11
+## Current handoff state — 2026-10-12
 
 This section is a point-in-time operational handoff. Re-read current `main` and current NAS Control status before acting, because parallel agents may advance infrastructure independently.
 
 ### Current repository and deployment state
 
-- Canonical application `main`: `192cc04dede0fc5d5c30ea4edb7a583725828cfa` (PR #139 merged).
-- PR #138 (`9c1cad50a96c70f62c693d34d38be62d2e147ca8`) hardened public Uplay discovery through Uplay search → Google → DuckDuckGo. Exact PR head passed Universal Local CI; integrated `main` `554105d298e14cfdd000e97978058faa4c62dd17` also passed `pytest-browser-v1`, lifecycle `CLEANED`, `cleanup_attested=true`.
-- Live production validation on `554105d2...` still returned `resolution=unresolved` for EAN `3558380049463`; this proved the remaining problem was provider discovery, not matching logic.
-- PR #139 adds a small audited verified-GTIN catalog ahead of network providers, seeds `3558380049463` → BGG `184151`, bypasses fuzzy title matching when that verified BGG game exists locally, and bumps barcode cache to v5.
-- Integrated `main` `192cc04d...` passed Universal Local CI on NAS Control issue #3065 with profile `pytest-browser-v1`, lifecycle `CLEANED`, and `cleanup_attested=true`.
-- Immutable image for `192cc04d...` was published successfully through NAS Control issue #3073 (run `38165791946`).
-- The same exact revision was deployed successfully through NAS Control issue #3074 (run `38166017673`).
-- Production health after deploy: HTTP 200, app status `ok`, schema version `21` (NAS Control issue #3077).
-- Production diagnostics after deploy: HTTP 200, schema `21`, BGG configured and collection sync configured; no startup failure was observed (issue #3078).
-- Post-deploy container logs (issue #3079) show application startup complete and repeated `/health` 200 responses, with no immediate repeated tutorial-discovery error loop.
+- Canonical application `main`: `23a602b5927cc0d7fee7674f9b04d59a24e715e3` (PR #142 merged).
+- PR #142 head `13f3dd49608f06d7ad61998f0e2cdb5388c2a8e2` passed Universal Local CI on NAS Control issue #3486 with profile `pytest-browser-v1`, lifecycle `CLEANED`, and `cleanup_attested=true`.
+- The merged `main` `23a602b5927cc0d7fee7674f9b04d59a24e715e3` independently passed Universal Local CI on NAS Control issue #3526 / run `38292482576` with profile `pytest-browser-v1`, lifecycle `CLEANED`, and `cleanup_attested=true`.
+- Immutable image for `23a602b5...` was published successfully through NAS Control issue #3529 / run `38293404657`.
+- The same exact revision was deployed successfully through NAS Control issue #3536 / run `38293817207`.
+- Production health after deploy is HTTP 200 with app status `ok` and schema version `21` (issue #3541 / run `38294023393`).
 
-### Barcode resolver — production-verified behavior
+### PR #142 behavior now deployed
 
-- Barcode lookup first checks locally registered physical copies, then external product resolution.
-- Provider order now starts with `VerifiedBarcodeLookup`, then UPCitemdb, then Uplay/public-search fallback.
-- Verified-catalog entries are intentionally small and audited; they must carry a primary-source URL and exact BGG identity.
-- Cache namespace is v5, so stale negative v4 results cannot mask the verified-catalog fix.
-- Live regression EAN `3558380049463` now succeeds in production:
-  - `resolution=owned_game`;
-  - `external_lookup=verified_catalog`;
-  - product title `La Leggenda dei Cinque Anelli: Il Gioco di Carte`;
-  - auto-match BGG `184151` (`Legend of the Five Rings: The Card Game`);
-  - confidence `1.0`.
-  Evidence: NAS Control issue #3075 / run `38166097149`.
-- Existing positive regression EAN `5425016924242` still succeeds:
-  - `resolution=owned_game`;
+- Barcode cache namespace is v6; stale v5 barcode lookup cache entries no longer mask the new resolver behavior.
+- `BarcodeResolver` now evaluates provider results sequentially and continues to later providers when an earlier product result does not produce a reliable owned-game auto-match.
+- It stops early once a reliable match exists, so known-positive UPCitemdb cases do not unnecessarily query later providers.
+- Barcode candidate scoring now considers BGG alternate titles in addition to primary/original titles.
+- Title normalization is accent-insensitive and Unicode-safe.
+- Catalog and universal search now use BGG alternate titles as aliases.
+- Legacy enrichment rows that lack `alternate_titles` are eligible for metadata refresh.
+- Universal search propagates alias matches to games, wishlist items tied to the same BGG ID, and persisted rulebooks tied to the same BGG ID.
+
+### Universal title search — production verified
+
+Production live postflight confirms bidirectional localized/original-title search works:
+
+- Query `Codenames` returns owned game BGG `178900`, title `Codenames` (issue #3542 / run `38294027309`).
+- Query `Nome in Codice` returns the same owned game BGG `178900` (issue #3543 / run `38294032047`).
+- Therefore the requested `Codenames` ⇄ `Nome in Codice` equivalence is live and verified in production.
+- Do not reopen the title-alias search incident unless a new live regression appears.
+
+### Barcode resolver — still open after PR #142
+
+Do **not** treat the outer NAS Control `success` label as barcode success. Inspect the structured result payload.
+
+Live post-deploy results on `23a602b5...`:
+
+- EAN `8034055580424` (Nome in Codice / Codenames):
+  - `resolution=product_identified`;
   - `external_lookup=upcitemdb`;
-  - auto-match BGG `173346` (`7 Wonders Duel`);
-  - confidence `0.842`.
-  Evidence: NAS Control issue #3076 / run `38166099856`.
-- Do not reopen the L5R barcode incident unless a new live regression appears. The original unresolved production case is closed by PR #139 and the v5 deployment.
+  - product title `Name In Code, Game Cards, By Cranio, Edition Italian`;
+  - `auto_match=null`;
+  - `candidates=[]`.
+  Evidence: issue #3539 / run `38294012195`.
+- EAN `8034055581032` (Sagrada):
+  - `resolution=unresolved`;
+  - `external_lookup=providers`;
+  - `product=null`;
+  - `auto_match=null`;
+  - `candidates=[]`.
+  Evidence: issue #3540 / run `38294017444`.
 
-### Tutorial background discovery — merged and postflight-checked
+These two barcode cases remain the active functional blocker. PR #142 fixed provider-selection/cache/search architecture but did **not** close the two real production barcode cases.
 
-- Background tutorial discovery remains enabled by default.
-- Default bounded batch size is `3`; default poll interval is 6 hours.
-- If YouTube is not configured at process start, the worker stays alive and retries on a shortened interval instead of requiring restart.
-- Provider-wide YouTube quota/HTTP 403 stops the current batch without burning through the remaining queue, leaving the item due for retry.
-- Production schema is `21`; the post-v5 container started normally and showed no immediate repeated tutorial-worker errors.
-- A future deeper acceptance may inspect actual backlog progression over time, but no runtime blocker remains from the worker startup/retry implementation.
+Earlier barcode baselines remain relevant:
+- EAN `3558380049463` (La Leggenda dei Cinque Anelli) is production-verified as `owned_game` through the audited verified catalog mapping to BGG `184151`.
+- EAN `5425016924242` (7 Wonders Duel) is production-verified as `owned_game` through UPCitemdb with BGG `173346`.
+- Preserve these as regressions while fixing the two open Italian barcode cases.
 
 ### Immediate next steps
 
-1. Treat `192cc04dede0fc5d5c30ea4edb7a583725828cfa` as the deployed production baseline unless a newer merged `main` is verified.
-2. Before any new source write, re-read this file and current `main`; parallel agents may advance the repository.
-3. For future barcode additions, prefer audited exact GTIN→BGG mappings only when a trustworthy primary source verifies the GTIN; keep generic provider lookup for all other products.
-4. Optional regression work: re-run Assistant hard-constraint, Suggestions bounded-history, and Crowdfunding relevance smokes when those areas are next touched; they are not blockers for the completed barcode v5 deployment.
-5. Keep WoL physical acceptance separate: only test when the operator intentionally puts the gaming PC to sleep; do not redesign WoL before that physical acceptance.
-6. Complete the README/ROADMAP cleanup below when convenient.
+1. Start from current remote `main` and re-read this file before any source modification.
+2. Treat `23a602b5927cc0d7fee7674f9b04d59a24e715e3` as the currently deployed application baseline unless a newer exact revision is verified.
+3. Investigate why `8034055580424` does not reach a usable Uplay result despite UPCitemdb being an insufficient match, and why `8034055581032` remains unresolved.
+4. Verify the actual provider sequence and exact Uplay/public-search result for both barcodes in live runtime. Do not assume a provider was queried merely because source code permits it.
+5. Prefer a general resolver/provider fix over adding ad-hoc hardcoded barcode mappings. Use audited exact GTIN→BGG mappings only when a trustworthy primary source is the most reliable available source.
+6. Preserve the now-working universal title search and the known L5R/7 Wonders Duel barcode regressions.
+7. After any barcode fix: exact-SHA Local CI → merge → integrated-main Local CI → immutable publish → deploy → raw live structured lookup for both `8034055580424` and `8034055581032`.
+8. Complete README/ROADMAP cleanup when convenient; it remains non-blocking.
+9. Keep WoL physical acceptance separate and only test it when the operator intentionally puts the gaming PC to sleep.
 
 ### Known documentation cleanup still pending
 
-When convenient, audit README/ROADMAP against current behavior: browser Local CI activation is complete, GHCR publication is working, Assistant hard constraints are implemented, Suggestions history pool and crowdfunding filtering are implemented, and tutorial background discovery is implemented. Avoid leaving roadmap items marked future when already completed.
+When convenient, audit README/ROADMAP against current behavior: browser Local CI activation is complete, GHCR publication is working, Assistant hard constraints are implemented, Suggestions history pool and crowdfunding filtering are implemented, tutorial background discovery is implemented, and universal localized/original title alias search is now deployed and live-verified. Avoid leaving roadmap items marked future when already completed.
 
