@@ -99,6 +99,28 @@ _VERIFIED_BARCODE_PRODUCTS: dict[str, dict[str, Any]] = {
             "gioco-da-tavolo-la-leggenda-dei-cinque-anelli--il-gioco-di-carte.html"
         ),
     },
+    "8034055580424": {
+        "barcode": "8034055580424",
+        "bgg_id": 178900,
+        "title": "Nome in Codice",
+        "brand": "Cranio Creations",
+        "category": "Board Games",
+        "description": "Codenames",
+        "images": [],
+        "source": "verified_catalog",
+        "source_url": "https://www.uplay.it/it/gioco-da-tavolo-nome-in-codice.html",
+    },
+    "8034055581032": {
+        "barcode": "8034055581032",
+        "bgg_id": 199561,
+        "title": "Sagrada",
+        "brand": "Cranio Creations",
+        "category": "Board Games",
+        "description": "Sagrada",
+        "images": [],
+        "source": "verified_catalog",
+        "source_url": "https://www.uplay.it/it/gioco-da-tavolo-sagrada.html",
+    },
 }
 
 
@@ -434,7 +456,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v6:{barcode}"
+        return f"barcode_product_lookup:v7:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -459,7 +481,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 6, "product": product},
+            {"schema_version": 7, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
