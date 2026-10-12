@@ -155,6 +155,28 @@ def test_verified_catalog_resolves_known_l5r_without_network() -> None:
     assert network.calls == []
 
 
+def test_verified_catalog_resolves_audited_italian_gtins_without_network() -> None:
+    network = FakeLookup(error=AssertionError("network fallback must not run"))
+    lookup = FallbackBarcodeLookup(VerifiedBarcodeLookup(), network)
+
+    codenames = lookup.lookup("8034055580424")
+    sagrada = lookup.lookup("8034055581032")
+
+    assert codenames is not None
+    assert codenames["bgg_id"] == 178900
+    assert codenames["title"] == "Nome in Codice"
+    assert codenames["brand"] == "Cranio Creations"
+    assert codenames["source_url"].endswith("/gioco-da-tavolo-nome-in-codice.html")
+
+    assert sagrada is not None
+    assert sagrada["bgg_id"] == 199561
+    assert sagrada["title"] == "Sagrada"
+    assert sagrada["brand"] == "Cranio Creations"
+    assert sagrada["source_url"].endswith("/gioco-da-tavolo-sagrada.html")
+
+    assert network.calls == []
+
+
 def test_verified_bgg_id_bypasses_fuzzy_title_matching(tmp_path: Path) -> None:
     database = _database(tmp_path)
     lookup = FakeLookup(
@@ -407,3 +429,40 @@ def test_v5_negative_barcode_cache_is_ignored_after_provider_ranking_upgrade(
     assert lookup.calls == [barcode]
     assert result["resolution"] == "owned_game"
     assert result["external_lookup"] == "uplay"
+
+
+def test_v6_barcode_cache_is_ignored_after_verified_catalog_v7_upgrade(
+    tmp_path: Path,
+) -> None:
+    database = _database(tmp_path)
+    barcode = "4000000000102"
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings(key,value,sensitive,updated_at)
+            VALUES(?,?,0,CURRENT_TIMESTAMP)
+            """,
+            (
+                f"barcode_product_lookup:v6:{barcode}",
+                '{"schema_version":6,"product":{"barcode":"4000000000102","title":"Stale Product","source":"upcitemdb"}}',
+            ),
+        )
+
+    lookup = FakeLookup(
+        {
+            "barcode": barcode,
+            "title": "Synthetic Alpha Board Game",
+            "brand": "Example Publisher",
+            "category": "Board Games",
+            "description": None,
+            "images": [],
+            "source": "verified_catalog",
+            "bgg_id": 900001,
+        }
+    )
+    result = BarcodeResolver(database, product_lookup=lookup).lookup(barcode)
+
+    assert lookup.calls == [barcode]
+    assert result["resolution"] == "owned_game"
+    assert result["external_lookup"] == "verified_catalog"
+    assert result["auto_match"]["bgg_id"] == 900001
