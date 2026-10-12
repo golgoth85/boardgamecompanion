@@ -397,8 +397,21 @@ class FallbackBarcodeLookup:
         return products
 
     def lookup(self, barcode: str) -> dict[str, Any] | None:
-        products = self.lookup_all(barcode)
-        return products[0] if products else None
+        errors: list[str] = []
+        completed_provider = False
+        for lookup in self.lookups:
+            try:
+                product = lookup.lookup(barcode)
+            except BarcodeProductLookupError as exc:
+                errors.append(str(exc))
+                continue
+            completed_provider = True
+            if product is not None:
+                return product
+
+        if not completed_provider and errors:
+            raise BarcodeProductLookupError("; ".join(errors))
+        return None
 
 
 class BarcodeResolver:
