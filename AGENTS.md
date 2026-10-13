@@ -332,10 +332,10 @@ The existing bidirectional localized/original-title search remains valid and was
 1. Treat barcode incident closure as complete unless new production evidence contradicts it.
 2. Preserve exact functional/deployed revision `7973d11dae98c7121998e0a73f2ced0290903348` as the current runtime baseline until a newer exact deployment is verified.
 3. Before any source modification, re-read current remote `main` and this file; documentation-only successors may exist.
-4. Complete README/ROADMAP cleanup when convenient. It remains non-blocking.
+4. README and `docs/ROADMAP.md` were realigned on 2026-10-13 to current implemented behavior: browser Local CI, GHCR publication, Assistant hard constraints, Suggestions rotation/history, crowdfunding relevance filtering, tutorial background discovery, universal localized/original title aliases, and closed Codenames/Sagrada barcode remediation are no longer listed as future work.
 5. Continue ordinary BoardGameCompanion product work from current priorities; do not spend further cycles on the closed Codenames/Sagrada barcode incident absent regression.
 6. Keep WoL physical acceptance separate and test it only when the operator intentionally places the gaming PC in sleep state.
 
-### Known documentation cleanup still pending
+### Documentation state
 
-Audit README/ROADMAP against current behavior when convenient: browser Local CI activation is complete, GHCR publication works, Assistant hard constraints are implemented, Suggestions history pool and crowdfunding filtering are implemented, tutorial background discovery is implemented, universal localized/original title alias search is deployed, and the Codenames/Sagrada barcode incident is now deployed and live-verified as closed.
+README and `docs/ROADMAP.md` are aligned with the verified 2026-10-13 product/runtime checkpoint. Future documentation changes should preserve the distinction between the deployed functional revision and later documentation-only repository HEADs.
