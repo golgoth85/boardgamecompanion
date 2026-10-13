@@ -109,7 +109,7 @@ P7. RAG ingestion and page-cited Q&A.
 
 Workflow: inspect remote and live evidence -> reserve isolated NAS task workspace -> implement -> publish exact branch/SHA -> Local CI -> reviewable handoff -> merge/deploy only under a later authorized gate.
 
-For this preliminary handoff (2026-10-13), CloudCLI operations remain temporarily excluded while it is updated. No merge, deploy, installation, component update, security-policy change, folder migration, cleanup, new automation or provider activation is authorized. DeepSeek is optional and must never be activated or used as an automatic paid fallback.
+Provider isolation is mandatory. A native Anthropic/Claude session must authenticate through its own Anthropic path and must not inherit DeepSeek or OpenAI endpoint/token overrides. DeepSeek is explicit opt-in only and must never be an automatic fallback. Do not copy provider credentials between providers. Any temporary provider exclusion stated by the current user/task mandate still takes priority.
 
 ## Source-integrity invariant — no local-only source changes
 
