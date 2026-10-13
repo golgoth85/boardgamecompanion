@@ -1,29 +1,35 @@
 # BoardGameCompanion — current roadmap
 
-This document reflects the live application and repository audit completed on
-2026-10-10. Older phase documents remain useful as architectural history, but
+This document reflects the live application and repository state verified through
+2026-10-13. Older phase documents remain useful as architectural history, but
 they must not be read as unfinished product milestones.
 
 ## Current product state
 
 BoardGameCompanion is a standalone, self-hosted companion for a physical board-game
-collection. The major product areas below are implemented on `main` and were
-present in the live application during the audit:
+collection. The major product areas below are implemented on `main` and have
+production evidence:
 
 - BGG collection synchronization, metadata enrichment, catalog search/filtering,
   rankings and Explore views;
 - personal ratings, played/completed state, lists, wishlist, global search and
   notifications;
-- barcode/copy workflow;
+- barcode/copy workflow, including verified exact-GTIN resolution and fallback
+  provider matching;
+- bidirectional localized/original title aliases in universal search;
 - game-centric detail pages;
 - rulebook discovery, review, guarded acquisition, archival, scheduled updates,
   PDF ingest, chunking, embeddings, retrieval and grounded Q&A;
-- YouTube tutorial discovery and persisted video metadata;
-- personalized Suggestions for games not already owned;
-- owned-catalog AI recommendations ("Consigliami un gioco");
-- Gamefound/Kickstarter crowdfunding discovery;
+- bounded catalog-wide YouTube tutorial discovery with IT-first/EN fallback;
+- personalized Suggestions with a bounded rotating/history-aware candidate pool;
+- owned-catalog AI recommendations ("Consigliami un gioco") with deterministic
+  hard-constraint filtering before model ranking;
+- Gamefound/Kickstarter crowdfunding discovery with board-game relevance filtering;
 - relevant-expansion discovery and notifications;
-- LM Studio/Gemini provider configuration, diagnostics and Wake-on-LAN.
+- LM Studio/Gemini provider configuration, diagnostics and Wake-on-LAN;
+- browser-capable Universal Local CI with Python, JavaScript and Playwright coverage;
+- trusted immutable container publication and deployment through the NAS control
+  plane, including GHCR publication.
 
 The full information-architecture/UI redesign is no longer a future phase: the
 current UI already incorporates the redesign and subsequent simplification work.
@@ -40,129 +46,88 @@ The 2026-10-10 live audit found 154 owned catalog titles and no uncovered title:
   booklet, shared/external exact manual, etc.);
 - `uncovered_total = 0`.
 
-Periodic discovery now stops for games already resolved by an official IT/EN PDF
-or a curated no-standalone-PDF classification, while fallback-only titles remain
-eligible for improvement. Manual forced discovery remains available.
+Periodic discovery stops for games already resolved by an official IT/EN PDF or a
+curated no-standalone-PDF classification, while fallback-only titles remain eligible
+for improvement. Manual forced discovery remains available.
 
 RAG was verified live end to end: LM Studio embeddings + Gemini generation returned
 a grounded Italian answer from an official Italian rulebook with a page-level
 citation and no version conflict.
 
 Rulebook work is therefore maintenance rather than a product phase. Remaining
-activity is opportunistic: replace the 10 fallback documents with preferred
-official IT/EN sources when exact identity can be verified.
+activity is opportunistic: replace fallback documents with preferred official
+IT/EN sources when exact identity can be verified.
+
+## Barcode and universal search — incident closed
+
+The production barcode incident for the two Italian GTINs is closed on deployed
+functional revision `7973d11dae98c7121998e0a73f2ced0290903348`.
+
+Live structured post-deploy evidence confirms:
+
+- `8034055580424` → Nome in Codice / Codenames → BGG `178900`,
+  `owned_game`, `verified_catalog`, confidence `1.0`;
+- `8034055581032` → Sagrada → BGG `199561`,
+  `owned_game`, `verified_catalog`, confidence `1.0`;
+- L5R regression barcode remains BGG `184151`, confidence `1.0`;
+- 7 Wonders Duel remains BGG `173346` through UPCitemdb, confidence `0.842`.
+
+Universal search also remains production-verified for localized/original aliases:
+`Codenames` and `Nome in Codice` resolve to the same owned game.
+
+Do not reopen either incident without new production regression evidence.
 
 ## Expansions — major-only policy
 
 The game-detail expansion box intentionally does not mirror every BGG expansion
-link. It first rejects obvious micro-content (promos, packs, accessories, minis,
-replacement/media items, etc.) and then selects the materially relevant cohort
-using BGG ownership relative to the most widely owned expansion for that base
-game, with a bounded result set.
+link. It rejects obvious micro-content (promos, packs, accessories, minis,
+replacement/media items, etc.) and selects the materially relevant cohort using
+BGG ownership relative to the most widely owned expansion for that base game,
+with a bounded result set.
 
 Live verification on Arena: The Contest reduced the linked expansion set to six
 material expansions and filtered fifteen marginal entries.
 
+## Recently completed roadmap items
+
+The following items were previously listed as future work but are now implemented
+and should remain in regression/maintenance scope rather than the active roadmap:
+
+- Suggestions candidate expansion/rotation and history-aware reuse prevention;
+- deterministic hard constraints for the owned-catalog assistant;
+- bounded background tutorial discovery;
+- crowdfunding board-game relevance filtering;
+- browser-capable Universal Local CI using profile `pytest-browser-v1`, including
+  Python, JavaScript and Playwright coverage while preserving exact-source-SHA and
+  cleanup attestation;
+- trusted immutable container publication, including working GHCR publication.
+
 ## Residual roadmap
 
-### P1 — Recommendation quality
+### P1 — Wake-on-LAN physical acceptance
 
-#### Suggestions candidate universe
-
-The Suggestions module is implemented, grounded and live, but its current discovery
-pool is BGG Hot with a default candidate limit of 50. Expand the bounded candidate
-universe beyond the current Hot list so "Per te" and "Più diversi" can discover
-high-quality games outside short-term popularity.
-
-Target properties:
-
-- bounded/cached pool rather than full-database ingestion;
-- deterministic exclusion of owned titles and expansions where inappropriate;
-- diversity across mechanics, categories, weight, duration and age;
-- stable scoring before AI editorial generation;
-- rotation/pagination so refresh does not simply recycle the same small cohort.
-
-#### Owned-catalog assistant constraints
-
-"Consigliami un gioco" correctly restricts IDs to owned catalog entries, but the
-AI currently interprets hard constraints itself. The live audit produced a
-cooperative-game request that included Sagrada despite its metadata not declaring
-the Cooperative Game mechanic.
-
-Add deterministic constraint extraction/filtering or a strict post-validator for
-hard requirements such as:
-
-- cooperative vs competitive;
-- player count;
-- maximum duration;
-- age;
-- complexity/weight;
-- requested/excluded mechanics or categories.
-
-The model should explain/rank already valid candidates, not redefine their factual
-properties.
-
-### P1 — Tutorial coverage
-
-The tutorial-video feature and YouTube integration are implemented and configured,
-but persisted coverage is sparse: the audit found videos already stored for only
-6 of 154 owned games.
-
-Add bounded catalog-wide/background discovery with:
-
-- IT first, then EN;
-- official channels preferred where available;
-- existing relevance/review/unboxing/playthrough filters retained;
-- rate-limit-aware batching and retry;
-- no requirement for the user to open each game page manually to populate videos.
-
-### P1 — Crowdfunding relevance
-
-Gamefound and Kickstarter/Apify are live, but the audit found a Kickstarter
-Tabletop false positive that was not a board game. Add a board-game relevance
-filter before ranking/notification so category noise cannot enter the normal
-feed.
-
-### P2 — CI coverage
-
-Universal Local CI is the ordinary application gate, but the current BGC
-`pytest-v1` profile runs Python tests with `tests/e2e` excluded. It also does not
-make real Node/JavaScript syntax validation a required BGC gate.
-
-Extend the trusted Local CI profile to include:
-
-- JavaScript syntax validation;
-- Playwright desktop/mobile E2E;
-- the existing Python suite;
-- the same exact-source-SHA and cleanup attestation guarantees.
-
-Do not restore routine GitHub-hosted application CI.
-
-### P2 — Container publishing
-
-Trusted NAS image build and smoke tests work, and deployment can use the immutable
-local image. GHCR push currently fails because the token used at the release
-boundary lacks the required package-write scope.
-
-Fix the GHCR credential/scope so immutable images can also be published normally.
-This is an infrastructure issue, not an application blocker.
-
-### P2 — Wake-on-LAN acceptance
-
-The BGC endpoint successfully emits the magic packet and LM Studio is reachable
-after the request. Complete one physical acceptance test with the gaming PC
-actually asleep/off:
+The BGC endpoint emits the magic packet and LM Studio is reachable after a wake
+request. The remaining acceptance is intentionally physical and should only be run
+when the operator places the gaming PC into a real sleep/off state:
 
 `sleep/off -> BGC wake -> PC online -> LM Studio ready -> AI operation succeeds`.
 
-### P3 — Maintenance and documentation
+Do not simulate this by restarting services on an already awake machine.
 
-- keep this roadmap and README aligned with the current UI terminology and runtime;
-- periodically review the 10 fallback-only rulebooks for preferred official IT/EN
-  replacements;
+### P2 — Rulebook source quality
+
+Continue opportunistically replacing fallback-only rulebooks with preferred official
+IT/EN sources when exact title/edition identity can be verified. This is maintenance,
+not a blocker for normal product use.
+
+### P2 — Operational maintenance
+
+- keep this roadmap, README and AGENTS.md aligned with current runtime behavior;
 - keep notification volume/retention under review as background producers grow;
-- continue removing obsolete historical branches/PRs rather than treating them as
-  active roadmap items.
+- preserve exact deployed revision tracking separately from later docs-only `main`
+  commits;
+- remove or close superseded branches/PRs rather than treating them as active work;
+- retain raw structured post-deploy evidence for runtime-sensitive regressions.
 
 ## Architectural invariants
 
@@ -182,4 +147,6 @@ actually asleep/off:
 - External provider failures must degrade gracefully without making the local
   catalog unusable.
 
-Changes continue to follow branch -> tests -> PR -> exact-HEAD Local CI -> merge.
+Changes continue to follow branch -> tests/appropriate validation -> PR -> merge.
+Application changes additionally require exact-HEAD Universal Local CI and the
+normal merged-main/publish/deploy/runtime evidence gates when applicable.

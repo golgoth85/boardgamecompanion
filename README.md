@@ -11,7 +11,9 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Personal 0.5–5 star ratings in 0.5 steps, explicit played/completed state and a unified **Sala dei trofei** that also respects imported BGG play counts.
 - Persistent smart/manual game lists, with manual lists constrained to owned titles.
 - A first-class wishlist fed by suggestions and crowdfunding results.
-- Universal Ctrl+K search across games, sections, wishlist, saved lists, archived rulebooks and cached crowdfunding campaigns.
+- Personalized Suggestions use a bounded rotating/history-aware candidate pool rather than repeatedly recycling only a small popularity cohort.
+- Owned-catalog AI recommendations apply deterministic hard constraints before model ranking, so factual requirements such as player count, cooperation, duration, age, weight and requested/excluded mechanics are enforced outside the model.
+- Universal Ctrl+K search across games, sections, wishlist, saved lists, archived rulebooks and cached crowdfunding campaigns, with localized/original-title aliases (for example Codenames ⇄ Nome in Codice).
 - Relevant missing-expansion discovery with minor promo/accessory filtering and baseline-safe expansion notifications.
 - Baseline-safe crowdfunding notifications for campaigns related to the owned/wishlisted catalog.
 - Technical integration state centralized under Settings → Diagnostica instead of ordinary browsing surfaces.
@@ -19,7 +21,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
-- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available.
+- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available. Exact audited GTIN mappings are resolved through the verified catalog before network fallbacks, with versioned cache invalidation for corrected results.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
@@ -35,7 +37,7 @@ Browser camera access requires a secure context (HTTPS, or localhost); on plain 
 
 Because the BGG CSV export does not contain cover-image URLs, placeholders remain the offline fallback. When an approved BGG application token is configured, BGC refreshes exact-ID metadata and displays BGG-hosted cover art.
 
-Phase 7 is complete: PDF ingestion, chunk indexing, embeddings/retrieval, grounded answer generation, server-owned page citations and the in-game query UI are available. See `docs/ROADMAP.md`.
+Phase 7 is complete: PDF ingestion, chunk indexing, embeddings/retrieval, grounded answer generation, server-owned page citations and the in-game query UI are available. The previously open Codenames/Sagrada barcode incident is also closed and live-verified in production. See `docs/ROADMAP.md` for the current residual roadmap.
 
 ## Container
 
