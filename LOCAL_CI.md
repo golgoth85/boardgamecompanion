@@ -5,11 +5,11 @@ This repository uses **Universal Local CI** as the default development-validatio
 Current trusted contract:
 - generic entrypoint: `localci_repo_ci`;
 - repository identity: `golgoth85/boardgamecompanion` / GitHub ID `1381144611`;
-- command profile: `pytest-v1`;
-- immutable template: `python-pytest-boardgamecompanion` v2;
-- policy identity: `localci-boardgamecompanion-pytest-v2`;
+- command profile: `pytest-browser-v1`;
+- immutable template: `python-browser-pytest-boardgamecompanion` v1;
+- policy identity: `localci-boardgamecompanion-browser-pytest-v1`;
 - trusted registry: `golgoth85/nas-control:ops/nas-control/localci-repositories.json`;
-- Python pytest profile does not require Node merely because static JavaScript assets are present; JavaScript files remain bounded and counted, while Node validation belongs to profiles that explicitly contract for it.
+- This browser profile includes Python tests, Node JavaScript syntax checks and isolated Chromium/Playwright E2E; browser and backend failures remain distinguishable.
 
 Automatic PR routing:
 - `.github/workflows/local-ci.yml` sends only PR number, exact head SHA, base repository and numeric repository ID to the repository-scoped `localci-dispatcher`;
@@ -31,4 +31,6 @@ Rules:
 - release/publish/deploy jobs requiring credentials are a separate trusted boundary;
 - infrastructure failures must not silently fall back to hosted CI.
 
-Enrollment E2E: `golgoth85/nas-control#2137`, `ENROLLED`, `activated=true`, real isolated I3 guest `PASS` on the trusted `pytest-v1` v2 contract.
+Historical enrollment #2137 used the former pytest-only v2 contract; it is not evidence for the current browser profile. NAS Control #3851 on 2026-10-13 independently reported the current browser v1 profile active and CI available.
+
+Configuration and activation snapshot: [NAS Control #3851](https://github.com/golgoth85/nas-control/issues/3851), [run 38427508177](https://github.com/golgoth85/nas-control/actions/runs/38427508177), 2026-10-13. This confirms infrastructure availability, not PASS for any new commit. The trusted server registry remains authoritative; application documentation cannot choose its own profile.
