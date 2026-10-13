@@ -8,7 +8,6 @@ from boardgamecompanion.barcode_resolution import (
     BarcodeProductLookupError,
     BarcodeResolver,
     FallbackBarcodeLookup,
-    ItalianRetailBarcodeLookup,
     UplayBarcodeLookup,
     VerifiedBarcodeLookup,
 )
@@ -474,41 +473,57 @@ def test_uplay_continues_after_discovered_page_fails_exact_barcode() -> None:
     assert "Codenames" in product["description"]
 
 
-def test_retail_exact_gtin_lookup_resolves_historical_sagrada_ean() -> None:
-    product_url = (
-        "https://www.ibs.it/"
-        "sagrada-gioco-da-tavolo-giocattolo-cranio-creations/e/8034055581032"
-    )
-    product_html = """
+
+def test_uplay_continues_to_public_index_for_real_sagrada_barcode() -> None:
+    stale_url = "https://www.uplay.it/it/gioco-da-tavolo-sagrada--5---6-giocatore.html"
+    exact_url = "https://www.uplay.it/it/gioco-da-tavolo-sagrada.html"
+    stale_html = """
     <html><body>
-      <h1>Sagrada. Gioco da tavolo</h1>
-      <div>Marca: Cranio Creations</div>
-      <div>EAN: 8034055581032</div>
+      <h1>Sagrada: 5 &amp; 6 Giocatore</h1>
+      <div>BARCODE: 8034055581698</div>
+    </body></html>
+    """
+    exact_html = """
+    <html><body>
+      <h1>Sagrada</h1>
+      <div>Editore: Cranio Creations</div>
+      <div>Nomi alternativi: Sagrada</div>
+      <div>BARCODE: 8034055581032</div>
     </body></html>
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.uplay.it" and request.url.path == "/it/search":
+            return httpx.Response(
+                200,
+                text=f'<html><a href="{stale_url}">stale result</a></html>',
+                request=request,
+            )
         if request.url.host == "www.google.com":
             assert "8034055581032" in request.url.params["q"]
             return httpx.Response(
                 200,
-                text=_google_search_result(product_url),
+                text=_google_search_result(exact_url),
                 request=request,
             )
-        if request.url.host == "www.ibs.it":
-            return httpx.Response(200, text=product_html, request=request)
+        if request.url.host == "www.uplay.it" and request.url.path.endswith(
+            "/gioco-da-tavolo-sagrada--5---6-giocatore.html"
+        ):
+            return httpx.Response(200, text=stale_html, request=request)
+        if request.url.host == "www.uplay.it" and request.url.path.endswith(
+            "/gioco-da-tavolo-sagrada.html"
+        ):
+            return httpx.Response(200, text=exact_html, request=request)
         raise AssertionError(f"unexpected request: {request.url}")
 
-    product = ItalianRetailBarcodeLookup(
+    product = UplayBarcodeLookup(
         transport=httpx.MockTransport(handler)
     ).lookup("8034055581032")
 
     assert product is not None
     assert product["barcode"] == "8034055581032"
-    assert product["title"] == "Sagrada. Gioco da tavolo"
-    assert product["brand"] == "Cranio Creations"
-    assert product["source"] == "retail_exact_gtin"
-
+    assert product["title"] == "Sagrada"
+    assert product["source"] == "uplay"
 
 def test_real_codenames_pattern_prefers_later_exact_uplay_match(tmp_path: Path) -> None:
     database = _real_barcode_database(tmp_path)
@@ -551,36 +566,34 @@ def test_real_codenames_pattern_prefers_later_exact_uplay_match(tmp_path: Path) 
     assert retail.calls == []
 
 
-def test_real_sagrada_pattern_falls_through_to_exact_retail_gtin(tmp_path: Path) -> None:
+
+def test_real_sagrada_pattern_falls_through_to_exact_uplay_match(tmp_path: Path) -> None:
     database = _real_barcode_database(tmp_path)
     verified = FakeLookup(None)
     upc = FakeLookup(None)
-    uplay = FakeLookup(None)
-    retail = FakeLookup(
+    uplay = FakeLookup(
         {
             "barcode": "8034055581032",
-            "title": "Sagrada. Gioco da tavolo",
+            "title": "Sagrada",
             "brand": "Cranio Creations",
             "category": "Board Games",
-            "description": None,
+            "description": "Sagrada",
             "images": [],
-            "source": "retail_exact_gtin",
+            "source": "uplay",
         }
     )
 
     result = BarcodeResolver(
         database,
-        product_lookup=FallbackBarcodeLookup(verified, upc, uplay, retail),
+        product_lookup=FallbackBarcodeLookup(verified, upc, uplay),
     ).lookup("8034055581032")
 
     assert result["resolution"] == "owned_game"
-    assert result["external_lookup"] == "retail_exact_gtin"
+    assert result["external_lookup"] == "uplay"
     assert result["auto_match"]["bgg_id"] == 199561
     assert verified.calls == ["8034055581032"]
     assert upc.calls == ["8034055581032"]
     assert uplay.calls == ["8034055581032"]
-    assert retail.calls == ["8034055581032"]
-
 
 def test_v6_positive_cache_is_ignored_after_public_gtin_upgrade(tmp_path: Path) -> None:
     database = _real_barcode_database(tmp_path)
@@ -637,7 +650,7 @@ def test_v6_negative_cache_is_ignored_after_public_gtin_upgrade(tmp_path: Path) 
             "barcode": barcode,
             "title": "Sagrada. Gioco da tavolo",
             "brand": "Cranio Creations",
-            "source": "retail_exact_gtin",
+            "source": "uplay",
         }
     )
     result = BarcodeResolver(database, product_lookup=lookup).lookup(barcode)
