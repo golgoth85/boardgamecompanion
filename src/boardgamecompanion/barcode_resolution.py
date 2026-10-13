@@ -233,9 +233,9 @@ class UplayBarcodeLookup:
             return None
         if hostname not in cls.allowed_hosts:
             return None
-        if not parsed.path.startswith("/it/"):
+        if not re.match(r"^/(?:it|en|de|fr|es|pl|pt)/", parsed.path, re.IGNORECASE):
             return None
-        if "gioco-da-tavolo-" not in parsed.path or not parsed.path.endswith(".html"):
+        if "gioco-da-tavolo-" not in parsed.path.casefold() or not parsed.path.endswith(".html"):
             return None
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
@@ -309,7 +309,7 @@ class UplayBarcodeLookup:
             ),
         }
         public_queries = (
-            f'"{normalized}" site:uplay.it/it/gioco-da-tavolo',
+            f'"{normalized}" site:uplay.it "gioco-da-tavolo"',
             f"{normalized} uplay gioco da tavolo",
         )
         try:
@@ -319,7 +319,7 @@ class UplayBarcodeLookup:
                 follow_redirects=True,
                 transport=self.transport,
             ) as client:
-                product_urls: list[str] = []
+                seen_product_urls: set[str] = set()
                 for endpoint, parameter in self.search_endpoints:
                     queries = (
                         (normalized,)
@@ -334,26 +334,25 @@ class UplayBarcodeLookup:
                             str(response.url),
                             response.text,
                         ):
-                            if product_url not in product_urls:
-                                product_urls.append(product_url)
-                            if len(product_urls) >= 5:
+                            if product_url in seen_product_urls:
+                                continue
+                            seen_product_urls.add(product_url)
+                            page = client.get(product_url)
+                            if page.status_code >= 400:
+                                continue
+                            product = self._parse_product_page(
+                                page.text,
+                                normalized,
+                                source_url=product_url,
+                            )
+                            if product is not None:
+                                return product
+                            if len(seen_product_urls) >= 12:
                                 break
-                        if product_urls:
+                        if len(seen_product_urls) >= 12:
                             break
-                    if product_urls:
+                    if len(seen_product_urls) >= 12:
                         break
-
-                for product_url in product_urls:
-                    page = client.get(product_url)
-                    if page.status_code >= 400:
-                        continue
-                    product = self._parse_product_page(
-                        page.text,
-                        normalized,
-                        source_url=product_url,
-                    )
-                    if product is not None:
-                        return product
         except BarcodeProductLookupError:
             raise
         except httpx.HTTPError as exc:
@@ -361,6 +360,7 @@ class UplayBarcodeLookup:
                 f"public board-game barcode lookup failed: {exc}"
             ) from exc
         return None
+
 
 class FallbackBarcodeLookup:
     def __init__(self, *lookups: BarcodeProductLookup) -> None:
@@ -434,7 +434,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v6:{barcode}"
+        return f"barcode_product_lookup:v7:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -459,7 +459,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 6, "product": product},
+            {"schema_version": 7, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
