@@ -6,7 +6,7 @@
 - The canonical runtime route is GitHub → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations. Application repositories are consumers of this shared control plane.
 - Keep source work in this repository's normal GitHub branch/PR flow. Use NAS Control for runtime inspection, managed deploys, Docker actions, Home Assistant operations, and approved workspace actions.
 - Submit each runtime request exclusively as its own owner-authored GitHub Issue in `golgoth85/nas-control` using the `NAS_CONTROL_REQUEST_V1` format in `REQUESTS.md`. Verify the resulting workflow/runtime evidence.
-- CloudCLI/Claude Code follows the same runtime path. This rule does not itself authorize starting CloudCLI; existing explicit user-authorization requirements still apply. If CloudCLI is already authorized/running, terminal availability is not a reason to bypass the typed control plane.
+- Claude Code, CloudCLI, ChatGPT, and other GitHub-capable agents follow the same provider-neutral split: dedicated NAS workspace for source work; typed NAS Control for runtime/infrastructure work. Terminal availability is never a reason to bypass the control plane.
 - A missing Home Assistant plugin is not a blocker. Use the existing NAS Control Home Assistant capabilities and managed deploy path where applicable.
 - If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/nas-control` `main`, validate it in CI, then use it.
 - Canonical control-plane docs: `golgoth85/nas-control`, branch `main`, `REQUESTS.md`, `ARCHITECTURE.md`, and `ops/nas-control/RUNBOOK.md`.
@@ -94,28 +94,25 @@ P5. Official rulebook provider framework and IT/EN resolver.
 P6. Review queue and scheduled document update checks.
 P7. RAG ingestion and page-cited Q&A.
 
-## Mandatory execution policy — GitHub-first, operator-minimal
+## Mandatory execution policy — NAS-workspace-first, provider-neutral
 
-This policy has top workflow priority for all current and future development, remediation, review, and maintenance phases in this repository. It overrides older execution/workflow instructions where they conflict, but it never overrides an explicit scope or safety boundary in the current user mandate.
+This policy controls execution mechanics for all development, remediation, review, and maintenance work in this repository. It does not override a narrower phase boundary, review mandate, deployment gate, or safety rule in the current task.
 
-1. **GitHub is the primary work surface and source of truth.** Use GitHub-native/connected capabilities first for repository inspection, branches, file edits, commits, pull requests, diffs, reviews, CI status/logs, and merges when the current phase authorizes them.
-2. **Minimize operator involvement.** Do not ask the user to copy/paste scripts, relay command output, or perform routine Git/GitHub steps when an available connected tool can perform the same operation. Within the currently authorized phase, carry routine steps through autonomously.
-3. **Respect the phase boundary.** Autonomy applies only to the phase currently authorized. Do not start a subsequent phase, broaden product scope, deploy, publish, merge, mutate production data, or perform another action that the current mandate reserves for later approval.
-4. **Independent reviews remain read-only.** A review/re-review agent must not modify the reviewed branch, remediate findings, or alter runtime state unless the user explicitly changes the mandate.
-5. **Remote Desktop Commander is a last resort.** Use it only when the required operation is genuinely impossible through GitHub, CI, available connectors/tools, or another non-interactive route and access to the real NAS/PC/GUI/filesystem/runtime is indispensable. Never select it merely out of convenience.
-6. **CloudCLI requires explicit prior user authorization.** Use CloudCLI only when coding/debugging truly requires the real environment and GitHub/CI cannot provide sufficient evidence or execution. Do not use CloudCLI for ordinary repository editing, Git operations, documentation updates, or routine inspection.
-7. **Prefer reproducible automation over ad-hoc terminal work.** When real-environment execution is recurring, encode it in versioned scripts or GitHub Actions/self-hosted-runner workflows where safe, rather than repeatedly asking the user to execute shell fragments.
-8. **Manual user steps are exceptional.** If no automated route exists, explain why the manual step is unavoidable and provide the smallest safe self-contained command block. Do not split a routine operation into many copy/paste exchanges.
-9. **Ask only for decisions that require human authority or information.** Examples: a product/scope choice not determined by the current mandate, destructive/irreversible production action, secret/credential input, or an explicit approval gate. Do not ask for confirmation of routine reversible steps already covered by the phase.
-10. **Verify before claiming completion.** Check the exact branch/SHA, relevant diff, CI/tests, and any required runtime evidence. At handoff report the exact state, what was verified, unresolved limitations, and the next permitted step.
-11. **Do not silently substitute environments.** GitHub/CI evidence is preferred for source-level work. If correctness depends on NAS/Windows/Home Assistant/other real runtime behavior, state that dependency and obtain the required authorization before using CloudCLI; use Remote Desktop Commander only if indispensable under rule 5.
-12. **Keep secrets and production state out of GitHub.** Use repository secrets/environments or runtime secret stores. Never commit tokens, passwords, private runtime databases, or sensitive generated state.
+1. **GitHub is the canonical source and handoff boundary; the NAS workspace is the normal development surface.** Start from the current remote truth, then perform writable source work in a dedicated development workspace on the NAS whenever the repository is registered there. Never develop in a production/runtime directory.
+2. **One task/agent = one branch = one isolated worktree/workspace.** Concurrent agents must never write to the same working tree. Resume a worktree only for the same logical task and owner.
+3. **CloudCLI and Claude Code are not workflow exceptions.** They use the same dedicated NAS workspace, GitHub publication, Local CI, NAS Control, review, and phase boundaries as every other agent. Terminal availability never authorizes direct infrastructure mutation or editing of production source.
+4. **Publish before handoff or runtime use.** Every intended source/documentation change must exist on GitHub on a named branch and immutable commit SHA before it is handed off, reviewed, deployed, or otherwise treated as durable.
+5. **Validate the exact published SHA through the repository's Local CI path.** Do not infer CI success from documentation, a previous SHA, a local test, or the outer success label of an unrelated workflow. Unknown/unavailable profiles fail closed.
+6. **Use NAS Control for NAS/runtime/infrastructure operations.** Prefer existing typed capabilities. Do not bypass a missing, pending, denied, or expired NAS Control authorization through shell, SSH, Docker socket, Desktop Commander, CloudCLI, another workflow, or another connector.
+7. **Autonomy is bounded by the active mandate.** Routine reversible actions already covered by the mandate proceed without repeated confirmation. Destructive/irreversible effects and any explicitly reserved gate require the prescribed human approval.
+8. **Independent reviews remain read-only.** A review/re-review agent must not remediate findings or mutate runtime state unless the user explicitly changes the mandate.
+9. **Remote Desktop Commander is a diagnostic fallback, not the normal development path.** Use it only when the required evidence is genuinely unavailable through GitHub, Local CI, NAS Control, or another authorized non-interactive route.
+10. **Preserve secrets and production state.** Never commit credentials, private databases, session stores, runtime histories, or uncontrolled backups. Never erase drift merely to obtain a clean tree.
+11. **Verify before claiming completion.** Report the exact branch/SHA, Local CI evidence when required, runtime evidence when required, unresolved limitations, and the next permitted step.
 
 ### Default execution order
 
-GitHub inspection → scoped branch/worktree → implementation or read-only review as mandated → automated tests/CI → PR/review evidence → merge only if authorized → real-environment validation/deploy only if authorized and necessary.
-
-If a task can be completed reliably without involving the user in mechanical steps, it should be.
+Resolve current remote truth → create/resume the task's dedicated NAS worktree/branch → edit and perform bounded local checks there → commit and push → run Local CI on the exact pushed SHA → open/update the reviewable PR → merge/deploy only when separately authorized.
 
 ## Source-integrity invariant — no local-only source changes
 
@@ -140,7 +137,7 @@ This repository participates in the shared GitHub-mediated NAS control architect
 
 ### Canonical path
 
-ChatGPT / connected GitHub tooling → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner `github-runner-nas-control-repo` / label `nas-control` → authenticated gateway `nas-control-agent` → typed operations, with privileged host/Docker effects delegated to `nas-control-executor`, against Unraid / approved project workspaces / LAN services.
+GitHub-capable agent (Claude Code, ChatGPT, or equivalent) → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner `github-runner-nas-control-repo` / label `nas-control` → authenticated gateway `nas-control-agent` → typed operations, with privileged host/Docker effects delegated to `nas-control-executor`, against Unraid / approved project workspaces / LAN services.
 
 ### Security boundary
 
@@ -208,7 +205,7 @@ The hardened control agent can perform controlled Docker list/inspect/logs/start
 3. Prefer the selective RW workspace operations over direct runtime/config mutation.
 4. Do not ask the operator to use Termius for routine operations supported by the bridge.
 5. Remote Desktop Commander is not the preferred route and may be unavailable due to quota.
-6. CloudCLI still requires explicit prior user authorization.
+6. Claude Code and CloudCLI remain subject to the same workspace, phase and NAS Control boundaries as every other agent.
 7. Never let bridge capabilities bypass an independent-review read-only mandate, no-deploy/no-merge instruction, or explicit phase gate.
 
 
