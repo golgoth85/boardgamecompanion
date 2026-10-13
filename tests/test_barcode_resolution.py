@@ -155,6 +155,25 @@ def test_verified_catalog_resolves_known_l5r_without_network() -> None:
     assert network.calls == []
 
 
+def test_verified_catalog_resolves_audited_italian_gtins_without_network() -> None:
+    network = FakeLookup(error=AssertionError("network fallback must not run"))
+    lookup = FallbackBarcodeLookup(VerifiedBarcodeLookup(), network)
+
+    codenames = lookup.lookup("8034055580424")
+    sagrada = lookup.lookup("8034055581032")
+
+    assert codenames is not None
+    assert codenames["bgg_id"] == 178900
+    assert codenames["title"] == "Nome in Codice"
+    assert codenames["source"] == "verified_catalog"
+
+    assert sagrada is not None
+    assert sagrada["bgg_id"] == 199561
+    assert sagrada["title"] == "Sagrada"
+    assert sagrada["source"] == "verified_catalog"
+    assert network.calls == []
+
+
 def test_verified_bgg_id_bypasses_fuzzy_title_matching(tmp_path: Path) -> None:
     database = _database(tmp_path)
     lookup = FakeLookup(
@@ -658,3 +677,47 @@ def test_v6_negative_cache_is_ignored_after_public_gtin_upgrade(tmp_path: Path) 
     assert lookup.calls == [barcode]
     assert result["resolution"] == "owned_game"
     assert result["auto_match"]["bgg_id"] == 199561
+
+
+def test_v7_live_barcode_cache_is_ignored_after_verified_catalog_v8_upgrade(
+    tmp_path: Path,
+) -> None:
+    database = _real_barcode_database(tmp_path)
+    with database.transaction(immediate=True) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings(key,value,sensitive,updated_at)
+            VALUES(?,?,0,CURRENT_TIMESTAMP)
+            """,
+            (
+                "barcode_product_lookup:v7:8034055580424",
+                (
+                    '{"schema_version":7,"product":'
+                    '{"barcode":"8034055580424","title":"Name In Code, Game Cards, '
+                    'By Cranio, Edition Italian","source":"upcitemdb"}}'
+                ),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO app_settings(key,value,sensitive,updated_at)
+            VALUES(?,?,0,CURRENT_TIMESTAMP)
+            """,
+            (
+                "barcode_product_lookup:v7:8034055581032",
+                '{"schema_version":7,"product":null}',
+            ),
+        )
+
+    codenames = BarcodeResolver(database).lookup("8034055580424")
+    sagrada = BarcodeResolver(database).lookup("8034055581032")
+
+    assert codenames["resolution"] == "owned_game"
+    assert codenames["external_lookup"] == "verified_catalog"
+    assert codenames["auto_match"]["bgg_id"] == 178900
+    assert codenames["auto_match"]["confidence"] == 1.0
+
+    assert sagrada["resolution"] == "owned_game"
+    assert sagrada["external_lookup"] == "verified_catalog"
+    assert sagrada["auto_match"]["bgg_id"] == 199561
+    assert sagrada["auto_match"]["confidence"] == 1.0
