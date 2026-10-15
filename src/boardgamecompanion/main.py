@@ -49,6 +49,7 @@ from boardgamecompanion.bgg_rulebook_search import (
     GeminiBggFileProvider,
 )
 from boardgamecompanion.catalog import SORT_SQL, Catalog
+from boardgamecompanion.suggestions import SuggestionsError, SuggestionsService
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
     CatalogAssistantService,
@@ -243,6 +244,32 @@ def get_bgg_metadata_store() -> BggMetadataStore:
         database,
         client,
         refresh_seconds=settings.bgg_metadata_refresh_seconds,
+    )
+
+
+def get_suggestions_service() -> SuggestionsService:
+    database = get_database()
+    database.initialize()
+    resolved = resolve_bgg_settings(database)
+    token = (resolved.application_token or "").strip()
+    client = (
+        BggApiClient(
+            BggApiConfig(
+                application_token=token,
+                timeout_seconds=resolved.timeout_seconds,
+                min_interval_seconds=resolved.min_interval_seconds,
+            ),
+            rate_limiter=PersistentRateLimiter(database).acquire,
+        )
+        if token
+        else None
+    )
+    return SuggestionsService(
+        database,
+        client,
+        cache_path=settings.suggestions_cache_path,
+        cache_ttl_seconds=settings.suggestions_cache_ttl_seconds,
+        candidate_limit=settings.suggestions_candidate_limit,
     )
 
 
@@ -662,6 +689,11 @@ def web_crowdfunding() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/suggestions", include_in_schema=False)
+def web_suggestions() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -864,6 +896,20 @@ def explore_catalog(
         min_rating=min_rating,
         limit=limit,
     )
+
+
+@app.get("/api/catalog/suggestions", tags=["catalog"])
+def get_catalog_suggestions(
+    limit: int = Query(default=10, ge=1, le=25),
+    refresh: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_suggestions_service().list_suggestions(
+            limit=limit,
+            refresh=refresh,
+        )
+    except SuggestionsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/catalog/facets", tags=["catalog"])
