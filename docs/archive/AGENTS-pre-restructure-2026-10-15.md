@@ -1,0 +1,335 @@
+# AGENTS.md
+
+## Canonical runtime access — including CloudCLI/Claude Code
+
+- Do not infer that NAS or Home Assistant access is unavailable just because the current session has no Home Assistant app/plugin, Desktop Commander, direct SSH surface, or direct NAS tool.
+- The canonical runtime route is GitHub → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner → typed `nas-control-agent` / `nas-control-executor` operations. Application repositories are consumers of this shared control plane.
+- Keep source work in this repository's normal GitHub branch/PR flow. Use NAS Control for runtime inspection, managed deploys, Docker actions, Home Assistant operations, and approved workspace actions.
+- Submit each runtime request exclusively as its own owner-authored GitHub Issue in `golgoth85/nas-control` using the `NAS_CONTROL_REQUEST_V1` format in `REQUESTS.md`. Verify the resulting workflow/runtime evidence.
+- All authorized agents follow the same typed runtime path and the development contract below; an explicit provider exclusion in the current mandate remains binding.
+- A missing Home Assistant plugin is not a blocker. Use the existing NAS Control Home Assistant capabilities and managed deploy path where applicable.
+- If a required runtime action is not yet typed, treat it as a control-plane gap: extend the narrow capability in `golgoth85/nas-control` `main`, validate it in CI, then use it.
+- Canonical control-plane docs: `golgoth85/nas-control`, branch `main`, `REQUESTS.md`, `ARCHITECTURE.md`, and `ops/nas-control/RUNBOOK.md`.
+- After an approval-timeout, reopen the same NAS Control issue after approval without changing its request body or nonce. Never create an alternate request to bypass a pending gate.
+- Existing review-only, no-deploy/no-merge, destructive-action, protected-branch, and secret-handling boundaries still apply.
+
+## Mission
+
+BoardGameCompanion is a self-hosted Docker/Unraid application for managing a physical board-game collection, locating and archiving rulebooks, and querying those documents with RAG.
+
+## Non-negotiable domain rules
+
+1. The BoardGameGeek `objectid` is the canonical external identifier when known.
+2. The application must work without a BGG API token. BGG CSV import is a first-class path.
+3. Never require authenticated scraping of BoardGameGeek.
+4. Rulebook provenance must always be stored. A downloaded document is not trusted merely because its filename looks plausible.
+5. Official publisher/localizer sources outrank community sources.
+6. Community translations must be visibly marked as unofficial.
+7. BoardGameCompanion is the source of truth for its board-game domain and must remain fully usable without an external catalog manager.
+8. BGG access belongs to BoardGameCompanion itself: use only the approved XML API2 boundary and never authenticated scraping.
+9. A board-game item may have zero, one or many documents.
+10. RAG answers must retain document identity and page-level citation metadata.
+
+## Persistent filesystem contract
+
+- `/config`: database and application configuration.
+- `/data/import`: inbound collection exports such as BGG CSV.
+- `/data/manuals`: rulebooks and related documents.
+
+Never store persistent state only inside the container filesystem.
+
+## Rulebook confidence
+
+Initial policy:
+
+- official publisher: 100
+- official localizer/distributor: 100
+- official mirrored/uploaded source: 95
+- known community source: 70
+- generic discovery result: 40
+
+Only high-confidence results may become unattended downloads. Lower-confidence results must enter a review queue.
+
+## Provider architecture
+
+Rulebook discovery must use isolated provider adapters. Do not put publisher-specific parsing logic in generic resolver code.
+
+Every provider should return normalized candidates containing at least:
+
+- source/provider
+- URL
+- language
+- document type
+- official/unofficial status
+- confidence
+- edition/version clues when available
+
+## Development rules
+
+- Keep changes small and testable.
+- Add tests for import parsing, matching, provider normalization and destructive state changes.
+- No feature may silently overwrite a user's manual or collection metadata.
+- Imports must be idempotent.
+- Preserve unknown CSV fields where practical instead of discarding potentially useful source data.
+- Secrets belong in environment variables or runtime configuration, never in the repository.
+- Prefer additive schema migrations.
+- Treat network content as untrusted input.
+
+## Git workflow
+
+- Work on feature branches.
+- Keep `main` deployable.
+- Do not force-push `main`.
+- Do not merge failing CI.
+- Use conventional, scoped commit messages where practical.
+
+## Initial milestones
+
+P0. Foundation: Docker, health endpoint, CI/GHCR, Unraid template.
+P1. BGG CSV importer and internal catalog.
+P2. Catalog integration adapter foundation.
+P3. Physical-copy/barcode model and scanner workflow.
+P4. Rulebook document model, storage and manual upload.
+P5. Official rulebook provider framework and IT/EN resolver.
+P6. Review queue and scheduled document update checks.
+P7. RAG ingestion and page-cited Q&A.
+
+## Development contract — NAS workspaces, GitHub publication
+
+1. Develop in a dedicated NAS workspace, with a separate branch and worktree/clone for each concurrent task. Verify its current remote base and ownership before writing. Never edit source consumed directly by production.
+2. GitHub is the canonical publication, documentation and review surface. Publish the exact changes to a dedicated branch before handoff or deployment; open a reviewable PR. Merge, deploy and subsequent phases require the current mandate to authorize them.
+3. Use existing typed NAS Control operations for NAS workspace and infrastructure actions, through the owner-authored Issue transport in the private control repository. A terminal or a provider change does not authorize bypassing the control plane, reading hidden credentials, mounting sockets or using ad-hoc privileged shell.
+4. Run ordinary application validation through the exact-SHA Local CI path in `LOCAL_CI.md`. Execute untrusted source only in disposable credentialless I3 guests. Do not silently substitute hosted CI, production or a persistent credential-bearing runner.
+5. Routine reversible steps within the mandate proceed autonomously. Technical preauthorization is not permission to exceed a no-merge, no-deploy, read-only or other phase boundary. Independent reviews remain read-only.
+6. Destructive or irreversible effects require the existing request-bound approval mechanism. A pending, denied or expired approval must never be bypassed through another operation, connector or tool.
+7. These rules are provider-neutral: Claude Code, Codex and other authorized agents use the same development contract. No provider is an exception reserved only for emergency real-environment debugging. An explicit temporary exclusion in the current mandate still takes priority.
+8. Inspect dirty/untracked state before recovery. Preserve local work and private data; do not reset, clean, overwrite or automatically commit an unreviewed directory. Review the exact file list and secret exposure before any rescue publication.
+9. Keep credentials, private histories, databases and infrastructure inventory out of application commits. Keep infrastructure documentation in the responsible private repository.
+10. Report source SHA, PR, exact-SHA CI result and installed/runtime evidence separately. If isolation, access or validation is missing, complete independent documentation work and record the precise gap without claiming the missing proof.
+
+Workflow: inspect remote and live evidence -> reserve isolated NAS task workspace -> implement -> publish exact branch/SHA -> Local CI -> reviewable handoff -> merge/deploy only under a later authorized gate.
+
+Provider isolation is mandatory. A native Anthropic/Claude session must authenticate through its own Anthropic path and must not inherit DeepSeek or OpenAI endpoint/token overrides. DeepSeek is explicit opt-in only and must never be an automatic fallback. Do not copy provider credentials between providers. Any temporary provider exclusion stated by the current user/task mandate still takes priority.
+
+## Source-integrity invariant — no local-only source changes
+
+This invariant is mandatory for every coding agent, including CloudCLI/Claude Code, Codex, ChatGPT, self-hosted runners, and future agents.
+
+1. **A production/runtime checkout is never a development workspace.** Do not edit application source in a directory whose files are consumed directly by a running service/container/plugin/runtime. Use a dedicated task branch and a separate worktree/clone.
+2. **Every source change must become a GitHub commit before handoff or deployment.** A change is not durable, shareable, reviewable, or complete while it exists only as an uncommitted/unpushed local filesystem edit.
+3. **Push before deploy.** The exact code intended for runtime must first exist on GitHub at a named branch and immutable commit SHA. Runtime actions must record/verify that SHA.
+4. **No deploy from a dirty tree.** Do not restart/redeploy merely to activate uncommitted source edits. If a runtime checkout is dirty, treat that as source-integrity drift and stop normal deployment.
+5. **Never erase drift to make Git look clean.** Preserve and inspect local-only changes before any recovery. Publish only reviewed source files on a rescue branch after excluding secrets, histories and runtime databases. Do not reset, checkout, pull, rebase, replace or clean away unreviewed work.
+6. **Agent isolation is mandatory.** One task/agent = one branch/worktree. Two agents must not write concurrently to the same working tree. Handoff occurs through pushed commits/PRs, not shared uncommitted files.
+7. **Start from remote truth.** Before editing, fetch origin and verify the intended remote branch/SHA. A clean worktree whose HEAD differs from GitHub is still drifted.
+8. **End with remote truth.** Before claiming completion, verify that the final intended commit exists on GitHub and report its branch/SHA. If a task intentionally remains read-only, say so instead.
+9. **Runtime verification is separate from source publication.** Tests or behavior observed from locally modified runtime files do not prove that GitHub contains those changes.
+10. **Local-only emergency fixes are temporary quarantine states, not a workflow.** If an emergency runtime edit is unavoidable, immediately capture the exact source delta on a dedicated rescue/fix branch, test it, push it, and only then continue normal work.
+
+For repositories with a NAS bridge, the bridge should compare both the technical Git workspace and, where available, the real runtime checkout. A green technical mirror must never be interpreted as proof that production is synchronized.
+
+## Shared NAS control bridge — canonical runtime access path
+
+This repository participates in the shared GitHub-mediated NAS control architecture. This policy does not override repository-specific review, deployment, or production safety gates.
+
+### Canonical path
+
+ChatGPT / connected GitHub tooling → `golgoth85/nas-control` branch `main` → GitHub Actions workflow `NAS Control` → dedicated self-hosted runner `github-runner-nas-control-repo` / label `nas-control` → authenticated gateway `nas-control-agent` → typed operations, with privileged host/Docker effects delegated to `nas-control-executor`, against Unraid / approved project workspaces / LAN services.
+
+### Security boundary
+
+- The active runner is intentionally least-privilege. It mounts only its runner state RW plus the NAS-control token RO.
+- The runner does **not** receive `/var/run/docker.sock` and does **not** mount `/mnt/user/appdata` directly.
+- `nas-control-agent` has no Docker socket and no persistent host-root mount; privileged host/Docker effects are delegated to `nas-control-executor`.
+- The agent exposes a typed allowlist; there is no generic host-root shell.
+- The base `/mnt/user/appdata` mount inside the agent is read-only.
+- Only the explicitly listed project workspaces below are overlaid read-write.
+- Generic file reads block likely secret/token/credential/key material.
+- Docker state-changing operations require explicit confirmation.
+- Never weaken this boundary for convenience; add a narrow typed capability instead.
+
+### Selective RW project workspaces — active and verified
+
+The following development workspaces are mounted RW in `nas-control-agent` and were verified with `mounted=true` and `writable=true` through the least-privilege runner:
+
+- `upscaler` → `/mnt/user/appdata/github-runner-worktrees/upscaler`
+- `boardgamecompanion` → `/mnt/user/appdata/github-runner-worktrees/boardgamecompanion`
+- `bookarr` → `/mnt/user/appdata/bookarr/repo`
+- `cwsync.koplugin` → `/mnt/user/appdata/github-runner-worktrees/cwsync.koplugin`
+- `komix.koplugin` → `/mnt/user/appdata/github-runner-worktrees/komix.koplugin`
+- `home-assistant` → `/mnt/user/appdata/github-runner-worktrees/home-assistant`
+
+These paths are development/source workspaces. Do not substitute runtime/config directories for them.
+
+### Controlled workspace write operations
+
+The agent supports typed workspace operations including:
+
+- `workspace_list`
+- `workspace_status`
+- `workspace_read_file`
+- `workspace_create_branch`
+- `workspace_write_file` with SHA-256 precondition
+- `workspace_apply_patch`
+- `workspace_diff`
+
+Write protection rules:
+
+- direct writes on `main`, `master`, `deploy/current`, and `production` are forbidden;
+- task branches created by the bridge must use `chatgpt/...`;
+- direct `.git` manipulation is forbidden;
+- secret/token/credential/key paths remain forbidden;
+- a technical RW capability never overrides an explicit read-only review mandate;
+- source changes still follow the repository's commit/review/merge/deploy gates.
+
+### Other active typed capabilities
+
+The hardened control agent can perform controlled Docker list/inspect/logs/start/stop/restart operations, appdata listing/read operations, Git status inspection, TCP/HTTP probes, Home Assistant discovery/probe, LM Studio model probing, and NAS filesystem capacity reporting.
+
+`disk_space` is active and reports the Unraid `/mnt/user` user-share filesystem. At the activation verification on 2026-09-25 it reported 70.93 TiB total, 58.70 TiB used, 12.23 TiB free, 83% used. Treat these numbers as a point-in-time observation; query `disk_space` again for current capacity.
+
+### Current verified LAN endpoints
+
+- Unraid main web surface: `192.168.1.55:1234`.
+- Home Assistant: `192.168.1.147:8123`; reachability verified. Authenticated HA actions still require the dedicated token/secret boundary.
+- LM Studio: `192.168.1.249:1234`; when the PC and LM Studio server are running, `/v1/models` returns HTTP 200 with OpenAI-compatible model data.
+- Tailscale is installed on the Flint 2 router; Tailscale on Unraid is disabled. Do not expect a local Unraid `tailscaled` socket.
+
+### Execution preference
+
+1. Use GitHub-native repository operations for source-level work when sufficient.
+2. Use the NAS control bridge for runtime inspection and authorized workspace edits.
+3. Prefer the selective RW workspace operations over direct runtime/config mutation.
+4. Do not ask the operator to use Termius for routine operations supported by the bridge.
+5. Remote Desktop Commander is not the preferred route and may be unavailable due to quota.
+- The provider-neutral development contract above applies; retain explicit temporary exclusions in the current mandate.
+7. Never let bridge capabilities bypass an independent-review read-only mandate, no-deploy/no-merge instruction, or explicit phase gate.
+
+
+## Mandatory Local CI policy
+
+- This repository must follow `LOCAL_CI.md` and the canonical policy in `golgoth85/local-ci-lab/docs/LOCAL-CI-ADOPTION-POLICY.md`.
+- Local CI is the default path for ordinary development tests and validation. Do not add or restore automatic GitHub-hosted development CI without an explicit documented exception.
+- During migration, retained hosted development workflows are manual-only fallbacks. Unknown or unavailable Local CI profiles fail closed; do not silently substitute `ubuntu-latest`.
+- Untrusted PR/source code must not execute directly on persistent credential-bearing self-hosted runners. Use the disposable I3 sandbox.
+- Release/publish/deploy jobs requiring credentials are a separate trusted boundary and do not replace Local CI validation.
+- New application repositories must be registered in the Local CI repository registry and contain `LOCAL_CI.md` before CI is considered configured.
+
+## Current handoff state — 2026-10-13
+
+This section is the authoritative point-in-time operational handoff for the completed barcode incident. Re-read current remote `main` and current NAS Control `main` before any future modification because documentation-only or unrelated concurrent work may advance either repository.
+
+### Canonical functional and deployment state
+
+- Final functional application revision: `7973d11dae98c7121998e0a73f2ced0290903348` (PR #146 merged).
+- This revision is the exact source that passed merged-main Universal Local CI, was published as an immutable image, and was deployed to production.
+- A later repository `main` may be documentation-only. Do not infer that a docs-only successor is deployed; the production application revision remains `7973d11...` until a later exact deploy is independently verified.
+- PR #143 is closed unmerged as superseded by PR #146.
+
+### PR #145 — generic Uplay discovery remediation
+
+PR #145 attempted the general provider fix before exact verified-catalog fallback:
+
+- PR head: `18bd47ae8d69345ea6240b30dd4251742ad256e0`.
+- Exact-head Universal Local CI: NAS Control #3602 / run `38348049614`, profile `pytest-browser-v1`, PASS, lifecycle `CLEANED`, `cleanup_attested=true`.
+- Merged functional revision: `449c1977a8571c52776c7ad81ce6bb5c6372d14e`.
+- Merged-main Universal Local CI: NAS Control #3617 / run `38351939519`, PASS/CLEANED/attested.
+- Immutable publish: #3632.
+- Production deploy: #3636.
+- Health after deploy remained HTTP 200 / app status `ok` / schema `21`.
+- Live production verification proved the generic Uplay change did not close the two target GTIN cases:
+  - `8034055580424` remained `product_identified` via `upcitemdb`, no auto-match.
+  - `8034055581032` remained unresolved.
+- L5R and 7 Wonders Duel baseline barcode behavior remained correct.
+- Therefore PR #145 is historically valid architectural work but not the final incident closure.
+
+### PR #146 — final verified GTIN remediation
+
+PR #146 is the final barcode closure:
+
+- PR head: `c560aac69029e62344f3ddec69dc5c379876fb8b`.
+- Change scope:
+  - exact verified GTIN `8034055580424` → BGG `178900` (Nome in Codice / Codenames);
+  - exact verified GTIN `8034055581032` → BGG `199561` (Sagrada);
+  - existing `VerifiedBarcodeLookup` remains first provider;
+  - network providers remain fallbacks for non-verified GTINs;
+  - barcode cache namespace/schema bumped from v7 to v8 so failed live v7 positive/negative entries cannot mask the corrected result;
+  - regressions reproduce the real v7 weak-positive Codenames and negative-cache Sagrada states.
+- Initial exact-head CI #3659 / run `38357638852` was infrastructure-only failure: `scheduler queue timeout before execution`; it is not an application failure.
+- Exact-head retry #3670 / run `38361459687`:
+  - source `c560aac69029...`;
+  - Local CI status PASS;
+  - profile `pytest-browser-v1`;
+  - lifecycle `CLEANED`;
+  - `cleanup_attested=true`.
+- PR #146 merged as exact functional `main` revision `7973d11dae98c7121998e0a73f2ced0290903348`.
+- Merged-main Universal Local CI #3740 / run `38382891749`:
+  - source `7973d11dae98...`;
+  - PASS;
+  - profile `pytest-browser-v1`;
+  - lifecycle `CLEANED`;
+  - `cleanup_attested=true`.
+- Immutable image publish #3753 / run `38384634704`: success for exact revision `7973d11dae98c7121998e0a73f2ced0290903348`.
+- Production deploy #3754 / run `38385105582`: success for the same exact revision.
+- Production health #3755 / run `38385271385`:
+  - HTTP 200;
+  - body status `ok`;
+  - schema version `21`.
+
+### Barcode resolver — incident CLOSED by raw live production evidence
+
+Do not use only the outer NAS Control `success` label for barcode acceptance. The following closure is based on the structured JSON line from each raw workflow job log after deploy of exact revision `7973d11...`.
+
+1. EAN `8034055580424` — Nome in Codice / Codenames
+   - issue #3756 / run `38385392764`;
+   - `resolution=owned_game`;
+   - `external_lookup=verified_catalog`;
+   - product source `verified_catalog`;
+   - `auto_match.bgg_id=178900`;
+   - confidence `1.0`.
+
+2. EAN `8034055581032` — Sagrada
+   - issue #3757 / run `38385398461`;
+   - `resolution=owned_game`;
+   - `external_lookup=verified_catalog`;
+   - product source `verified_catalog`;
+   - `auto_match.bgg_id=199561`;
+   - confidence `1.0`.
+
+3. EAN `3558380049463` — La Leggenda dei Cinque Anelli regression
+   - issue #3758 / run `38385401467`;
+   - `resolution=owned_game`;
+   - `external_lookup=verified_catalog`;
+   - `auto_match.bgg_id=184151`;
+   - confidence `1.0`.
+
+4. EAN `5425016924242` — 7 Wonders Duel regression
+   - issue #3759 / run `38385403673`;
+   - `resolution=owned_game`;
+   - `external_lookup=upcitemdb`;
+   - `auto_match.bgg_id=173346`;
+   - confidence `0.842`;
+   - secondary Pantheon candidate remains lower at `0.594`.
+
+The two previously blocking Italian GTINs are therefore closed in real production, and both established regression barcodes remain healthy.
+
+### Universal title search — still CLOSED and production verified
+
+The existing bidirectional localized/original-title search remains valid and was not regressed by PR #145/#146:
+
+- Query `Codenames` returns owned game BGG `178900` (issue #3542 / run `38294027309`).
+- Query `Nome in Codice` returns the same owned game BGG `178900` (issue #3543 / run `38294032047`).
+- Do not reopen this incident without new live regression evidence.
+
+### Immediate next steps
+
+1. Treat barcode incident closure as complete unless new production evidence contradicts it.
+2. Preserve exact functional/deployed revision `7973d11dae98c7121998e0a73f2ced0290903348` as the current runtime baseline until a newer exact deployment is verified.
+3. Before any source modification, re-read current remote `main` and this file; documentation-only successors may exist.
+4. README and `docs/ROADMAP.md` were realigned on 2026-10-13 to current implemented behavior: browser Local CI, GHCR publication, Assistant hard constraints, Suggestions rotation/history, crowdfunding relevance filtering, tutorial background discovery, universal localized/original title aliases, and closed Codenames/Sagrada barcode remediation are no longer listed as future work.
+5. Continue ordinary BoardGameCompanion product work from current priorities; do not spend further cycles on the closed Codenames/Sagrada barcode incident absent regression.
+6. Keep WoL physical acceptance separate and test it only when the operator intentionally places the gaming PC in sleep state.
+
+### Documentation state
+
+README and `docs/ROADMAP.md` are aligned with the verified 2026-10-13 product/runtime checkpoint. Future documentation changes should preserve the distinction between the deployed functional revision and later documentation-only repository HEADs.
