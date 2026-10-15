@@ -1,3 +1,9 @@
+import {bindGlobalSearch} from "./components/global-search.js";
+import {bindNotifications} from "./components/notifications.js";
+import {relativeTime, starRatingMarkup} from "./core/ui.js";
+import {renderListsView} from "./views/lists.js";
+import {renderWishlistView} from "./views/wishlist.js";
+
 const app = document.querySelector("#app");
 const appSidebar = document.querySelector("#appSidebar");
 const sidebarToggle = document.querySelector("#sidebarToggle");
@@ -10,7 +16,9 @@ const shellSectionLabels = {
   suggestions: "Suggerimenti",
   crowdfunding: "Crowdfunding",
   explore: "Esplora",
-  completed: "Completati",
+  lists: "Liste",
+  wishlist: "Wishlist",
+  completed: "Sala dei trofei",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
   discovery: "Ricerca regolamenti",
@@ -20,6 +28,8 @@ function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
   if (/^\/suggestions\/?$/.test(pathname)) return "suggestions";
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
+  if (/^\/lists(?:\/[^/]+)?\/?$/.test(pathname)) return "lists";
+  if (/^\/wishlist\/?$/.test(pathname)) return "wishlist";
   if (/^\/completed\/?$/.test(pathname)) return "completed";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";
@@ -428,6 +438,24 @@ function tutorialVideoCard(item) {
   `;
 }
 
+function relevantExpansionCard(item) {
+  return `
+    <article class="relevant-expansion-card ${item.owned ? "is-owned" : "is-missing"}">
+      <a class="relevant-expansion-cover" href="${escapeHtml(item.bgg_url || "#")}" target="_blank" rel="noopener noreferrer">
+        ${item.cover_url
+          ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
+      </a>
+      <div class="relevant-expansion-copy">
+        <span class="badge ${item.owned ? "expansion-owned-badge" : "expansion-missing-badge"}">${item.owned ? "✓ Posseduta" : "Non posseduta"}</span>
+        <strong>${escapeHtml(item.title)}</strong>
+        <small>${escapeHtml(String(item.year_published || "Anno —"))}</small>
+        <a class="external-link" href="${escapeHtml(item.bgg_url || "#")}" target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+      </div>
+    </article>
+  `;
+}
+
 function runWhenIdle(callback, timeout = 1500) {
   if ("requestIdleCallback" in window) {
     window.requestIdleCallback(() => callback(), {timeout});
@@ -527,7 +555,7 @@ function closeSettingsDialog() {
 }
 
 function setSettingsTab(name = "general") {
-  const active = ["general", "rulebooks", "providers", "crowdfunding"].includes(name)
+  const active = ["general", "rulebooks", "providers", "crowdfunding", "diagnostics"].includes(name)
     ? name
     : "general";
   settingsTabs.forEach((tab) => {
@@ -538,8 +566,43 @@ function setSettingsTab(name = "general") {
   settingsPanels.forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== active;
   });
-  if (saveSettings) saveSettings.hidden = active === "rulebooks";
+  if (saveSettings) saveSettings.hidden = ["rulebooks", "diagnostics"].includes(active);
   if (saveTestSettings) saveTestSettings.hidden = active !== "general";
+  if (active === "diagnostics") void loadDiagnostics();
+}
+
+async function loadDiagnostics() {
+  const panel = document.querySelector("#diagnosticsPanel");
+  if (!panel) return;
+  panel.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const data = await api("/api/diagnostics");
+    const services = data.services || {};
+    panel.innerHTML = `
+      <div class="diagnostics-grid">
+        <div><span>Schema DB</span><strong>v${escapeHtml(data.schema_version)}</strong></div>
+        <div><span>Giochi</span><strong>${formatNumber(data.counts?.games || 0, 0)}</strong></div>
+        <div><span>Regolamenti/documenti</span><strong>${formatNumber(data.counts?.documents || 0, 0)}</strong></div>
+        <div><span>Wishlist</span><strong>${formatNumber(data.counts?.wishlist || 0, 0)}</strong></div>
+        <div><span>Liste</span><strong>${formatNumber(data.counts?.lists || 0, 0)}</strong></div>
+        <div><span>Notifiche</span><strong>${formatNumber(data.counts?.notifications || 0, 0)}</strong></div>
+      </div>
+      <div class="diagnostics-service-list">
+        <span>BGG: ${services.bgg?.configured ? "configurato" : "non configurato"}</span>
+        <span>Sync collezione: ${services.bgg?.collection_sync ? "attiva" : "non attiva"}</span>
+        <span>YouTube: ${services.youtube?.configured ? "configurato" : "non configurato"}</span>
+        <span>Kickstarter: ${services.crowdfunding?.kickstarter_configured ? "configurato" : "non configurato"}</span>
+        <span>Embedding: ${escapeHtml((services.rag?.embedding_order || []).join(" → ") || "—")}</span>
+        <span>Generation: ${escapeHtml((services.rag?.generation_order || []).join(" → ") || "—")}</span>
+      </div>
+      <details class="diagnostics-technical">
+        <summary>Cache e percorsi tecnici</summary>
+        <pre>${escapeHtml(JSON.stringify({database: data.database, cache: data.cache}, null, 2))}</pre>
+      </details>
+    `;
+  } catch (error) {
+    panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function applyBggSettingsToForm(data) {
@@ -1790,7 +1853,10 @@ function gameCard(game, expansions = []) {
           </div>
           <div class="card-footer-meta">
             <span>${game.year_published || "—"}</span>
-            <span class="rating">★ ${rating}</span>
+            <span class="card-ratings">
+              ${game.progress?.personal_rating ? `<span class="personal-rating-compact">Tu ${starRatingMarkup(game.progress.personal_rating)}</span>` : ""}
+              <span class="rating">BGG ★ ${rating}</span>
+            </span>
           </div>
         </div>
       </a>
@@ -1830,7 +1896,10 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
       <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
       <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
-      <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
+      <span class="list-rating">
+        <strong>${rating}</strong><small>BGG</small>
+        ${game.progress?.personal_rating ? `<span class="list-personal-rating">Tu ${starRatingMarkup(game.progress.personal_rating)}</span>` : ""}
+      </span>
       ${expansions.length ? `
         <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
                 aria-expanded="${expanded ? "true" : "false"}"
@@ -2957,11 +3026,12 @@ async function renderDetail(bggId) {
   `;
   const requestedPath = window.location.pathname;
   try {
-    const [game, copies, documents, tutorials] = await Promise.all([
+    const [game, copies, documents, tutorials, expansions] = await Promise.all([
       api(`/api/games/${bggId}`),
       api(`/api/games/${bggId}/copies`),
       api(`/api/games/${bggId}/documents`),
       api(`/api/games/${bggId}/tutorial-videos`),
+      api(`/api/games/${bggId}/expansions`).catch(() => ({items: [], available: false})),
     ]);
     if (window.location.pathname !== requestedPath) return;
 
@@ -2972,6 +3042,7 @@ async function renderDetail(bggId) {
     const copyItems = copies.items || [];
     const documentItems = documents.items || [];
     const tutorialItems = tutorials.items || [];
+    const expansionItems = Array.isArray(expansions.items) ? expansions.items : [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
     const italianDescription = String(game.description_it || "").trim();
     const description = italianDescription
@@ -3008,6 +3079,16 @@ async function renderDetail(bggId) {
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
             </dl>
+            <div class="personal-rating-panel">
+              <div>
+                <span>La mia valutazione</span>
+                <small>Separata dal rating BGG</small>
+              </div>
+              <div class="personal-rating-actions">
+                ${starRatingMarkup(game.progress?.personal_rating, {interactive: true})}
+                ${game.progress?.personal_rating ? '<button class="personal-rating-clear" id="clearPersonalRating" type="button">Azzera</button>' : ""}
+              </div>
+            </div>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
                target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
@@ -3024,6 +3105,11 @@ async function renderDetail(bggId) {
                 : ""}
             </div>
             <div class="game-primary-actions">
+              <button class="button ${game.progress?.played ? "played-button is-played" : "button-ghost played-button"}"
+                      id="togglePlayed" type="button"
+                      aria-pressed="${game.progress?.played ? "true" : "false"}">
+                ${game.progress?.played ? "✓ Giocato" : "Segna giocato"}
+              </button>
               <button class="button ${game.progress?.completed ? "completion-button is-completed" : "button-ghost completion-button"}"
                       id="toggleCompleted" type="button"
                       aria-pressed="${game.progress?.completed ? "true" : "false"}">
@@ -3067,6 +3153,21 @@ async function renderDetail(bggId) {
               </details>
             ` : '<div id="physicalCopyList" hidden></div>'}
           </section>
+
+          ${game.item_type !== "expansion" ? `
+            <section class="game-section relevant-expansions-section" aria-labelledby="relevantExpansionsTitle">
+              <div class="simple-rulebook-head">
+                <div>
+                  <p class="eyebrow">Collezione</p>
+                  <h2 id="relevantExpansionsTitle">Espansioni principali</h2>
+                </div>
+                <span class="quiet-pill">${expansionItems.filter((item) => !item.owned).length} mancanti</span>
+              </div>
+              ${expansionItems.length
+                ? `<div class="relevant-expansion-grid">${expansionItems.map(relevantExpansionCard).join("")}</div>`
+                : `<div class="tutorial-video-empty">${expansions.available === false ? "Dati delle espansioni non disponibili al momento." : "Nessuna espansione principale rilevante trovata."}</div>`}
+            </section>
+          ` : ""}
 
           <section class="game-section tutorial-videos-section" aria-labelledby="tutorialVideosTitle">
             <div class="simple-rulebook-head">
@@ -3154,6 +3255,51 @@ async function renderDetail(bggId) {
     `;
 
     const openCopy = () => openCopyEditor(game.bgg_id, game.title);
+    document.querySelectorAll("[data-personal-rating]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await api(`/api/games/${game.bgg_id}/personal`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({rating: Number(button.dataset.personalRating)}),
+          });
+          showToast("Valutazione personale aggiornata.");
+          await renderDetail(game.bgg_id);
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      });
+    });
+    document.querySelector("#clearPersonalRating")?.addEventListener("click", async () => {
+      try {
+        await api(`/api/games/${game.bgg_id}/personal`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({rating: null}),
+        });
+        showToast("Valutazione personale rimossa.");
+        await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    });
+    document.querySelector("#togglePlayed")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const next = !Boolean(game.progress?.played);
+        await api(`/api/games/${game.bgg_id}/personal`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({played: next}),
+        });
+        showToast(next ? "Gioco aggiunto alla Sala dei trofei." : "Stato giocato aggiornato.");
+        await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
     document.querySelector("#toggleCompleted")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -3285,9 +3431,9 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const stored = (documents.items || []).filter((value) => value.document_type === "rulebook");
       const italian = stored.filter((value) => String(value.language || "").split("-")[0] === "it");
       const fetched = stored.filter((value) => value.provenance?.ingest === "scheduled_rulebook_fetch");
-      const candidates = Number(item.candidates_found || 0);
-      const failures = Number(item.provider_failures || 0);
-      status.textContent = `PDF archiviati: ${stored.length} (${italian.length} IT; ${fetched.length} acquisiti automaticamente) · Fonti trovate: ${candidates} · Errori di ricerca: ${failures} · Ultima ricerca: ${item.last_finished_at || "mai"}.`;
+      status.textContent = stored.length
+        ? `Regolamento disponibile${italian.length ? " in italiano" : ""} · ultimo controllo ${relativeTime(item.last_finished_at)}.`
+        : `Regolamento non ancora disponibile · ultimo controllo ${relativeTime(item.last_finished_at)}.`;
       setButtonState(item);
     } catch (error) {
       if (status.isConnected) status.textContent = error.message;
@@ -3312,14 +3458,12 @@ async function setupGameDiscovery(bggId, gameTitle) {
       const result = await api(`/api/games/${bggId}/rulebook-discovery/run`, {method: "POST"});
       const found = Number(result.candidates_found || 0);
       const failures = Number(result.provider_failures || 0);
-      const approved = (result.review_items || []).filter((value) => value.status === "approved").length;
-      const pending = (result.review_items || []).filter((value) => value.status === "pending").length;
       if (found) {
-        showToast(`Trovate ${found} fonti: ${approved} approvate, ${pending} da verificare. Il download dei PDF è separato dalla ricerca.`);
+        showToast("Ricerca completata: sono disponibili nuove fonti per il regolamento.");
       } else if (failures) {
-        showToast("Nessuna fonte trovata; alcune fonti note non hanno risposto. Premi di nuovo per cercare il PDF su Google.");
+        showToast("Nessun regolamento trovato e alcuni dati non sono aggiornabili al momento.");
       } else {
-        showToast("Nessuna fonte nota trovata. Premi di nuovo per cercare il PDF su Google.");
+        showToast("Nessun regolamento trovato nelle fonti disponibili. Puoi estendere la ricerca sul web.");
       }
       await refresh();
     } catch (error) {
@@ -3877,7 +4021,6 @@ function renderCatalogAssistantResult(payload) {
         `).join("")}
       </div>
     ` : '<p class="muted">Nessun titolo del catalogo soddisfa abbastanza bene la richiesta.</p>'}
-    <small class="assistant-provider">Provider: ${escapeHtml(payload.provider || "AI")} · ${escapeHtml(payload.model || "")}</small>
   `;
 }
 
@@ -4264,7 +4407,11 @@ async function renderRankings() {
 }
 
 function completionAchievementMarkup(game) {
-  const achievements = [{icon: "♛", label: "Completato"}];
+  const achievements = [
+    game.progress?.completed
+      ? {icon: "♛", label: "Completato"}
+      : {icon: "✓", label: "Giocato"},
+  ];
   const weight = Number(game.bgg?.average_weight || 0);
   const minutes = Number(
     game.play_time?.max || game.play_time?.playing || game.play_time?.min || 0
@@ -4280,19 +4427,21 @@ function trophyGameCard(game, {compact = false} = {}) {
   const cover = game.bgg_metadata?.cover_url
     ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`;
-  const completedAt = game.progress?.completed_at
-    ? new Date(game.progress.completed_at + "T12:00:00").toLocaleDateString("it-IT", {
+  const eventDate = game.progress?.completed_at || game.progress?.played_at;
+  const formattedDate = eventDate
+    ? new Date(eventDate + "T12:00:00").toLocaleDateString("it-IT", {
         year: "numeric", month: "short", day: "numeric",
       })
     : null;
+  const completed = Boolean(game.progress?.completed);
   return `
-    <a class="trophy-card ${compact ? "is-compact" : ""}"
+    <a class="trophy-card ${compact ? "is-compact" : ""} ${completed ? "is-completed" : "is-played"}"
        href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
-      <span class="trophy-crown" aria-hidden="true">♛</span>
+      <span class="trophy-crown" aria-hidden="true">${completed ? "♛" : "✓"}</span>
       <span class="trophy-cover">${cover}</span>
       <span class="trophy-card-body">
         <strong>${escapeHtml(game.title)}</strong>
-        <small>${completedAt ? `Registrato il ${escapeHtml(completedAt)}` : "Completato"}</small>
+        <small>${formattedDate ? `${completed ? "Completato" : "Giocato"} il ${escapeHtml(formattedDate)}` : (completed ? "Completato" : "Giocato")}</small>
         <span class="trophy-achievements">${completionAchievementMarkup(game)}</span>
       </span>
     </a>
@@ -4305,7 +4454,7 @@ async function refreshAchievementShowcase() {
   if (!showcase || !grid) return;
   try {
     const payload = await api(
-      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=4&offset=0"
+      "/api/games?owned=true&item_type=standalone&trophy=true&sort=played_desc&limit=4&offset=0"
     );
     if (!showcase.isConnected || !grid.isConnected) return;
     if (!payload.items.length) {
@@ -4326,7 +4475,7 @@ async function renderCompleted() {
         <p class="eyebrow">La mia ludoteca</p>
         <h1>Sala dei trofei</h1>
         <p class="page-lead">
-          I giochi che hai portato fino in fondo. Nessun punteggio: solo traguardi personali.
+          Campagne concluse e giochi che hai realmente portato al tavolo, senza forzare un falso “completamento”.
         </p>
       </div>
       <span class="trophy-hero-mark" aria-hidden="true">♛</span>
@@ -4335,7 +4484,7 @@ async function renderCompleted() {
   `;
   try {
     const payload = await api(
-      "/api/games?owned=true&item_type=standalone&completed=true&sort=completed_desc&limit=250&offset=0"
+      "/api/games?owned=true&item_type=standalone&trophy=true&sort=played_desc&limit=250&offset=0"
     );
     const target = document.querySelector("#trophyWall");
     if (!target) return;
@@ -4343,9 +4492,9 @@ async function renderCompleted() {
       ? payload.items.map((game) => trophyGameCard(game)).join("")
       : `<div class="empty trophy-empty">
           <strong>La Sala dei trofei è ancora vuota.</strong>
-          <span>Apri la scheda di un gioco e usa “Segna completato” quando vuoi esporlo qui.</span>
+          <span>Apri la scheda di un gioco e usa “Segna giocato” oppure “Segna completato”.</span>
         </div>`;
-    document.title = "Completati · BoardGameCompanion";
+    document.title = "Sala dei trofei · BoardGameCompanion";
   } catch (error) {
     document.querySelector("#trophyWall").innerHTML =
       `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -4775,7 +4924,7 @@ function crowdfundingStatusLabel(item) {
   return "Attiva";
 }
 
-function crowdfundingCard(item) {
+function crowdfundingCard(item, wishlistKeys = new Set()) {
   const funds = formatCampaignMoney(item.funds, item.currency);
   const goal = Number(item.goal) > 0 ? formatCampaignMoney(item.goal, item.currency) : "—";
   const percent = item.funding_percent === null || item.funding_percent === undefined
@@ -4792,7 +4941,7 @@ function crowdfundingCard(item) {
         ${item.image_url
           ? `<img src="${escapeHtml(item.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
-        <span class="crowdfunding-platform">Gamefound</span>
+        <span class="crowdfunding-platform">${escapeHtml(item.platform === "kickstarter" ? "Kickstarter" : "Gamefound")}</span>
         <span class="crowdfunding-status ${item.status === "ending_soon" ? "is-ending" : ""}">${escapeHtml(status)}</span>
       </a>
       <div class="crowdfunding-card-body">
@@ -4811,9 +4960,20 @@ function crowdfundingCard(item) {
           ${remaining ? `<span><strong>${escapeHtml(remaining)}</strong> rimasti</span>` : ""}
           <span class="crowdfunding-score">${escapeHtml(score.replace(/^ · /, ""))}</span>
         </div>
-        <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
-          Apri campagna ↗
-        </a>
+        <div class="crowdfunding-card-actions">
+          <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
+            Apri campagna ↗
+          </a>
+          <button class="button button-ghost wishlist-toggle ${wishlistKeys.has(String(item.id)) ? "is-saved" : ""}" type="button"
+                  data-wishlist-crowdfunding="${escapeHtml(item.id)}"
+                  data-title="${escapeHtml(item.title)}"
+                  data-cover="${escapeHtml(item.image_url || "")}"
+                  data-url="${escapeHtml(item.project_url || "")}"
+                  data-platform="${escapeHtml(item.platform || "")}"
+                  ${wishlistKeys.has(String(item.id)) ? "disabled" : ""}>
+            ${wishlistKeys.has(String(item.id)) ? "♥ In Wishlist" : "♡ Wishlist"}
+          </button>
+        </div>
       </div>
     </article>
   `;
@@ -4823,21 +4983,18 @@ function crowdfundingProviderNotice(payload) {
   const gamefound = payload.providers?.gamefound || {};
   const kickstarter = payload.providers?.kickstarter || {};
   const notices = [];
-  if (gamefound.status === "stale") {
-    notices.push("Gamefound temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
-  } else if (gamefound.status === "error") {
-    notices.push("Gamefound non è al momento disponibile e non esiste ancora una cache valida.");
+  if (gamefound.status === "stale" || kickstarter.status === "stale") {
+    notices.push("Alcuni dati non sono aggiornabili al momento: mostro l’ultimo aggiornamento disponibile.");
   }
-  if (crowdfundingState.platform !== "gamefound") {
-    if (kickstarter.status === "configuration_required") {
-      notices.push(
-        'Kickstarter è predisposto tramite Apify ma non è configurato. <button class="button button-ghost" id="configureApifyFromCrowdfunding" type="button">Configura Apify</button>'
-      );
-    } else if (kickstarter.status === "stale") {
-      notices.push("Kickstarter/Apify temporaneamente irraggiungibile: mostro l’ultima cache locale valida.");
-    } else if (kickstarter.status === "error") {
-      notices.push("Kickstarter/Apify non è al momento disponibile e non esiste ancora una cache valida.");
-    }
+  if (gamefound.status === "error" && crowdfundingState.platform === "gamefound") {
+    notices.push("I dati Gamefound non sono temporaneamente disponibili.");
+  }
+  if (crowdfundingState.platform !== "gamefound" && kickstarter.status === "configuration_required") {
+    notices.push(
+      'Kickstarter non è ancora configurato. <button class="button button-ghost" id="configureApifyFromCrowdfunding" type="button">Configura Kickstarter</button>'
+    );
+  } else if (crowdfundingState.platform !== "gamefound" && kickstarter.status === "error") {
+    notices.push("I dati Kickstarter non sono temporaneamente disponibili.");
   }
   return notices.length
     ? `<div class="crowdfunding-source-note">${notices.map((text) => (
@@ -4849,7 +5006,7 @@ function crowdfundingProviderNotice(payload) {
 }
 
 
-function suggestionCard(item, index) {
+function suggestionCard(item, index, wishlistKeys = new Set()) {
   const players = item.players || {};
   const playTime = item.play_time || {};
   const bgg = item.bgg || {};
@@ -4906,6 +5063,14 @@ function suggestionCard(item, index) {
               <a class="button button-ghost suggestion-open"
                  href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
                  target="_blank" rel="noopener noreferrer">Apri su BGG ↗</a>
+              <button class="button button-ghost wishlist-toggle ${wishlistKeys.has(`bgg:${Number(item.bgg_id)}`) ? "is-saved" : ""}" type="button"
+                      data-wishlist-suggestion="${Number(item.bgg_id)}"
+                      data-title="${escapeHtml(title)}"
+                      data-year="${escapeHtml(item.year_published || "")}"
+                      data-cover="${escapeHtml(item.cover_url || "")}"
+                      ${wishlistKeys.has(`bgg:${Number(item.bgg_id)}`) ? "disabled" : ""}>
+                ${wishlistKeys.has(`bgg:${Number(item.bgg_id)}`) ? "♥ In Wishlist" : "♡ Wishlist"}
+              </button>
             </div>
           </div>
 
@@ -4955,6 +5120,70 @@ function suggestionCard(item, index) {
   `;
 }
 
+async function loadWishlistKeys() {
+  try {
+    const payload = await api("/api/wishlist");
+    return new Set((payload.items || []).map((item) => String(item.source_key || "")));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function bindWishlistButtons() {
+  document.querySelectorAll("[data-wishlist-suggestion]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const bggId = Number(button.dataset.wishlistSuggestion);
+        await api("/api/wishlist", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            source_type: "suggestion",
+            source_key: `bgg:${bggId}`,
+            bgg_id: bggId,
+            title: button.dataset.title,
+            year_published: button.dataset.year ? Number(button.dataset.year) : null,
+            cover_url: button.dataset.cover || null,
+            target_url: `https://boardgamegeek.com/boardgame/${bggId}`,
+          }),
+        });
+        button.classList.add("is-saved");
+        button.textContent = "♥ In Wishlist";
+        showToast("Aggiunto alla Wishlist.");
+      } catch (error) {
+        button.disabled = false;
+        showToast(error.message, true);
+      }
+    });
+  });
+  document.querySelectorAll("[data-wishlist-crowdfunding]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await api("/api/wishlist", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            source_type: "crowdfunding",
+            source_key: button.dataset.wishlistCrowdfunding,
+            title: button.dataset.title,
+            cover_url: button.dataset.cover || null,
+            target_url: button.dataset.url || null,
+            metadata: {platform: button.dataset.platform || null},
+          }),
+        });
+        button.classList.add("is-saved");
+        button.textContent = "♥ In Wishlist";
+        showToast("Aggiunto alla Wishlist.");
+      } catch (error) {
+        button.disabled = false;
+        showToast(error.message, true);
+      }
+    });
+  });
+}
+
 async function renderSuggestions({forceRefresh = false} = {}) {
   document.title = "Suggerimenti · BoardGameCompanion";
   const sortOptions = [
@@ -5002,7 +5231,10 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       sort: suggestionsState.sort,
     });
     if (forceRefresh) params.set("refresh", "true");
-    const payload = await api(`/api/catalog/suggestions?${params.toString()}`);
+    const [payload, wishlistKeys] = await Promise.all([
+      api(`/api/catalog/suggestions?${params.toString()}`),
+      loadWishlistKeys(),
+    ]);
     const items = Array.isArray(payload.items) ? payload.items : [];
     const profile = payload.profile || {};
     const topMechanics = Array.isArray(profile.top_mechanics)
@@ -5016,18 +5248,18 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
-        <span class="muted">${escapeHtml(sortLabel)} · pool BGG ${formatNumber(payload.candidate_count || 0, 0)} · posseduti esclusi ${formatNumber(payload.owned_excluded_count || 0, 0)}</span>
+        <span class="muted">${escapeHtml(sortLabel)} · aggiornato ${escapeHtml(relativeTime(payload.generated_at))}</span>
       </div>
       <div class="suggestions-profile">
         ${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-        <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
       </div>
     `;
     if (!items.length) {
       grid.innerHTML = '<div class="empty-state"><strong>Nessun candidato disponibile</strong><p class="muted">Riprova con Aggiorna o verifica il token BGG nelle Impostazioni.</p></div>';
       return;
     }
-    grid.innerHTML = items.map(suggestionCard).join("");
+    grid.innerHTML = items.map((item, index) => suggestionCard(item, index, wishlistKeys)).join("");
+    bindWishlistButtons();
   } catch (error) {
     grid.innerHTML = `<div class="empty-state"><strong>Impossibile generare i suggerimenti</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
@@ -5099,15 +5331,16 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       limit: "60",
     });
     if (forceRefresh) params.set("refresh", "true");
-    const payload = await api(`/api/crowdfunding?${params.toString()}`);
+    const [payload, wishlistKeys] = await Promise.all([
+      api(`/api/crowdfunding?${params.toString()}`),
+      loadWishlistKeys(),
+    ]);
     const items = Array.isArray(payload.items) ? payload.items : [];
-    const rankingText = payload.ranking?.[crowdfundingState.sort];
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(payload.total_matching || 0, 0)} progetti</strong>
-        <span class="muted">${rankingText ? escapeHtml(rankingText) : "Dati aggiornati dalla cache locale."}</span>
+        <span class="muted">Aggiornato ${escapeHtml(relativeTime(payload.generated_at))}</span>
       </div>
-      <span class="quiet-pill">Cache: ${escapeHtml(payload.cache_state || "—")}</span>
     ` + crowdfundingProviderNotice(payload);
 
     document.querySelector("#configureApifyFromCrowdfunding")?.addEventListener("click", () => {
@@ -5126,15 +5359,15 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
           <strong>${gamefoundOnlyUpcoming
             ? "Upcoming non esposti dalla Public API Gamefound"
             : kickstarterNeedsConfig
-              ? "Configura Kickstarter/Apify per gli upcoming"
+              ? "Configura Kickstarter per gli upcoming"
               : "Nessun progetto disponibile"}</strong>
           <p class="muted">${gamefoundOnlyUpcoming
-            ? "La Public API documentata di Gamefound espone al momento solo le campagne attive."
+            ? "Gamefound non rende disponibili gli upcoming in questa sorgente."
             : kickstarterNeedsConfig
-              ? "Configura il token Apify nelle Impostazioni: il provider Kickstarter è già predisposto e supporta anche le campagne upcoming."
+              ? "Completa la configurazione Kickstarter nelle Impostazioni per includere anche le campagne upcoming."
               : "Prova un’altra piattaforma o classifica."}</p>
           ${kickstarterNeedsConfig
-            ? '<button class="button button-primary" id="configureApifyFromEmpty" type="button">Configura Apify</button>'
+            ? '<button class="button button-primary" id="configureApifyFromEmpty" type="button">Configura Kickstarter</button>'
             : ""}
         </div>
       `;
@@ -5143,7 +5376,8 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       });
       return;
     }
-    grid.innerHTML = items.map(crowdfundingCard).join("");
+    grid.innerHTML = items.map((item) => crowdfundingCard(item, wishlistKeys)).join("");
+    bindWishlistButtons();
   } catch (error) {
     grid.innerHTML = `<div class="empty-state crowdfunding-empty"><strong>Impossibile caricare il crowdfunding</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
@@ -5180,6 +5414,18 @@ async function route() {
   }
   if (/^\/crowdfunding\/?$/.test(window.location.pathname)) {
     await renderCrowdfunding();
+    return;
+  }
+  const listMatch = window.location.pathname.match(/^\/lists(?:\/([^/]+))?\/?$/);
+  if (listMatch) {
+    await renderListsView(app, {
+      showToast,
+      listId: listMatch[1] ? decodeURIComponent(listMatch[1]) : null,
+    });
+    return;
+  }
+  if (/^\/wishlist\/?$/.test(window.location.pathname)) {
+    await renderWishlistView(app, {showToast});
     return;
   }
   if (/^\/completed\/?$/.test(window.location.pathname)) {
@@ -5463,4 +5709,12 @@ importForm.addEventListener("submit", async (event) => {
   }
 });
 
+bindGlobalSearch({onNavigate: () => void route()});
+const notificationCenter = bindNotifications({
+  onNavigate: () => void route(),
+  showToast,
+});
+document.querySelector("#refreshDiagnostics")?.addEventListener("click", () => void loadDiagnostics());
+
 route();
+void notificationCenter.refreshBadge();

@@ -7,6 +7,7 @@
   <title>BoardGameCompanion</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/game-centric.css">
+  <link rel="stylesheet" href="/static/components.css">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -44,9 +45,17 @@
             <span class="nav-icon" aria-hidden="true">◉</span>
             <span>Crowdfunding</span>
           </a>
+          <a class="nav-item" href="/lists" data-nav data-route="lists">
+            <span class="nav-icon" aria-hidden="true">≡</span>
+            <span>Liste</span>
+          </a>
+          <a class="nav-item" href="/wishlist" data-nav data-route="wishlist">
+            <span class="nav-icon" aria-hidden="true">♡</span>
+            <span>Wishlist</span>
+          </a>
           <a class="nav-item nav-completed" href="/completed" data-nav data-route="completed">
             <span class="nav-icon" aria-hidden="true">♛</span>
-            <span>Completati</span>
+            <span>Sala dei trofei</span>
           </a>
           <button class="nav-item nav-button nav-ai" id="catalogAssistantButton" type="button">
             <span class="nav-icon" aria-hidden="true">✦</span>
@@ -68,6 +77,10 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div class="sidebar-quick-actions">
+          <button class="sidebar-utility-button" type="button" data-global-search><span aria-hidden="true">⌕</span><span>Cerca</span><kbd>Ctrl K</kbd></button>
+          <button class="sidebar-utility-button notification-trigger" type="button" data-notifications><span aria-hidden="true">♢</span><span>Notifiche</span><span class="notification-badge" data-notification-badge hidden></span></button>
+        </div>
         <button class="sidebar-settings-button" id="settingsButton" type="button"
                 aria-haspopup="dialog" aria-controls="settingsDialog">
           <span aria-hidden="true">⚙</span><span>Impostazioni</span>
@@ -94,11 +107,49 @@
           <strong>BoardGameCompanion</strong>
           <span id="mobileSectionTitle">Ludoteca</span>
         </div>
+        <div class="shell-quick-actions">
+          <button class="icon-button shell-action-button" type="button" data-global-search aria-label="Ricerca universale" title="Ricerca universale (Ctrl+K)">⌕</button>
+          <button class="icon-button shell-action-button notification-trigger" type="button" data-notifications aria-label="Notifiche">
+            ♢<span class="notification-badge" data-notification-badge hidden></span>
+          </button>
+        </div>
       </header>
 
       <main id="app" class="shell" aria-live="polite"></main>
     </div>
   </div>
+
+  <dialog id="globalSearchDialog" class="dialog global-search-dialog" aria-labelledby="globalSearchTitle">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">Ricerca universale</p>
+        <h2 id="globalSearchTitle">Cerca nell'app</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-global-search aria-label="Chiudi ricerca">×</button>
+    </div>
+    <label class="global-search-field">
+      <span aria-hidden="true">⌕</span>
+      <input id="globalSearchInput" type="search" autocomplete="off" placeholder="Giochi, liste, Wishlist, sezioni…">
+      <kbd>Ctrl K</kbd>
+    </label>
+    <div id="globalSearchResults" class="global-search-results">
+      <p class="global-search-hint">Cerca giochi posseduti, liste personali e funzioni dell’app.</p>
+    </div>
+  </dialog>
+
+  <dialog id="notificationDialog" class="dialog notification-dialog" aria-labelledby="notificationDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">Novità rilevanti</p>
+        <h2 id="notificationDialogTitle">Notifiche</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-notifications aria-label="Chiudi notifiche">×</button>
+    </div>
+    <div class="notification-toolbar">
+      <button class="button button-ghost" type="button" data-read-all-notifications>Segna tutte come lette</button>
+    </div>
+    <div id="notificationList" class="notification-list"><div class="skeleton"></div></div>
+  </dialog>
 
   <dialog id="importDialog" class="dialog" aria-labelledby="importDialogTitle">
     <form id="importForm">
@@ -146,6 +197,8 @@
                 role="tab" aria-selected="false" data-settings-tab="providers">AI e provider</button>
         <button class="settings-tab" id="settingsTabCrowdfunding" type="button"
                 role="tab" aria-selected="false" data-settings-tab="crowdfunding">Crowdfunding</button>
+        <button class="settings-tab" id="settingsTabDiagnostics" type="button"
+                role="tab" aria-selected="false" data-settings-tab="diagnostics">Diagnostica</button>
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="general">
@@ -362,6 +415,22 @@
         </section>
       </div>
 
+      <div class="settings-tab-panel" data-settings-panel="diagnostics" hidden>
+        <section class="settings-card">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Avanzate</p>
+              <h3>Diagnostica</h3>
+            </div>
+            <button class="button button-ghost" id="refreshDiagnostics" type="button">Aggiorna</button>
+          </div>
+          <p class="muted">Dettagli tecnici per manutenzione e troubleshooting. Le schermate ordinarie mostrano solo lo stato operativo.</p>
+          <div id="diagnosticsPanel" class="diagnostics-panel">
+            <span class="muted">Apri questa sezione per caricare la diagnostica.</span>
+          </div>
+        </section>
+      </div>
+
       <div id="settingsResult" class="import-result settings-result" hidden></div>
       <div class="dialog-actions settings-actions">
         <button class="button button-ghost" type="button" id="cancelSettings">Chiudi</button>
@@ -574,6 +643,6 @@
   </dialog>
 
   <script src="/static/zxing-browser-0.2.1.min.js" defer></script>
-  <script src="/static/app.js" defer></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>

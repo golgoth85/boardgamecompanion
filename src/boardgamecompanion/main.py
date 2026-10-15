@@ -11,6 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from boardgamecompanion import __version__
+from boardgamecompanion.api.diagnostics import router as diagnostics_router
+from boardgamecompanion.api.expansions import expansion_service, router as expansions_router
+from boardgamecompanion.api.lists import router as lists_router
+from boardgamecompanion.api.notifications import router as notifications_router
+from boardgamecompanion.api.personal import router as personal_router
+from boardgamecompanion.api.search import router as search_router
+from boardgamecompanion.api.wishlist import router as wishlist_router
 from boardgamecompanion.answer_generation import (
     AnswerGenerationService,
     AnswerProtocolError,
@@ -77,6 +84,7 @@ from boardgamecompanion.crowdfunding import (
     GamefoundProvider,
 )
 from boardgamecompanion.database import Database
+from boardgamecompanion.notifications import NotificationService
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
@@ -520,6 +528,11 @@ def _run_bgg_collection_sync(force: bool = False) -> dict[str, object] | None:
     except Exception:
         LOGGER.exception("BGG collection sync: rulebook catalog synchronization failed")
 
+    try:
+        expansion_service().refresh_stale_owned(limit=6)
+    except Exception:
+        LOGGER.exception("BGG collection sync: expansion relevance refresh failed")
+
     new_ids = list(result.created_bgg_ids)
     if new_ids:
         store = get_bgg_metadata_store()
@@ -643,6 +656,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+for feature_router in (
+    personal_router,
+    lists_router,
+    wishlist_router,
+    notifications_router,
+    search_router,
+    expansions_router,
+    diagnostics_router,
+):
+    app.include_router(feature_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -715,6 +738,26 @@ def web_mechanics() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/lists", include_in_schema=False)
+def web_lists() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/lists/{list_id}", include_in_schema=False)
+def web_list_detail(list_id: str) -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/wishlist", include_in_schema=False)
+def web_wishlist() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/notifications", include_in_schema=False)
+def web_notifications() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
 @app.get("/health", tags=["system"])
 def health() -> dict[str, object]:
     return {
@@ -738,13 +781,20 @@ def list_crowdfunding(
     refresh: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
-        return get_crowdfunding_service().list_campaigns(
+        result = get_crowdfunding_service().list_campaigns(
             sort=sort,
             platform=platform,
             status=status,
             limit=limit,
             refresh=refresh,
         )
+        try:
+            NotificationService(get_database()).sync_crowdfunding(
+                list(result.get("items") or [])
+            )
+        except Exception:
+            LOGGER.exception("Crowdfunding notification synchronization failed")
+        return result
     except CrowdfundingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -792,6 +842,9 @@ def list_games(
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     completed: bool | None = Query(default=None),
+    played: bool | None = Query(default=None),
+    trophy: bool | None = Query(default=None),
+    personal_rating_min: int | None = Query(default=None, ge=1, le=5),
     sort: str = Query(default="title"),
     limit: int = Query(default=50, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
@@ -811,6 +864,9 @@ def list_games(
         category=category,
         mechanic=mechanic,
         completed=completed,
+        played=played,
+        trophy=trophy,
+        personal_rating_min=personal_rating_min,
         sort=sort if sort in SORT_SQL else "title",
         limit=limit,
         offset=offset,
@@ -986,10 +1042,24 @@ def update_game_completion(
                 (board_game_id, completed_at, now, now),
             )
         else:
-            connection.execute(
-                "DELETE FROM game_progress WHERE board_game_id=?",
+            current = connection.execute(
+                "SELECT played_at,personal_rating FROM game_progress WHERE board_game_id=?",
                 (board_game_id,),
-            )
+            ).fetchone()
+            if current and (current["played_at"] is not None or current["personal_rating"] is not None):
+                connection.execute(
+                    """
+                    UPDATE game_progress
+                    SET completed_at=NULL,updated_at=?
+                    WHERE board_game_id=?
+                    """,
+                    (now, board_game_id),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM game_progress WHERE board_game_id=?",
+                    (board_game_id,),
+                )
 
     game = Catalog(database).get_game(bgg_id)
     if game is None:

@@ -1344,6 +1344,164 @@ def _tutorial_videos(connection: sqlite3.Connection) -> None:
     )
 
 
+def _personal_ux_macro(connection: sqlite3.Connection) -> None:
+    progress_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(game_progress)").fetchall()
+    }
+    if "played_at" not in progress_columns:
+        connection.execute("ALTER TABLE game_progress ADD COLUMN played_at TEXT")
+    if "personal_rating" not in progress_columns:
+        connection.execute(
+            """
+            ALTER TABLE game_progress
+            ADD COLUMN personal_rating INTEGER
+            CHECK(personal_rating IS NULL OR personal_rating BETWEEN 1 AND 5)
+            """
+        )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_lists (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('dynamic','manual')),
+            filters_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_list_items (
+            list_id TEXT NOT NULL REFERENCES game_lists(id) ON DELETE CASCADE,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(list_id,board_game_id)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_list_items_position "
+        "ON game_list_items(list_id,position)"
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wishlist_items (
+            id TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL,
+            source_key TEXT NOT NULL UNIQUE,
+            bgg_id INTEGER,
+            title TEXT NOT NULL,
+            year_published INTEGER,
+            cover_url TEXT,
+            target_url TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_wishlist_bgg_id ON wishlist_items(bgg_id)"
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_notifications (
+            id TEXT PRIMARY KEY,
+            dedupe_key TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            target_url TEXT,
+            source_json TEXT NOT NULL DEFAULT '{}',
+            read_at TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_app_notifications_unread "
+        "ON app_notifications(read_at,created_at)"
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS expansion_scan_state (
+            parent_board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            last_scanned_at TEXT,
+            initialized_at TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_expansion_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            bgg_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            year_published INTEGER,
+            cover_url TEXT,
+            bgg_average REAL,
+            bgg_num_owned INTEGER,
+            relevance_score INTEGER NOT NULL DEFAULT 0,
+            relevance_reason TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            UNIQUE(parent_board_game_id,bgg_id)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_expansion_candidates_parent "
+        "ON game_expansion_candidates(parent_board_game_id,relevance_score DESC)"
+    )
+
+    # Preserve BGG wishlist flags already present in imported collection data.
+    now = datetime.now(UTC).isoformat()
+    rows = connection.execute(
+        """
+        SELECT g.bgg_id,g.title,g.year_published,e.cover_url
+        FROM collection_entries c
+        JOIN board_games g ON g.id=c.board_game_id
+        LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
+        WHERE c.wishlist=1
+        """
+    ).fetchall()
+    for row in rows:
+        connection.execute(
+            """
+            INSERT INTO wishlist_items(
+                id,source_type,source_key,bgg_id,title,year_published,
+                cover_url,target_url,metadata_json,created_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(source_key) DO NOTHING
+            """,
+            (
+                str(uuid4()),
+                "bgg",
+                f"bgg:{int(row['bgg_id'])}",
+                int(row["bgg_id"]),
+                row["title"],
+                row["year_published"],
+                row["cover_url"],
+                f"https://boardgamegeek.com/boardgame/{int(row['bgg_id'])}",
+                "{}",
+                now,
+                now,
+            ),
+        )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1362,6 +1520,7 @@ MIGRATIONS = (
     Migration(15, "personal-collection-progress", _personal_collection_progress),
     Migration(16, "gameplay-summaries", _gameplay_summaries),
     Migration(17, "tutorial-videos", _tutorial_videos),
+    Migration(18, "personal-ux-macro", _personal_ux_macro),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
