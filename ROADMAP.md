@@ -10,6 +10,7 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 - [ ] Accettazione fisica del Wake-on-LAN (P1): solo quando il PC da gioco è davvero in sleep/off; sequenza `sleep/off -> wake da BGC -> PC online -> LM Studio pronto -> operazione AI riuscita`.
 
 ## Prossimo
+- [ ] Recuperare il lavoro salvato il 2026-10-15 (backup della vecchia home, mai unito a `main`): `backup/suggestions-v1-wip-20261015` (suggerimenti v1 con lista "hot" di BGG, +888 righe, test inclusi) e `backup/personal-ux-macro18-wip-20261015` (UX personale e wishlist, +2876 righe, basato su un `main` molto più vecchio, 113 commit indietro). Valutare, riallineare a `main` e portare via PR con Local CI, oppure scartare.
 - [ ] Sostituire i regolamenti di ripiego con fonti ufficiali IT/EN quando l'identità esatta è verificabile (P2, manutenzione).
 - [ ] Tenere sotto controllo volume e retention delle notifiche mentre crescono i produttori in background.
 - [ ] Allineare `README.md`, questo file e `docs/ROADMAP.md` ad ogni fase.
