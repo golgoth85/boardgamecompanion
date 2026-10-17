@@ -11,9 +11,10 @@ Current trusted contract:
 - trusted registry: `golgoth85/nas-control:ops/nas-control/localci-repositories.json`;
 - This browser profile includes Python tests, Node JavaScript syntax checks and isolated Chromium/Playwright E2E; browser and backend failures remain distinguishable.
 
-Automatic PR routing:
-- `.github/workflows/local-ci.yml` sends only PR number, exact head SHA, base repository and numeric repository ID to the repository-scoped `localci-dispatcher`;
-- the dispatcher never checks out or executes PR code and has no Docker socket or host-root mount;
+Automatic PR routing (dal 2026-10-17):
+- la Local CI delle PR verso `main` la esegue il poller lato NAS di nas-control, che pubblica sullo head lo status di commit `localci/pytest-browser-v1`;
+- `.github/workflows/local-ci.yml` e' solo `workflow_dispatch`: il job `avviso` non valida nulla ed esce con 1, per non far scambiare l'avvio manuale per una validazione; il vecchio percorso `pull_request_target` -> `localci-dispatch` non e' piu' in uso;
+- un esito `error` si rilancia con l'etichetta `localci-rerun` sulla PR;
 - source acquisition, authority resolution, policy/template selection and execution happen in NAS Control;
 - PASS requires matching repository/SHA/profile, guest `LOCALCI_RESULT_V1` PASS and cleanup attestation.
 

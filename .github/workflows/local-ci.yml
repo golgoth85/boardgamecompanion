@@ -1,27 +1,32 @@
-name: Local CI
+name: Local CI (solo manuale, ripiego)
+
+# La Local CI automatica delle PR la esegue il poller lato NAS di nas-control
+# (status di commit `localci/pytest-browser-v1`). Questo workflow non parte piu' da solo.
+# Il vecchio percorso `pull_request_target` -> `localci-dispatch` dipendeva da
+# `github.event.pull_request.*` (numero, SHA di testa, repo e ID numerico): con
+# `workflow_dispatch` questi dati non esistono e ricavarli richiederebbe
+# permessi nuovi. Per questo il job non invoca il dispatcher: segnala solo
+# come rilanciare la CI. Il rilancio di un `error` si fa con l'etichetta
+# `localci-rerun` sulla PR.
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: local-ci-${{ github.event.pull_request.number }}
+  group: local-ci-manuale
   cancel-in-progress: false
 
 jobs:
-  dispatch:
-    if: github.event.pull_request.draft == false
-    name: Universal Local CI / exact PR head
+  avviso:
+    name: Local CI automatica gestita dal poller NAS
     runs-on: [self-hosted, linux, x64, localci-dispatcher]
-    timeout-minutes: 50
+    timeout-minutes: 5
     steps:
-      - name: Validate exact PR head in Universal Local CI
+      - name: Indicazioni
         shell: bash
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
-          BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
-        run: /usr/local/bin/localci-dispatch
+        run: |
+          echo "Nessuna validazione eseguita: la Local CI delle PR la fa il poller lato NAS (status localci/pytest-browser-v1)."
+          echo "Per rilanciare un esito 'error' applicare l'etichetta localci-rerun alla PR."
+          exit 1

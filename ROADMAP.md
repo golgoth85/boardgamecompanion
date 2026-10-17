@@ -1,13 +1,14 @@
 # Roadmap e cose da fare
 
-Ultimo aggiornamento: 2026-10-16 (fase: manutenzione di prodotto dopo la chiusura dell'incidente barcode).
+Ultimo aggiornamento: 2026-10-17 (fase: manutenzione di prodotto dopo la chiusura dell'incidente barcode).
 
 Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove sono.
 - Roadmap corrente: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Contratti di fase: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`P3B`](docs/P3B_BARCODE_CAMERA_CONTRACT.md), [`P7A`](docs/P7A_PDF_INGEST_CONTRACT.md), [`P7B`](docs/P7B_CHUNK_INDEX_CONTRACT.md), [`P7C`](docs/P7C_EMBEDDING_RETRIEVAL_CONTRACT.md), [`P7D`](docs/P7D_ANSWER_GENERATION_CONTRACT.md), [`P7E`](docs/P7E_QUERY_UI_CONTRACT.md), [`P7 remediation`](docs/P7_PHASE7_REMEDIATION.md), [`readiness UI`](docs/PRE_UI_REDESIGN_READINESS.md), [`publisher-first`](docs/PUBLISHER_FIRST_DISCOVERY.md)
 
 ## Ora
-- [ ] Local CI: aggiunto `scripts/ci_local.py` (2026-10-16), l'elenco unico dei controlli, equivalente alla funzione storica del guest (`boardgamecompanion_checks`). Il guest lo usa solo dopo la ricostruzione del template del repo con il runner d40i (`local-ci-lab`); fino ad allora usa la funzione storica. `local-ci.yml` resta finche' il poller lato NAS non e' attivo.
+- [ ] Local CI: aggiunto `scripts/ci_local.py` (2026-10-16), l'elenco unico dei controlli, equivalente alla funzione storica del guest (`boardgamecompanion_checks`). Il guest lo usa solo dopo la ricostruzione del template del repo con il runner d40i (`local-ci-lab`); fino ad allora usa la funzione storica.
+- [ ] Local CI: dal 2026-10-17 la Local CI delle PR passa dal poller NAS (status `localci/pytest-browser-v1`); `local-ci.yml` ridotto a `workflow_dispatch` di sola segnalazione. Da unire solo quando il poller segue questo repo.
 - [ ] Accettazione fisica del Wake-on-LAN (P1): solo quando il PC da gioco è davvero in sleep/off; sequenza `sleep/off -> wake da BGC -> PC online -> LM Studio pronto -> operazione AI riuscita`.
 
 ## Prossimo
