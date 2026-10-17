@@ -24,6 +24,13 @@ Applicazione self-hosted (Docker/Unraid) per gestire una collezione fisica di gi
 ## Regole di sviluppo
 Modifiche piccole e testabili; test per parsing, matching, normalizzazione dei provider e cambi di stato distruttivi. Import idempotenti; nessuna sovrascrittura silenziosa di metadati manuali; migrazioni di schema additive. Feature branch, `main` sempre distribuibile, niente force-push, niente merge con CI rossa. Codice applicativo: test locali (Local CI se c'è e funziona), poi evidenza di pubblicazione e runtime. Nei report separare la revisione funzionale distribuita dagli HEAD successivi solo documentali.
 
+## Zone delicate
+
+Toccare queste parti **non** si annulla con un semplice revert: prima backup o prova su una copia; se non basta, PR e review consigliata al proprietario (regola «Quanto rigore» in `/workspace/AGENTS.md`). Tutto il resto: si va dritti.
+- Migrazioni dello schema SQLite in `/config` (devono restare additive; backup del DB prima).
+- Import CSV e acquisizione dei regolamenti in `/data/manuals`: download automatici, sovrascrittura di metadati manuali, cancellazione di copie o documenti.
+- Invarianti di dominio (`objectid` BGG, catena `barcode -> OwnedCopy -> BoardGame`, provenienza dei regolamenti).
+
 ## Documenti
 `README.md`, `ROADMAP.md`, `docs/` (contratti di fase P3B-P7E, `ARCHITECTURE.md`), `LOCAL_CI.md`. Storico dell'handoff 2026-10-13 e delle regole pre-ristrutturazione: `docs/archive/AGENTS-pre-restructure-2026-10-15.md`.
 
