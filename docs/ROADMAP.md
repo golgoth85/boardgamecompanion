@@ -1,7 +1,8 @@
 # BoardGameCompanion — current roadmap
 
-This document reflects the live application and repository state verified through
-2026-10-13. Older phase documents remain useful as architectural history, but
+Stato operativo riesaminato il 2026-10-17; verifica funzionale storica del 2026-10-13,
+confermata per identità dei sorgenti montati e salute nel nuovo audit.
+Older phase documents remain useful as architectural history, but
 they must not be read as unfinished product milestones.
 
 ## Current product state
@@ -147,6 +148,16 @@ not a blocker for normal product use.
 - External provider failures must degrade gracefully without making the local
   catalog unusable.
 
-Changes continue to follow branch -> tests/appropriate validation -> PR -> merge.
-Application changes additionally require exact-HEAD Universal Local CI and the
-normal merged-main/publish/deploy/runtime evidence gates when applicable.
+## Riesame operativo del 2026-10-17
+
+I backup `backup/suggestions-v1-wip-20261015` e
+`backup/personal-ux-macro18-wip-20261015` sono stati valutati: le capacità di
+prodotto sono già presenti in versioni successive; il backup UX usa anche tabelle
+e contratti incompatibili con quelli correnti. Non importarli né considerarli
+milestone aperte. Branch conservati, nessuna cancellazione.
+Prove e limiti: [audit del checkpoint](handoff/2026-10-17-residual-audit.md).
+
+Le regole operative correnti sono in `AGENTS.md` e `/workspace/AGENTS.md`:
+branch, test pertinenti, pubblicazione GitHub e merge secondo l'annullabilità;
+Local CI facoltativa. Il deploy usa il pacchetto montato e UnraidClaw, con backup
+del codice e verifica runtime. Il precedente protocollo obbligatorio è superato.

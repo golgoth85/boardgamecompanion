@@ -1,0 +1,362 @@
+{
+  "observed_at": "2026-10-17T21:47:53.858068+00:00",
+  "bgc_main_reviewed": "194016cbf0c2c2e2c441605b08d92c400c55011d",
+  "nas_control_main_reviewed": "e2b9049c70b133251a78437e099a314018318862",
+  "functional_revision": "7973d11dae98c7121998e0a73f2ced0290903348",
+  "health": {
+    "http_status": 200,
+    "raw_body": "{\"status\":\"ok\",\"version\":\"0.1.0\",\"schema_version\":21,\"storage\":{\"config\":\"/config\",\"import\":\"/data/import\",\"manuals\":\"/data/manuals\",\"database\":\"/config/boardgamecompanion.sqlite3\"}}"
+  },
+  "mounted_files": [
+    {
+      "path": "__init__.py",
+      "expected_git_blob": "3dc1f76bc69e3f559bee6253b24fc93acee9e1f9",
+      "mounted_git_blob": "3dc1f76bc69e3f559bee6253b24fc93acee9e1f9"
+    },
+    {
+      "path": "answer_generation.py",
+      "expected_git_blob": "a85bb3c4fe88b5d9619c88fb661a0f67fcc544f2",
+      "mounted_git_blob": "a85bb3c4fe88b5d9619c88fb661a0f67fcc544f2"
+    },
+    {
+      "path": "app_settings.py",
+      "expected_git_blob": "1ba66e8ac3af0d6933ac7948b8a9d5bb99955ab6",
+      "mounted_git_blob": "1ba66e8ac3af0d6933ac7948b8a9d5bb99955ab6"
+    },
+    {
+      "path": "barcode_resolution.py",
+      "expected_git_blob": "76b6d26379b493f8dc47edbfba3ec95b649ad94b",
+      "mounted_git_blob": "76b6d26379b493f8dc47edbfba3ec95b649ad94b"
+    },
+    {
+      "path": "bgg_collection_sync.py",
+      "expected_git_blob": "e6106a56258899f1671f75d28baf531a29ef5740",
+      "mounted_git_blob": "e6106a56258899f1671f75d28baf531a29ef5740"
+    },
+    {
+      "path": "bgg_csv.py",
+      "expected_git_blob": "d4138c1ca0a77753385f196bc80cdac7ce3a9ce9",
+      "mounted_git_blob": "d4138c1ca0a77753385f196bc80cdac7ce3a9ce9"
+    },
+    {
+      "path": "bgg_metadata.py",
+      "expected_git_blob": "f5869122ddc213a80a1c3941677711ac0886e950",
+      "mounted_git_blob": "f5869122ddc213a80a1c3941677711ac0886e950"
+    },
+    {
+      "path": "bgg_rulebook_search.py",
+      "expected_git_blob": "012916fe8524a4cdb0c959b34f90e8737ddfa5b1",
+      "mounted_git_blob": "012916fe8524a4cdb0c959b34f90e8737ddfa5b1"
+    },
+    {
+      "path": "catalog.py",
+      "expected_git_blob": "3fecaf42dd349d2d37451005614e37e613f823da",
+      "mounted_git_blob": "3fecaf42dd349d2d37451005614e37e613f823da"
+    },
+    {
+      "path": "catalog_assistant.py",
+      "expected_git_blob": "b04ec28308bba3c1686dd9c5f5c791b0f42c490f",
+      "mounted_git_blob": "b04ec28308bba3c1686dd9c5f5c791b0f42c490f"
+    },
+    {
+      "path": "chunk_index.py",
+      "expected_git_blob": "895d190d9f4f0cfd4338515586c062c7b4b99002",
+      "mounted_git_blob": "895d190d9f4f0cfd4338515586c062c7b4b99002"
+    },
+    {
+      "path": "copies.py",
+      "expected_git_blob": "abfe2c75518faa1e8c787436d685b32c9d6dce17",
+      "mounted_git_blob": "abfe2c75518faa1e8c787436d685b32c9d6dce17"
+    },
+    {
+      "path": "crowdfunding.py",
+      "expected_git_blob": "4d58818650501ec663a48b097fe5b9442a176555",
+      "mounted_git_blob": "4d58818650501ec663a48b097fe5b9442a176555"
+    },
+    {
+      "path": "crowdfunding_notifications.py",
+      "expected_git_blob": "797ec61e1327ff4e133602b284c50f3e2551f7e2",
+      "mounted_git_blob": "797ec61e1327ff4e133602b284c50f3e2551f7e2"
+    },
+    {
+      "path": "database.py",
+      "expected_git_blob": "a3c905b39e12c902f5856a99dd88b40943b4fa8c",
+      "mounted_git_blob": "a3c905b39e12c902f5856a99dd88b40943b4fa8c"
+    },
+    {
+      "path": "dependencies.py",
+      "expected_git_blob": "849fe516530bbae0976d24518e9f12865acc3d40",
+      "mounted_git_blob": "849fe516530bbae0976d24518e9f12865acc3d40"
+    },
+    {
+      "path": "description_translation.py",
+      "expected_git_blob": "98e647dfcd35064e29199a20d533a4c9957c560c",
+      "mounted_git_blob": "98e647dfcd35064e29199a20d533a4c9957c560c"
+    },
+    {
+      "path": "document_indexing.py",
+      "expected_git_blob": "ae4e69df4e35d714b757785dd1888568c1ff6662",
+      "mounted_git_blob": "ae4e69df4e35d714b757785dd1888568c1ff6662"
+    },
+    {
+      "path": "documents.py",
+      "expected_git_blob": "795bbff6615bd1ffabea361d3f03ed3603413261",
+      "mounted_git_blob": "795bbff6615bd1ffabea361d3f03ed3603413261"
+    },
+    {
+      "path": "embedding_retrieval.py",
+      "expected_git_blob": "7e6070e295bb68d978bd8e2ce980011ff392ab73",
+      "mounted_git_blob": "7e6070e295bb68d978bd8e2ce980011ff392ab73"
+    },
+    {
+      "path": "expansions.py",
+      "expected_git_blob": "4cc6d9c7b1b2f0a3d0c2b876e1d6387e8309c0a3",
+      "mounted_git_blob": "4cc6d9c7b1b2f0a3d0c2b876e1d6387e8309c0a3"
+    },
+    {
+      "path": "game_lists.py",
+      "expected_git_blob": "77bd113322329515cc7f50181fe7c3484276c03d",
+      "mounted_git_blob": "77bd113322329515cc7f50181fe7c3484276c03d"
+    },
+    {
+      "path": "gameplay_summary.py",
+      "expected_git_blob": "e13ee9d60fc4993bd5089df223c1de25f9e716f8",
+      "mounted_git_blob": "e13ee9d60fc4993bd5089df223c1de25f9e716f8"
+    },
+    {
+      "path": "gemini.py",
+      "expected_git_blob": "b499362d2608551ec3df1151026357f6b5a5ca8e",
+      "mounted_git_blob": "b499362d2608551ec3df1151026357f6b5a5ca8e"
+    },
+    {
+      "path": "lmstudio.py",
+      "expected_git_blob": "3c084f9d4cbc57ea9d2452fee0501581f5862288",
+      "mounted_git_blob": "3c084f9d4cbc57ea9d2452fee0501581f5862288"
+    },
+    {
+      "path": "main.py",
+      "expected_git_blob": "8822a424b4530f93b3f0be0071447ee710c48050",
+      "mounted_git_blob": "8822a424b4530f93b3f0be0071447ee710c48050"
+    },
+    {
+      "path": "migrations.py",
+      "expected_git_blob": "fb901ecd934d7f54fe126931af008984baecc1f9",
+      "mounted_git_blob": "fb901ecd934d7f54fe126931af008984baecc1f9"
+    },
+    {
+      "path": "network_security.py",
+      "expected_git_blob": "d8387bfb74d5fd34af5583239b08585c6111414c",
+      "mounted_git_blob": "d8387bfb74d5fd34af5583239b08585c6111414c"
+    },
+    {
+      "path": "notifications.py",
+      "expected_git_blob": "df486ba5622c44cab7b9adcf12bc31359df99db0",
+      "mounted_git_blob": "df486ba5622c44cab7b9adcf12bc31359df99db0"
+    },
+    {
+      "path": "official_site_discovery.py",
+      "expected_git_blob": "53ed5721e17b1c7b5d443d07f5b021b1a026274d",
+      "mounted_git_blob": "53ed5721e17b1c7b5d443d07f5b021b1a026274d"
+    },
+    {
+      "path": "pdf_ingest.py",
+      "expected_git_blob": "17b793c145fe4322154be8aaafeab90f7bf7b4c2",
+      "mounted_git_blob": "17b793c145fe4322154be8aaafeab90f7bf7b4c2"
+    },
+    {
+      "path": "pdf_worker.py",
+      "expected_git_blob": "c305fafa4faea055103f0badafdcdb684428cc43",
+      "mounted_git_blob": "c305fafa4faea055103f0badafdcdb684428cc43"
+    },
+    {
+      "path": "personal_state.py",
+      "expected_git_blob": "af6a95faf4bc9a1d7a6c382961602a35a299b23a",
+      "mounted_git_blob": "af6a95faf4bc9a1d7a6c382961602a35a299b23a"
+    },
+    {
+      "path": "rate_limits.py",
+      "expected_git_blob": "d9e4d36641b40ba69fa98e66f69f057a113d64e0",
+      "mounted_git_blob": "d9e4d36641b40ba69fa98e66f69f057a113d64e0"
+    },
+    {
+      "path": "routers/__init__.py",
+      "expected_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "mounted_git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    },
+    {
+      "path": "routers/diagnostics.py",
+      "expected_git_blob": "69773752a9d104fb1ea4b97f680ae901849bc60a",
+      "mounted_git_blob": "69773752a9d104fb1ea4b97f680ae901849bc60a"
+    },
+    {
+      "path": "routers/expansions.py",
+      "expected_git_blob": "0992b1fef025e51f3ef394e169e8e3e1265ac780",
+      "mounted_git_blob": "0992b1fef025e51f3ef394e169e8e3e1265ac780"
+    },
+    {
+      "path": "routers/lists.py",
+      "expected_git_blob": "1331fb6b06eae736c80dc14c175c3f25b8b4becf",
+      "mounted_git_blob": "1331fb6b06eae736c80dc14c175c3f25b8b4becf"
+    },
+    {
+      "path": "routers/notifications.py",
+      "expected_git_blob": "b1ba4a943895a4d83ff131b73a866a7cc7720442",
+      "mounted_git_blob": "b1ba4a943895a4d83ff131b73a866a7cc7720442"
+    },
+    {
+      "path": "routers/personal.py",
+      "expected_git_blob": "02fbd5485c915d72700e8aadb1b33cdbd76da2c4",
+      "mounted_git_blob": "02fbd5485c915d72700e8aadb1b33cdbd76da2c4"
+    },
+    {
+      "path": "routers/search.py",
+      "expected_git_blob": "f177618813902b0148418ff6a49a90c9ad04da60",
+      "mounted_git_blob": "f177618813902b0148418ff6a49a90c9ad04da60"
+    },
+    {
+      "path": "routers/wishlist.py",
+      "expected_git_blob": "94066451b44e84abd22d3f498e88de3f4c93bb4b",
+      "mounted_git_blob": "94066451b44e84abd22d3f498e88de3f4c93bb4b"
+    },
+    {
+      "path": "rulebook_availability.py",
+      "expected_git_blob": "67152f813132fe4d7ea6e11ca911d07d3592283b",
+      "mounted_git_blob": "67152f813132fe4d7ea6e11ca911d07d3592283b"
+    },
+    {
+      "path": "rulebook_discovery.py",
+      "expected_git_blob": "2e6fafb07fa32d67a7831c516064e3681dc504c9",
+      "mounted_git_blob": "2e6fafb07fa32d67a7831c516064e3681dc504c9"
+    },
+    {
+      "path": "rulebook_fetch.py",
+      "expected_git_blob": "7163c74e48a98c1e14e1d144b931ff7efd1d1815",
+      "mounted_git_blob": "7163c74e48a98c1e14e1d144b931ff7efd1d1815"
+    },
+    {
+      "path": "rulebook_providers.py",
+      "expected_git_blob": "efcc2714df9a2f170dc220123dd7cc1f80776da9",
+      "mounted_git_blob": "efcc2714df9a2f170dc220123dd7cc1f80776da9"
+    },
+    {
+      "path": "rulebook_review.py",
+      "expected_git_blob": "e6c73de589cc2c04db48ce7b3a5954de0286da47",
+      "mounted_git_blob": "e6c73de589cc2c04db48ce7b3a5954de0286da47"
+    },
+    {
+      "path": "rulebook_updates.py",
+      "expected_git_blob": "6450f3f9d7e1ae05395937a14ce345f72eb2e5c6",
+      "mounted_git_blob": "6450f3f9d7e1ae05395937a14ce345f72eb2e5c6"
+    },
+    {
+      "path": "rulebooks.py",
+      "expected_git_blob": "d26ee43e24f03ea2137f6817b61decdf4df50c36",
+      "mounted_git_blob": "d26ee43e24f03ea2137f6817b61decdf4df50c36"
+    },
+    {
+      "path": "service_factories.py",
+      "expected_git_blob": "8d7fefed8f566c098402a4864dd0c05efea2d090",
+      "mounted_git_blob": "8d7fefed8f566c098402a4864dd0c05efea2d090"
+    },
+    {
+      "path": "settings.py",
+      "expected_git_blob": "3b8d19b406ad2bd000d3d86f6c237e36f309eb98",
+      "mounted_git_blob": "3b8d19b406ad2bd000d3d86f6c237e36f309eb98"
+    },
+    {
+      "path": "suggestion_editorial.py",
+      "expected_git_blob": "d12028a58fe8133de805d9b37f715de6a751d086",
+      "mounted_git_blob": "d12028a58fe8133de805d9b37f715de6a751d086"
+    },
+    {
+      "path": "suggestions.py",
+      "expected_git_blob": "9657e6dbf016c944bc9b91a3044f2a996657fc05",
+      "mounted_git_blob": "9657e6dbf016c944bc9b91a3044f2a996657fc05"
+    },
+    {
+      "path": "title_search.py",
+      "expected_git_blob": "d74494edcb14cd4856750f88a63f5708592049fc",
+      "mounted_git_blob": "d74494edcb14cd4856750f88a63f5708592049fc"
+    },
+    {
+      "path": "tutorial_videos.py",
+      "expected_git_blob": "b0eb602279ec7b3cd11ccf764bea10eb4793121a",
+      "mounted_git_blob": "b0eb602279ec7b3cd11ccf764bea10eb4793121a"
+    },
+    {
+      "path": "web/api-client.js",
+      "expected_git_blob": "21ce777fdc3970934f15a11c62c1ee8da365b209",
+      "mounted_git_blob": "21ce777fdc3970934f15a11c62c1ee8da365b209"
+    },
+    {
+      "path": "web/app.css",
+      "expected_git_blob": "cc3921ddb3010b0e09e624d750ae655ca6c51c28",
+      "mounted_git_blob": "cc3921ddb3010b0e09e624d750ae655ca6c51c28"
+    },
+    {
+      "path": "web/app.js",
+      "expected_git_blob": "347d0b4646aae1b9425989ca7aa28bd331d37121",
+      "mounted_git_blob": "347d0b4646aae1b9425989ca7aa28bd331d37121"
+    },
+    {
+      "path": "web/dialogs.js",
+      "expected_git_blob": "9afee47e9db4a9140459a90c3d10e8df7e89a611",
+      "mounted_git_blob": "9afee47e9db4a9140459a90c3d10e8df7e89a611"
+    },
+    {
+      "path": "web/game-centric.css",
+      "expected_git_blob": "e6721401ce66b67d68815f434a81d01db5450899",
+      "mounted_git_blob": "e6721401ce66b67d68815f434a81d01db5450899"
+    },
+    {
+      "path": "web/index.html",
+      "expected_git_blob": "9d3b551b53a8368ce2fb686b19ea421f1b0fac49",
+      "mounted_git_blob": "9d3b551b53a8368ce2fb686b19ea421f1b0fac49"
+    },
+    {
+      "path": "web/personal-components.js",
+      "expected_git_blob": "d16dbf043da69c6feaa7deeb9578c22c9b6999cc",
+      "mounted_git_blob": "d16dbf043da69c6feaa7deeb9578c22c9b6999cc"
+    },
+    {
+      "path": "web/routing.js",
+      "expected_git_blob": "2e65d0d8e7761d7ddee4089bfcb8d501fda612d3",
+      "mounted_git_blob": "2e65d0d8e7761d7ddee4089bfcb8d501fda612d3"
+    },
+    {
+      "path": "web/settings-ui.js",
+      "expected_git_blob": "3b7849d041ceece5409b52bb19b7b6323aa49c47",
+      "mounted_git_blob": "3b7849d041ceece5409b52bb19b7b6323aa49c47"
+    },
+    {
+      "path": "web/state.js",
+      "expected_git_blob": "0194f342a239d74970eec6f0b5df1ea6d84c24af",
+      "mounted_git_blob": "0194f342a239d74970eec6f0b5df1ea6d84c24af"
+    },
+    {
+      "path": "web/ui-utils.js",
+      "expected_git_blob": "f13cca09177f687faf689896be2691b6f9426da0",
+      "mounted_git_blob": "f13cca09177f687faf689896be2691b6f9426da0"
+    },
+    {
+      "path": "web/zxing-browser-0.2.1.min.js",
+      "expected_git_blob": "44643eb5198ff05032a92b13792f069133c26652",
+      "mounted_git_blob": "44643eb5198ff05032a92b13792f069133c26652"
+    },
+    {
+      "path": "web/zxing-browser-LICENSE.txt",
+      "expected_git_blob": "cab16c08701d5d352ccfb2975980758473d3e6a6",
+      "mounted_git_blob": "cab16c08701d5d352ccfb2975980758473d3e6a6"
+    },
+    {
+      "path": "web/zxing-library-LICENSE.txt",
+      "expected_git_blob": "4bcbdae1b10aa04199c13f5ec9382a53d3442afb",
+      "mounted_git_blob": "4bcbdae1b10aa04199c13f5ec9382a53d3442afb"
+    },
+    {
+      "path": "wishlist.py",
+      "expected_git_blob": "637e510966ee721a838b165c3e55271eab10f8fa",
+      "mounted_git_blob": "637e510966ee721a838b165c3e55271eab10f8fa"
+    }
+  ]
+}

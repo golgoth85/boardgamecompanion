@@ -1,6 +1,11 @@
 # Local CI
 
-This repository uses **Universal Local CI** as the default development-validation path.
+Dal 2026-10-17 la **Universal Local CI è facoltativa e non blocca il deploy**,
+secondo `AGENTS.md` e il regime semplificato in `/workspace/AGENTS.md`.
+I test pertinenti restano richiesti. Le sezioni seguenti descrivono il contratto
+esistente quando si usa la Local CI; non ne attestano la disponibilità attuale.
+La PR #153 propone il passaggio al poller e resta aperta con il proprio requisito
+di attivazione verificata, senza modificarlo in questa sessione.
 
 Current trusted contract:
 - generic entrypoint: `localci_repo_ci`;

@@ -1,6 +1,6 @@
 # Roadmap e cose da fare
 
-Ultimo aggiornamento: 2026-10-16 (fase: manutenzione di prodotto dopo la chiusura dell'incidente barcode).
+Ultimo aggiornamento: 2026-10-17 (fase: verifica dei backup di sviluppo e manutenzione; prossimo gate di prodotto: accettazione fisica Wake-on-LAN).
 
 Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove sono.
 - Roadmap corrente: [`docs/ROADMAP.md`](docs/ROADMAP.md)
@@ -11,7 +11,6 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 - [ ] Accettazione fisica del Wake-on-LAN (P1): solo quando il PC da gioco è davvero in sleep/off; sequenza `sleep/off -> wake da BGC -> PC online -> LM Studio pronto -> operazione AI riuscita`.
 
 ## Prossimo
-- [ ] Recuperare il lavoro salvato il 2026-10-15 (backup della vecchia home, mai unito a `main`): `backup/suggestions-v1-wip-20261015` (suggerimenti v1 con lista "hot" di BGG, +888 righe, test inclusi) e `backup/personal-ux-macro18-wip-20261015` (UX personale e wishlist, +2876 righe, basato su un `main` molto più vecchio, 113 commit indietro). Valutare, riallineare a `main` e portare via PR con Local CI, oppure scartare.
 - [ ] Sostituire i regolamenti di ripiego con fonti ufficiali IT/EN quando l'identità esatta è verificabile (P2, manutenzione).
 - [ ] Tenere sotto controllo volume e retention delle notifiche mentre crescono i produttori in background.
 - [ ] Allineare `README.md`, questo file e `docs/ROADMAP.md` ad ogni fase.
@@ -20,15 +19,11 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 - [ ] Lavoro di prodotto ordinario dalle priorità correnti di `docs/ROADMAP.md`. Non riaprire gli incidenti barcode e ricerca universale senza nuova evidenza di produzione.
 
 ## Fatto di recente
+- Valutati i due backup WIP del 2026-10-15: versioni alternative superate dalle funzioni già su `main`, da non importare. I branch restano conservati; dettagli e prove in [`docs/handoff/2026-10-17-residual-audit.md`](docs/handoff/2026-10-17-residual-audit.md).
 - Barcode `8034055580424` (Codenames) e `8034055581032` (Sagrada) risolti in produzione sulla revisione `7973d11` (2026-10-13), più ricerca universale con titoli localizzati/originali.
 
-## Adozione deploy UnraidClaw
+## Infrastruttura corrente
 
-Ultimo aggiornamento della fase: 2026-10-17. Nessun deploy applicativo eseguito.
+Il regime semplificato del 2026-10-17 sostituisce l'adozione obbligatoria: Local CI facoltativa, codice da commit pubblicato, backup del codice e deploy tramite mount e riavvio UnraidClaw. Vedi `AGENTS.md` e `/workspace/AGENTS.md`. La PR #153 sul poller CI resta separata e condizionata alla sua effettiva attivazione; non è un gate di prodotto.
 
-- [x] Identificare repository, branch applicativo e container reale, senza modificare il runtime.
-- [x] Documentare il protocollo obbligatorio per agenti e futuri servizi in `AGENTS.md` e `DEPLOYMENT.md`.
-- [ ] Completare il profilo CI fidato e ottenere PASS/CLEANED sull’esatto SHA della punta autorizzata.
-- [ ] Verificare template, tutti i mount di codice/dati, rete, salute e vincoli del profilo.
-- [ ] Predisporre Git persistente, registrare il profilo preservando gli altri e ottenere il dry run nativo riuscito.
-- [ ] Registrare qui l’esito reale e i blocker; il deploy effettivo richiede il mandato applicativo.
+Verifica in sola lettura del 2026-10-17: i 70 file del pacchetto montato coincidono con `7973d11dae98c7121998e0a73f2ced0290903348`; `/health` restituisce HTTP 200, `status=ok`, schema 21. L'audit non ha eseguito deploy né modifiche ai dati.

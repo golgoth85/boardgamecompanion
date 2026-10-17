@@ -259,6 +259,13 @@ The stable backend/workflow contract for the upcoming UI redesign is documented 
 
 See `AGENTS.md` and `docs/ARCHITECTURE.md`.
 
+Stato operativo riesaminato il 2026-10-17: i backup WIP di suggerimenti e UX
+personale sono superati dalle implementazioni correnti. Il prossimo gate di
+prodotto è l'accettazione fisica Wake-on-LAN, quando il proprietario prepara il PC.
+La revisione funzionale montata resta `7973d11dae98c7121998e0a73f2ced0290903348`;
+i successivi aggiornamenti documentali non sono nuovi deploy. Dettagli e limiti
+in [audit del checkpoint](docs/handoff/2026-10-17-residual-audit.md).
+
 ```bash
 python -m venv .venv
 . .venv/bin/activate

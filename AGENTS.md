@@ -37,3 +37,7 @@ Toccare queste parti **non** si annulla con un semplice revert: prima backup o p
 ## Deploy (regime semplificato, 2026-10-17)
 
 Il protocollo di adozione obbligatoria del 2026-10-17 è **sostituito** dal regime semplificato in `/workspace/AGENTS.md` («Deploy e controlli»): Local CI facoltativa e non bloccante, deploy dal container con il codice montato dal host e riavvio, backup dei dati prima di toccarli. Il testo precedente resta nella storia di git.
+
+## Checkpoint del 2026-10-17
+
+Audit in sola lettura: pacchetto montato identico nei 70 file a `7973d11dae98c7121998e0a73f2ced0290903348`, salute HTTP 200 e schema 21. Gli HEAD successivi documentali/CI non identificano un nuovo deploy applicativo. I due branch `backup/*-wip-20261015` sono stati valutati e superati dalle implementazioni correnti: non importarli integralmente. Evidenze e motivazioni: `docs/handoff/2026-10-17-residual-audit.md`. Prossimo gate di prodotto: accettazione fisica Wake-on-LAN, solo con PC predisposto dal proprietario; nessun test fisico autorizzato da questo checkpoint.
