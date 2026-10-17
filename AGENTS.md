@@ -10,7 +10,7 @@ Applicazione self-hosted (Docker/Unraid) per gestire una collezione fisica di gi
 - Produzione: container `BoardGameCompanion`, porta 8787, template `unraid/boardgamecompanion.xml`. Config in `/mnt/user/appdata/boardgamecompanion` (`/config`, database SQLite); import CSV in `/mnt/user/Altro/boardgames/import`, regolamenti in `/mnt/user/Altro/boardgames/manuals`.
 - Stato persistente solo su `/config`, `/data/import`, `/data/manuals`: mai solo nel filesystem del container.
 - Provider AI: LM Studio (embeddings, con Wake-on-LAN) e Gemini (generazione); Ollama supportato. Segreti solo in variabili d'ambiente o config di runtime.
-- Local CI: profilo `pytest-browser-v1` (Python, JavaScript, Playwright); dettagli in `LOCAL_CI.md`. Build e deploy passano da NAS Control (in manutenzione, vedi generale).
+- Local CI: profilo `pytest-browser-v1` (Python, JavaScript, Playwright); dettagli in `LOCAL_CI.md`. Build e deploy applicativi passano da UnraidClaw dopo l’adozione; Local CI resta sull’authority separata (vedi generale e `DEPLOYMENT.md`).
 
 ## Regole di dominio
 1. L'`objectid` di BGG è l'identificatore esterno canonico; i codici prodotto delle versioni BGG non sono UPC/EAN/ISBN.
@@ -26,3 +26,9 @@ Modifiche piccole e testabili; test per parsing, matching, normalizzazione dei p
 
 ## Documenti
 `README.md`, `ROADMAP.md`, `docs/` (contratti di fase P3B-P7E, `ARCHITECTURE.md`), `LOCAL_CI.md`. Storico dell'handoff 2026-10-13 e delle regole pre-ristrutturazione: `docs/archive/AGENTS-pre-restructure-2026-10-15.md`.
+
+## Adozione e deploy obbligatori (2026-10-17)
+
+Il protocollo corrente è in `DEPLOYMENT.md` e nella sezione dedicata di `/workspace/AGENTS.md`; va applicato di iniziativa dall’agente, anche per futuri servizi del progetto. Prevale sulle indicazioni storiche di deploy tramite NAS Control o script rimossi. La Local CI resta una dipendenza separata e non viene disattivata.
+
+Stato: adozione UnraidClaw in corso, nessun deploy applicativo in questa attività. Prima di dichiarare il percorso pronto servono identità Git/CI verificate, configurazione persistente, tutti i mount di codice coerenti e dry run nativo riuscito. Non equiparare la documentazione o un profilo proposto all’attivazione sul NAS. Rileggere e aggiornare questo stato dopo ogni fase.

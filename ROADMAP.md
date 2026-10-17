@@ -21,3 +21,14 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 
 ## Fatto di recente
 - Barcode `8034055580424` (Codenames) e `8034055581032` (Sagrada) risolti in produzione sulla revisione `7973d11` (2026-10-13), più ricerca universale con titoli localizzati/originali.
+
+## Adozione deploy UnraidClaw
+
+Ultimo aggiornamento della fase: 2026-10-17. Nessun deploy applicativo eseguito.
+
+- [x] Identificare repository, branch applicativo e container reale, senza modificare il runtime.
+- [x] Documentare il protocollo obbligatorio per agenti e futuri servizi in `AGENTS.md` e `DEPLOYMENT.md`.
+- [ ] Completare il profilo CI fidato e ottenere PASS/CLEANED sull’esatto SHA della punta autorizzata.
+- [ ] Verificare template, tutti i mount di codice/dati, rete, salute e vincoli del profilo.
+- [ ] Predisporre Git persistente, registrare il profilo preservando gli altri e ottenere il dry run nativo riuscito.
+- [ ] Registrare qui l’esito reale e i blocker; il deploy effettivo richiede il mandato applicativo.
