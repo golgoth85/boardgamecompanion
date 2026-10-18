@@ -2303,20 +2303,22 @@ async function renderCatalog() {
       </div>
     </section>
 
-    <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Riepilogo ludoteca">
-      <div class="stat"><strong>—</strong><span>Giochi base</span></div>
-      <div class="stat"><strong>—</strong><span>Espansioni</span></div>
-      <div class="stat"><strong>—</strong><span>Completati</span></div>
-      <div class="stat"><strong>—</strong><span>Regolamenti</span></div>
-    </section>
+    <div class="catalog-top">
+      <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Riepilogo ludoteca">
+        <div class="stat"><strong>—</strong><span>Giochi base</span></div>
+        <div class="stat"><strong>—</strong><span>Espansioni</span></div>
+        <div class="stat"><strong>—</strong><span>Completati</span></div>
+        <div class="stat"><strong>—</strong><span>Regolamenti</span></div>
+      </section>
 
-    <section class="achievement-showcase" id="achievementShowcase" hidden>
-      <div class="achievement-showcase-head">
-        <div><p class="eyebrow">Attività recente</p><h2>Giocati di recente</h2></div>
-        <a class="button button-ghost" href="/completed" data-nav>Vedi tutti</a>
-      </div>
-      <div class="achievement-showcase-grid" id="achievementShowcaseGrid"></div>
-    </section>
+      <section class="achievement-showcase" id="achievementShowcase" hidden>
+        <div class="achievement-showcase-head">
+          <div><p class="eyebrow">Attività recente</p><h2>Giocati di recente</h2></div>
+          <a class="button button-ghost" href="/completed" data-nav>Vedi tutti</a>
+        </div>
+        <div class="achievement-showcase-grid" id="achievementShowcaseGrid"></div>
+      </section>
+    </div>
 
     <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
       <div class="catalog-head catalog-workspace-head">
