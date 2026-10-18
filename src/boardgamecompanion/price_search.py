@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from boardgamecompanion.bgg_rulebook_search import GeminiBggFileProvider
 from boardgamecompanion.gemini import validate_model_id
 from boardgamecompanion.rulebooks import canonical_http_url
 
@@ -210,11 +211,18 @@ class GeminiPriceProvider:
                     raise PriceSearchError("Price search response is too large")
                 return response
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == 429 and attempt == 1:
+                response = exc.response
+                if (
+                    response.status_code == 429
+                    and attempt == 1
+                    and not GeminiBggFileProvider._has_zero_quota(response)
+                ):
                     self.sleep(10.0)
                     continue
+                diagnostic = GeminiBggFileProvider._quota_diagnostic(response)
+                suffix = f" ({diagnostic})" if diagnostic else ""
                 raise PriceSearchError(
-                    f"Price search failed with HTTP {exc.response.status_code}"
+                    f"Price search failed with HTTP {response.status_code}{suffix}"
                 ) from exc
             except httpx.HTTPError as exc:
                 if attempt == 1:

@@ -88,6 +88,38 @@ def test_invalid_output_and_http_errors_raise() -> None:
         _provider({}, status=500).search(title="X")
 
 
+def test_quota_error_reports_diagnostic_without_retry() -> None:
+    calls: list[int] = []
+    error = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [{"quotaId": "GroundingRequestsPerDay", "quotaValue": "0"}],
+                }
+            ],
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(429, json=error)
+
+    provider = GeminiPriceProvider(
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="k",
+        client=httpx.Client(
+            base_url="https://generativelanguage.googleapis.com",
+            transport=httpx.MockTransport(handler),
+        ),
+        sleep=lambda _: None,
+    )
+    with pytest.raises(PriceSearchError, match="GroundingRequestsPerDay"):
+        provider.search(title="X")
+    assert len(calls) == 1
+
+
 class _FakeProvider:
     def __init__(self, offers=None, error: Exception | None = None) -> None:
         self.offers = offers or []
