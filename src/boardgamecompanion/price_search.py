@@ -13,7 +13,7 @@ from boardgamecompanion.bgg_rulebook_search import GeminiBggFileProvider
 from boardgamecompanion.gemini import validate_model_id
 from boardgamecompanion.rulebooks import canonical_http_url
 
-PRICE_GROUNDING_MODEL = "gemini-3.5-flash-lite"
+PRICE_GROUNDING_MODEL = "gemini-3.1-flash-lite"
 MAX_OFFERS = 8
 MAX_PRICE_EUR = 1000.0
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
