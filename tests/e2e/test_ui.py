@@ -379,7 +379,8 @@ def test_advanced_catalog_search_filters_by_play_context(browser, live_server):
         import_csv(page, live_server)
         details = page.locator("#advancedSearch")
         expect(details).not_to_have_attribute("open", "")
-        details.locator("summary").click()
+        page.locator("#advancedSearchToggle").click()
+        expect(details).to_have_attribute("open", "")
 
         page.locator("#idealPlayers").fill("2")
         page.locator("#idealPlayers").blur()

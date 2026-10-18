@@ -233,28 +233,6 @@
 .trophy-empty{grid-column:1/-1;display:grid;gap:.28rem;justify-items:start}
 .trophy-empty strong{font-size:.85rem}.trophy-empty span{color:var(--muted);font-size:.68rem}
 
-.achievement-showcase{
-  margin:.8rem 0 1rem;padding:.82rem;border:1px solid rgba(232,191,93,.14);
-  border-radius:15px;background:linear-gradient(135deg,rgba(232,191,93,.04),rgba(18,24,38,.42));
-}
-.achievement-showcase-head{
-  display:flex;align-items:center;justify-content:space-between;gap:.8rem;margin-bottom:.65rem
-}
-.achievement-showcase-head h2{margin:.05rem 0 0;font-size:1rem}
-.achievement-showcase-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem}
-.catalog-top{display:grid;gap:.8rem;margin-bottom:1rem}
-.catalog-top .catalog-overview,
-.catalog-top .achievement-showcase{margin:0}
-.catalog-page-header{margin-bottom:.7rem}
-.catalog-page-header h1{font-size:clamp(1.6rem,3vw,2.3rem)}
-@media(min-width:1101px){
-  .catalog-top:has(.achievement-showcase:not([hidden])){grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);align-items:stretch}
-  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:nth-child(2n){border-right:1px solid var(--line)}
-  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
-  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:last-child{border-right:0}
-  .catalog-top:has(.achievement-showcase:not([hidden])) .achievement-showcase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
 .trophy-card.is-compact{grid-template-columns:3.2rem minmax(0,1fr);grid-template-rows:1fr;min-height:4.25rem}
 .trophy-card.is-compact .trophy-cover{width:3.2rem;height:100%;min-height:4.25rem;aspect-ratio:auto}
 .trophy-card.is-compact .trophy-card-body{align-content:center;padding:.5rem .58rem}
@@ -278,15 +256,11 @@
 }
 .ranking-result-row.is-podium .ranking-result-score strong{color:#e9e0c2}
 
-@media(max-width:900px){
-  .achievement-showcase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
 @media(max-width:640px){
   .trophy-hero{align-items:flex-start;padding:1rem}
   .trophy-hero-mark{width:3.6rem;height:3.6rem;font-size:1.45rem}
   .trophy-wall{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
   .trophy-card-body{padding:.58rem}
-  .achievement-showcase-grid{grid-template-columns:1fr}
 }
 
 
@@ -709,3 +683,70 @@
 .wishlist-offers li{display:flex;justify-content:space-between;gap:.5rem}
 .wishlist-offers a{color:inherit}
 .wishlist-price .button{justify-self:start;white-space:nowrap}
+
+/* Catalogo: intestazione compatta, attività recente in una riga, barra unica */
+.catalog-page-header{flex-wrap:wrap;align-items:flex-end;gap:.75rem 2rem;margin-bottom:.8rem}
+.catalog-page-header h1{font-size:clamp(1.6rem,3vw,2.3rem)}
+.catalog-stats{display:flex;flex-wrap:wrap;gap:.45rem;margin:0}
+.catalog-stats .stat{
+  flex-direction:row;align-items:baseline;gap:.4rem;min-height:0;padding:.42rem .78rem;
+  border:1px solid var(--line);border-radius:999px;background:rgba(18,24,38,.62)
+}
+.catalog-stats .stat strong{font-size:1.05rem;line-height:1;letter-spacing:-.02em}
+.catalog-stats .stat span{font-size:.78rem}
+
+.catalog-recent{
+  display:flex;align-items:center;gap:.8rem;margin:0 0 .9rem;padding:.45rem .6rem .45rem .9rem;
+  border:1px solid rgba(232,191,93,.14);border-radius:14px;
+  background:linear-gradient(135deg,rgba(232,191,93,.04),rgba(18,24,38,.42))
+}
+.catalog-recent[hidden]{display:none}
+.catalog-recent-head{display:grid;flex:0 0 auto;gap:.25rem;justify-items:start}
+.catalog-recent-title{margin:0;color:var(--accent-2);font-size:.72rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.catalog-recent-list{
+  display:grid;grid-auto-flow:column;grid-auto-columns:minmax(9.5rem,1fr);gap:.45rem;
+  flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:thin
+}
+.catalog-recent .trophy-card.is-compact{grid-template-columns:2.2rem minmax(0,1fr);min-height:2.9rem;border-radius:10px;box-shadow:none}
+.catalog-recent .trophy-card.is-compact .trophy-cover{width:2.2rem;min-height:2.9rem}
+.catalog-recent .trophy-card.is-compact .trophy-card-body{gap:.12rem;padding:.3rem .55rem}
+.catalog-recent .trophy-card-body>strong{font-size:.78rem}
+.catalog-recent .trophy-card-body>small{overflow:hidden;font-size:.66rem;text-overflow:ellipsis;white-space:nowrap}
+.catalog-recent-all{
+  display:inline-flex;flex:0 0 auto;align-items:center;gap:.3rem;color:var(--muted);
+  font-size:.8rem;font-weight:700;text-decoration:none;white-space:nowrap
+}
+.catalog-recent-all:hover,.catalog-recent-all:focus-visible{color:var(--text)}
+
+.catalog-workspace{padding:.85rem}
+.catalog-workspace .catalog-workspace-head{margin:0 0 .65rem}
+.catalog-workspace .catalog-simple-search{
+  grid-template-columns:minmax(220px,1.45fr) minmax(130px,.5fr) minmax(190px,.75fr) auto auto;
+  margin:0 0 .8rem
+}
+.advanced-search-toggle{min-height:2.9rem;padding-inline:.9rem;font-size:.82rem;white-space:nowrap}
+.advanced-search-toggle[aria-expanded="true"]{border-color:rgba(232,191,93,.4);color:var(--text)}
+.catalog-workspace .advanced-search{margin:0 0 .9rem}
+.catalog-workspace .advanced-search:not([open]){display:none}
+.catalog-workspace .advanced-search>summary{display:none}
+
+@media(max-width:1180px){
+  .catalog-workspace .catalog-simple-search{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto auto}
+  .catalog-workspace .catalog-simple-search .search-field{grid-column:1/-1}
+}
+@media(max-width:760px){
+  .catalog-recent{flex-wrap:wrap;gap:.5rem .8rem;padding:.55rem .6rem}
+  .catalog-recent{flex-direction:column;align-items:stretch}
+  .catalog-recent-head{display:flex;align-items:center;justify-content:space-between}
+  .catalog-workspace{padding:.65rem}
+  .catalog-page-header{align-items:stretch}
+  #cardsPerRowField{display:none}
+}
+@media(max-width:620px){
+  .catalog-workspace .catalog-head-compact-actions{padding-top:0}
+}
+@media(max-width:640px){
+  .catalog-workspace .catalog-simple-search{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .catalog-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .catalog-stats .stat{justify-content:flex-start}
+}

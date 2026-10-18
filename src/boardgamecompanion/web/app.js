@@ -2302,24 +2302,21 @@ async function renderCatalog() {
           </div>
         ` : ""}
       </div>
-    </section>
-
-    <div class="catalog-top">
-      <section class="stats-panel catalog-overview" id="statsPanel" aria-label="Riepilogo ludoteca">
+      <section class="catalog-stats" id="statsPanel" aria-label="Riepilogo ludoteca">
         <div class="stat"><strong>—</strong><span>Giochi base</span></div>
         <div class="stat"><strong>—</strong><span>Espansioni</span></div>
-        <div class="stat"><strong>—</strong><span>Completati</span></div>
+        <div class="stat"><strong>—</strong><span>Giocati</span></div>
         <div class="stat"><strong>—</strong><span>Regolamenti</span></div>
       </section>
+    </section>
 
-      <section class="achievement-showcase" id="achievementShowcase" hidden>
-        <div class="achievement-showcase-head">
-          <div><p class="eyebrow">Attività recente</p><h2>Giocati di recente</h2></div>
-          <a class="button button-ghost" href="/completed" data-nav>Vedi tutti</a>
-        </div>
-        <div class="achievement-showcase-grid" id="achievementShowcaseGrid"></div>
-      </section>
-    </div>
+    <section class="catalog-recent" id="achievementShowcase" aria-labelledby="catalogRecentHeading" hidden>
+      <div class="catalog-recent-head">
+        <h2 class="catalog-recent-title" id="catalogRecentHeading">Giocati di recente</h2>
+        <a class="catalog-recent-all" href="/completed" data-nav>Vedi tutti ${icon("arrow-right")}</a>
+      </div>
+      <div class="catalog-recent-list" id="achievementShowcaseGrid"></div>
+    </section>
 
     <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
       <div class="catalog-head catalog-workspace-head">
@@ -2399,6 +2396,8 @@ async function renderCatalog() {
           <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
                   type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">${icon("list")}<span>Lista</span></button>
         </div>
+        <button class="button button-ghost advanced-search-toggle" id="advancedSearchToggle" type="button"
+                aria-controls="advancedSearch" aria-expanded="${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "true" : "false"}">Ricerca avanzata</button>
 
       </section>
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
@@ -2470,6 +2469,15 @@ async function renderCatalog() {
 function bindCatalogControls() {
   document.querySelector("#scannerButton")?.addEventListener("click", () => {
     openScannerDialog();
+  });
+
+  const advancedSearch = document.querySelector("#advancedSearch");
+  const advancedSearchToggle = document.querySelector("#advancedSearchToggle");
+  advancedSearchToggle?.addEventListener("click", () => {
+    advancedSearch.open = !advancedSearch.open;
+  });
+  advancedSearch?.addEventListener("toggle", () => {
+    advancedSearchToggle?.setAttribute("aria-expanded", advancedSearch.open ? "true" : "false");
   });
 
   const refreshFrom = (key, value) => {
@@ -4772,7 +4780,8 @@ function trophyGameCard(game, {compact = false} = {}) {
     : null;
   return `
     <a class="trophy-card ${compact ? "is-compact" : ""}"
-       href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+       href="/games/${encodeURIComponent(game.bgg_id)}" data-nav
+       ${compact ? `title="${escapeHtml(game.title)}"` : ""}>
       <span class="trophy-crown" aria-hidden="true">${icon(game.progress?.completed ? "crown" : "diamond")}</span>
       <span class="trophy-cover">${cover}</span>
       <span class="trophy-card-body">
