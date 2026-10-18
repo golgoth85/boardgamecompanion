@@ -722,12 +722,12 @@
 .catalog-workspace{padding:.85rem}
 .catalog-workspace .catalog-workspace-head{margin:0 0 .65rem}
 .catalog-workspace .catalog-simple-search{
-  display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;min-width:0;margin:0 0 .7rem
+  display:flex;flex-wrap:nowrap;align-items:center;gap:.3rem;min-width:0;margin:0 0 .7rem
 }
 .catalog-simple-search > *{min-width:0}
 .catalog-simple-search .field{min-height:2.25rem;border-radius:10px}
 .catalog-simple-search .field input,.catalog-simple-search .field select{padding:.42rem .6rem;font-size:.78rem}
-.catalog-simple-search .search-field{flex:1 1 100%;min-width:0}
+.catalog-simple-search .search-field{flex:1 1 12rem;min-width:8rem}
 .catalog-type-field{flex:0 0 6.8rem}
 .catalog-sort-control{
   display:flex;flex:0 1 8.8rem;min-width:7rem;min-height:2.25rem;align-items:center;overflow:hidden;
