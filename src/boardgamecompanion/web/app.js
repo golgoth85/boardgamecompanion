@@ -171,7 +171,8 @@ const catalogAssistantResult = document.querySelector("#catalogAssistantResult")
 const closeCatalogAssistant = document.querySelector("#closeCatalogAssistant");
 const cancelCatalogAssistant = document.querySelector("#cancelCatalogAssistant");
 const askCatalogAssistant = document.querySelector("#askCatalogAssistant");
-const globalSearchButton = document.querySelector("#globalSearchButton");
+const globalSearchForm = document.querySelector("#globalSearchForm");
+const globalSearchBar = document.querySelector("#globalSearchBar");
 const mobileSearchButton = document.querySelector("#mobileSearchButton");
 const globalSearchDialog = document.querySelector("#globalSearchDialog");
 const globalSearchInput = document.querySelector("#globalSearchInput");
@@ -6032,7 +6033,8 @@ window.addEventListener("resize", () => {
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
-    openGlobalSearchDialog();
+    if (globalSearchBar?.offsetParent) globalSearchBar.focus();
+    else openGlobalSearchDialog();
     return;
   }
   if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
@@ -6040,7 +6042,13 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-globalSearchButton?.addEventListener("click", openGlobalSearchDialog);
+globalSearchForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = String(globalSearchBar?.value || "").trim();
+  if (globalSearchInput) globalSearchInput.value = query;
+  openGlobalSearchDialog();
+  if (query) void performGlobalSearch();
+});
 mobileSearchButton?.addEventListener("click", openGlobalSearchDialog);
 closeGlobalSearch?.addEventListener("click", closeGlobalSearchDialog);
 bindDialogCancel(globalSearchDialog, closeGlobalSearchDialog);
