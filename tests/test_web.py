@@ -131,3 +131,19 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "-webkit-line-clamp: 2" in css.text
     assert zxing.status_code == 200
     assert "ZXingBrowser" in zxing.text
+
+
+def test_icon_sprite_covers_every_referenced_icon(tmp_path: Path) -> None:
+    import re
+
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        sprite = client.get("/static/icons.svg")
+        index = client.get("/")
+        js = client.get("/static/app.js")
+
+    assert sprite.status_code == 200
+    defined = set(re.findall(r'<symbol id="(i-[a-z-]+)"', sprite.text))
+    used = set(re.findall(r"/static/icons\.svg#(i-[a-z-]+)", index.text + js.text))
+    assert used
+    assert used <= defined, used - defined

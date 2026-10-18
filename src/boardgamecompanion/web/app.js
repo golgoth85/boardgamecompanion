@@ -599,7 +599,7 @@ async function openNotificationCenter() {
                href="${escapeHtml(target)}"
                ${internal ? "data-nav" : 'target="_blank" rel="noopener noreferrer"'}
                data-notification-id="${escapeHtml(item.id)}">
-              <span class="notification-kind" aria-hidden="true">${item.category === "expansion" ? "＋" : "◉"}</span>
+              <span class="notification-kind" aria-hidden="true">${item.category === "expansion" ? '<svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg>' : '<svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-megaphone"/></svg>'}</span>
               <span>
                 <strong>${escapeHtml(item.title)}</strong>
                 <small>${escapeHtml(item.body)}</small>
@@ -3430,14 +3430,14 @@ async function renderDetail(bggId) {
                       aria-pressed="${game.progress?.played ? "true" : "false"}"
                       aria-label="${game.progress?.played ? "Rimuovi stato giocato" : "Segna come giocato"}"
                       title="${game.progress?.played ? "Giocato" : "Segna come giocato"}">
-                <span aria-hidden="true">✓</span>
+                <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></span>
               </button>
               <button class="game-state-icon ${game.progress?.completed ? "completion-button is-completed" : "completion-button"}"
                       id="toggleCompleted" type="button"
                       aria-pressed="${game.progress?.completed ? "true" : "false"}"
                       aria-label="${game.progress?.completed ? "Rimuovi completamento" : "Segna come completato"}"
                       title="${game.progress?.completed ? "Completato" : "Segna come completato"}">
-                <span aria-hidden="true">♛</span>
+                <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-crown"/></svg></span>
               </button>
               ${game.progress?.completed ? `
                 <label class="completion-date-editor" for="completionDate">
