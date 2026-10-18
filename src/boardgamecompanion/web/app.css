@@ -1530,9 +1530,9 @@ a { color: inherit; text-decoration: none; }
 
 .page-header h1 {
   margin: 0;
-  font-size: clamp(2rem, 4vw, 3.35rem);
-  line-height: 1;
-  letter-spacing: -.045em;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+  line-height: 1.04;
+  letter-spacing: -.035em;
 }
 
 .page-lead {
@@ -1604,7 +1604,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 .catalog-workspace-head h2 {
-  font-size: 1.12rem;
+  font-size: .98rem;
+  letter-spacing: -.01em;
 }
 
 .catalog-workspace .toolbar {
@@ -1707,7 +1708,7 @@ a { color: inherit; text-decoration: none; }
   }
 
   .page-header h1 {
-    font-size: clamp(1.9rem, 10vw, 2.65rem);
+    font-size: clamp(1.6rem, 3vw, 2.3rem);
   }
 
   .catalog-overview {
@@ -2157,10 +2158,10 @@ a { color: inherit; text-decoration: none; }
 }
 
 .admin-page-head h1 {
-  margin: .08rem 0 .38rem;
-  font-size: clamp(2rem, 4vw, 3.2rem);
-  line-height: 1;
-  letter-spacing: -.04em;
+  margin: 0 0 .25rem;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+  line-height: 1.04;
+  letter-spacing: -.035em;
 }
 
 .admin-page-head .muted {
@@ -3868,28 +3869,6 @@ a { color: inherit; text-decoration: none; }
   gap: 1rem;
 }
 
-.crowdfunding-hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: clamp(1.2rem, 2.4vw, 2rem);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, rgba(24, 32, 51, .96), rgba(17, 24, 39, .9));
-  box-shadow: var(--shadow);
-}
-
-.crowdfunding-hero h1 {
-  margin: 0;
-}
-
-.crowdfunding-hero p:last-child {
-  max-width: 62ch;
-  margin-bottom: 0;
-  color: var(--muted);
-}
-
 .crowdfunding-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -3901,30 +3880,34 @@ a { color: inherit; text-decoration: none; }
 .crowdfunding-segment {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: .3rem;
-  padding: .28rem;
+  gap: .35rem;
+  padding: .3rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(14, 19, 30, .82);
+  border-radius: 12px;
+  background: rgba(10, 14, 22, .72);
 }
 
 .crowdfunding-segment button {
-  min-height: 2.15rem;
-  padding: .42rem .78rem;
+  min-height: 2.45rem;
+  padding: .48rem .72rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: 9px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: .82rem;
-  font-weight: 750;
+  font-size: .75rem;
+  font-weight: 850;
 }
 
-.crowdfunding-segment button:hover,
-.crowdfunding-segment button.is-active {
+.crowdfunding-segment button:hover {
   color: var(--text);
-  background: rgba(245, 158, 11, .16);
+  background: rgba(255, 255, 255, .04);
+}
+
+.crowdfunding-segment button.is-active {
+  color: #07140e;
+  background: var(--accent);
 }
 
 .crowdfunding-summary {
@@ -4120,11 +4103,6 @@ a { color: inherit; text-decoration: none; }
 }
 
 @media (max-width: 720px) {
-  .crowdfunding-hero {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .crowdfunding-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -4134,7 +4112,7 @@ a { color: inherit; text-decoration: none; }
     width: 100%;
     overflow-x: auto;
     flex-wrap: nowrap;
-    border-radius: .85rem;
+    border-radius: 12px;
   }
 
   .crowdfunding-segment button {

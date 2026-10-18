@@ -2292,7 +2292,6 @@ async function renderCatalog() {
   app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
-        <p class="eyebrow">Ludoteca</p>
         <h1>Catalogo</h1>
         ${activeFacet ? `
           <div class="catalog-hero-actions">
@@ -3838,7 +3837,7 @@ async function renderDiscovery() {
     app.innerHTML = `
       <section class="admin-page review-page">
         <div class="review-page-head admin-page-head">
-          <div><p class="eyebrow">Regolamenti</p><h1>Ricerca regolamenti</h1></div>
+          <div><h1>Ricerca regolamenti</h1></div>
           <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
@@ -3995,7 +3994,6 @@ async function renderReviews({reset = false} = {}) {
       <section class="admin-page review-page">
         <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">Regolamenti</p>
             <h1>Fonti da verificare</h1>
           </div>
           <span class="review-counter">${pendingData.total} da verificare</span>
@@ -4279,7 +4277,6 @@ async function renderUpdates({reset = false} = {}) {
       <section class="admin-page update-page">
         <div class="review-page-head admin-page-head">
           <div>
-            <p class="eyebrow">Regolamenti</p>
             <h1>Aggiornamenti regolamenti</h1>
           </div>
           <span class="review-counter">${data.total} monitorati</span>
@@ -4699,7 +4696,6 @@ async function renderRankings() {
   app.innerHTML = `
     <section class="page-header browse-header rankings-header">
       <div>
-        <p class="eyebrow">Ludoteca</p>
         <h1>Classifiche</h1>
       </div>
       <div class="ranking-result-count" id="rankingResultCount">— giochi classificati</div>
@@ -4819,7 +4815,6 @@ async function renderCompleted() {
   app.innerHTML = `
     <section class="trophy-hero">
       <div>
-        <p class="eyebrow">La mia ludoteca</p>
         <h1>Giochi giocati</h1>
       </div>
       <span class="trophy-hero-mark" aria-hidden="true">${icon("crown")}</span>
@@ -5182,7 +5177,6 @@ async function renderExplore(initialTab = null) {
   app.innerHTML = `
     <section class="page-header browse-header explore-page-header">
       <div>
-        <p class="eyebrow">Ludoteca</p>
         <h1>Esplora</h1>
       </div>
       <div class="explore-header-result">
@@ -5494,9 +5488,8 @@ async function renderSuggestions({forceRefresh = false} = {}) {
   ];
   app.innerHTML = `
     <section class="suggestions-page">
-      <header class="suggestions-header">
-        <div>
-          <p class="eyebrow">Scopri</p>
+      <header class="page-header browse-header suggestions-header">
+        <div class="page-header-copy">
           <h1>Suggerimenti</h1>
         </div>
         <button class="button button-ghost" id="suggestionsRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
@@ -5581,9 +5574,8 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
   ];
   app.innerHTML = `
     <section class="crowdfunding-page">
-      <header class="crowdfunding-hero">
-        <div>
-          <p class="eyebrow">Scopri</p>
+      <header class="page-header browse-header crowdfunding-header">
+        <div class="page-header-copy">
           <h1>Crowdfunding</h1>
         </div>
         <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
@@ -5779,7 +5771,6 @@ async function renderWishlist() {
   app.innerHTML = `
     <section class="page-header browse-header">
       <div>
-        <p class="eyebrow">Ludoteca personale</p>
         <h1>Wishlist</h1>
       </div>
     </section>
@@ -5864,7 +5855,6 @@ async function renderLists() {
   app.innerHTML = `
     <section class="page-header browse-header lists-header">
       <div>
-        <p class="eyebrow">Ludoteca personale</p>
         <h1>Liste</h1>
       </div>
     </section>
