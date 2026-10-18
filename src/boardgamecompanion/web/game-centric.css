@@ -242,6 +242,19 @@
 }
 .achievement-showcase-head h2{margin:.05rem 0 0;font-size:1rem}
 .achievement-showcase-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem}
+.catalog-top{display:grid;gap:.8rem;margin-bottom:1rem}
+.catalog-top .catalog-overview,
+.catalog-top .achievement-showcase{margin:0}
+.catalog-page-header{margin-bottom:.7rem}
+.catalog-page-header h1{font-size:clamp(1.6rem,3vw,2.3rem)}
+@media(min-width:1101px){
+  .catalog-top:has(.achievement-showcase:not([hidden])){grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);align-items:stretch}
+  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:nth-child(2n){border-right:1px solid var(--line)}
+  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:nth-child(-n+2){border-bottom:1px solid var(--line)}
+  .catalog-top:has(.achievement-showcase:not([hidden])) .catalog-overview .stat:last-child{border-right:0}
+  .catalog-top:has(.achievement-showcase:not([hidden])) .achievement-showcase-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 .trophy-card.is-compact{grid-template-columns:3.2rem minmax(0,1fr);grid-template-rows:1fr;min-height:4.25rem}
 .trophy-card.is-compact .trophy-cover{width:3.2rem;height:100%;min-height:4.25rem;aspect-ratio:auto}
 .trophy-card.is-compact .trophy-card-body{align-content:center;padding:.5rem .58rem}
