@@ -120,6 +120,12 @@ def test_quota_error_reports_diagnostic_without_retry() -> None:
     assert len(calls) == 1
 
 
+def test_error_message_is_included_in_failure() -> None:
+    payload = {"error": {"status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded, limit: 0"}}
+    with pytest.raises(PriceSearchError, match="limit: 0"):
+        _provider(payload, status=429).search(title="X")
+
+
 class _FakeProvider:
     def __init__(self, offers=None, error: Exception | None = None) -> None:
         self.offers = offers or []
