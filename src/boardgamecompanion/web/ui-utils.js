@@ -30,3 +30,7 @@ export function safeExternalHref(value, fallback = "#") {
     return fallback;
   }
 }
+
+export function icon(name, className = "icon") {
+  return `<svg class="${className}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
+}

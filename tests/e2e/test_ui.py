@@ -305,12 +305,12 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
             ),
         )
 
-        page.get_by_role("button", name="☷ Lista").click()
+        page.get_by_role("button", name="Lista").click()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator(".catalog-list-row")).to_have_count(2)
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#cardsPerRowField")).to_be_hidden()
-        page.get_by_role("button", name="▦ Card").click()
+        page.get_by_role("button", name="Card").click()
         expect(page.locator(".catalog-results-cards")).to_be_visible()
         expect(page.locator("#cardsPerRowField")).to_be_visible()
         page.locator('[data-catalog-columns="3"]').click()
@@ -320,7 +320,7 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         assert page.evaluate("localStorage.getItem('bgc.catalogColumns')") == "3"
         assert catalog_requests == []
 
-        page.get_by_role("button", name="☷ Lista").click()
+        page.get_by_role("button", name="Lista").click()
         page.reload()
         expect(page.locator(".catalog-results-list")).to_be_visible()
         expect(page.locator("#listViewButton")).to_have_attribute("aria-pressed", "true")
@@ -330,12 +330,12 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
     mobile_context, mobile_page = new_page(browser, mobile=True)
     try:
         import_csv(mobile_page, live_server)
-        mobile_page.get_by_role("button", name="☷ Lista").click()
+        mobile_page.get_by_role("button", name="Lista").click()
         expect(mobile_page.locator(".catalog-results-list")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
         )
-        mobile_page.get_by_role("button", name="▦ Card").click()
+        mobile_page.get_by_role("button", name="Card").click()
         expect(mobile_page.locator(".catalog-results-cards")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
@@ -348,7 +348,7 @@ def test_catalog_list_headers_sort_and_toggle_direction(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
-        page.get_by_role("button", name="☷ Lista").click()
+        page.get_by_role("button", name="Lista").click()
 
         titles = page.locator(".catalog-list-title strong")
         expect(titles.nth(0)).to_have_text("Synthetic Alpha")

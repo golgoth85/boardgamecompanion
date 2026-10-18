@@ -1,3 +1,5 @@
+import {icon} from "./ui-utils.js";
+
 function personalRatingLabel(value) {
   return String(Number(value)).replace(".", ",");
 }
@@ -31,7 +33,7 @@ export function wishlistActionMarkup({active = false, itemId = "", sourceKind, s
                   data-wishlist-source-kind="${sourceKind}"
                   data-wishlist-source-key="${sourceKey}"
                   data-wishlist-item-id="${itemId || ""}">
-            ${active ? "♥ In Wishlist" : "♡ Wishlist"}
+            ${active ? `${icon("heart-fill")}<span>In Wishlist</span>` : `${icon("heart")}<span>Wishlist</span>`}
           </button>`;
 }
 

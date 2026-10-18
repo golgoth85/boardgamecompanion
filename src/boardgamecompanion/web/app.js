@@ -12,7 +12,7 @@ import {
   rankingState,
   state,
 } from "./state.js";
-import {escapeHtml, formatNumber, initials, safeExternalHref} from "./ui-utils.js";
+import {escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
@@ -309,7 +309,7 @@ function tutorialVideoCard(item) {
         </div>
         <strong>${escapeHtml(item.title || "Video tutorial")}</strong>
         <p class="muted">${escapeHtml(meta)}</p>
-        <a class="external-link" href="${escapeHtml(item.watch_url)}" target="_blank" rel="noopener noreferrer">Apri su YouTube ↗</a>
+        <a class="external-link" href="${escapeHtml(item.watch_url)}" target="_blank" rel="noopener noreferrer">Apri su YouTube ${icon("external")}</a>
       </div>
     </article>
   `;
@@ -380,11 +380,11 @@ async function toggleWishlistButton(button) {
       wishlistIndex.delete(wishlistKey(sourceKind, sourceKey));
       button.classList.remove("is-active");
       if (button.classList.contains("wishlist-heart")) {
-        button.innerHTML = '<span aria-hidden="true">♡</span>';
+        button.innerHTML = `<span aria-hidden="true">${icon("heart")}</span>`;
         button.setAttribute("aria-label", "Aggiungi alla wishlist");
         button.setAttribute("title", "Aggiungi alla wishlist");
       } else {
-        button.textContent = "♡ Wishlist";
+        button.innerHTML = `${icon("heart")}<span>Wishlist</span>`;
       }
       button.dataset.wishlistItemId = "";
       showToast("Rimosso dalla Wishlist.");
@@ -415,11 +415,11 @@ async function toggleWishlistButton(button) {
     wishlistIndex.set(wishlistKey(sourceKind, sourceKey), created);
     button.classList.add("is-active");
     if (button.classList.contains("wishlist-heart")) {
-      button.innerHTML = '<span aria-hidden="true">♥</span>';
+      button.innerHTML = `<span aria-hidden="true">${icon("heart-fill")}</span>`;
       button.setAttribute("aria-label", "Rimuovi dalla wishlist");
       button.setAttribute("title", "Rimuovi dalla wishlist");
     } else {
-      button.textContent = "♥ In Wishlist";
+      button.innerHTML = `${icon("heart-fill")}<span>In Wishlist</span>`;
     }
     button.dataset.wishlistItemId = created.id;
     showToast("Aggiunto alla Wishlist.");
@@ -496,7 +496,7 @@ async function performGlobalSearch() {
                 <span class="global-search-cover">
                   ${item.cover_url
                     ? `<img src="${escapeHtml(item.cover_url)}" alt="" referrerpolicy="no-referrer">`
-                    : `<span>♡</span>`}
+                    : `<span>${icon("heart")}</span>`}
                 </span>
                 <span><strong>${escapeHtml(item.title)}</strong><small>${item.source_kind === "crowdfunding" ? "Crowdfunding" : "Wishlist BGG"}</small></span>
               </a>
@@ -509,7 +509,7 @@ async function performGlobalSearch() {
           <h3>Liste</h3>
           ${lists.map((item) => `
             <a class="global-search-result is-section" href="/lists?focus=${encodeURIComponent(item.id)}" data-nav>
-              <span aria-hidden="true">☷</span>
+              <span aria-hidden="true">${icon("list")}</span>
               <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? "Lista dinamica" : "Lista manuale"}</small></span>
             </a>
           `).join("")}
@@ -520,7 +520,7 @@ async function performGlobalSearch() {
           <h3>Regolamenti</h3>
           ${rulebooks.map((item) => `
             <a class="global-search-result is-section" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
-              <span aria-hidden="true">▤</span>
+              <span aria-hidden="true">${icon("book")}</span>
               <span><strong>${escapeHtml(item.game_title)}</strong><small>${escapeHtml(item.title || "Regolamento")} · ${escapeHtml(item.language || "—")}</small></span>
             </a>
           `).join("")}
@@ -536,7 +536,7 @@ async function performGlobalSearch() {
             return `
               <a class="global-search-result is-section" href="${escapeHtml(target)}"
                 ${external ? 'target="_blank" rel="noopener noreferrer"' : "data-nav"}>
-                <span aria-hidden="true">↗</span>
+                <span aria-hidden="true">${icon("external")}</span>
                 <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.platform || "Crowdfunding")}</small></span>
               </a>
             `;
@@ -548,7 +548,7 @@ async function performGlobalSearch() {
           <h3>Sezioni</h3>
           ${sections.map((item) => `
             <a class="global-search-result is-section" href="${escapeHtml(item.url)}" data-nav>
-              <span aria-hidden="true">→</span>
+              <span aria-hidden="true">${icon("arrow-right")}</span>
               <span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.description)}</small></span>
             </a>
           `).join("")}
@@ -2133,7 +2133,7 @@ function expansionMiniCard(game) {
         <strong>${escapeHtml(game.title)}</strong>
         <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))}</small>
       </span>
-      ${game.collection?.own ? '<span class="owned-dot" title="Posseduta">✓</span>' : ""}
+      ${game.collection?.own ? `<span class="owned-dot" title="Posseduta">${icon("check")}</span>` : ""}
     </a>
   `;
 }
@@ -2216,7 +2216,7 @@ function gameListRow(game, expansions = [], isExpansion = false) {
         <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
                 aria-expanded="${expanded ? "true" : "false"}"
                 title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
-          <strong>${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">${expanded ? "▴" : "▾"}</i>
+          <strong>${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">${icon(expanded ? "caret-up" : "caret-down")}</i>
         </button>
       ` : '<span class="list-expansion-placeholder"></span>'}
     </div>
@@ -2239,7 +2239,7 @@ function bindExpansionToggles() {
       button.setAttribute("aria-expanded", expanded ? "true" : "false");
       if (panel) panel.hidden = !expanded;
       const caret = button.querySelector("i");
-      if (caret) caret.textContent = expanded ? "▴" : "▾";
+      if (caret) caret.innerHTML = icon(expanded ? "caret-up" : "caret-down");
     });
   });
 }
@@ -2387,9 +2387,9 @@ async function renderCatalog() {
         </label>
         <div class="catalog-view-switch catalog-filter-view" aria-label="Vista catalogo">
           <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">▦ Card</button>
+                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">${icon("catalog")}<span>Card</span></button>
           <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">☷ Lista</button>
+                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">${icon("list")}<span>Lista</span></button>
         </div>
 
       </section>
@@ -3310,7 +3310,7 @@ function relevantExpansionCard(item) {
         </div>
         <small>${item.year_published || "Anno —"}</small>
         <a class="external-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
-          Apri su BGG ↗
+          Apri su BGG ${icon("external")}
         </a>
       </div>
     </article>
@@ -3414,7 +3414,7 @@ async function renderDetail(bggId) {
             </dl>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
-               target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ↗</a>
+               target="_blank" rel="noopener noreferrer">Apri su BoardGameGeek ${icon("external")}</a>
           </div>
         </aside>
 
@@ -3693,7 +3693,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
     if (availability?.action === "open_external" && externalUrl) {
       button.dataset.mode = "external";
       button.dataset.externalUrl = externalUrl;
-      button.textContent = "Apri manuale esterno ↗";
+      button.innerHTML = `Apri manuale esterno ${icon("external")}`;
       return;
     }
     button.dataset.mode = knownSourceMiss && !availability ? "google" : "discovery";
@@ -3701,7 +3701,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
     if (knownSourceMiss && availability) {
       button.textContent = "Riprova fonti ufficiali";
     } else if (knownSourceMiss) {
-      button.textContent = "Cerca PDF su Google ↗";
+      button.innerHTML = `Cerca PDF su Google ${icon("external")}`;
     } else if (failures > 0) {
       button.textContent = "Riprova ricerca automatica";
     } else if (candidates > 0) {
@@ -3812,7 +3812,7 @@ async function renderDiscovery() {
             <p class="muted">${escapeHtml(item.status)} · ultimo: ${escapeHtml(item.last_finished_at || "mai")} · fonti trovate: ${item.candidates_found} · da verificare: ${item.review_items_created}</p>
             <p class="muted">${(item.providers || []).map((value) => `${escapeHtml(value.provider)}: ${escapeHtml(value.outcome)} (${value.candidate_count})`).join(" · ") || "Nessun provider ancora interrogato"}</p>
             ${item.last_error ? `<p class="integration-error">${escapeHtml(item.last_error)}</p>` : ""}
-            <a class="external-link" href="/games/${item.bgg_id}" data-nav>Apri gioco →</a>
+            <a class="external-link" href="/games/${item.bgg_id}" data-nav>Apri gioco ${icon("arrow-right")}</a>
           </article>`).join("") || '<div class="empty">Nessun gioco nel catalogo.</div>'}
         </div>
       </section>`;
@@ -4718,17 +4718,17 @@ async function renderRankings() {
 
 function completionAchievementMarkup(game) {
   const achievements = [{
-    icon: game.progress?.completed ? "♛" : "◇",
+    icon: game.progress?.completed ? "crown" : "diamond",
     label: game.progress?.completed ? "Completato" : "Giocato",
   }];
   const weight = Number(game.bgg?.average_weight || 0);
   const minutes = Number(
     game.play_time?.max || game.play_time?.playing || game.play_time?.min || 0
   );
-  if (weight >= 3.5) achievements.push({icon: "◆", label: "Impresa"});
-  if (minutes >= 120) achievements.push({icon: "⌛", label: "Maratona"});
+  if (weight >= 3.5) achievements.push({icon: "gem", label: "Impresa"});
+  if (minutes >= 120) achievements.push({icon: "hourglass", label: "Maratona"});
   return achievements.map((item) =>
-    `<span class="trophy-achievement"><i aria-hidden="true">${item.icon}</i>${escapeHtml(item.label)}</span>`
+    `<span class="trophy-achievement"><i aria-hidden="true">${icon(item.icon)}</i>${escapeHtml(item.label)}</span>`
   ).join("");
 }
 
@@ -4746,7 +4746,7 @@ function trophyGameCard(game, {compact = false} = {}) {
   return `
     <a class="trophy-card ${compact ? "is-compact" : ""}"
        href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
-      <span class="trophy-crown" aria-hidden="true">${game.progress?.completed ? "♛" : "◇"}</span>
+      <span class="trophy-crown" aria-hidden="true">${icon(game.progress?.completed ? "crown" : "diamond")}</span>
       <span class="trophy-cover">${cover}</span>
       <span class="trophy-card-body">
         <strong>${escapeHtml(game.title)}</strong>
@@ -4786,7 +4786,7 @@ async function renderCompleted() {
         <p class="eyebrow">La mia ludoteca</p>
         <h1>Giochi giocati</h1>
       </div>
-      <span class="trophy-hero-mark" aria-hidden="true">♛</span>
+      <span class="trophy-hero-mark" aria-hidden="true">${icon("crown")}</span>
     </section>
     <section class="trophy-wall" id="trophyWall">${skeletons()}</section>
   `;
@@ -4811,10 +4811,10 @@ async function renderCompleted() {
 
 function exploreFacetMosaic(item, kind) {
   const covers = Array.isArray(item.covers) ? item.covers.slice(0, 4) : [];
-  const icon = kind === "category" ? "◫" : "⌘";
+  const facetIcon = kind === "category" ? icon("layers") : icon("settings");
   if (!covers.length) {
     return `<div class="explore-facet-mosaic is-empty" aria-hidden="true">
-      <span>${icon}</span>
+      <span>${facetIcon}</span>
     </div>`;
   }
   return `<div class="explore-facet-mosaic has-${covers.length}" aria-hidden="true">
@@ -4836,7 +4836,7 @@ function exploreFacetCard(item, kind) {
         <strong>${escapeHtml(item.name)}</strong>
         <small>${kind === "category" ? "Genere" : "Meccanica"}${selected ? " · selezionata" : ""}</small>
       </span>
-      <span class="explore-facet-check" aria-hidden="true">${selected ? "✓" : "+"}</span>
+      <span class="explore-facet-check" aria-hidden="true">${selected ? icon("check") : icon("plus")}</span>
     </button>
   `;
 }
@@ -5272,7 +5272,7 @@ function crowdfundingCard(item) {
         </div>
         <div class="crowdfunding-card-actions">
           <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
-            Apri campagna ↗
+            Apri campagna ${icon("external")}
           </a>
           <button class="button button-ghost wishlist-action ${wishlist ? "is-active" : ""}"
                   type="button"
@@ -5283,7 +5283,7 @@ function crowdfundingCard(item) {
                   data-wishlist-cover="${escapeHtml(item.image_url || "")}"
                   data-wishlist-target="${escapeHtml(item.project_url || "")}"
                   data-wishlist-platform="${escapeHtml(platform)}">
-            ${wishlist ? "♥ In Wishlist" : "♡ Wishlist"}
+            ${wishlist ? `${icon("heart-fill")}<span>In Wishlist</span>` : `${icon("heart")}<span>Wishlist</span>`}
           </button>
         </div>
       </div>
@@ -5377,7 +5377,7 @@ function suggestionCard(item, index) {
                  href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
                  target="_blank" rel="noopener noreferrer"
                  aria-label="Apri ${escapeHtml(title)} su BoardGameGeek">
-                <span class="suggestion-bgg-mark">BGG</span><span aria-hidden="true">↗</span>
+                <span class="suggestion-bgg-mark">BGG</span><span aria-hidden="true">${icon("external")}</span>
               </a>
               <button class="wishlist-heart ${wishlist ? "is-active" : ""}"
                       type="button"
@@ -5391,7 +5391,7 @@ function suggestionCard(item, index) {
                       data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
                       data-wishlist-cover="${escapeHtml(item.cover_url || "")}"
                       data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
-                <span aria-hidden="true">${wishlist ? "♥" : "♡"}</span>
+                <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
               </button>
             </div>
           </div>
@@ -5456,7 +5456,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
           <p class="eyebrow">Scopri</p>
           <h1>Suggerimenti</h1>
         </div>
-        <button class="button button-ghost" id="suggestionsRefresh" type="button">↻ Aggiorna</button>
+        <button class="button button-ghost" id="suggestionsRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
       <div class="suggestions-toolbar" aria-label="Ordina suggerimenti">
         ${sortOptions.map(([value, label]) => `<button type="button" data-suggestions-sort="${value}" class="${suggestionsState.sort === value ? "is-active" : ""}">${label}</button>`).join("")}
@@ -5543,7 +5543,7 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
           <p class="eyebrow">Scopri</p>
           <h1>Crowdfunding</h1>
         </div>
-        <button class="button button-ghost" id="crowdfundingRefresh" type="button">↻ Aggiorna</button>
+        <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
       <div class="crowdfunding-toolbar">
         <div class="crowdfunding-segment" aria-label="Classifica">
@@ -5673,14 +5673,14 @@ async function renderWishlist() {
                 <h2>${escapeHtml(item.title)}</h2>
                 <p class="muted">${item.year_published || "Anno non disponibile"}</p>
                 <div class="wishlist-card-actions">
-                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">Apri informazioni ↗</a>
+                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">Apri informazioni ${icon("external")}</a>
                   <button class="button button-ghost wishlist-action is-active"
                           type="button"
                           data-wishlist-source-kind="${escapeHtml(item.source_kind)}"
                           data-wishlist-source-key="${escapeHtml(item.source_key)}"
                           data-wishlist-item-id="${escapeHtml(item.id)}"
                           data-wishlist-title="${escapeHtml(item.title)}">
-                    ♥ In Wishlist
+                    ${icon("heart-fill")}<span>In Wishlist</span>
                   </button>
                 </div>
               </div>
@@ -5788,7 +5788,7 @@ async function renderLists() {
       ? items.map((item) => `
           <article class="saved-list-card" data-list-id="${escapeHtml(item.id)}">
             <button class="saved-list-open" type="button" data-open-list="${escapeHtml(item.id)}">
-              <span class="saved-list-icon" aria-hidden="true">${item.kind === "smart" ? "⌁" : "☷"}</span>
+              <span class="saved-list-icon" aria-hidden="true">${icon(item.kind === "smart" ? "bolt" : "list")}</span>
               <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? escapeHtml(smartListFilterSummary(item.filters)) : "Lista manuale"}</small></span>
             </button>
             <button class="icon-button saved-list-delete" type="button" data-delete-list="${escapeHtml(item.id)}" aria-label="Elimina ${escapeHtml(item.name)}">×</button>
@@ -5830,7 +5830,7 @@ async function renderLists() {
                 const candidates = search.items || [];
                 searchTarget.innerHTML = candidates.map((game) => `
                   <button class="manual-list-search-item" type="button" data-add-bgg="${game.bgg_id}">
-                    <strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"}</small><span>＋</span>
+                    <strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"}</small><span>${icon("plus")}</span>
                   </button>
                 `).join("") || '<span class="muted">Nessun gioco trovato.</span>';
                 searchTarget.querySelectorAll("[data-add-bgg]").forEach((button) => {
