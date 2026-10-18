@@ -177,6 +177,7 @@ const mobileSearchButton = document.querySelector("#mobileSearchButton");
 const globalSearchDialog = document.querySelector("#globalSearchDialog");
 const globalSearchInput = document.querySelector("#globalSearchInput");
 const globalSearchResults = document.querySelector("#globalSearchResults");
+const globalSearchPopover = document.querySelector("#globalSearchPopover");
 const closeGlobalSearch = document.querySelector("#closeGlobalSearch");
 const notificationButton = document.querySelector("#notificationButton");
 const mobileNotificationButton = document.querySelector("#mobileNotificationButton");
@@ -349,6 +350,7 @@ function showToast(message, isError = false) {
 }
 
 let globalSearchTimer = null;
+let latestGlobalSearchQuery = "";
 let wishlistIndex = new Map();
 
 function wishlistKey(sourceKind, sourceKey) {
@@ -445,29 +447,31 @@ function openGlobalSearchDialog() {
   openDialog(globalSearchDialog, {focus: globalSearchInput, select: true});
 }
 
+function hideGlobalSearchPopover() {
+  if (globalSearchPopover) globalSearchPopover.hidden = true;
+}
+
 function closeGlobalSearchDialog() {
   closeDialog(globalSearchDialog);
 }
 
-async function performGlobalSearch() {
-  const query = String(globalSearchInput?.value || "").trim();
-  if (!globalSearchResults) return;
+async function performGlobalSearch(query, target) {
+  latestGlobalSearchQuery = query;
   if (!query) {
-    globalSearchResults.innerHTML =
-      '<p class="muted">Scrivi almeno un carattere. Scorciatoia: Ctrl+K.</p>';
+    target.innerHTML = '<p class="muted">Scrivi almeno un carattere. Scorciatoia: Ctrl+K.</p>';
     return;
   }
-  globalSearchResults.innerHTML = '<p class="muted">Ricerca…</p>';
+  target.innerHTML = '<p class="muted">Ricerca…</p>';
   try {
     const payload = await api(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
-    if (String(globalSearchInput?.value || "").trim() !== query) return;
+    if (query !== latestGlobalSearchQuery) return;
     const games = payload.groups?.games || [];
     const sections = payload.groups?.sections || [];
     const wishlist = payload.groups?.wishlist || [];
     const lists = payload.groups?.lists || [];
     const rulebooks = payload.groups?.rulebooks || [];
     const crowdfunding = payload.groups?.crowdfunding || [];
-    globalSearchResults.innerHTML = `
+    target.innerHTML = `
       ${games.length ? `
         <section class="global-search-group">
           <h3>Giochi</h3>
@@ -560,7 +564,7 @@ async function performGlobalSearch() {
         : ""}
     `;
   } catch (error) {
-    globalSearchResults.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    target.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -3271,7 +3275,8 @@ async function ensureItalianDescription(bggId) {
       const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
       const cover = document.querySelector(".game-summary-cover .detail-cover");
       if (cover?.isConnected && metadata.cover_url) {
-        cover.innerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+        const placeholder = cover.querySelector(".cover-image, .cover-initials");
+        if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
       }
       status = await api(`/api/games/${bggId}/description-it`);
     }
@@ -3571,6 +3576,24 @@ async function renderDetail(bggId) {
         showToast(error.message, true);
         button.disabled = false;
       }
+    });
+    document.querySelectorAll(".cover-rating-overlay .personal-stars").forEach((group) => {
+      const preview = (value) => {
+        group.classList.toggle("is-previewing", value !== null);
+        group.querySelectorAll(".personal-star-control").forEach((control, index) => {
+          const star = index + 1;
+          control.classList.toggle("is-preview", value !== null && value >= star);
+          control.classList.toggle("is-preview-half", value !== null && value === star - 0.5);
+        });
+      };
+      group.querySelectorAll("[data-personal-rating]").forEach((button) => {
+        button.addEventListener("mouseenter", () => preview(Number(button.dataset.personalRating)));
+        button.addEventListener("focus", () => preview(Number(button.dataset.personalRating)));
+      });
+      group.addEventListener("mouseleave", () => preview(null));
+      group.addEventListener("focusout", (event) => {
+        if (!group.contains(event.relatedTarget)) preview(null);
+      });
     });
     document.querySelectorAll("[data-personal-rating]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -6046,15 +6069,43 @@ globalSearchForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   const query = String(globalSearchBar?.value || "").trim();
   if (globalSearchInput) globalSearchInput.value = query;
+  hideGlobalSearchPopover();
   openGlobalSearchDialog();
-  if (query) void performGlobalSearch();
+  void performGlobalSearch(query, globalSearchResults);
+});
+globalSearchBar?.addEventListener("input", () => {
+  window.clearTimeout(globalSearchTimer);
+  const query = String(globalSearchBar.value || "").trim();
+  if (!query) {
+    latestGlobalSearchQuery = "";
+    hideGlobalSearchPopover();
+    return;
+  }
+  globalSearchPopover.hidden = false;
+  globalSearchTimer = window.setTimeout(() => void performGlobalSearch(query, globalSearchPopover), 160);
+});
+globalSearchBar?.addEventListener("focus", () => {
+  if (globalSearchBar.value.trim() && globalSearchPopover?.childElementCount) globalSearchPopover.hidden = false;
+});
+globalSearchBar?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    hideGlobalSearchPopover();
+    globalSearchBar.blur();
+  }
+});
+globalSearchPopover?.addEventListener("click", (event) => {
+  if (event.target.closest("a")) hideGlobalSearchPopover();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (globalSearchForm && !globalSearchForm.contains(event.target)) hideGlobalSearchPopover();
 });
 mobileSearchButton?.addEventListener("click", openGlobalSearchDialog);
 closeGlobalSearch?.addEventListener("click", closeGlobalSearchDialog);
 bindDialogCancel(globalSearchDialog, closeGlobalSearchDialog);
 globalSearchInput?.addEventListener("input", () => {
   window.clearTimeout(globalSearchTimer);
-  globalSearchTimer = window.setTimeout(() => void performGlobalSearch(), 160);
+  const query = String(globalSearchInput.value || "").trim();
+  globalSearchTimer = window.setTimeout(() => void performGlobalSearch(query, globalSearchResults), 160);
 });
 notificationButton?.addEventListener("click", () => void openNotificationCenter());
 mobileNotificationButton?.addEventListener("click", () => void openNotificationCenter());
