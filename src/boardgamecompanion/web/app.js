@@ -2350,18 +2350,8 @@ async function renderCatalog() {
       <div class="catalog-recent-list" id="achievementShowcaseGrid"></div>
     </section>
 
-    <section class="catalog-workspace" aria-labelledby="catalogGamesHeading">
-      <div class="catalog-head catalog-workspace-head">
-        <div>
-          <h2 id="catalogGamesHeading">Collezione</h2>
-        </div>
-        <span id="resultCount" hidden></span>
-        <button class="button button-ghost catalog-scan-button" id="scannerButton" type="button"
-                aria-label="Scansiona barcode" title="Scansiona barcode">
-          <span aria-hidden="true">+</span>
-        </button>
-      </div>
-
+    <section class="catalog-workspace" aria-label="Catalogo">
+      <span id="resultCount" hidden></span>
       <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
         <label class="field search-field">
           <input id="searchInput" type="search" aria-label="Cerca per titolo"
@@ -2385,9 +2375,9 @@ async function renderCatalog() {
         </div>
         <div class="catalog-view-switch catalog-filter-view" aria-label="Vista catalogo">
           <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
-                  type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">${icon("catalog")}<span>Card</span></button>
+                  type="button" aria-label="Card" title="Card" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">${icon("catalog")}</button>
           <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
-                  type="button" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">${icon("list")}<span>Lista</span></button>
+                  type="button" aria-label="Lista" title="Lista" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">${icon("list")}</button>
         </div>
         <button class="button button-ghost advanced-search-toggle" id="advancedSearchToggle" type="button"
                 aria-controls="advancedSearch" aria-expanded="${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "true" : "false"}">Ricerca avanzata</button>
@@ -2405,6 +2395,10 @@ async function renderCatalog() {
             </select>
           </label>
         </div>
+        <button class="button button-ghost catalog-scan-button" id="scannerButton" type="button"
+                aria-label="Scansiona barcode" title="Scansiona barcode">
+          <span aria-hidden="true">+</span>
+        </button>
       </section>
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
         <summary>Ricerca avanzata</summary>
@@ -4533,17 +4527,6 @@ function rankingSelectOptions(items, selected, placeholder) {
 
 function rankingFilterMarkup(facets) {
   return `
-    <div class="ranking-filter-head">
-      <div>
-        <p class="eyebrow">Affina</p>
-        <h2>Contesto</h2>
-      </div>
-      <span class="quiet-pill">Facoltativo</span>
-    </div>
-    <p class="muted ranking-filter-intro">
-      I filtri non cambiano la formula: restringono il tavolo su cui la classifica viene calcolata.
-    </p>
-
     <section class="ranking-filter-group">
       <strong>Giocatori ideali</strong>
       <div class="ranking-filter-chips">
@@ -5231,12 +5214,6 @@ async function renderExplore(initialTab = null) {
       </div>
 
       <aside class="explore-filter-panel" aria-label="Parametri facoltativi">
-        <div class="explore-filter-head">
-          <div><p class="eyebrow">Affina</p><h2>Altri parametri</h2></div>
-          <span class="quiet-pill">Facoltativi</span>
-        </div>
-        <p class="muted explore-filter-intro">Le opzioni si aggiornano in base alla selezione corrente: non vengono proposti valori che porterebbero a zero giochi.</p>
-
         <div class="explore-filter-options" id="exploreFilterOptions">
           ${skeletons()}
         </div>

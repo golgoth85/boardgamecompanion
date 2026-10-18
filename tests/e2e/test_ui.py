@@ -1002,7 +1002,7 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
         expect(page.get_by_role("tab", name="Generi")).to_have_attribute(
             "aria-selected", "true"
         )
-        expect(page.get_by_text("Altri parametri", exact=True)).to_be_visible()
+        expect(page.locator("#exploreFilterOptions")).to_be_visible()
         expect(page.locator("#exploreResultCount")).to_have_text(
             "2 giochi corrispondenti"
         )

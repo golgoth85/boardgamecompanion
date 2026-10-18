@@ -727,7 +727,7 @@
 .catalog-simple-search > *{min-width:0}
 .catalog-simple-search .field{min-height:2.25rem;border-radius:10px}
 .catalog-simple-search .field input,.catalog-simple-search .field select{padding:.42rem .6rem;font-size:.78rem}
-.catalog-simple-search .search-field{flex:1 1 16rem;min-width:9rem}
+.catalog-simple-search .search-field{flex:0 1 13rem;min-width:8rem}
 .catalog-type-field{flex:0 0 6.8rem}
 .catalog-sort-control{
   display:flex;flex:0 1 8.8rem;min-width:7rem;min-height:2.25rem;align-items:center;overflow:hidden;
@@ -742,7 +742,7 @@
 .catalog-sort-direction:hover,.catalog-sort-direction:focus-visible{color:var(--text);background:rgba(255,255,255,.05)}
 .catalog-sort-direction .icon{width:1rem;height:1rem}
 .catalog-filter-view{min-height:2.25rem;align-self:center;flex:0 0 auto;gap:.12rem;border-radius:10px;padding:.18rem}
-.catalog-filter-view .view-switch-button{min-height:1.85rem;gap:.18rem;padding:.26rem .34rem;font-size:.64rem}
+.catalog-filter-view .view-switch-button{min-width:2.05rem;min-height:1.85rem;justify-content:center;gap:0;padding:.26rem .34rem}
 .catalog-filter-view .icon{width:1rem;height:1rem}
 .advanced-search-toggle{min-height:2.25rem;padding:.3rem .44rem;font-size:.64rem;flex:0 0 auto;white-space:nowrap}
 .catalog-density-fields{display:flex;flex:0 0 auto;align-items:center;gap:.28rem;min-width:0}
@@ -757,7 +757,7 @@
   font:inherit;font-size:.68rem;font-weight:850;cursor:pointer;color-scheme:dark
 }
 .catalog-density-field select option{color:var(--text);background:#121826}
-.catalog-simple-search .catalog-scan-button{width:2.2rem;min-width:2.2rem;height:2.2rem;font-size:1.05rem}
+.catalog-simple-search .catalog-scan-button{width:2.25rem;min-width:2.25rem;height:2.25rem;min-height:2.25rem;border-radius:10px;font-size:1.05rem}
 .advanced-search-toggle[aria-expanded="true"]{border-color:rgba(232,191,93,.4);color:var(--text)}
 .catalog-workspace .advanced-search{margin:0 0 .9rem}
 .catalog-workspace .advanced-search:not([open]){display:none}
@@ -780,7 +780,7 @@
   .catalog-simple-search .search-field{flex:1 1 100%}
   .catalog-type-field,.catalog-sort-control{flex:1 1 8rem}
   .catalog-filter-view,.catalog-simple-search .advanced-search-toggle{flex:1 1 8rem;justify-content:center}
-  .catalog-density-fields{flex:1 1 100%}
+  .catalog-density-fields{flex:1 1 8rem}
   .catalog-density-field{flex:1 1 4rem}
 }
 @media(max-width:430px){
@@ -814,4 +814,8 @@
   display:grid;width:2.6rem;height:2.6rem;flex:0 0 auto;place-items:center;
   border:1px solid rgba(232,191,93,.25);border-radius:50%;color:#f4d982;
   background:rgba(232,191,93,.07);font-size:1.15rem
+}
+
+@media(max-width:620px){
+  .catalog-scan-button{position:static;top:auto;right:auto;align-self:auto}
 }
