@@ -49,6 +49,17 @@ class PriceSearchError(RuntimeError):
     pass
 
 
+def _api_error_message(response: httpx.Response) -> str | None:
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return None
+    message = error.get("message") if isinstance(error, dict) else None
+    if not isinstance(message, str) or not message.strip():
+        return None
+    return " ".join(message.split())[:300]
+
+
 def shop_host(url: str) -> str | None:
     host = (urlsplit(url).hostname or "").lower()
     for known in ITALIAN_SHOP_HOSTS:
@@ -220,6 +231,9 @@ class GeminiPriceProvider:
                     self.sleep(10.0)
                     continue
                 diagnostic = GeminiBggFileProvider._quota_diagnostic(response)
+                message = _api_error_message(response)
+                if message:
+                    diagnostic = f"{diagnostic}; {message}" if diagnostic else message
                 suffix = f" ({diagnostic})" if diagnostic else ""
                 raise PriceSearchError(
                     f"Price search failed with HTTP {response.status_code}{suffix}"
