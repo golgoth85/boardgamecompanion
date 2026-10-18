@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.price_search import PriceSearchError, best_offer
+from boardgamecompanion.service_factories import get_price_provider
 from boardgamecompanion.wishlist import WishlistError, WishlistNotFound, WishlistStore
 
 router = APIRouter(tags=["wishlist"])
@@ -34,6 +36,26 @@ def add_wishlist_item(payload: WishlistPayload) -> dict[str, object]:
         return WishlistStore(get_database()).upsert(**payload.model_dump())
     except WishlistError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/wishlist/{item_id}/prices")
+def refresh_wishlist_prices(item_id: str) -> dict[str, object]:
+    store = WishlistStore(get_database())
+    try:
+        item = store.get(item_id)
+    except WishlistNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    provider = get_price_provider()
+    if provider is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Configura la chiave Gemini nelle impostazioni per cercare i prezzi.",
+        )
+    try:
+        offers = provider.search(title=item["title"], year=item["year_published"])
+    except PriceSearchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return store.set_prices(item_id, offers=offers, best=best_offer(offers))
 
 
 @router.delete("/api/wishlist/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

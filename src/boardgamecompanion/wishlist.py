@@ -138,6 +138,44 @@ class WishlistStore:
         assert row is not None
         return self._row(row)
 
+    def get(self, item_id: str) -> dict[str, Any]:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_wishlist WHERE id=?", (str(item_id),)
+            ).fetchone()
+        if row is None:
+            raise WishlistNotFound("Wishlist item not found")
+        return self._row(row)
+
+    def set_prices(
+        self,
+        item_id: str,
+        *,
+        offers: list[dict[str, Any]],
+        best: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        with self.database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT * FROM personal_wishlist WHERE id=?", (str(item_id),)
+            ).fetchone()
+            if row is None:
+                raise WishlistNotFound("Wishlist item not found")
+            metadata = json.loads(row["metadata_json"] or "{}")
+            metadata["prices"] = {
+                "checked_at": datetime.now(UTC).isoformat(),
+                "offers": offers,
+                "best": best,
+            }
+            connection.execute(
+                "UPDATE personal_wishlist SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), str(item_id)),
+            )
+            updated = connection.execute(
+                "SELECT * FROM personal_wishlist WHERE id=?", (str(item_id),)
+            ).fetchone()
+        assert updated is not None
+        return self._row(updated)
+
     def delete(self, item_id: str) -> None:
         with self.database.transaction(immediate=True) as connection:
             cursor = connection.execute(

@@ -3,7 +3,9 @@ from __future__ import annotations
 from boardgamecompanion.app_settings import (
     resolve_bgg_settings,
     resolve_crowdfunding_settings,
+    resolve_rag_settings,
 )
+from boardgamecompanion.price_search import GeminiPriceProvider
 from boardgamecompanion.bgg_metadata import BggApiClient, BggApiConfig, BggMetadataStore
 from boardgamecompanion.crowdfunding import (
     ApifyKickstarterProvider,
@@ -38,6 +40,20 @@ def get_bgg_metadata_store() -> BggMetadataStore:
         database,
         client,
         refresh_seconds=settings.bgg_metadata_refresh_seconds,
+    )
+
+
+def get_price_provider() -> GeminiPriceProvider | None:
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    if not rag.gemini_api_key:
+        return None
+    return GeminiPriceProvider(
+        base_url=rag.gemini_url,
+        api_key=rag.gemini_api_key,
+        verify_tls=settings.gemini_verify_tls,
+        rate_limiter=PersistentRateLimiter(database).acquire,
     )
 
 
