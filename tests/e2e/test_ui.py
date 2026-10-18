@@ -257,7 +257,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
         page.locator("#typeFilter").select_option("")
         expect(page.locator(".game-card")).to_have_count(2)
 
-        page.locator("#sortFilter").select_option("rating_desc")
+        page.locator("#sortField").select_option("rating")
         expect(page.locator(".card-title").first).to_have_text("Synthetic Alpha")
 
         page.get_by_role("link", name="Apri Synthetic Beta Expansion").click()
@@ -290,7 +290,7 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         expect(page.locator(".catalog-results-cards")).to_be_visible()
         expect(page.locator(".game-card")).to_have_count(2)
         expect(page.locator("#ownedFilter")).to_have_count(0)
-        expect(page.locator(".catalog-density-controls")).to_be_visible()
+        expect(page.locator(".catalog-density-field")).to_have_count(2)
         assert page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
         )
@@ -313,7 +313,7 @@ def test_catalog_card_list_switch_persists_and_mobile_stays_bounded(browser, liv
         page.get_by_role("button", name="Card").click()
         expect(page.locator(".catalog-results-cards")).to_be_visible()
         expect(page.locator("#cardsPerRowField")).to_be_visible()
-        page.locator('[data-catalog-columns="3"]').click()
+        page.locator("#cardsPerRowFilter").select_option("3")
         expect(page.locator(".catalog-results-cards")).to_have_class(
             re.compile(r"\bcatalog-columns-3\b")
         )
@@ -355,20 +355,24 @@ def test_catalog_list_headers_sort_and_toggle_direction(browser, live_server):
 
         page.locator('[data-catalog-sort="title"]').click()
         expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
-        expect(page.locator("#sortFilter")).to_have_value("title_desc")
+        expect(page.locator("#sortField")).to_have_value("title")
+        expect(page.locator("#sortDirection")).to_have_attribute("data-direction", "desc")
         expect(page.locator('[data-catalog-sort="title"]')).to_contain_text("↓")
 
         page.locator('[data-catalog-sort="rating"]').click()
         expect(titles.nth(0)).to_have_text("Synthetic Alpha")
-        expect(page.locator("#sortFilter")).to_have_value("rating_desc")
+        expect(page.locator("#sortField")).to_have_value("rating")
+        expect(page.locator("#sortDirection")).to_have_attribute("data-direction", "desc")
 
         page.locator('[data-catalog-sort="rating"]').click()
         expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
-        expect(page.locator("#sortFilter")).to_have_value("rating_asc")
+        expect(page.locator("#sortField")).to_have_value("rating")
+        expect(page.locator("#sortDirection")).to_have_attribute("data-direction", "asc")
 
         page.locator('[data-catalog-sort="duration"]').click()
         expect(titles.nth(0)).to_have_text("Synthetic Beta Expansion")
-        expect(page.locator("#sortFilter")).to_have_value("duration_asc")
+        expect(page.locator("#sortField")).to_have_value("duration")
+        expect(page.locator("#sortDirection")).to_have_attribute("data-direction", "asc")
     finally:
         context.close()
 
@@ -529,12 +533,12 @@ def test_pagination(browser, live_server, tmp_path: Path):
         page.get_by_role("button", name="Chiudi").click()
 
         expect(page.locator(".game-card")).to_have_count(30)
-        expect(page.locator('[data-catalog-page-size="50"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#pageSizeFilter")).to_have_value("50")
         expect(page.locator("#pagination")).to_be_hidden()
         expect(page.locator("#ownedFilter")).to_have_count(0)
-        expect(page.locator(".catalog-density-label")).to_contain_text(["Riga", "Pagina"])
+        expect(page.locator(".catalog-density-label")).to_have_text(["Righe", "Pagina"])
 
-        page.locator('[data-catalog-page-size="20"]').click()
+        page.locator("#pageSizeFilter").select_option("20")
         expect(page.locator(".game-card")).to_have_count(20)
         expect(page.locator("#pagination")).to_be_visible()
         expect(page.locator("#pagination")).to_contain_text("20 per pagina")
@@ -542,7 +546,7 @@ def test_pagination(browser, live_server, tmp_path: Path):
         page.get_by_role("button", name="Successiva →").click()
         expect(page.locator(".game-card")).to_have_count(10)
 
-        page.locator('[data-catalog-page-size="all"]').click()
+        page.locator("#pageSizeFilter").select_option("all")
         expect(page.locator(".game-card")).to_have_count(30)
         expect(page.locator("#pagination")).to_be_hidden()
         assert page.evaluate("localStorage.getItem('bgc.catalogPageSize')") == "all"

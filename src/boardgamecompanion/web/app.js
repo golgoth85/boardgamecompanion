@@ -213,11 +213,43 @@ function bindCatalogSortHeaders() {
     button.addEventListener("click", () => {
       state.sort = button.dataset.nextSort || "title";
       state.offset = 0;
-      const select = document.querySelector("#sortFilter");
-      if (select) select.value = state.sort;
+      syncCatalogSortControls();
       refreshCatalog();
     });
   });
+}
+
+const catalogSortFieldLabels = Object.freeze({
+  title: "Titolo",
+  players: "Giocatori",
+  age: "Età",
+  duration: "Durata",
+  weight: "Peso",
+  rating: "Rating BGG",
+});
+
+function currentCatalogSortField() {
+  for (const [key, [primary, secondary]] of Object.entries(catalogColumnSorts)) {
+    if (state.sort === primary || state.sort === secondary) return key;
+  }
+  return "title";
+}
+
+function catalogSortAscending() {
+  return state.sort === "title" || state.sort.endsWith("_asc");
+}
+
+function syncCatalogSortControls() {
+  const field = currentCatalogSortField();
+  const select = document.querySelector("#sortField");
+  if (select) select.value = field;
+  const button = document.querySelector("#sortDirection");
+  if (!button) return;
+  const ascending = catalogSortAscending();
+  button.dataset.direction = ascending ? "asc" : "desc";
+  button.setAttribute("aria-label", `Ordinamento ${ascending ? "crescente" : "decrescente"}`);
+  button.setAttribute("title", ascending ? "Ordine crescente" : "Ordine decrescente");
+  button.innerHTML = icon(ascending ? "caret-up" : "caret-down");
 }
 
 let searchTimer;
@@ -2270,6 +2302,7 @@ function syncCatalogViewControls() {
   const cardsVisible = state.catalogView === "cards";
   if (columnsField) columnsField.hidden = !cardsVisible;
   if (columnsSelect) columnsSelect.disabled = !cardsVisible;
+  syncCatalogSortControls();
 }
 
 function rerenderCurrentCatalog() {
@@ -2322,41 +2355,11 @@ async function renderCatalog() {
         <div>
           <h2 id="catalogGamesHeading">Collezione</h2>
         </div>
-        <div class="catalog-head-actions catalog-head-compact-actions">
-        <div class="catalog-density-controls" aria-label="Densità catalogo">
-          <div class="catalog-density-group" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
-            <span class="catalog-density-label">Riga</span>
-            <div class="catalog-density-options" role="group" aria-label="Card per riga">
-              <button class="catalog-density-button ${state.cardsPerRow === 3 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="3" aria-pressed="${state.cardsPerRow === 3 ? "true" : "false"}">3</button>
-              <button class="catalog-density-button ${state.cardsPerRow === 4 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="4" aria-pressed="${state.cardsPerRow === 4 ? "true" : "false"}">4</button>
-              <button class="catalog-density-button ${state.cardsPerRow === 5 ? "is-active" : ""}" type="button"
-                      data-catalog-columns="5" aria-pressed="${state.cardsPerRow === 5 ? "true" : "false"}">5</button>
-            </div>
-          </div>
-          <div class="catalog-density-group">
-            <span class="catalog-density-label">Pagina</span>
-            <div class="catalog-density-options" role="group" aria-label="Titoli per pagina">
-              <button class="catalog-density-button ${state.pageSize === "20" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="20" aria-pressed="${state.pageSize === "20" ? "true" : "false"}">20</button>
-              <button class="catalog-density-button ${state.pageSize === "50" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="50" aria-pressed="${state.pageSize === "50" ? "true" : "false"}">50</button>
-              <button class="catalog-density-button ${state.pageSize === "100" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="100" aria-pressed="${state.pageSize === "100" ? "true" : "false"}">100</button>
-              <button class="catalog-density-button ${state.pageSize === "250" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="250" aria-pressed="${state.pageSize === "250" ? "true" : "false"}">250</button>
-              <button class="catalog-density-button ${state.pageSize === "all" ? "is-active" : ""}" type="button"
-                      data-catalog-page-size="all" aria-pressed="${state.pageSize === "all" ? "true" : "false"}">Tutti</button>
-            </div>
-          </div>
-        </div>
-          <button class="button button-ghost catalog-scan-button" id="scannerButton" type="button"
-                  aria-label="Scansiona barcode" title="Scansiona barcode">
-            <span aria-hidden="true">+</span>
-          </button>
-          <span id="resultCount" hidden></span>
-        </div>
+        <span id="resultCount" hidden></span>
+        <button class="button button-ghost catalog-scan-button" id="scannerButton" type="button"
+                aria-label="Scansiona barcode" title="Scansiona barcode">
+          <span aria-hidden="true">+</span>
+        </button>
       </div>
 
       <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
@@ -2364,31 +2367,22 @@ async function renderCatalog() {
           <input id="searchInput" type="search" aria-label="Cerca per titolo"
                  placeholder="Cerca un gioco…" value="${escapeHtml(state.q)}" autocomplete="off">
         </label>
-        <label class="field">
+        <label class="field catalog-type-field">
           <select id="typeFilter" aria-label="Tipo">
             <option value="">Tutti i tipi</option>
             <option value="standalone" ${state.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
             <option value="expansion" ${state.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
           </select>
         </label>
-        <label class="field catalog-sort-field">
-          <select id="sortFilter" aria-label="Ordina">
-            <option value="title" ${state.sort === "title" ? "selected" : ""}>Titolo A–Z</option>
-            <option value="title_desc" ${state.sort === "title_desc" ? "selected" : ""}>Titolo Z–A</option>
-            <option value="players_asc" ${state.sort === "players_asc" ? "selected" : ""}>Giocatori: meno → più</option>
-            <option value="players_desc" ${state.sort === "players_desc" ? "selected" : ""}>Giocatori: più → meno</option>
-            <option value="age_asc" ${state.sort === "age_asc" ? "selected" : ""}>Età: più bassa</option>
-            <option value="age_desc" ${state.sort === "age_desc" ? "selected" : ""}>Età: più alta</option>
-            <option value="duration_asc" ${state.sort === "duration_asc" ? "selected" : ""}>Durata: più breve</option>
-            <option value="duration_desc" ${state.sort === "duration_desc" ? "selected" : ""}>Durata: più lunga</option>
-            <option value="rating_desc" ${state.sort === "rating_desc" ? "selected" : ""}>Rating BGG: migliore</option>
-            <option value="rating_asc" ${state.sort === "rating_asc" ? "selected" : ""}>Rating BGG: peggiore</option>
-            <option value="rank_asc" ${state.sort === "rank_asc" ? "selected" : ""}>Classifica BGG</option>
-            <option value="weight_desc" ${state.sort === "weight_desc" ? "selected" : ""}>Complessità: alta</option>
-            <option value="weight_asc" ${state.sort === "weight_asc" ? "selected" : ""}>Complessità: bassa</option>
-            <option value="year_desc" ${state.sort === "year_desc" ? "selected" : ""}>Anno più recente</option>
+        <div class="catalog-sort-control">
+          <select id="sortField" aria-label="Ordina per">
+            ${Object.entries(catalogSortFieldLabels).map(([value, label]) => `<option value="${value}" ${currentCatalogSortField() === value ? "selected" : ""}>${label}</option>`).join("")}
           </select>
-        </label>
+          <button class="catalog-sort-direction" id="sortDirection" type="button"
+                  data-direction="${catalogSortAscending() ? "asc" : "desc"}"
+                  aria-label="Ordinamento ${catalogSortAscending() ? "crescente" : "decrescente"}"
+                  title="${catalogSortAscending() ? "Ordine crescente" : "Ordine decrescente"}">${icon(catalogSortAscending() ? "caret-up" : "caret-down")}</button>
+        </div>
         <div class="catalog-view-switch catalog-filter-view" aria-label="Vista catalogo">
           <button class="view-switch-button ${state.catalogView === "cards" ? "is-active" : ""}" id="cardViewButton"
                   type="button" aria-pressed="${state.catalogView === "cards" ? "true" : "false"}">${icon("catalog")}<span>Card</span></button>
@@ -2397,7 +2391,20 @@ async function renderCatalog() {
         </div>
         <button class="button button-ghost advanced-search-toggle" id="advancedSearchToggle" type="button"
                 aria-controls="advancedSearch" aria-expanded="${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "true" : "false"}">Ricerca avanzata</button>
-
+        <div class="catalog-density-fields">
+          <label class="catalog-density-field" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
+            <span class="catalog-density-label">Righe</span>
+            <select id="cardsPerRowFilter" aria-label="Card per riga">
+              ${[3, 4, 5].map((value) => `<option value="${value}" ${state.cardsPerRow === value ? "selected" : ""}>${value}</option>`).join("")}
+            </select>
+          </label>
+          <label class="catalog-density-field">
+            <span class="catalog-density-label">Pagina</span>
+            <select id="pageSizeFilter" aria-label="Titoli per pagina">
+              ${[["20", "20"], ["50", "50"], ["100", "100"], ["250", "250"], ["all", "Tutti"]].map(([value, label]) => `<option value="${value}" ${state.pageSize === value ? "selected" : ""}>${label}</option>`).join("")}
+            </select>
+          </label>
+        </div>
       </section>
       <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
         <summary>Ricerca avanzata</summary>
@@ -2490,30 +2497,36 @@ function bindCatalogControls() {
     searchTimer = window.setTimeout(() => refreshFrom("q", event.target.value), 260);
   });
   document.querySelector("#typeFilter")?.addEventListener("change", (event) => refreshFrom("itemType", event.target.value));
-  document.querySelector("#sortFilter")?.addEventListener("change", (event) => refreshFrom("sort", event.target.value));
 
-  document.querySelectorAll("[data-catalog-page-size]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const value = catalogPageSizeValues.has(button.dataset.catalogPageSize)
-        ? button.dataset.catalogPageSize
-        : "50";
-      if (state.pageSize === value) return;
-      state.pageSize = value;
-      state.limit = value === "all" ? CATALOG_ALL_LIMIT : Number(value);
-      state.offset = 0;
-      window.localStorage.setItem("bgc.catalogPageSize", value);
-      refreshCatalog();
-    });
+  document.querySelector("#sortField")?.addEventListener("change", (event) => {
+    const [primary] = catalogColumnSorts[event.target.value] || catalogColumnSorts.title;
+    refreshFrom("sort", primary);
+    syncCatalogSortControls();
   });
 
-  document.querySelectorAll("[data-catalog-columns]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const value = Number(button.dataset.catalogColumns);
-      if (![3, 4, 5].includes(value) || state.cardsPerRow === value) return;
-      state.cardsPerRow = value;
-      window.localStorage.setItem("bgc.catalogColumns", String(value));
-      rerenderCurrentCatalog();
-    });
+  document.querySelector("#sortDirection")?.addEventListener("click", () => {
+    const field = currentCatalogSortField();
+    const [primary, secondary] = catalogColumnSorts[field] || catalogColumnSorts.title;
+    refreshFrom("sort", state.sort === primary ? secondary : primary);
+    syncCatalogSortControls();
+  });
+
+  document.querySelector("#pageSizeFilter")?.addEventListener("change", (event) => {
+    const value = catalogPageSizeValues.has(event.target.value) ? event.target.value : "50";
+    if (state.pageSize === value) return;
+    state.pageSize = value;
+    state.limit = value === "all" ? CATALOG_ALL_LIMIT : Number(value);
+    state.offset = 0;
+    window.localStorage.setItem("bgc.catalogPageSize", value);
+    refreshCatalog();
+  });
+
+  document.querySelector("#cardsPerRowFilter")?.addEventListener("change", (event) => {
+    const value = Number(event.target.value);
+    if (![3, 4, 5].includes(value) || state.cardsPerRow === value) return;
+    state.cardsPerRow = value;
+    window.localStorage.setItem("bgc.catalogColumns", String(value));
+    rerenderCurrentCatalog();
   });
 
   for (const [id, key] of [
@@ -4813,11 +4826,11 @@ async function refreshAchievementShowcase() {
 
 async function renderCompleted() {
   app.innerHTML = `
-    <section class="trophy-hero">
+    <section class="page-header browse-header completed-header">
       <div>
         <h1>Giochi giocati</h1>
       </div>
-      <span class="trophy-hero-mark" aria-hidden="true">${icon("crown")}</span>
+      <span class="completed-header-mark" aria-hidden="true">${icon("crown")}</span>
     </section>
     <section class="trophy-wall" id="trophyWall">${skeletons()}</section>
   `;
