@@ -469,6 +469,15 @@
 .wishlist-card-body{display:grid;align-content:start;gap:.5rem;padding:.78rem}
 .wishlist-card-body h2{margin:0;font-size:.88rem;line-height:1.28}
 .wishlist-card-body p{margin:0}
+.wishlist-card-actions .button{white-space:nowrap;justify-content:center}
+.wishlist-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem .7rem;margin:0}
+.wishlist-facts div{display:grid;gap:.05rem}
+.wishlist-facts dt{font-size:.72rem;color:var(--muted)}
+.wishlist-facts dd{margin:0;font-size:.85rem;font-weight:600}
+.wishlist-shops{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.wishlist-shops-label{width:100%;font-size:.72rem;color:var(--muted)}
+.wishlist-shops a{padding:.22rem .55rem;border:1px solid var(--line);border-radius:999px;color:inherit;font-size:.78rem;text-decoration:none}
+.wishlist-shops a:hover,.wishlist-shops a:focus-visible{border-color:rgba(245,158,11,.5);color:var(--accent-2)}
 
 .list-builder-card{margin-bottom:1rem;padding:.85rem;border:1px solid var(--line);border-radius:15px;background:var(--panel)}
 .list-builder-card form{display:grid;gap:.75rem}
@@ -690,3 +699,13 @@
   .cover-rating-overlay .personal-star-glyph{font-size:.82rem}
   .suggestion-heading-actions{display:flex;justify-content:flex-end}
 }
+.wishlist-price{display:grid;gap:.4rem}
+.wishlist-price-best{display:grid;gap:.1rem}
+.wishlist-price-label{font-size:.72rem;color:var(--muted)}
+.wishlist-price-value{color:var(--good);font-size:1.25rem;font-weight:700;text-decoration:none}
+.wishlist-price-value small{font-size:.72rem;font-weight:500;color:var(--muted)}
+.wishlist-offers summary{cursor:pointer;font-size:.8rem;color:var(--muted)}
+.wishlist-offers ul{display:grid;gap:.25rem;margin:.4rem 0 0;padding:0;list-style:none;font-size:.82rem}
+.wishlist-offers li{display:flex;justify-content:space-between;gap:.5rem}
+.wishlist-offers a{color:inherit}
+.wishlist-price .button{justify-self:start;white-space:nowrap}

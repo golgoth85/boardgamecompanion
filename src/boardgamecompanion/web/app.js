@@ -406,9 +406,10 @@ async function toggleWishlistButton(button) {
         : null,
       cover_url: button.dataset.wishlistCover || null,
       target_url: button.dataset.wishlistTarget || null,
-      metadata: button.dataset.wishlistPlatform
-        ? {platform: button.dataset.wishlistPlatform}
-        : {},
+      metadata: {
+        ...(button.dataset.wishlistPlatform ? {platform: button.dataset.wishlistPlatform} : {}),
+        ...(button.dataset.wishlistMeta ? JSON.parse(button.dataset.wishlistMeta) : {}),
+      },
     };
     const created = await api("/api/wishlist", {
       method: "POST",
@@ -5384,6 +5385,12 @@ function suggestionCard(item, index) {
   const whyText = item.why_it_fits
     || item.reason
     || "È un candidato verificato BGG non presente nella tua ludoteca.";
+  const wishlistMeta = {
+    players: {min: players.min || null, max: players.max || null},
+    playing_time: playTime.playing || playTime.max || null,
+    weight: Number.isFinite(Number(bgg.average_weight)) ? Number(bgg.average_weight) : null,
+    bgg_rating: Number.isFinite(Number(bgg.average)) ? Number(bgg.average) : null,
+  };
 
   return `
     <article class="suggestion-card">
@@ -5416,6 +5423,7 @@ function suggestionCard(item, index) {
                       data-wishlist-title="${escapeHtml(title)}"
                       data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
                       data-wishlist-cover="${escapeHtml(item.cover_url || "")}"
+                      data-wishlist-meta="${escapeHtml(JSON.stringify(wishlistMeta))}"
                       data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
                 <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
               </button>
@@ -5666,6 +5674,97 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
   }
 }
 
+function wishlistFactsMarkup(item) {
+  const meta = item.metadata || {};
+  if (item.source_kind !== "bgg") {
+    return meta.platform ? `<p class="muted">Piattaforma: ${escapeHtml(meta.platform)}</p>` : "";
+  }
+  const players = meta.players || {};
+  const playersText = players.min && players.max
+    ? (players.min === players.max ? `${players.min}` : `${players.min}–${players.max}`)
+    : "—";
+  const timeText = meta.playing_time ? `${meta.playing_time} min` : "—";
+  const weightText = Number.isFinite(Number(meta.weight)) ? Number(meta.weight).toFixed(1) : "—";
+  const ratingText = Number.isFinite(Number(meta.bgg_rating)) ? Number(meta.bgg_rating).toFixed(1) : "—";
+  return `
+    <dl class="wishlist-facts">
+      <div><dt>Giocatori</dt><dd>${escapeHtml(playersText)}</dd></div>
+      <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
+      <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
+      <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
+    </dl>`;
+}
+
+const euroFormat = new Intl.NumberFormat("it-IT", {style: "currency", currency: "EUR"});
+
+function wishlistPriceMarkup(item) {
+  const prices = item.metadata?.prices;
+  const checked = prices?.checked_at
+    ? new Date(prices.checked_at).toLocaleDateString("it-IT")
+    : "";
+  let summary = "";
+  if (prices?.best) {
+    const best = prices.best;
+    const others = (prices.offers || []).map((offer) => `
+      <li>
+        <a href="${escapeHtml(safeExternalHref(offer.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(offer.shop)}</a>
+        <span>${escapeHtml(euroFormat.format(offer.price_eur))}${offer.availability === "out_of_stock" ? " · esaurito" : ""}</span>
+      </li>`).join("");
+    summary = `
+      <div class="wishlist-price-best">
+        <span class="wishlist-price-label">Miglior prezzo in Italia</span>
+        <a class="wishlist-price-value" href="${escapeHtml(safeExternalHref(best.url))}" target="_blank" rel="noopener noreferrer">
+          ${escapeHtml(euroFormat.format(best.price_eur))} <small>${escapeHtml(best.shop)}</small>
+        </a>
+      </div>
+      <details class="wishlist-offers">
+        <summary>Tutte le offerte (${(prices.offers || []).length})</summary>
+        <ul>${others}</ul>
+      </details>
+      <small class="muted">Prezzo indicativo da ricerca web, aggiornato il ${escapeHtml(checked)}. Verifica sul sito.</small>`;
+  } else if (prices) {
+    summary = `<small class="muted">Nessun prezzo verificato trovato il ${escapeHtml(checked)}.</small>`;
+  }
+  return `
+    <div class="wishlist-price">
+      ${summary}
+      <button class="button button-ghost" type="button" data-wishlist-price-refresh="${escapeHtml(item.id)}">
+        ${icon("refresh")}<span>${prices ? "Aggiorna prezzi" : "Cerca prezzi"}</span>
+      </button>
+    </div>`;
+}
+
+function bindWishlistPriceActions(root) {
+  root.querySelectorAll("[data-wishlist-price-refresh]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.querySelector("span").textContent = "Cerco…";
+      try {
+        await api(`/api/wishlist/${encodeURIComponent(button.dataset.wishlistPriceRefresh)}/prices`, {method: "POST"});
+        await renderWishlist();
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+        button.querySelector("span").textContent = "Cerca prezzi";
+      }
+    });
+  });
+}
+
+function shopLinksMarkup(title) {
+  const query = `${title} gioco da tavolo`;
+  const shops = [
+    ["Amazon.it", `https://www.amazon.it/s?k=${encodeURIComponent(query)}`],
+    ["eBay.it", `https://www.ebay.it/sch/i.html?_nkw=${encodeURIComponent(query)}`],
+    ["Google.it", `https://www.google.it/search?q=${encodeURIComponent(`${query} prezzo`)}`],
+  ];
+  return `
+    <nav class="wishlist-shops" aria-label="Cerca prezzi in Italia per ${escapeHtml(title)}">
+      <span class="wishlist-shops-label">Cerca manualmente</span>
+      ${shops.map(([label, href]) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`).join("")}
+    </nav>`;
+}
+
 async function renderWishlist() {
   document.title = "Wishlist · BoardGameCompanion";
   app.innerHTML = `
@@ -5683,7 +5782,8 @@ async function renderWishlist() {
     const items = payload.items || [];
     grid.innerHTML = items.length
       ? items.map((item) => {
-          const sourceLabel = item.source_kind === "crowdfunding" ? "Crowdfunding" : "BoardGameGeek";
+          const isCrowdfunding = item.source_kind === "crowdfunding";
+          const sourceLabel = isCrowdfunding ? "Crowdfunding" : "BoardGameGeek";
           const target = safeExternalHref(
             item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : ""),
           );
@@ -5698,8 +5798,11 @@ async function renderWishlist() {
                 <p class="eyebrow">${escapeHtml(sourceLabel)}</p>
                 <h2>${escapeHtml(item.title)}</h2>
                 <p class="muted">${item.year_published || "Anno non disponibile"}</p>
+                ${wishlistFactsMarkup(item)}
+                ${wishlistPriceMarkup(item)}
+                ${shopLinksMarkup(item.title)}
                 <div class="wishlist-card-actions">
-                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">Apri informazioni ${icon("external")}</a>
+                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${isCrowdfunding ? "Apri progetto" : "Scheda BGG"} ${icon("external")}</a>
                   <button class="button button-ghost wishlist-action is-active"
                           type="button"
                           data-wishlist-source-kind="${escapeHtml(item.source_kind)}"
@@ -5715,6 +5818,7 @@ async function renderWishlist() {
         }).join("")
       : '<div class="empty"><strong>Wishlist vuota.</strong><span>Aggiungi titoli da Suggerimenti o Crowdfunding.</span></div>';
     bindWishlistActions(grid);
+    bindWishlistPriceActions(grid);
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (focus) {
       const card = Array.from(grid.querySelectorAll(".wishlist-card")).find((item) => {
