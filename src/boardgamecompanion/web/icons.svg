@@ -12,7 +12,7 @@
     <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.7 2.7L16 9.5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-crown" viewBox="0 0 24 24"><path d="m4 8 4.5 4L12 5l3.5 7L20 8l-1.5 10h-13zM6 21h12"/></symbol>
-    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.34 5.30 L10.49 2.92 L13.51 2.92 L13.66 5.30 L15.56 6.09 L17.35 4.51 L19.49 6.65 L17.91 8.44 L18.70 10.34 L21.08 10.49 L21.08 13.51 L18.70 13.66 L17.91 15.56 L19.49 17.35 L17.35 19.49 L15.56 17.91 L13.66 18.70 L13.51 21.08 L10.49 21.08 L10.34 18.70 L8.44 17.91 L6.65 19.49 L4.51 17.35 L6.09 15.56 L5.30 13.66 L2.92 13.51 L2.92 10.49 L5.30 10.34 L6.09 8.44 L4.51 6.65 L6.65 4.51 L8.44 6.09Z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
     <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 21h4"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12a8 8 0 0 1 13.7-5.6M18 3v4h-4M6 21v-4h4"/></symbol>
