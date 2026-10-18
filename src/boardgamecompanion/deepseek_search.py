@@ -86,7 +86,8 @@ class DeepSeekRulebookProvider:
         try:
             # Two searches, at most three page reads. No model invents download links.
             results = self.web.search(f'"{query.title[:65]}" regolamento filetype:pdf')
-            results += self.web.search(f'"{query.title[:55]}" site:boardgamegeek.com/filepage/')
+            bgg_title = query.original_title or query.title
+            results += self.web.search(f'"{bgg_title[:55]}" site:boardgamegeek.com/filepage/')
             candidates, seen, fetched = [], set(), 0
             for result in results:
                 source = result["url"]
@@ -140,6 +141,7 @@ class DeepSeekPriceProvider:
         try:
             results = self.web.search(f'"{title[:85]}" gioco prezzo Italia')
             pages = []
+            read_failures = 0
             seen = set()
             for result in results:
                 if shop_host(result["url"]) is None or result["url"] in seen:
@@ -148,11 +150,14 @@ class DeepSeekPriceProvider:
                 try:
                     page = self.web.fetch(result)
                 except CloudAIError:
+                    read_failures += 1
                     continue
                 pages.append(page)
                 if len(pages) == 4:
                     break
             if not pages:
+                if read_failures:
+                    raise CloudAIError("DeepSeek: impossibile verificare le pagine dei negozi; prezzi precedenti conservati")
                 return []
             structured = self.web.client.structured(
                 "Find prices of exactly the requested board game and edition, preferably Italian. "

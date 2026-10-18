@@ -260,3 +260,13 @@ def test_editorial_does_not_fall_back_to_excluded_gemini(isolated_database, tmp_
     monkeypatch.setattr(service, '_gemini', lambda *args: pytest.fail('Provider escluso chiamato'))
     with pytest.raises(editorial.SuggestionEditorialError, match='No editorial'):
         service._generate([{'bgg_id': 1, 'title': 'Game'}])
+
+
+def test_price_fetch_outage_is_an_error_so_cached_prices_are_preserved():
+    def handler(request):
+        if request.url.path.endswith('/search'):
+            return httpx.Response(200, json={'results': [{'url': 'https://dungeondice.it/catan', 'title': 'Catan'}]})
+        return httpx.Response(503)
+    from boardgamecompanion.price_search import PriceSearchError
+    with pytest.raises(PriceSearchError, match='prezzi precedenti conservati'):
+        DeepSeekPriceProvider(make_client(handler)).search(title='Catan')
