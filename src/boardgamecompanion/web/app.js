@@ -1,4 +1,5 @@
 import {api} from "./api-client.js";
+import {renderProviderPriority, readProviderPriority, setupCloudProviderControls, applyCloudProviderSettings, cloudProviderPayload} from "./ai-settings.js";
 import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
 import {shellRouteKey, shellSectionLabels} from "./routing.js";
 import {
@@ -259,6 +260,7 @@ let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
 let currentRagSettings = null;
+setupCloudProviderControls({api, generationControl: ragGenerationOrder, onSelect: (label) => showToast(`${label} selezionato. Salva impostazioni per applicare.`)});
 let currentYoutubeSettings = null;
 let currentCrowdfundingSettings = null;
 let copyBusy = false;
@@ -975,8 +977,9 @@ function applyRagSettingsToForm(data) {
   const lmstudio = providers.lmstudio || {};
   const gemini = providers.gemini || {};
 
-  ragEmbeddingOrder.value = (data.embedding_provider_order || []).join(",");
-  ragGenerationOrder.value = (data.generation_provider_order || []).join(",");
+  renderProviderPriority(ragEmbeddingOrder, ["lmstudio", "ollama", "gemini"], data.embedding_provider_order);
+  renderProviderPriority(ragGenerationOrder, ["deepseek", "groq", "lmstudio", "ollama", "gemini"], data.generation_provider_order);
+  applyCloudProviderSettings(data);
   ollamaUrl.value = ollama.url || "";
   ollamaEmbeddingModel.value = ollama.embedding_model || "";
   ollamaGenerationModel.value = ollama.generation_model || "";
@@ -1008,22 +1011,6 @@ function applyRagSettingsToForm(data) {
     : "Nessuna Gemini API key configurata.";
 }
 
-function parseProviderOrder(value, label) {
-  const allowed = new Set(["ollama", "lmstudio", "gemini"]);
-  const result = String(value || "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  if (!result.length || result.length > 3) {
-    throw new Error(`${label}: indica da 1 a 3 provider.`);
-  }
-  if (new Set(result).size !== result.length || result.some((item) => !allowed.has(item))) {
-    throw new Error(
-      `${label}: usa solo ollama, lmstudio, gemini senza duplicati.`,
-    );
-  }
-  return result;
-}
 
 async function openSettingsDialog(initialTab = "general") {
   if (settingsCollapseExpansions) {
@@ -1066,14 +1053,9 @@ async function persistSettings({verifyAfter = false} = {}) {
 
   try {
     const ragPayload = {
-      embedding_provider_order: parseProviderOrder(
-        ragEmbeddingOrder.value,
-        "Priorità embedding",
-      ),
-      generation_provider_order: parseProviderOrder(
-        ragGenerationOrder.value,
-        "Priorità generation",
-      ),
+      embedding_provider_order: readProviderPriority(ragEmbeddingOrder),
+      generation_provider_order: readProviderPriority(ragGenerationOrder),
+      ...cloudProviderPayload(),
       ollama_url: ollamaUrl.value.trim() || null,
       ollama_embedding_model: ollamaEmbeddingModel.value.trim() || null,
       ollama_generation_model: ollamaGenerationModel.value.trim() || null,

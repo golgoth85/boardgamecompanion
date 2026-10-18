@@ -17,6 +17,7 @@ from boardgamecompanion.answer_generation import (
     AnswerProviderError,
     AnswerSourceNotReady,
     GeminiGenerationProvider,
+    CloudGenerationProvider,
     LMStudioGenerationProvider,
     OllamaGenerationProvider,
 )
@@ -272,7 +273,12 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     )
     fallback_providers: list = []
     rag = resolve_rag_settings(database)
-    if rag.gemini_api_key:
+    if rag.web_provider == "deepseek":
+        # Discovery remains review-only. Never bypass the guarded PDF acquisition path.
+        from boardgamecompanion.cloud_ai import cloud_client
+        from boardgamecompanion.deepseek_search import DeepSeekRulebookProvider
+        fallback_providers.append(DeepSeekRulebookProvider(cloud_client(rag, "deepseek", rate_limiter=limiter)))
+    elif rag.gemini_api_key:
         fallback_providers.append(
             GeminiBggFileProvider(
                 base_url=rag.gemini_url,
@@ -375,8 +381,8 @@ class RagSettingsUpdate(BaseModel):
     embedding_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
         min_length=1, max_length=3
     )
-    generation_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
-        min_length=1, max_length=3
+    generation_provider_order: list[Literal["ollama", "lmstudio", "gemini", "deepseek", "groq"]] = Field(
+        min_length=1, max_length=5
     )
     ollama_url: str | None = Field(default=None, max_length=4096)
     ollama_embedding_model: str | None = Field(default=None, max_length=500)
@@ -398,6 +404,17 @@ class RagSettingsUpdate(BaseModel):
     clear_gemini_api_key: bool = False
     gemini_embedding_model: str | None = Field(default=None, max_length=500)
     gemini_generation_model: str | None = Field(default=None, max_length=500)
+    deepseek_api_key: str | None = Field(default=None, max_length=4096)
+    clear_deepseek_api_key: bool = False
+    deepseek_generation_model: str | None = Field(default=None, max_length=200)
+    groq_api_key: str | None = Field(default=None, max_length=4096)
+    clear_groq_api_key: bool = False
+    groq_generation_model: str | None = Field(default=None, max_length=200)
+    web_provider: Literal["auto", "deepseek", "gemini"] | None = None
+
+
+class CloudProviderVerification(BaseModel):
+    api_key: str | None = Field(default=None, max_length=4096)
 
 
 class RetrievalPayload(BaseModel):
@@ -1704,7 +1721,10 @@ def get_answer_generation_service() -> AnswerGenerationService:
     database.initialize()
     rag = resolve_rag_settings(database)
     selected = rag.generation_provider
-    if selected == "lmstudio":
+    if selected in {"deepseek", "groq"}:
+        from boardgamecompanion.cloud_ai import cloud_client
+        provider = CloudGenerationProvider(cloud_client(rag))
+    elif selected == "lmstudio":
         if not rag.lmstudio_url or not rag.lmstudio_generation_model:
             raise HTTPException(
                 status_code=503,
@@ -2243,10 +2263,29 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
             clear_gemini_api_key=payload.clear_gemini_api_key,
             gemini_embedding_model=payload.gemini_embedding_model,
             gemini_generation_model=payload.gemini_generation_model,
+            deepseek_api_key=payload.deepseek_api_key,
+            clear_deepseek_api_key=payload.clear_deepseek_api_key,
+            deepseek_generation_model=payload.deepseek_generation_model,
+            groq_api_key=payload.groq_api_key,
+            clear_groq_api_key=payload.clear_groq_api_key,
+            groq_generation_model=payload.groq_generation_model,
+            web_provider=payload.web_provider,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return resolved.public_dict()
+
+
+@app.post("/api/settings/ai/{provider}/verify", tags=["settings"])
+def verify_cloud_provider(provider: Literal["deepseek", "groq"], payload: CloudProviderVerification) -> dict:
+    from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+    database = get_database()
+    database.initialize()
+    try:
+        client = cloud_client(resolve_rag_settings(database), provider, api_key=payload.api_key)
+        return {"provider": provider, "verified": True, "models": client.models()}
+    except (CloudAIError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/system/lmstudio/wake", tags=["system"])

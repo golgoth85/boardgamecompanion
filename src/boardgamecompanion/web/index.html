@@ -287,20 +287,59 @@
             </div>
             <span class="quiet-pill">Nessun fallback RAG automatico</span>
           </div>
-          <p class="muted">Il primo provider di ogni priorità è quello effettivo per il RAG. L'assistente catalogo usa il provider generation attivo.</p>
-          <div class="settings-grid">
-            <label class="settings-field">
-              <span>Embedding</span>
-              <input id="ragEmbeddingOrder" type="text" placeholder="lmstudio,ollama,gemini">
-            </label>
-            <label class="settings-field">
-              <span>Generation</span>
-              <input id="ragGenerationOrder" type="text" placeholder="lmstudio,gemini,ollama">
+          <p class="muted">Scegli i provider da usare e spostali con le frecce. Il primo è quello attivo; il RAG non passa automaticamente agli altri.</p>
+          <div class="settings-grid ai-priorities">
+            <fieldset class="ai-priority-field"><legend>Indice dei regolamenti</legend>
+              <p class="muted">Gli embedding trovano i passaggi pertinenti. Mantieni il provider attuale per riutilizzare l'indice.</p>
+              <div id="ragEmbeddingOrder" aria-label="Priorità indice dei regolamenti"></div>
+            </fieldset>
+            <fieldset class="ai-priority-field"><legend>Risposte e testi</legend>
+              <p class="muted">Domande, traduzioni, riassunti e assistente catalogo.</p>
+              <div id="ragGenerationOrder" aria-label="Priorità risposte e testi"></div>
+            </fieldset>
+            <label class="settings-field copy-span-2"><span>Ricerca web per regolamenti e prezzi</span>
+              <select id="aiWebProvider"><option value="auto">Primo provider compatibile nelle priorità</option>
+                <option value="deepseek">DeepSeek Search e Fetch</option><option value="gemini">Gemini con Google Search</option></select>
+              <small class="muted" id="aiWebProviderHint">La ricerca web è separata dall'indice locale.</small>
             </label>
           </div>
         </section>
 
         <div class="settings-provider-stack">
+          <details class="settings-provider" id="deepseekSettings">
+            <summary><span><strong>DeepSeek</strong><small>Risposte, traduzioni, suggerimenti e ricerca web</small></span><span class="settings-provider-state" id="deepseekState">Da configurare</span></summary>
+            <div class="settings-provider-body"><div class="settings-grid">
+              <label class="settings-field copy-span-2"><span>Chiave API DeepSeek</span>
+                <input id="deepseekApiKey" type="password" autocomplete="new-password" placeholder="Incolla la chiave API">
+                <small id="deepseekApiKeyHint" class="muted"></small>
+              </label>
+              <label class="settings-check copy-span-2" id="deepseekClearRow" hidden><input id="deepseekClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
+              <label class="settings-field copy-span-2"><span>Modello per risposte e testi</span><select id="deepseekGenerationModel"><option value="deepseek-flash">Flash · consigliato</option><option value="deepseek-v4-pro">Pro</option></select></label>
+              <div class="ai-provider-actions copy-span-2">
+                <button type="button" class="button button-ghost" id="deepseekVerify">Verifica chiave e carica modelli</button>
+                <button type="button" class="button button-primary" id="deepseekUse">Usa DeepSeek</button>
+              </div>
+              <p class="muted copy-span-2" id="deepseekVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
+            </div></div>
+          </details>
+
+          <details class="settings-provider" id="groqSettings">
+            <summary><span><strong>Groq</strong><small>Risposte, traduzioni e suggerimenti · ricerca web separata</small></span><span class="settings-provider-state" id="groqState">Da configurare</span></summary>
+            <div class="settings-provider-body"><div class="settings-grid">
+              <label class="settings-field copy-span-2"><span>Chiave API Groq</span>
+                <input id="groqApiKey" type="password" autocomplete="new-password" placeholder="Incolla la chiave API">
+                <small id="groqApiKeyHint" class="muted"></small>
+              </label>
+              <label class="settings-check copy-span-2" id="groqClearRow" hidden><input id="groqClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
+              <label class="settings-field copy-span-2"><span>Modello per risposte e testi</span><select id="groqGenerationModel"><option value="openai/gpt-oss-120b">GPT-OSS 120B</option><option value="openai/gpt-oss-20b">GPT-OSS 20B · economico</option></select></label>
+              <div class="ai-provider-actions copy-span-2">
+                <button type="button" class="button button-ghost" id="groqVerify">Verifica chiave e carica modelli</button>
+                <button type="button" class="button button-primary" id="groqUse">Usa Groq</button>
+              </div>
+              <p class="muted copy-span-2" id="groqVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
+            </div></div>
+          </details>
+
           <details class="settings-provider" id="ollamaSettings">
             <summary>
               <span><strong>Ollama</strong><small>Provider locale</small></span>

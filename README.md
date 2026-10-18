@@ -87,6 +87,46 @@ BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
 
 `BGC_LMSTUDIO_API_KEY` is optional when LM Studio authentication is disabled. `BGC_LMSTUDIO_EMBEDDING_DIMENSIONS`, batch size, timeouts and TLS verification can also be overridden through the corresponding `BGC_LMSTUDIO_*` settings.
 
+### DeepSeek e Groq
+
+Da **Impostazioni → AI e provider**, le priorità si scelgono con caselle e frecce:
+**Indice dei regolamenti** mantiene gli embedding esistenti; **Risposte e testi**
+controlla risposte RAG, traduzioni, riassunti, suggerimenti e assistente catalogo.
+Il primo provider è attivo per il RAG; gli altri restano selezionabili senza
+riscrivere i nomi. Traduzioni e testi dei suggerimenti provano, in caso di errore,
+solo i provider presenti nelle priorità; quelli esclusi non vengono chiamati.
+I provider preesistenti restano disponibili.
+
+Per DeepSeek o Groq: incollare la chiave, usare **Verifica chiave e carica modelli**,
+scegliere il modello dall'elenco e premere **Usa DeepSeek** / **Usa Groq**, poi **Salva**.
+La verifica legge l'elenco modelli e non salva la chiave né avvia generazioni.
+La chiave vuota conserva quella esistente; non viene restituita al browser.
+La selezione DeepSeek imposta anche la ricerca web, senza cambiare gli embedding.
+Groq gestisce le funzioni testuali; la ricerca web rimane selezionabile separatamente
+fra Gemini e DeepSeek. In modalità automatica usa il primo di questi due nelle priorità.
+
+Configurazione alternativa tramite ambiente:
+
+```text
+BGC_GENERATION_PROVIDER=deepseek
+BGC_DEEPSEEK_API_KEY=<chiave>
+BGC_DEEPSEEK_GENERATION_MODEL=deepseek-flash
+# Per Groq:
+BGC_GROQ_API_KEY=<chiave>
+BGC_GROQ_GENERATION_MODEL=openai/gpt-oss-120b
+```
+
+Gli endpoint cloud sono fissi, HTTPS, senza redirect o proxy d'ambiente.
+DeepSeek usa JSON Output e thinking disattivato; Groq limita il ragionamento
+sui modelli GPT-OSS. Le risposte RAG conservano le validazioni di pagina e citazione.
+La ricerca dei regolamenti è limitata a due query e tre letture: i link devono
+comparire nei risultati/pagine e l'identità del titolo deve coincidere. I candidati
+restano non ufficiali e in revisione (40 per scoperta generica, 70 per comunità BGG),
+senza promozione automatica dell'identificatore BGG o della fiducia.
+I prezzi richiedono URL di negozi ammessi e una citazione testuale contenente
+l'importo in euro nella pagina recuperata. Nessun download PDF passa attraverso
+Search/Fetch: acquisizione e provenienza restano gestite dal percorso protetto esistente.
+
 ### Gemini
 
 Gemini uses Google's HTTPS Gemini API directly through `httpx`; no Google SDK is required. The API key is passed only in the `x-goog-api-key` request header and must be supplied through runtime configuration.

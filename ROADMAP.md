@@ -1,6 +1,6 @@
 # Roadmap e cose da fare
 
-Ultimo aggiornamento: 2026-10-17 (fase: verifica dei backup di sviluppo e manutenzione; prossimo gate di prodotto: accettazione fisica Wake-on-LAN).
+Ultimo aggiornamento: 2026-10-18 (fase: provider AI aggiuntivi e semplificazione impostazioni; prossimo gate di prodotto: accettazione fisica Wake-on-LAN).
 
 Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove sono.
 - Roadmap corrente: [`docs/ROADMAP.md`](docs/ROADMAP.md)
@@ -19,6 +19,7 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 - [ ] Lavoro di prodotto ordinario dalle priorità correnti di `docs/ROADMAP.md`. Non riaprire gli incidenti barcode e ricerca universale senza nuova evidenza di produzione.
 
 ## Fatto di recente
+- 2026-10-18: aggiunti DeepSeek e Groq per le funzioni testuali; DeepSeek Search/Fetch come alternativa web a Gemini. Impostazioni con priorità a caselle/frecce, scelta dei modelli e verifica della chiave; nessun cambio allo schema o all'indice embeddings. Attivazione reale dopo inserimento della chiave del proprietario e salvataggio della preferenza.
 - Valutati i due backup WIP del 2026-10-15: versioni alternative superate dalle funzioni già su `main`, da non importare. I branch restano conservati; dettagli e prove in [`docs/handoff/2026-10-17-residual-audit.md`](docs/handoff/2026-10-17-residual-audit.md).
 - Barcode `8034055580424` (Codenames) e `8034055581032` (Sagrada) risolti in produzione sulla revisione `7973d11` (2026-10-13), più ricerca universale con titoli localizzati/originali.
 

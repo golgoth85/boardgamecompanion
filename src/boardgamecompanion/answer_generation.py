@@ -158,6 +158,35 @@ def _system_prompt(repair_instruction: str | None) -> str:
     )
 
 
+class CloudGenerationProvider:
+    def __init__(self, client):
+        self.client = client
+
+    def describe(self) -> GenerationDescriptor:
+        from boardgamecompanion.cloud_ai import CloudAIError
+        try:
+            model, digest = self.client.describe()
+            return GenerationDescriptor(self.client.provider, model, digest, self.client.base_url)
+        except CloudAIError as exc:
+            raise AnswerProviderError(str(exc)) from exc
+
+    def generate(self, *, query, evidence, descriptor, max_claims, repair_instruction=None):
+        from boardgamecompanion.cloud_ai import CloudAIError
+        if descriptor.provider != self.client.provider or descriptor.model != self.client.model:
+            raise AnswerProviderError("Il provider di generazione è cambiato")
+        try:
+            structured = self.client.structured(
+                _system_prompt(repair_instruction),
+                {"question": query, "maximum_claims": max_claims, "evidence": evidence},
+                schema=ANSWER_SCHEMA,
+            )
+            if len(json.dumps(structured).encode("utf-8")) > MAX_GENERATION_JSON_BYTES:
+                raise AnswerProtocolError("Generated structured answer exceeds safety limit")
+            return structured
+        except CloudAIError as exc:
+            raise AnswerProviderError(str(exc)) from exc
+
+
 class OllamaGenerationProvider:
     def __init__(
         self,

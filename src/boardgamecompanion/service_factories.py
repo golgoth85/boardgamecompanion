@@ -43,10 +43,16 @@ def get_bgg_metadata_store() -> BggMetadataStore:
     )
 
 
-def get_price_provider() -> GeminiPriceProvider | None:
+def get_price_provider():
     database = get_database()
     database.initialize()
     rag = resolve_rag_settings(database)
+    if rag.web_provider == "deepseek":
+        if not rag.deepseek_api_key:
+            return None
+        from boardgamecompanion.cloud_ai import cloud_client
+        from boardgamecompanion.deepseek_search import DeepSeekPriceProvider
+        return DeepSeekPriceProvider(cloud_client(rag, "deepseek", rate_limiter=PersistentRateLimiter(database).acquire))
     if not rag.gemini_api_key:
         return None
     return GeminiPriceProvider(

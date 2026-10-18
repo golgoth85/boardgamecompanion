@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     )
     rag_provider: Literal["ollama", "lmstudio", "gemini"] = "ollama"
     embedding_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
-    generation_provider: Literal["ollama", "lmstudio", "gemini"] | None = None
+    generation_provider: Literal["ollama", "lmstudio", "gemini", "deepseek", "groq"] | None = None
     ollama_url: str | None = None
     ollama_embedding_model: str | None = None
     ollama_embedding_dimensions: int | None = Field(default=None, ge=64, le=4096)
@@ -177,6 +177,11 @@ class Settings(BaseSettings):
     gemini_generation_timeout_seconds: float = Field(default=120.0, ge=1.0, le=900.0)
     gemini_generation_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     gemini_verify_tls: bool = True
+    deepseek_api_key: str | None = None
+    deepseek_generation_model: str = "deepseek-flash"
+    groq_api_key: str | None = None
+    groq_generation_model: str = "openai/gpt-oss-120b"
+    cloud_generation_timeout_seconds: float = Field(default=120.0, ge=1.0, le=300.0)
     retrieval_max_candidates: int = Field(default=10000, ge=100, le=100000)
     answer_max_evidence_chars: int = Field(default=30000, ge=1000, le=200000)
     answer_max_claims: int = Field(default=12, ge=1, le=100)
@@ -187,7 +192,7 @@ class Settings(BaseSettings):
         return self.embedding_provider or self.rag_provider
 
     @property
-    def effective_generation_provider(self) -> Literal["ollama", "lmstudio", "gemini"]:
+    def effective_generation_provider(self) -> Literal["ollama", "lmstudio", "gemini", "deepseek", "groq"]:
         return self.generation_provider or self.rag_provider
 
     @property

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+
 import hashlib
 import json
 import re
@@ -270,7 +272,14 @@ class GameplaySummaryService:
 
         rag = resolve_rag_settings(self.database)
         prompt = self._prompt_payload(missing)
-        if rag.generation_provider == "gemini":
+        if rag.generation_provider in {"deepseek", "groq"}:
+            try:
+                payload = cloud_client(rag).structured(_SYSTEM_PROMPT, json.loads(prompt))
+                provider = rag.generation_provider
+                model = getattr(rag, f"{provider}_generation_model")
+            except CloudAIError as exc:
+                raise GameplaySummaryError(str(exc)) from exc
+        elif rag.generation_provider == "gemini":
             payload, provider, model = self._generate_gemini(prompt, rag)
         elif rag.generation_provider == "lmstudio":
             payload, provider, model = self._generate_lmstudio(prompt, rag)

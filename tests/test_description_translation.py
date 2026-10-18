@@ -97,6 +97,7 @@ def test_description_translation_falls_back_to_local_provider(
 
     fake_rag = SimpleNamespace(
         generation_provider="gemini",
+        generation_provider_order=("gemini", "lmstudio"),
         gemini_api_key="test",
         gemini_generation_model="gemini-test",
         gemini_url="https://example.invalid",
