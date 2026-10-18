@@ -141,9 +141,14 @@ def test_icon_sprite_covers_every_referenced_icon(tmp_path: Path) -> None:
         sprite = client.get("/static/icons.svg")
         index = client.get("/")
         js = client.get("/static/app.js")
+        personal = client.get("/static/personal-components.js")
+        utils = client.get("/static/ui-utils.js")
 
     assert sprite.status_code == 200
     defined = set(re.findall(r'<symbol id="(i-[a-z-]+)"', sprite.text))
-    used = set(re.findall(r"/static/icons\.svg#(i-[a-z-]+)", index.text + js.text))
+    sources = index.text + js.text + personal.text + utils.text
+    used = set(re.findall(r"/static/icons\.svg#(i-[a-z-]+)", sources))
+    used |= {f"i-{name}" for name in re.findall(r'icon\(\s*"([a-z-]+)"', js.text)}
+    used |= {f"i-{name}" for name in ("crown", "diamond", "gem", "hourglass")}
     assert used
     assert used <= defined, used - defined
