@@ -88,6 +88,10 @@ from boardgamecompanion.routers.notifications import router as notifications_rou
 from boardgamecompanion.routers.personal import router as personal_router
 from boardgamecompanion.routers.search import router as search_router
 from boardgamecompanion.routers.wishlist import router as wishlist_router
+from boardgamecompanion.game_description import (
+    GameDescriptionError,
+    GameDescriptionService,
+)
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
@@ -247,6 +251,12 @@ def get_description_translation_service() -> DescriptionTranslationService:
     database = get_database()
     database.initialize()
     return DescriptionTranslationService(database)
+
+
+def get_game_description_service() -> GameDescriptionService:
+    database = get_database()
+    database.initialize()
+    return GameDescriptionService(database)
 
 
 def get_youtube_tutorial_service() -> YouTubeTutorialService:
@@ -522,6 +532,13 @@ def _run_bgg_collection_sync(force: bool = False) -> dict[str, object] | None:
             except Exception:
                 LOGGER.exception(
                     "BGG collection sync: Italian description translation failed for BGG #%s",
+                    bgg_id,
+                )
+            try:
+                get_game_description_service().generate(bgg_id)
+            except Exception:
+                LOGGER.exception(
+                    "BGG collection sync: AI description generation failed for BGG #%s",
                     bgg_id,
                 )
 
@@ -1058,6 +1075,8 @@ def get_game(bgg_id: int) -> dict[str, object]:
     game["description_it"] = (
         cached_translation["translated_text"] if cached_translation else None
     )
+    cached_ai_description = GameDescriptionService(database).get_cached(bgg_id)
+    game["description_ai"] = cached_ai_description
     return game
 
 
@@ -1108,6 +1127,32 @@ def translate_game_description_it(bgg_id: int) -> dict[str, object]:
     try:
         return get_description_translation_service().translate(bgg_id)
     except DescriptionTranslationError as exc:
+        detail = str(exc)
+        if "not found" in detail:
+            code = 404
+        elif "No BGG description" in detail:
+            code = 409
+        else:
+            code = 503
+        raise HTTPException(status_code=code, detail=detail) from exc
+
+
+@app.get("/api/games/{bgg_id}/description-ai", tags=["catalog"])
+def get_game_description_ai(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_game_description_service().status(bgg_id)
+    except GameDescriptionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/games/{bgg_id}/description-ai/generate", tags=["catalog"])
+def generate_game_description_ai(
+    bgg_id: int,
+    force: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_game_description_service().generate(bgg_id, force=force)
+    except GameDescriptionError as exc:
         detail = str(exc)
         if "not found" in detail:
             code = 404

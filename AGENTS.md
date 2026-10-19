@@ -10,7 +10,7 @@ Applicazione self-hosted (Docker/Unraid) per gestire una collezione fisica di gi
 - Produzione: container `BoardGameCompanion`, porta 8787, template `unraid/boardgamecompanion.xml`. Config in `/mnt/user/appdata/boardgamecompanion` (`/config`, database SQLite); import CSV in `/mnt/user/Altro/boardgames/import`, regolamenti in `/mnt/user/Altro/boardgames/manuals`.
 - Stato persistente solo su `/config`, `/data/import`, `/data/manuals`: mai solo nel filesystem del container.
 - Provider AI: LM Studio (embeddings, con Wake-on-LAN), Ollama e Gemini; DeepSeek e Groq per generazione. Ricerca web selezionabile fra Gemini e DeepSeek Search/Fetch. Segreti solo in variabili d'ambiente o config di runtime.
-- Local CI: profilo `pytest-browser-v1` (Python, JavaScript, Playwright); dettagli in `LOCAL_CI.md`. Facoltativa, non blocca il deploy. Deploy: ricetta nella tabella «Deploy» di `/workspace/AGENTS.md`; salute su `:8787/health` (schema DB atteso 21 salvo migrazioni). Dipendenze o Dockerfile nuovi richiedono un rebuild sul host.
+- Local CI: profilo `pytest-browser-v1` (Python, JavaScript, Playwright); dettagli in `LOCAL_CI.md`. Facoltativa, non blocca il deploy. Deploy: ricetta nella tabella «Deploy» di `/workspace/AGENTS.md`; salute su `:8787/health` (schema DB atteso 22 salvo migrazioni). Dipendenze o Dockerfile nuovi richiedono un rebuild sul host.
 
 ## Regole di dominio
 1. L'`objectid` di BGG è l'identificatore esterno canonico; i codici prodotto delle versioni BGG non sono UPC/EAN/ISBN.

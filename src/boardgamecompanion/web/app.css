@@ -3313,6 +3313,18 @@ a { color: inherit; text-decoration: none; }
 .game-description-text {
   white-space: pre-line;
 }
+.game-publisher-description {
+  margin-top: .9rem;
+  color: var(--muted);
+  font-size: .85rem;
+}
+.game-publisher-description summary {
+  cursor: pointer;
+}
+.game-publisher-description .game-description-text {
+  margin-top: .6rem;
+  font-size: .85rem;
+}
 
 .rules-simple {
   padding: 1rem;

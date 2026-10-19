@@ -3265,9 +3265,18 @@ function setupRagPanel(bggId, documentItems) {
   void refreshRagIndexStatus(bggId, documentItems);
 }
 
-async function ensureItalianDescription(bggId) {
+function showPublisherDescription(text) {
+  const details = document.querySelector("#gamePublisherDescription");
+  const body = document.querySelector("#gamePublisherDescriptionText");
+  if (!details?.isConnected || !body || !text) return;
+  body.textContent = text;
+  details.hidden = false;
+}
+
+async function ensureGameDescription(bggId) {
   const node = document.querySelector("#gameDescriptionText");
-  if (!node?.isConnected || node.dataset.ready === "true" || navigator.webdriver) return;
+  if (!node?.isConnected || node.dataset.source === "ai" || navigator.webdriver) return;
+  let translatedText = "";
   try {
     let status = await api(`/api/games/${bggId}/description-it`);
     if (!status.source_available) {
@@ -3279,19 +3288,29 @@ async function ensureItalianDescription(bggId) {
       }
       status = await api(`/api/games/${bggId}/description-it`);
     }
-    if (status.translation?.translated_text) {
-      node.textContent = status.translation.translated_text;
-      node.dataset.ready = "true";
-      return;
+    translatedText = status.translation?.translated_text || "";
+    if (!translatedText && status.source_available) {
+      const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
+      translatedText = translated.translation?.translated_text || "";
     }
-    const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
-    if (translated.translation?.translated_text && node.isConnected) {
-      node.textContent = translated.translation.translated_text;
-      node.dataset.ready = "true";
+    if (translatedText && node.isConnected && node.dataset.source !== "ai") {
+      node.textContent = translatedText;
+      node.dataset.source = "translation";
     }
   } catch (_) {
-    if (node?.isConnected) {
-      node.textContent = "Descrizione italiana non disponibile al momento.";
+    // The AI description below can still be generated from the BGG source text.
+  }
+  try {
+    const generated = await api(`/api/games/${bggId}/description-ai/generate`, {method: "POST"});
+    const text = generated.description?.text;
+    if (text && node.isConnected) {
+      node.textContent = text;
+      node.dataset.source = "ai";
+      showPublisherDescription(translatedText);
+    }
+  } catch (_) {
+    if (node.isConnected && !node.dataset.source) {
+      node.textContent = "Descrizione non disponibile al momento.";
     }
   }
 }
@@ -3380,9 +3399,11 @@ async function renderDetail(bggId) {
     const tutorialItems = tutorials.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
     const italianDescription = String(game.description_it || "").trim();
-    const description = italianDescription
-      ? escapeHtml(italianDescription).replace(/\r?\n/g, "<br>")
-      : "Traduzione italiana in preparazione…";
+    const aiDescription = String(game.description_ai?.text || "").trim();
+    const descriptionSource = aiDescription ? "ai" : italianDescription ? "translation" : "";
+    const description = aiDescription || italianDescription
+      ? escapeHtml(aiDescription || italianDescription)
+      : "Descrizione in preparazione…";
     const firstRulebook = rulebooks[0] || null;
 
     app.innerHTML = `
@@ -3459,7 +3480,11 @@ async function renderDetail(bggId) {
           <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
-            <div class="game-description-text" id="gameDescriptionText" data-ready="${italianDescription ? "true" : "false"}">${description}</div>
+            <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}">${description}</div>
+            <details class="game-publisher-description" id="gamePublisherDescription" ${aiDescription && italianDescription ? "" : "hidden"}>
+              <summary>Testo originale dell'editore</summary>
+              <div class="game-description-text" id="gamePublisherDescriptionText">${escapeHtml(aiDescription ? italianDescription : "")}</div>
+            </details>
           </section>
 
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
@@ -3657,7 +3682,7 @@ async function renderDetail(bggId) {
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
     setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
-    ensureItalianDescription(game.bgg_id);
+    ensureGameDescription(game.bgg_id);
     void loadRelevantExpansions(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;

@@ -1604,6 +1604,29 @@ def _tutorial_discovery_state(connection: sqlite3.Connection) -> None:
     )
 
 
+def _ai_game_descriptions(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS board_game_ai_descriptions (
+            board_game_id INTEGER PRIMARY KEY
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            input_sha256 TEXT NOT NULL,
+            style_version TEXT NOT NULL,
+            description_text TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            generated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_board_game_ai_descriptions_generated
+        ON board_game_ai_descriptions(generated_at)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1626,6 +1649,7 @@ MIGRATIONS = (
     Migration(19, "crowdfunding-notification-baseline", _crowdfunding_notification_baseline),
     Migration(20, "half-star-personal-ratings", _half_star_personal_ratings),
     Migration(21, "tutorial-discovery-state", _tutorial_discovery_state),
+    Migration(22, "ai-game-descriptions", _ai_game_descriptions),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

@@ -87,13 +87,27 @@ BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
 
 `BGC_LMSTUDIO_API_KEY` is optional when LM Studio authentication is disabled. `BGC_LMSTUDIO_EMBEDDING_DIMENSIONS`, batch size, timeouts and TLS verification can also be overridden through the corresponding `BGC_LMSTUDIO_*` settings.
 
+### Descrizioni dei giochi
+
+La scheda di un gioco mostra una descrizione scritta dall'AI in italiano a partire
+dalla descrizione dell'editore su BGG e dai metadati BGG (meccaniche, giocatori,
+durata, peso, dipendenza dalla lingua, espansioni). Serve a decidere se il gioco fa
+al caso proprio: contesto, meccaniche centrali, punti di forza e limiti, in prosa
+senza tono pubblicitario. Ogni gioco riceve un punto di attacco diverso e il modello
+vede gli incipit recenti da non ripetere; bozze promozionali, con sezioni etichettate
+o con incipit già usati vengono riscritte una volta e poi scartate. Il testo è salvato
+in `board_game_ai_descriptions` con provider e modello e si rigenera solo se cambiano
+la descrizione BGG o i dati stabili (non rating o peso). Se la generazione non
+riesce, la scheda mostra la traduzione; il testo dell'editore resta consultabile.
+
 ### DeepSeek e Groq
 
 Da **Impostazioni → AI e provider**, le priorità si scelgono con caselle e frecce:
 **Indice dei regolamenti** mantiene gli embedding esistenti; **Risposte e testi**
-controlla risposte RAG, traduzioni, riassunti, suggerimenti e assistente catalogo.
+controlla risposte RAG, traduzioni, descrizioni dei giochi, riassunti, suggerimenti
+e assistente catalogo.
 Il primo provider è attivo per il RAG; gli altri restano selezionabili senza
-riscrivere i nomi. Traduzioni e testi dei suggerimenti provano, in caso di errore,
+riscrivere i nomi. Traduzioni, descrizioni e testi dei suggerimenti provano, in caso di errore,
 solo i provider presenti nelle priorità; quelli esclusi non vengono chiamati.
 I provider preesistenti restano disponibili.
 
