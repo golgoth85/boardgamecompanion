@@ -12,6 +12,8 @@ Applicazione self-hosted (Docker/Unraid) per gestire una collezione fisica di gi
 - Provider AI: LM Studio (embeddings, con Wake-on-LAN), Ollama e Gemini; DeepSeek e Groq per generazione. Ricerca web selezionabile fra Gemini e DeepSeek Search/Fetch. Segreti solo in variabili d'ambiente o config di runtime.
 - Local CI: profilo `pytest-browser-v1` (Python, JavaScript, Playwright); dettagli in `LOCAL_CI.md`. Facoltativa, non blocca il deploy. Deploy: ricetta nella tabella «Deploy» di `/workspace/AGENTS.md`; salute su `:8787/health` (schema DB atteso 22 salvo migrazioni). Dipendenze o Dockerfile nuovi richiedono un rebuild sul host.
 
+- Orientamento facoltativo: `python3 scripts/trail_local.py build`, poi `map`, `ask "domanda"`, `skeleton <file>` o `callers <simbolo>`. Configurazione e limiti in `docs/TRAIL-PILOT.md`; nessun hook automatico. Il grafo dei chiamanti può essere incompleto: verificare sempre gli usi nei sorgenti prima di una modifica.
+
 ## Regole di dominio
 1. L'`objectid` di BGG è l'identificatore esterno canonico; i codici prodotto delle versioni BGG non sono UPC/EAN/ISBN.
 2. Deve funzionare senza token BGG: l'import CSV è un percorso di primo livello. Mai scraping autenticato di BGG; accesso BGG solo via XML API2 approvata.

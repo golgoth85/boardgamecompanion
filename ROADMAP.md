@@ -19,6 +19,7 @@ Il progetto ha già una roadmap dettagliata e documenti di fase: restano dove so
 - [ ] Lavoro di prodotto ordinario dalle priorità correnti di `docs/ROADMAP.md`. Non riaprire gli incidenti barcode e ricerca universale senza nuova evidenza di produzione.
 
 ## Fatto di recente
+- 2026-10-22: completata la prova locale di Trail Code 0.23.1. Wrapper facoltativo, indice sull'array fuori dal checkout, nessun hook/MCP, modello o modifica al runtime. Ricerche sintetiche utili ma più lente di grep; grafo dei chiamanti incompleto su un caso verificato. Procedura e misure in [`docs/TRAIL-PILOT.md`](docs/TRAIL-PILOT.md). Non esteso ad altri progetti.
 - 2026-10-18: aggiunti DeepSeek e Groq per le funzioni testuali; DeepSeek Search/Fetch come alternativa web a Gemini. Impostazioni con priorità a caselle/frecce, scelta dei modelli e verifica della chiave; nessun cambio allo schema o all'indice embeddings. Attivazione reale dopo inserimento della chiave del proprietario e salvataggio della preferenza.
 - Valutati i due backup WIP del 2026-10-15: versioni alternative superate dalle funzioni già su `main`, da non importare. I branch restano conservati; dettagli e prove in [`docs/handoff/2026-10-17-residual-audit.md`](docs/handoff/2026-10-17-residual-audit.md).
 - Barcode `8034055580424` (Codenames) e `8034055581032` (Sagrada) risolti in produzione sulla revisione `7973d11` (2026-10-13), più ricerca universale con titoli localizzati/originali.
