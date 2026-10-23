@@ -1137,6 +1137,23 @@ def translate_game_description_it(bgg_id: int) -> dict[str, object]:
         raise HTTPException(status_code=code, detail=detail) from exc
 
 
+class GameDescriptionPromptUpdate(BaseModel):
+    prompt: str
+
+
+@app.get("/api/settings/game-description-prompt", tags=["settings"])
+def get_game_description_prompt() -> dict[str, object]:
+    return get_game_description_service().prompt_settings()
+
+
+@app.put("/api/settings/game-description-prompt", tags=["settings"])
+def update_game_description_prompt(payload: GameDescriptionPromptUpdate) -> dict[str, object]:
+    try:
+        return get_game_description_service().save_prompt(payload.prompt)
+    except GameDescriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/games/{bgg_id}/description-ai", tags=["catalog"])
 def get_game_description_ai(bgg_id: int) -> dict[str, object]:
     try:
@@ -1149,9 +1166,13 @@ def get_game_description_ai(bgg_id: int) -> dict[str, object]:
 def generate_game_description_ai(
     bgg_id: int,
     force: bool = Query(default=False),
+    provider: Literal["gemini", "deepseek", "groq", "lmstudio", "ollama"] | None = Query(default=None),
+    preview: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
-        return get_game_description_service().generate(bgg_id, force=force)
+        return get_game_description_service().generate(
+            bgg_id, force=force, provider=provider, preview=preview
+        )
     except GameDescriptionError as exc:
         detail = str(exc)
         if "not found" in detail:

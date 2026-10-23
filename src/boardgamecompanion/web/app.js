@@ -1,5 +1,5 @@
 import {api} from "./api-client.js";
-import {renderProviderPriority, readProviderPriority, setupCloudProviderControls, applyCloudProviderSettings, cloudProviderPayload} from "./ai-settings.js";
+import {renderProviderPriority, readProviderPriority, setupCloudProviderControls, setupDescriptionPrompt, applyCloudProviderSettings, cloudProviderPayload} from "./ai-settings.js";
 import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
 import {shellRouteKey, shellSectionLabels} from "./routing.js";
 import {
@@ -261,6 +261,7 @@ let settingsBusy = false;
 let currentBggSettings = null;
 let currentRagSettings = null;
 setupCloudProviderControls({api, generationControl: ragGenerationOrder, onSelect: (label) => showToast(`${label} selezionato. Salva impostazioni per applicare.`)});
+setupDescriptionPrompt({api});
 let currentYoutubeSettings = null;
 let currentCrowdfundingSettings = null;
 let copyBusy = false;

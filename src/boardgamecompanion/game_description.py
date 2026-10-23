@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from boardgamecompanion.app_settings import resolve_rag_settings
+from boardgamecompanion.app_settings import AppSettingsStore, resolve_rag_settings
 from boardgamecompanion.database import Database
 from boardgamecompanion.description_translation import _clean_source
 from boardgamecompanion.settings import settings
@@ -69,6 +69,11 @@ BANNED_PHRASES = (
     "infinite possibilità",
     "rigiocabilità infinita",
 )
+
+PROMPT_SETTING_KEY = "game_description_prompt"
+MIN_PROMPT_CHARS = 200
+MAX_PROMPT_CHARS = 12000
+GENERATION_PROVIDERS = ("gemini", "deepseek", "groq", "lmstudio", "ollama")
 
 SYSTEM_PROMPT = """Sei il redattore delle schede di BoardGameCompanion, una ludoteca personale.
 
@@ -160,11 +165,42 @@ def _style_problems(text: str, *, title: str, avoid_openings: list[str]) -> list
     return problems
 
 
+def validate_prompt(value: Any) -> str:
+    if not isinstance(value, str):
+        raise GameDescriptionError("Il prompt deve essere un testo")
+    text = value.replace("\r\n", "\n").strip()
+    if len(text) < MIN_PROMPT_CHARS:
+        raise GameDescriptionError(f"Il prompt è troppo breve (minimo {MIN_PROMPT_CHARS} caratteri)")
+    if len(text) > MAX_PROMPT_CHARS:
+        raise GameDescriptionError(f"Il prompt è troppo lungo (massimo {MAX_PROMPT_CHARS} caratteri)")
+    return text
+
+
 class GameDescriptionService:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def _source(self, bgg_id: int) -> dict[str, Any] | None:
+    def prompt_settings(self) -> dict[str, Any]:
+        saved = AppSettingsStore(self.database).get(PROMPT_SETTING_KEY)
+        return {
+            "prompt": saved or SYSTEM_PROMPT,
+            "original": SYSTEM_PROMPT,
+            "customized": bool(saved),
+        }
+
+    def save_prompt(self, value: Any) -> dict[str, Any]:
+        text = validate_prompt(value)
+        # Saving the original text clears the override so future edits to the
+        # shipped prompt still apply to anyone who never customised it.
+        AppSettingsStore(self.database).set(
+            PROMPT_SETTING_KEY, None if text == SYSTEM_PROMPT.strip() else text
+        )
+        return self.prompt_settings()
+
+    def _system_prompt(self) -> str:
+        return self.prompt_settings()["prompt"].strip()
+
+    def _source(self, bgg_id: int, system_prompt: str | None = None) -> dict[str, Any] | None:
         with self.database.connect() as connection:
             row = connection.execute(
                 """
@@ -236,6 +272,9 @@ class GameDescriptionService:
             json.dumps(
                 {
                     "style": STYLE_VERSION,
+                    "prompt": hashlib.sha256(
+                        (system_prompt or self._system_prompt()).encode("utf-8")
+                    ).hexdigest(),
                     # Only stable inputs: monthly BGG refreshes of ratings, weight or
                     # expansion lists must not regenerate every description.
                     "stable": {key: payload[key] for key in STABLE_INPUT_KEYS},
@@ -398,9 +437,16 @@ class GameDescriptionService:
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise GameDescriptionError("Ollama description generation failed") from exc
 
-    def _complete(self, system: str, prompt: str) -> tuple[str, str, str]:
+    def _complete(
+        self,
+        system: str,
+        prompt: str,
+        providers: tuple[str, ...] | None = None,
+    ) -> tuple[str, str, str]:
         rag = resolve_rag_settings(self.database)
-        provider_order = getattr(rag, "generation_provider_order", (rag.generation_provider,))
+        provider_order = providers or getattr(
+            rag, "generation_provider_order", (rag.generation_provider,)
+        )
         failures: list[str] = []
         for provider in provider_order:
             try:
@@ -425,11 +471,27 @@ class GameDescriptionService:
             + (f" ({'; '.join(failures)})" if failures else "")
         )
 
-    def generate(self, bgg_id: int, *, force: bool = False) -> dict[str, Any]:
-        source = self._source(bgg_id)
+    def generate(
+        self,
+        bgg_id: int,
+        *,
+        force: bool = False,
+        provider: str | None = None,
+        preview: bool = False,
+    ) -> dict[str, Any]:
+        """Return the description, generating it if needed.
+
+        ``provider`` pins one provider without fallback. ``preview`` never reads or
+        writes the cache and reports remaining style problems instead of failing, so
+        providers and prompts can be compared without touching stored descriptions.
+        """
+        if provider is not None and provider not in GENERATION_PROVIDERS:
+            raise GameDescriptionError(f"Unsupported provider: {provider}")
+        system_prompt = self._system_prompt()
+        source = self._source(bgg_id, system_prompt)
         if source is None:
             raise GameDescriptionError("No BGG description is available to rewrite")
-        cached = None if force else self._cached_row(source)
+        cached = None if force or preview else self._cached_row(source)
         if cached is not None:
             return {
                 "bgg_id": source["bgg_id"],
@@ -445,23 +507,38 @@ class GameDescriptionService:
             "game": source["payload"],
         }
         prompt = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
-        text, provider, model = self._complete(SYSTEM_PROMPT, prompt)
+        pinned = (provider,) if provider else None
+        text, provider, model = self._complete(system_prompt, prompt, pinned)
         problems = _style_problems(text, title=source["title"], avoid_openings=avoid_openings)
         if problems:
             repair = (
-                SYSTEM_PROMPT
+                system_prompt
                 + "\nLa bozza precedente è stata scartata per questi motivi: "
                 + "; ".join(problems)
                 + ". Riscrivila da capo rispettando tutte le regole.\n"
             )
-            text, provider, model = self._complete(repair, prompt)
+            text, provider, model = self._complete(repair, prompt, pinned)
             problems = _style_problems(text, title=source["title"], avoid_openings=avoid_openings)
-            if problems:
+            if problems and not preview:
                 raise GameDescriptionError(
                     "Generated description failed style checks: " + "; ".join(problems)
                 )
 
         generated_at = datetime.now(UTC).isoformat()
+        if preview:
+            return {
+                "bgg_id": source["bgg_id"],
+                "source_available": True,
+                "status": "preview",
+                "description": {
+                    "text": text,
+                    "provider": provider,
+                    "model": model,
+                    "generated_at": generated_at,
+                },
+                "style_problems": problems,
+                "words": len(text.split()),
+            }
         with self.database.transaction(immediate=True) as connection:
             connection.execute(
                 """

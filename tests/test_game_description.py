@@ -9,6 +9,7 @@ import pytest
 from boardgamecompanion.database import Database
 from boardgamecompanion.game_description import (
     OPENING_ANGLES,
+    SYSTEM_PROMPT,
     GameDescriptionError,
     GameDescriptionService,
     _clean_output,
@@ -61,11 +62,11 @@ def _service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outputs: list[str]
     database = Database(tmp_path / "bgc.sqlite3")
     database.initialize()
     service = GameDescriptionService(database)
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple] = []
 
-    def complete(system: str, prompt: str):
-        calls.append((system, prompt))
-        return _clean_output(outputs.pop(0)), "gemini", "gemini-test"
+    def complete(system: str, prompt: str, providers=None):
+        calls.append((system, prompt, providers))
+        return _clean_output(outputs.pop(0)), (providers or ("gemini",))[0], "model-test"
 
     monkeypatch.setattr(service, "_complete", complete)
     return database, service, calls
@@ -180,3 +181,79 @@ def test_provider_fallback_order(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(service, "_ollama", lambda *_args: "Testo **locale**")
 
     assert service._complete("system", "prompt") == ("Testo locale", "ollama", "local-test")
+
+
+def test_prompt_is_editable_saved_and_restorable(tmp_path, monkeypatch) -> None:
+    database, service, calls = _service(tmp_path, monkeypatch, [GOOD, GOOD])
+    _seed(database)
+
+    initial = service.prompt_settings()
+    assert initial == {"prompt": SYSTEM_PROMPT, "original": SYSTEM_PROMPT, "customized": False}
+
+    service.generate(340237)
+    assert calls[0][0] == SYSTEM_PROMPT.strip()
+
+    custom = SYSTEM_PROMPT + "\nScrivi sempre in tono pacato."
+    saved = service.save_prompt(custom)
+    assert saved["customized"] is True and saved["prompt"] == custom.strip()
+    assert service.prompt_settings()["original"] == SYSTEM_PROMPT
+
+    # A changed prompt invalidates the cached description.
+    assert service.status(340237)["status"] == "pending"
+    service.generate(340237)
+    assert calls[1][0] == custom.strip()
+    assert service.status(340237)["status"] == "ready"
+
+    # Saving the original text clears the override.
+    assert service.save_prompt(SYSTEM_PROMPT)["customized"] is False
+    assert service.status(340237)["status"] == "pending"
+
+
+@pytest.mark.parametrize("value", [None, "", "troppo corto", "x" * 13000])
+def test_prompt_validation(tmp_path, monkeypatch, value) -> None:
+    _, service, _ = _service(tmp_path, monkeypatch, [])
+    with pytest.raises(GameDescriptionError):
+        service.save_prompt(value)
+    assert service.prompt_settings()["customized"] is False
+
+
+def test_preview_pins_provider_and_never_touches_cache(tmp_path, monkeypatch) -> None:
+    database, service, calls = _service(tmp_path, monkeypatch, [GOOD, "Troppo breve.", "Ancora breve."])
+    _seed(database)
+
+    result = service.generate(340237, provider="groq", preview=True)
+    assert result["status"] == "preview"
+    assert result["description"]["provider"] == "groq"
+    assert result["style_problems"] == []
+    assert calls[0][2] == ("groq",)
+    assert service.status(340237)["status"] == "pending"
+
+    # A bad draft is reported, not raised, and still not stored.
+    bad = service.generate(340237, provider="deepseek", preview=True)
+    assert bad["style_problems"] and bad["words"] == 2
+    assert service.status(340237)["status"] == "pending"
+
+    with pytest.raises(GameDescriptionError, match="Unsupported provider"):
+        service.generate(340237, provider="nope")
+
+
+def test_prompt_api_roundtrip(tmp_path) -> None:
+    from fastapi.testclient import TestClient
+
+    from boardgamecompanion.main import app
+    from boardgamecompanion.settings import settings
+
+    settings.config_dir = tmp_path / "config"
+    settings.import_dir = tmp_path / "import"
+    settings.manuals_dir = tmp_path / "manuals"
+    with TestClient(app) as client:
+        current = client.get("/api/settings/game-description-prompt").json()
+        assert current["customized"] is False and current["prompt"] == current["original"]
+
+        text = current["original"] + "\nRiga in più."
+        saved = client.put("/api/settings/game-description-prompt", json={"prompt": text})
+        assert saved.status_code == 200 and saved.json()["customized"] is True
+        assert client.get("/api/settings/game-description-prompt").json()["prompt"] == text.strip()
+
+        assert client.put("/api/settings/game-description-prompt", json={"prompt": "no"}).status_code == 400
+        assert client.post("/api/games/1/description-ai/generate?provider=nope").status_code == 422

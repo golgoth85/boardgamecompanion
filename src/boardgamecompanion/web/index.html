@@ -306,6 +306,22 @@
         </section>
 
         <div class="settings-provider-stack">
+          <details class="settings-provider" id="descriptionPromptSettings">
+            <summary><span><strong>Prompt delle descrizioni dei giochi</strong><small>Istruzioni date all'AI per scrivere le schede</small></span><span class="settings-provider-state" id="descriptionPromptState">Originale</span></summary>
+            <div class="settings-provider-body"><div class="settings-grid">
+              <label class="settings-field copy-span-2"><span>Prompt</span>
+                <textarea id="descriptionPromptText" class="description-prompt-text" rows="22" spellcheck="false"></textarea>
+                <small class="muted" id="descriptionPromptCount"></small>
+              </label>
+              <div class="ai-provider-actions copy-span-2">
+                <button type="button" class="button button-primary" id="descriptionPromptSave">Salva come modello</button>
+                <button type="button" class="button button-ghost" id="descriptionPromptRestore">Ripristina</button>
+                <button type="button" class="button button-ghost" id="descriptionPromptOriginal">Originale</button>
+              </div>
+              <p class="muted copy-span-2" id="descriptionPromptStatus" role="status">«Ripristina» riporta il testo al modello salvato; «Originale» carica il prompt di fabbrica (poi va salvato). Le descrizioni già generate si aggiornano alla prossima apertura della scheda.</p>
+            </div></div>
+          </details>
+
           <details class="settings-provider" id="deepseekSettings">
             <summary><span><strong>DeepSeek</strong><small>Risposte, traduzioni, suggerimenti e ricerca web</small></span><span class="settings-provider-state" id="deepseekState">Da configurare</span></summary>
             <div class="settings-provider-body"><div class="settings-grid">

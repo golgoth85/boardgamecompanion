@@ -92,6 +92,64 @@ export function cloudProviderPayload() {
   return payload;
 }
 
+export function setupDescriptionPrompt({api}) {
+  const details = field("descriptionPromptSettings");
+  const text = field("descriptionPromptText");
+  const status = field("descriptionPromptStatus");
+  const state = field("descriptionPromptState");
+  const count = field("descriptionPromptCount");
+  let saved = "";
+  let original = "";
+  let loaded = false;
+  const refresh = () => {
+    count.textContent = `${text.value.length.toLocaleString("it-IT")} caratteri${text.value.trim() === saved.trim() ? "" : " · modifiche non salvate"}`;
+  };
+  const apply = (data) => {
+    saved = data.prompt;
+    original = data.original;
+    text.value = saved;
+    state.textContent = data.customized ? "Personalizzato" : "Originale";
+    refresh();
+  };
+  const run = async (button, action) => {
+    button.disabled = true;
+    try {
+      await action();
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+  details.addEventListener("toggle", () => {
+    if (!details.open || loaded) return;
+    void run(field("descriptionPromptSave"), async () => {
+      apply(await api("/api/settings/game-description-prompt"));
+      loaded = true;
+    });
+  });
+  text.addEventListener("input", refresh);
+  field("descriptionPromptRestore").addEventListener("click", () => {
+    text.value = saved;
+    refresh();
+    status.textContent = "Ripristinato il modello salvato.";
+  });
+  field("descriptionPromptOriginal").addEventListener("click", () => {
+    text.value = original;
+    refresh();
+    status.textContent = "Caricato il prompt originale. Premi «Salva come modello» per usarlo.";
+  });
+  field("descriptionPromptSave").addEventListener("click", (event) => {
+    void run(event.currentTarget, async () => {
+      apply(await api("/api/settings/game-description-prompt", {
+        method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({prompt: text.value}),
+      }));
+      status.textContent = "Modello salvato. Le descrizioni si rigenerano alla prossima apertura della scheda.";
+    });
+  });
+}
+
 export function setupCloudProviderControls({api, generationControl, onSelect}) {
   for (const provider of cloudProviders) {
     field(`${provider}ClearApiKey`).addEventListener("change", (event) => {
