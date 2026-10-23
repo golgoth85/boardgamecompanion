@@ -17,6 +17,7 @@ from boardgamecompanion.database import Database
 from boardgamecompanion.game_description import (
     EXTENDED_SYSTEM_PROMPT,
     GameDescriptionError,
+    SECOND_PERSON_RE,
     GameDescriptionService,
     _clean_output,
     _style_problems,
@@ -211,3 +212,26 @@ def test_recent_closings_collects_last_sentences(tmp_path, monkeypatch) -> None:
     other = database.connect().execute("SELECT id FROM board_games WHERE bgg_id=2").fetchone()["id"]
     assert service._recent_closings(other) == ["Ultima frase del testo."]
     assert service._recent_closings(first) == []
+
+
+def test_style_profile_rotates_with_stored_descriptions(tmp_path, monkeypatch) -> None:
+    database, service, _ = _service(tmp_path, monkeypatch, None)
+    first = _seed(database)
+    second = _seed(database, bgg_id=2, title="Altro")
+
+    def profile():
+        return service._style_profile(2, second, preview=False)
+
+    before = profile()
+    with database.transaction() as connection:
+        connection.execute(
+            """INSERT INTO board_game_ai_descriptions
+               (board_game_id,input_sha256,style_version,description_text,provider,model,generated_at)
+               VALUES (?,'x','v','Testo.','p','m','2026-10-01')""",
+            (first,),
+        )
+    after = profile()
+    assert before["topic_order"] != after["topic_order"]
+    assert before["register"] != after["register"]
+    assert service._style_profile(2, second, preview=True) != after
+    assert "immagina" in SECOND_PERSON_RE.pattern

@@ -67,6 +67,7 @@ BANNED_PHRASES = (
     "siete pronti",
     "viaggio epico",
     "avventura epica",
+    "immers",
     "in sintesi",
     "in conclusione",
     "variazioni infinite",
@@ -105,6 +106,7 @@ Regole di contenuto:
   senza una frase di chiusura ricorrente.
 - I numeri servono a ragionare: citane pochi, mai come elenco.
 - Scrivi i termini di gioco in italiano; lascia in inglese solo nomi propri.
+- Le espansioni elencate nel payload esistono: non chiamarle «annunciate».
 
 Forma e varietà:
 - Prosa scorrevole di 240-340 parole, in 2-4 paragrafi separati da una riga vuota,
@@ -112,8 +114,9 @@ Forma e varietà:
   «Da sapere:»), elenchi, titoli, grassetti o markdown.
 - Registro e ordine degli argomenti sono indicati in style_profile (register,
   topic_order): seguili davvero, perché le schede della ludoteca non devono somigliarsi.
-  Apri dall'angolo indicato in opening_angle: la prima frase non deve avere il titolo
-  del gioco come soggetto.
+  Rispetta topic_order, che stabilisce da quale argomento comincia il testo; usa
+  opening_angle per il taglio della prima frase, adattandolo a quell'argomento. La
+  prima frase non deve avere il titolo del gioco come soggetto né rivolgersi al lettore.
 - Terza persona, tono da recensione informata. Niente seconda persona rivolta al
   lettore («non aspettatevi», «scoprirete»), niente slogan, superlativi vuoti,
   formule di chiusura come «in sintesi», niente frasi fatte sull'immersione.
@@ -189,7 +192,8 @@ LABEL_RE = re.compile(r"(?m)^[A-ZÀ-Ý][\wÀ-ÿ' ]{0,30}:")
 
 # Second-person addresses and wrap-up formulas the owner does not want.
 SECOND_PERSON_RE = re.compile(
-    r"\b(aspettatevi|preparatevi|immaginate|scoprirete|troverete|potrete|potreste|"
+    r"\b(aspettatevi|preparatevi|immagina|immaginate|pensate|scoprirete|troverete|"
+    r"potrete|potreste|"
     r"sarete|vi aspetta|ti aspetta|non aspettarti)\b",
     re.IGNORECASE,
 )
@@ -450,13 +454,21 @@ class GameDescriptionService:
             openings.append(" ".join(words[:OPENING_WORDS]))
         return openings
 
-    @staticmethod
-    def _style_profile(bgg_id: int) -> dict[str, str]:
-        digest = hashlib.sha256(f"{STYLE_VERSION}:profile:{int(bgg_id)}".encode()).digest()
+    def _style_profile(self, bgg_id: int, board_game_id: int, *, preview: bool) -> dict[str, str]:
+        """Rotate the profile with the number of stored descriptions so that games
+        generated one after the other never share the same structure and register."""
+        with self.database.connect() as connection:
+            stored = int(connection.execute(
+                "SELECT COUNT(*) AS n FROM board_game_ai_descriptions WHERE board_game_id<>?",
+                (board_game_id,),
+            ).fetchone()["n"])
+        # Previews store nothing, so spread them by game instead.
+        ordinal = stored + (int(bgg_id) % 7 if preview else 0)
+        angle = OPENING_ANGLES[(ordinal * 3 + 1) % len(OPENING_ANGLES)]
         return {
-            "opening_angle": _opening_angle(bgg_id),
-            "topic_order": TOPIC_ORDERS[digest[1] % len(TOPIC_ORDERS)],
-            "register": REGISTERS[digest[2] % len(REGISTERS)],
+            "opening_angle": angle,
+            "topic_order": TOPIC_ORDERS[ordinal % len(TOPIC_ORDERS)],
+            "register": REGISTERS[(ordinal * 2 + 1) % len(REGISTERS)],
         }
 
     def _extended_inputs(
@@ -677,7 +689,10 @@ class GameDescriptionService:
         sources_used = None
         if extended:
             extra, sources_used = self._extended_inputs(source, pinned, model)
-            request["style_profile"] = self._style_profile(source["bgg_id"])
+            request["style_profile"] = self._style_profile(
+                source["bgg_id"], source["board_game_id"], preview=preview
+            )
+            request["opening_angle"] = request["style_profile"]["opening_angle"]
             request["avoid_closings"] = self._recent_closings(source["board_game_id"])
             request.update(extra)
         prompt = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
