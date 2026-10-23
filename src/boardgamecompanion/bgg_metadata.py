@@ -153,6 +153,13 @@ class BggApiClient:
         url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
         return self._request_xml(url)
 
+    def comments_page(self, bgg_id: int, page: int = 1) -> bytes:
+        """One page (100 items) of user comments, from the approved XML API2."""
+        return self._request_xml(
+            f"{BGG_API_ORIGIN}/xmlapi2/thing?id={int(bgg_id)}"
+            f"&comments=1&page={max(1, int(page))}&pagesize=100"
+        )
+
     def hot(self, *, limit: int = 50) -> list[dict[str, Any]]:
         cap = max(1, min(int(limit), 100))
         content = self._request_xml(f"{BGG_API_ORIGIN}/xmlapi2/hot?type=boardgame")

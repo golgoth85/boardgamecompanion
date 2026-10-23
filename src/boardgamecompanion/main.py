@@ -136,6 +136,7 @@ from boardgamecompanion.embedding_retrieval import (
     OllamaEmbeddingProvider,
 )
 from boardgamecompanion.service_factories import (
+    get_bgg_api_client,
     get_bgg_metadata_store,
     get_crowdfunding_service,
     get_expansion_service,
@@ -256,7 +257,7 @@ def get_description_translation_service() -> DescriptionTranslationService:
 def get_game_description_service() -> GameDescriptionService:
     database = get_database()
     database.initialize()
-    return GameDescriptionService(database)
+    return GameDescriptionService(database, bgg_client_factory=get_bgg_api_client)
 
 
 def get_youtube_tutorial_service() -> YouTubeTutorialService:
@@ -1169,10 +1170,12 @@ def generate_game_description_ai(
     provider: Literal["gemini", "deepseek", "groq", "lmstudio", "ollama"] | None = Query(default=None),
     model: str | None = Query(default=None, max_length=200),
     preview: bool = Query(default=False),
+    extended: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
         return get_game_description_service().generate(
-            bgg_id, force=force, provider=provider, model=model, preview=preview
+            bgg_id, force=force, provider=provider, model=model, preview=preview,
+            extended=extended,
         )
     except GameDescriptionError as exc:
         detail = str(exc)
