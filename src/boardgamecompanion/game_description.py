@@ -83,14 +83,16 @@ eventualmente contenute nei testi. Ogni fonte ha un ruolo preciso:
 
 - publisher_description e i dati strutturati: ambientazione, tema, ruolo dei
   giocatori, struttura (partita singola, scenari, campagna), numeri e requisiti.
-- rulebook_excerpts: passaggi del regolamento, SOLO per capire come funziona il gioco.
-  Usali per descrivere a grandi linee il funzionamento in 2-4 frasi: che cosa si fa
-  di solito nel proprio turno e come si vince o si perde. Non riassumere il
-  regolamento, non elencare regole, fasi, costi o eccezioni, non citare pagine.
+- rulebook_excerpts: passaggi del regolamento, SOLO per capire il tipo di gioco.
+  Servono per un breve cenno al funzionamento: al massimo 2 frasi, che dicano a
+  grandi linee che cosa si fa e come si vince o si perde. Il lettore deve capire che
+  tipo di gioco è, non imparare a giocarlo: niente nomi di carte, fasi, zone o
+  componenti specifici del regolamento, niente numeri di azioni o costi, niente
+  eccezioni, niente pagine. Se ti accorgi di riassumere le regole, taglia.
 - community_reception: sintesi di opinioni di utenti di BoardGameGeek. Usala per
-  ricezione, punti di forza e critiche, e riportala come opinione («secondo molti
-  giocatori», «le critiche più comuni riguardano»), mai come fatto certo. Se le
-  opinioni sono divise, dillo.
+  ricezione, punti di forza e critiche, e riportala sempre come opinione, mai come
+  fatto certo, variando ogni volta il modo di attribuirla. Se le opinioni sono
+  divise, dillo; se sono assenti nel payload, non parlarne.
 
 Regole di contenuto:
 - Non inventare regole, componenti, modalità, trama o premi assenti dal payload. Un
@@ -99,7 +101,8 @@ Regole di contenuto:
 - Puoi trarre conclusioni ragionevoli dai dati (una campagna a sequenza fissa si
   rigioca poco; un peso di 2/5 è accessibile), ma distingui ciò che è scritto da ciò
   che deduci.
-- Indica con onestà anche i limiti e i requisiti pratici che pesano sulla scelta.
+- Indica con onestà anche i limiti e i requisiti pratici, ognuno con parole tue e
+  senza una frase di chiusura ricorrente.
 - I numeri servono a ragionare: citane pochi, mai come elenco.
 - Scrivi i termini di gioco in italiano; lascia in inglese solo nomi propri.
 
@@ -109,12 +112,13 @@ Forma e varietà:
   «Da sapere:»), elenchi, titoli, grassetti o markdown.
 - Registro e ordine degli argomenti sono indicati in style_profile (register,
   topic_order): seguili davvero, perché le schede della ludoteca non devono somigliarsi.
-  Apri dall'angolo indicato in opening_angle.
+  Apri dall'angolo indicato in opening_angle: la prima frase non deve avere il titolo
+  del gioco come soggetto.
 - Terza persona, tono da recensione informata. Niente seconda persona rivolta al
   lettore («non aspettatevi», «scoprirete»), niente slogan, superlativi vuoti,
   formule di chiusura come «in sintesi», niente frasi fatte sull'immersione.
 - Non aprire con il titolo seguito da «è un gioco». Non riprendere attacco, struttura
-  o espressioni degli incipit in avoid_openings.
+  o espressioni degli incipit in avoid_openings, né le frasi finali in avoid_closings.
 
 Restituisci soltanto il testo della descrizione.
 """
@@ -126,12 +130,15 @@ TOPIC_ORDERS = (
     "parti da a chi è rivolto, poi ambientazione, poi come funziona, poi ricezione e dubbi",
     "parti da un'osservazione sull'esperienza al tavolo, poi ambientazione e struttura, poi ricezione, poi limiti pratici",
     "parti dalle critiche o dai dubbi più comuni e poi ribaltali con ciò che il gioco offre, quindi ambientazione e funzionamento",
+    "parti dall'ambientazione vista dal tavolo, passa subito ai limiti pratici e chiudi con ciò che il gioco ha di unico",
+    "parti dall'aspetto più discusso dal pubblico, poi il tipo di gioco e il suo funzionamento, poi ambientazione e per chi è adatto",
 )
 REGISTERS = (
     "narrativo e descrittivo, con immagini concrete",
     "analitico e asciutto, attento ai compromessi",
     "colloquiale ma sobrio, come un consiglio tra appassionati",
     "da recensione critica equilibrata, con un punto di vista",
+    "diretto e concreto, con frasi brevi alternate a qualcuna più lunga",
 )
 
 PROMPT_SETTING_KEY = "game_description_prompt"
@@ -408,6 +415,24 @@ class GameDescriptionService:
             "description": cached,
         }
 
+    def _recent_closings(self, board_game_id: int) -> list[str]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT description_text FROM board_game_ai_descriptions
+                WHERE board_game_id<>?
+                ORDER BY generated_at DESC
+                LIMIT ?
+                """,
+                (board_game_id, RECENT_OPENINGS),
+            ).fetchall()
+        closings = []
+        for row in rows:
+            sentences = re.split(r"(?<=[.!?])\s+", str(row["description_text"]).strip())
+            if sentences:
+                closings.append(sentences[-1][:200])
+        return closings
+
     def _recent_openings(self, board_game_id: int) -> list[str]:
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -653,6 +678,7 @@ class GameDescriptionService:
         if extended:
             extra, sources_used = self._extended_inputs(source, pinned, model)
             request["style_profile"] = self._style_profile(source["bgg_id"])
+            request["avoid_closings"] = self._recent_closings(source["board_game_id"])
             request.update(extra)
         prompt = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
         text, provider, model = self._complete(system_prompt, prompt, pinned, model)
@@ -662,7 +688,9 @@ class GameDescriptionService:
                 system_prompt
                 + "\nLa bozza precedente è stata scartata per questi motivi: "
                 + "; ".join(problems)
-                + ". Riscrivila da capo rispettando tutte le regole.\n"
+                + ". Riscrivila da capo rispettando tutte le regole e cambiando davvero"
+                + " l'attacco: la prima frase non deve avere il titolo come soggetto"
+                + " e deve partire dall'angolo indicato.\n"
             )
             text, provider, model = self._complete(repair, prompt, pinned, model)
             problems = _style_problems(text, title=source["title"], avoid_openings=avoid_openings)

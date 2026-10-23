@@ -167,7 +167,7 @@ def test_extended_preview_uses_all_sources(tmp_path, monkeypatch) -> None:
     assert request["community_reception"].startswith("Sintesi della community")
     assert request["rulebook_excerpts"][0]["text"].startswith("Obiettivo")
     assert set(request["style_profile"]) == {"opening_angle", "topic_order", "register"}
-    assert "Le opinioni" not in final_prompt and "commento" not in final_prompt.casefold()
+    assert "commento" not in final_prompt.casefold() and request["avoid_closings"] == []
     assert service.status(340237)["status"] == "pending"
 
 
@@ -195,3 +195,19 @@ def test_style_checks_reject_second_person_and_wrap_up() -> None:
     assert _style_problems(base, title="X", avoid_openings=[]) == []
     assert any("seconda persona" in p for p in _style_problems(base + " Non aspettatevi molto.", title="X", avoid_openings=[]))
     assert any("promozionali" in p for p in _style_problems(base + " In sintesi è valido.", title="X", avoid_openings=[]))
+
+
+def test_recent_closings_collects_last_sentences(tmp_path, monkeypatch) -> None:
+    database, service, _ = _service(tmp_path, monkeypatch, None)
+    first = _seed(database)
+    _seed(database, bgg_id=2, title="Altro")
+    with database.transaction() as connection:
+        connection.execute(
+            """INSERT INTO board_game_ai_descriptions
+               (board_game_id,input_sha256,style_version,description_text,provider,model,generated_at)
+               VALUES (?,'x','v','Prima frase. Ultima frase del testo.','p','m','2026-10-01')""",
+            (first,),
+        )
+    other = database.connect().execute("SELECT id FROM board_games WHERE bgg_id=2").fetchone()["id"]
+    assert service._recent_closings(other) == ["Ultima frase del testo."]
+    assert service._recent_closings(first) == []
