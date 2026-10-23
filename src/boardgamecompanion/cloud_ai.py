@@ -108,6 +108,8 @@ class CloudAIClient:
         elif "gpt-oss" in self.model:
             payload["reasoning_effort"] = "low"
             payload["reasoning_format"] = "hidden"
+        elif self.provider == "groq" and "qwen" in self.model.casefold():
+            payload["reasoning_format"] = "hidden"
         if json_output:
             payload["response_format"] = {"type": "json_object"}
         result = self.request("POST", "chat/completions", payload)
@@ -137,11 +139,11 @@ class CloudAIClient:
 
 
 def cloud_client(rag, provider: str | None = None, *, api_key: str | None = None,
-                 rate_limiter=None) -> CloudAIClient:
+                 model: str | None = None, rate_limiter=None) -> CloudAIClient:
     from boardgamecompanion.settings import settings
     provider = provider or rag.generation_provider
     return CloudAIClient(provider=provider,
                          api_key=api_key or getattr(rag, f"{provider}_api_key"),
-                         model=getattr(rag, f"{provider}_generation_model"),
+                         model=model or getattr(rag, f"{provider}_generation_model"),
                          timeout_seconds=settings.cloud_generation_timeout_seconds,
                          rate_limiter=rate_limiter)

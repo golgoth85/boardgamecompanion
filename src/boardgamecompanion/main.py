@@ -1167,11 +1167,12 @@ def generate_game_description_ai(
     bgg_id: int,
     force: bool = Query(default=False),
     provider: Literal["gemini", "deepseek", "groq", "lmstudio", "ollama"] | None = Query(default=None),
+    model: str | None = Query(default=None, max_length=200),
     preview: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
         return get_game_description_service().generate(
-            bgg_id, force=force, provider=provider, preview=preview
+            bgg_id, force=force, provider=provider, model=model, preview=preview
         )
     except GameDescriptionError as exc:
         detail = str(exc)

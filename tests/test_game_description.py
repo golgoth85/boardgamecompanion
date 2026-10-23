@@ -64,9 +64,9 @@ def _service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outputs: list[str]
     service = GameDescriptionService(database)
     calls: list[tuple] = []
 
-    def complete(system: str, prompt: str, providers=None):
+    def complete(system: str, prompt: str, providers=None, model=None):
         calls.append((system, prompt, providers))
-        return _clean_output(outputs.pop(0)), (providers or ("gemini",))[0], "model-test"
+        return _clean_output(outputs.pop(0)), (providers or ("gemini",))[0], model or "model-test"
 
     monkeypatch.setattr(service, "_complete", complete)
     return database, service, calls
@@ -257,3 +257,22 @@ def test_prompt_api_roundtrip(tmp_path) -> None:
 
         assert client.put("/api/settings/game-description-prompt", json={"prompt": "no"}).status_code == 400
         assert client.post("/api/games/1/description-ai/generate?provider=nope").status_code == 422
+
+
+def test_model_override_is_preview_only_and_cloud_only(tmp_path, monkeypatch) -> None:
+    database, service, _ = _service(tmp_path, monkeypatch, [GOOD])
+    _seed(database)
+
+    result = service.generate(340237, provider="groq", model="qwen/qwen3.8-27b", preview=True)
+    assert result["description"]["model"] == "qwen/qwen3.8-27b"
+    for kwargs in (
+        {"provider": "groq", "model": "x"},  # not a preview
+        {"provider": "gemini", "model": "x", "preview": True},  # not a cloud provider
+        {"model": "x", "preview": True},  # provider not pinned
+    ):
+        with pytest.raises(GameDescriptionError, match="anteprima"):
+            service.generate(340237, **kwargs)
+
+
+def test_reasoning_blocks_are_removed_from_output() -> None:
+    assert _clean_output("<think>ragiono\nqui</think>\nTesto finale.") == "Testo finale."

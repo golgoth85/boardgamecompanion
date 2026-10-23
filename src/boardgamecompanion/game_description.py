@@ -133,7 +133,8 @@ def _opening_angle(bgg_id: int) -> str:
 def _clean_output(value: Any) -> str:
     if not isinstance(value, str):
         raise GameDescriptionError("Description provider returned invalid text")
-    text = value.replace("**", "").replace("__", "")
+    text = re.sub(r"(?is)<think>.*?</think>", "", value)
+    text = text.replace("**", "").replace("__", "")
     text = re.sub(r"(?m)^[ \t]*(?:#+|[-*•])[ \t]*", "", text)
     paragraphs = [" ".join(part.split()) for part in re.split(r"\n\s*\n", text)]
     text = "\n\n".join(part for part in paragraphs if part).strip().strip('"“”«»').strip()
@@ -442,6 +443,7 @@ class GameDescriptionService:
         system: str,
         prompt: str,
         providers: tuple[str, ...] | None = None,
+        model: str | None = None,
     ) -> tuple[str, str, str]:
         rag = resolve_rag_settings(self.database)
         provider_order = providers or getattr(
@@ -452,7 +454,9 @@ class GameDescriptionService:
             try:
                 if provider in {"deepseek", "groq"}:
                     try:
-                        text = cloud_client(rag, provider).text(system, prompt, max_tokens=2048)
+                        text = cloud_client(rag, provider, model=model).text(
+                            system, prompt, max_tokens=2048
+                        )
                     except CloudAIError as exc:
                         raise GameDescriptionError(str(exc)) from exc
                 elif provider == "gemini":
@@ -463,7 +467,11 @@ class GameDescriptionService:
                     text = self._ollama(system, prompt, rag)
                 else:
                     continue
-                return _clean_output(text), provider, getattr(rag, f"{provider}_generation_model")
+                return (
+                    _clean_output(text),
+                    provider,
+                    model or getattr(rag, f"{provider}_generation_model"),
+                )
             except GameDescriptionError as exc:
                 failures.append(f"{provider}: {exc}")
         raise GameDescriptionError(
@@ -477,6 +485,7 @@ class GameDescriptionService:
         *,
         force: bool = False,
         provider: str | None = None,
+        model: str | None = None,
         preview: bool = False,
     ) -> dict[str, Any]:
         """Return the description, generating it if needed.
@@ -487,6 +496,8 @@ class GameDescriptionService:
         """
         if provider is not None and provider not in GENERATION_PROVIDERS:
             raise GameDescriptionError(f"Unsupported provider: {provider}")
+        if model is not None and not (preview and provider in {"deepseek", "groq"}):
+            raise GameDescriptionError("Il modello si sceglie solo in anteprima, con DeepSeek o Groq")
         system_prompt = self._system_prompt()
         source = self._source(bgg_id, system_prompt)
         if source is None:
@@ -508,7 +519,7 @@ class GameDescriptionService:
         }
         prompt = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
         pinned = (provider,) if provider else None
-        text, provider, model = self._complete(system_prompt, prompt, pinned)
+        text, provider, model = self._complete(system_prompt, prompt, pinned, model)
         problems = _style_problems(text, title=source["title"], avoid_openings=avoid_openings)
         if problems:
             repair = (
@@ -517,7 +528,7 @@ class GameDescriptionService:
                 + "; ".join(problems)
                 + ". Riscrivila da capo rispettando tutte le regole.\n"
             )
-            text, provider, model = self._complete(repair, prompt, pinned)
+            text, provider, model = self._complete(repair, prompt, pinned, model)
             problems = _style_problems(text, title=source["title"], avoid_openings=avoid_openings)
             if problems and not preview:
                 raise GameDescriptionError(

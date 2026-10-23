@@ -270,3 +270,20 @@ def test_price_fetch_outage_is_an_error_so_cached_prices_are_preserved():
     from boardgamecompanion.price_search import PriceSearchError
     with pytest.raises(PriceSearchError, match='prezzi precedenti conservati'):
         DeepSeekPriceProvider(make_client(handler)).search(title='Catan')
+
+
+def test_groq_qwen_hides_reasoning_and_model_can_be_overridden():
+    seen = []
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return response('Testo.')
+    client = CloudAIClient(provider='groq', api_key='secret-test-key', model='qwen/qwen3.8-27b',
+                           client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.text('sistema', 'utente') == 'Testo.'
+    assert seen[0]['reasoning_format'] == 'hidden' and 'reasoning_effort' not in seen[0]
+
+    from boardgamecompanion.cloud_ai import cloud_client
+    rag = type('Rag', (), {'generation_provider': 'groq', 'groq_api_key': 'k',
+                           'groq_generation_model': 'openai/gpt-oss-120b'})()
+    assert cloud_client(rag, 'groq').model == 'openai/gpt-oss-120b'
+    assert cloud_client(rag, 'groq', model='qwen/qwen3.8-27b').model == 'qwen/qwen3.8-27b'
