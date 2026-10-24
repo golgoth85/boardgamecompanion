@@ -725,7 +725,30 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
-app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser must revalidate (ETag) before reuse.
+
+    Without Cache-Control browsers pick their own freshness, so after a deploy
+    they may keep running the previous JavaScript for hours. Revalidating costs a
+    bodiless 304 per file; the versioned zxing bundle never changes and stays cached.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+                if path.startswith("zxing-browser-") and path.endswith(".min.js")
+                else "no-cache"
+            )
+        return response
+
+
+def _web_page() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+app.mount("/static", RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
 app.include_router(diagnostics_router)
 app.include_router(expansions_router)
@@ -737,82 +760,82 @@ app.include_router(search_router)
 
 @app.get("/", include_in_schema=False)
 def web_home() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/games/{bgg_id}", include_in_schema=False)
 def web_game(bgg_id: int) -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/lists", include_in_schema=False)
 def web_lists() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/wishlist", include_in_schema=False)
 def web_wishlist() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/reviews", include_in_schema=False)
 def web_reviews() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/updates", include_in_schema=False)
 def web_updates() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/discovery", include_in_schema=False)
 def web_discovery() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/rankings", include_in_schema=False)
 def web_rankings() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/play-next", include_in_schema=False)
 def web_play_next() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/new", include_in_schema=False)
 def web_new() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/completed", include_in_schema=False)
 def web_completed() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/crowdfunding", include_in_schema=False)
 def web_crowdfunding() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/suggestions", include_in_schema=False)
 def web_suggestions() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/categories", include_in_schema=False)
 def web_categories() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/mechanics", include_in_schema=False)
 def web_mechanics() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/health", tags=["system"])

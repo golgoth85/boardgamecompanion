@@ -3266,14 +3266,6 @@ function setupRagPanel(bggId, documentItems) {
   void refreshRagIndexStatus(bggId, documentItems);
 }
 
-function showPublisherDescription(text) {
-  const details = document.querySelector("#gamePublisherDescription");
-  const body = document.querySelector("#gamePublisherDescriptionText");
-  if (!details?.isConnected || !body || !text) return;
-  body.textContent = text;
-  details.hidden = false;
-}
-
 function descriptionSourcesText(description) {
   if (!description?.text) return "";
   const sources = description.sources || {};
@@ -3294,23 +3286,26 @@ function showDescriptionSources(description) {
   node.hidden = false;
 }
 
+// The description (and the AI text built from it) needs the BGG publisher text:
+// fetch the BGG metadata first when it is not stored yet.
+async function ensureDescriptionSource(bggId) {
+  const status = await api(`/api/games/${bggId}/description-it`);
+  if (status.source_available) return status;
+  const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
+  const cover = document.querySelector(".game-summary-cover .detail-cover");
+  if (cover?.isConnected && metadata.cover_url) {
+    const placeholder = cover.querySelector(".cover-image, .cover-initials");
+    if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+  }
+  return api(`/api/games/${bggId}/description-it`);
+}
+
 async function loadItalianTranslation(bggId) {
-  let status = await api(`/api/games/${bggId}/description-it`);
-  if (!status.source_available) {
-    const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
-    const cover = document.querySelector(".game-summary-cover .detail-cover");
-    if (cover?.isConnected && metadata.cover_url) {
-      const placeholder = cover.querySelector(".cover-image, .cover-initials");
-      if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
-    }
-    status = await api(`/api/games/${bggId}/description-it`);
-  }
-  let text = status.translation?.translated_text || "";
-  if (!text && status.source_available) {
-    const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
-    text = translated.translation?.translated_text || "";
-  }
-  return text;
+  const status = await ensureDescriptionSource(bggId);
+  if (status.translation?.translated_text) return status.translation.translated_text;
+  if (!status.source_available) return "";
+  const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
+  return translated.translation?.translated_text || "";
 }
 
 function setDescriptionBusy(busy) {
@@ -3344,46 +3339,35 @@ async function regenerateGameDescription(bggId) {
   }
 }
 
-// The AI description is written the first time a game page is opened; until it is
-// ready the publisher text (translated) is shown, and stays available afterwards.
+// The AI description is written the first time a game page is opened. Until it is
+// ready the stored translation of the publisher text (if any) stays on screen; the
+// translation is only produced as a fallback when the AI text cannot be written.
 async function ensureGameDescription(bggId) {
   const node = document.querySelector("#gameDescriptionText");
-  if (!node?.isConnected || navigator.webdriver) return;
-  const hasAi = node.dataset.source === "ai";
-  let translatedText = node.dataset.translation === "true" ? node.textContent : "";
-
-  const translation = hasAi && document.querySelector("#gamePublisherDescriptionText")?.textContent
-    ? Promise.resolve("")
-    : loadItalianTranslation(bggId).then((text) => {
-      translatedText = text || translatedText;
-      if (text && node.isConnected && node.dataset.source !== "ai") {
-        node.textContent = text;
-        node.dataset.source = "translation";
-      } else if (text && node.isConnected) {
-        showPublisherDescription(text);
-      }
-      return text;
-    }).catch(() => "");
-
-  if (hasAi) {
-    await translation;
-    return;
-  }
+  if (!node?.isConnected || navigator.webdriver || node.dataset.source === "ai") return;
   if (!node.dataset.source) {
     node.textContent = "Sto scrivendo la descrizione di questo gioco… può richiedere fino a un minuto.";
   }
   setDescriptionBusy(true);
   try {
+    await ensureDescriptionSource(bggId);
     const generated = await api(`/api/games/${bggId}/description-ai/generate`, {method: "POST"});
     const text = generated.description?.text;
     if (text && node.isConnected) {
       node.textContent = text;
       node.dataset.source = "ai";
       showDescriptionSources(generated.description);
-      showPublisherDescription(translatedText || await translation);
     }
   } catch (_) {
-    await translation;
+    try {
+      const text = await loadItalianTranslation(bggId);
+      if (text && node.isConnected && node.dataset.source !== "ai") {
+        node.textContent = text;
+        node.dataset.source = "translation";
+      }
+    } catch (__) {
+      // Nothing more to try: the message below covers it.
+    }
     if (node.isConnected && !node.dataset.source) {
       node.textContent = "Descrizione non disponibile al momento.";
     }
@@ -3557,16 +3541,12 @@ async function renderDetail(bggId) {
           <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
-            <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}" data-translation="${aiDescription ? "false" : italianDescription ? "true" : "false"}">${description}</div>
+            <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}">${description}</div>
             <p class="game-description-sources" id="gameDescriptionSources" ${aiDescription ? "" : "hidden"}>${escapeHtml(descriptionSourcesText(game.description_ai))}</p>
             <div class="game-description-actions">
               <button class="button button-ghost" id="regenerateDescription" type="button"
                       title="Riscrive la descrizione con il prompt e i provider attuali">${icon("refresh")}<span>Rigenera descrizione</span></button>
             </div>
-            <details class="game-publisher-description" id="gamePublisherDescription" ${aiDescription && italianDescription ? "" : "hidden"}>
-              <summary>Testo originale dell'editore</summary>
-              <div class="game-description-text" id="gamePublisherDescriptionText">${escapeHtml(aiDescription ? italianDescription : "")}</div>
-            </details>
           </section>
 
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">

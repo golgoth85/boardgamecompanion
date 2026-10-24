@@ -108,8 +108,8 @@ volta e poi scartate. Il testo è in `board_game_ai_descriptions` (con `sources_
 e si rigenera se cambiano prompt, descrizione BGG, dati stabili o regolamento (non
 rating o peso); se una fonte è fallita per un errore passeggero (per esempio BGG
 non raggiungibile) la descrizione viene rigenerata alla prima apertura dopo 6 ore.
-Se la generazione non riesce, la scheda mostra la traduzione e il testo
-dell'editore resta consultabile. Il prompt si modifica da Impostazioni → AI e
+Se la generazione non riesce, la scheda mostra la traduzione del testo
+dell'editore. Il prompt si modifica da Impostazioni → AI e
 provider («Salva come modello», «Ripristina», «Originale»); i provider seguono la
 priorità «Risposte e testi».
 
