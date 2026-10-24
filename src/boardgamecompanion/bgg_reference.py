@@ -431,16 +431,17 @@ class BggReferenceCatalog:
                 detail_error = "no_token"
             else:
                 try:
-                    metadata = client.thing(bgg_id)
+                    metadata, raw_xml = client.thing_with_xml(bgg_id)
                 except Exception as exc:  # network, XML or rate-limit failures
                     detail_error = f"{type(exc).__name__}: {exc}"[:300]
                 else:
-                    self._store_api_detail(bgg_id, metadata)
+                    self._store_api_detail(bgg_id, metadata, raw_xml)
                     row = self._detail_row(bgg_id)
         try:
             details = json.loads(row["details_json"] or "{}")
         except ValueError:
             details = {}
+        details.pop("raw_xml", None)
         return {
             "bgg_id": int(row["bgg_id"]),
             "name": row["name"],
@@ -472,7 +473,7 @@ class BggReferenceCatalog:
                 (bgg_id,),
             ).fetchone()
 
-    def _store_api_detail(self, bgg_id: int, metadata: dict[str, Any]) -> None:
+    def _store_api_detail(self, bgg_id: int, metadata: dict[str, Any], raw_xml: str) -> None:
         now = datetime.now(UTC).isoformat()
         alt_names = "\n".join(metadata.get("alternate_titles") or [])
         with self.database.connect() as connection:
@@ -500,7 +501,7 @@ class BggReferenceCatalog:
                     metadata.get("cover_url"),
                     metadata.get("description"),
                     alt_names,
-                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    json.dumps({**metadata, "raw_xml": raw_xml}, ensure_ascii=False, sort_keys=True),
                     now,
                     now,
                     bgg_id,

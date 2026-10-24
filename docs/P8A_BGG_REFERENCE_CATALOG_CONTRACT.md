@@ -148,8 +148,9 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   ricostruito). `GET /api/reference/{bgg_id}` restituisce la riga e, solo se
   mai interrogata, fa una `/thing?stats=1` singola (stesso limitatore e token
   dei job); salva descrizione, immagini, titoli alternativi, rank/voti/wishing e
-  `details_json` (metadati già analizzati dal parser, non l'XML grezzo: i
-  sondaggi occuperebbero troppo spazio) e valorizza `api_checked_at`. Senza
+  `details_json` (metadati del parser più `raw_xml`, l'XML completo
+  dell'item con sondaggi inclusi: lo spazio sul NAS non è un vincolo; l'API
+  non lo restituisce) e valorizza `api_checked_at`. Senza
   token o con BGG in errore risponde comunque con i dati del dump
   (`detail_error`). UI: scheda dettagli aperta dal titolo nei risultati.
 - Da fare: worker API, segnali

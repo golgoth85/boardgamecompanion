@@ -290,8 +290,11 @@ class FakeThingClient:
     def __init__(self) -> None:
         self.calls: list[int] = []
 
-    def thing(self, bgg_id: int) -> dict:
+    def thing_with_xml(self, bgg_id: int) -> tuple[dict, str]:
         self.calls.append(bgg_id)
+        return self._metadata(bgg_id), '<item id="28720"><poll name="x"/></item>'
+
+    def _metadata(self, bgg_id: int) -> dict:
         return {
             "bgg_id": bgg_id,
             "title": "Brass",
@@ -324,6 +327,10 @@ def test_detail_fetches_once_and_indexes_alternate_titles(database: Database) ->
     assert first["wishing"] == 321 and first["users_rated"] == 16000
     catalog.detail(28720, client)
     assert client.calls == [28720]
+    assert "raw_xml" not in first["details"]
+    with database.connect() as connection:
+        stored = connection.execute("SELECT details_json FROM bgg_reference_games WHERE bgg_id=28720").fetchone()[0]
+    assert '<poll name=\\"x\\"/>' in stored or '<poll name="x"/>' in stored
 
     assert [i["bgg_id"] for i in catalog.search("castelli fittizi")] == [28720]
     # a later dump import must not overwrite API data
@@ -335,7 +342,7 @@ def test_detail_provider_failure_keeps_dump_data(database: Database) -> None:
     BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
 
     class Broken:
-        def thing(self, bgg_id: int) -> dict:
+        def thing_with_xml(self, bgg_id: int) -> tuple[dict, str]:
             raise RuntimeError("boom")
 
     item = BggReferenceCatalog(database).detail(28720, Broken())

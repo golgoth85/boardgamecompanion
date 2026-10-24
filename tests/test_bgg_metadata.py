@@ -142,6 +142,16 @@ def test_bgg_metadata_cache_survives_restart_without_api_client(tmp_path: Path) 
         restarted.refresh(173346, force=True)
 
 
+def test_thing_with_xml_returns_complete_item_xml() -> None:
+    client = BggApiClient(
+        BggApiConfig("secret", min_interval_seconds=0),
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=XML, request=request))),
+    )
+    metadata, raw = client.thing_with_xml(173346)
+    assert metadata["title"] == "7 Wonders Duel"
+    assert raw.startswith("<item") and "7 Wonders Duel" in raw and "<description>" in raw
+
+
 def test_bgg_202_is_retried_with_bounded_retry_after() -> None:
     calls = 0
     sleeps: list[float] = []

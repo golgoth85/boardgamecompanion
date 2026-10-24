@@ -197,6 +197,19 @@ class BggApiClient:
             raise BggMetadataError("BGG API did not return exactly one item")
         return items[identifier]
 
+    def thing_with_xml(self, bgg_id: int) -> tuple[dict[str, Any], str]:
+        """Like ``thing`` but also returns the item's complete XML, unmodified."""
+        identifier = int(bgg_id)
+        if identifier <= 0:
+            raise ValueError("BGG ID must be positive")
+        content = self._request_things((identifier,))
+        items = _parse_things(content, expected_bgg_ids={identifier})
+        if identifier not in items:
+            raise BggMetadataError("BGG API did not return exactly one item")
+        root = ET.fromstring(content)
+        item = next(node for node in root.findall("item") if node.attrib.get("id") == str(identifier))
+        return items[identifier], ET.tostring(item, encoding="unicode")
+
     def things(self, bgg_ids: list[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
         identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
         if not identifiers or len(identifiers) > MAX_THING_IDS:
