@@ -10,7 +10,7 @@ from boardgamecompanion.bgg_reference import (
     get_sync_state,
     save_reference_settings,
 )
-from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, crowdfunding_matches
+from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, _next_check, crowdfunding_matches
 from boardgamecompanion.database import Database
 
 HEADER = (
@@ -145,7 +145,7 @@ def test_admitted_rotation_rechecks_after_14_days_and_promotes_by_votes(database
     client = FakeClient(13, {10: {"bgg_users_rated": 5100}})
     worker(database, client).run_once()
     first = row(database, 10)
-    assert first["users_rated"] == 5100 and first["next_check_at"] > "2026-11-06"
+    assert first["users_rated"] == 5100 and "2026-10-25" < first["next_check_at"] <= "2026-11-07T12"
     calls = len(client.requests)
     worker(database, client).run_once()
     assert not any(10 in r for r in client.requests[calls:])
@@ -280,3 +280,15 @@ def test_crowdfunding_grace_setting_is_bounded(database: Database) -> None:
     assert save_reference_settings(database, ReferenceSettings(crowdfunding_grace_days=30)).crowdfunding_grace_days == 30
     with pytest.raises(ValueError):
         save_reference_settings(database, ReferenceSettings(crowdfunding_grace_days=1096))
+
+
+def test_recheck_slots_spread_a_burst_evenly_and_then_keep_the_cycle() -> None:
+    now = datetime(YEAR, 10, 24, 12, tzinfo=UTC)
+    slots = [_next_check(now, bgg_id, 7) for bgg_id in range(1, 7001)]
+    per_day: dict[str, int] = {}
+    for slot in slots:
+        assert now + timedelta(days=1) <= slot <= now + timedelta(days=7)
+        per_day[slot.date().isoformat()] = per_day.get(slot.date().isoformat(), 0) + 1
+    assert sorted(per_day.values()) == [1000] * 7
+    # once on its own slot, a title comes back exactly one cycle later
+    assert all(_next_check(slot, bgg_id, 7) == slot + timedelta(days=7) for bgg_id, slot in enumerate(slots, 1))

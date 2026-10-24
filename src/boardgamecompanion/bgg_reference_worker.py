@@ -313,7 +313,7 @@ class BggReferenceWorker:
                 self._admit(connection, bgg_id, "upcoming", now + timedelta(days=UPCOMING_ADMISSION_DAYS))
             connection.execute(
                 "UPDATE bgg_reference_games SET next_check_at = ? WHERE bgg_id = ?",
-                ((now + timedelta(days=recheck_days)).isoformat(), bgg_id),
+                (_next_check(now, bgg_id, recheck_days).isoformat(), bgg_id),
             )
         self._summary["stored"] += 1
 
@@ -337,6 +337,17 @@ class BggReferenceWorker:
 
 class _BudgetExhausted(Exception):
     pass
+
+
+def _next_check(now: datetime, bgg_id: int, days: int) -> datetime:
+    """Next check on the title's own day of the cycle, at most ``days`` away.
+
+    Each ID owns the days where ``(day ordinal + bgg_id) % days == 0``, so a queue
+    checked all at once (first run, outage) spreads evenly over the next cycle and
+    then stays spread: the daily load is about 1/``days`` of the queue.
+    """
+    target = now + timedelta(days=days)
+    return target - timedelta(days=(target.toordinal() + bgg_id) % days)
 
 
 def _parse_time(value: object) -> datetime | None:
