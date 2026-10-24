@@ -138,8 +138,13 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
 - Limite noto: i nomi del dump sono solo quelli principali BGG; titoli
   italiani (es. «Castelli della Borgogna») non si trovano finché non arrivano
   i titoli alternativi da `/thing`.
-- Da fare: UI, worker API e dettagli su richiesta, segnali crowdfunding/hot/in
-  uscita.
+- Fatto (non ancora distribuito): UI. Scheda «Catalogo di riferimento» nelle
+  impostazioni (soglia voti, espansioni, stato import); gruppo «Catalogo BGG»
+  nella ricerca globale con wishlist (`source_kind=bgg`) e «Collezione»
+  (`POST /api/reference/{bgg_id}/collection`: crea riga `board_games` e voce
+  collezione `own=1`, idempotente, senza sovrascrivere).
+- Da fare: dettagli su richiesta e titoli alternativi, worker API, segnali
+  crowdfunding/hot/in uscita.
 
 ## Rilascio
 

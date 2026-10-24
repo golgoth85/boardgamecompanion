@@ -823,3 +823,4 @@
 .global-search-result.reference-result>span.reference-result-actions{display:flex;gap:.35rem;align-items:center}
 .reference-result-actions .button{padding:.25rem .55rem;font-size:.6rem;white-space:nowrap}
 @media (max-width:480px){.global-search-result.reference-result{grid-template-columns:2.6rem minmax(0,1fr)}.reference-result-actions{grid-column:1 / -1;justify-content:flex-end}}
+.global-search-result.reference-result>span:nth-child(2){display:grid;gap:.1rem;min-width:0}
