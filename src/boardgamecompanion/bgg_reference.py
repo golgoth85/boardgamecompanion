@@ -28,7 +28,8 @@ DUMP_REQUIRED_COLUMNS = {
 MIN_VOTES_KEY = "bgg_reference_min_votes"
 INCLUDE_EXPANSIONS_KEY = "bgg_reference_include_expansions"
 DEFAULT_MIN_VOTES = 100
-MIN_VOTES_RANGE = (10, 10000)
+MIN_VOTES_MINIMUM = 0
+DUMP_WATCH_STATE_KEY = "dump_file_signature"
 
 
 class BggReferenceError(ValueError):
@@ -74,17 +75,15 @@ class ReferenceSettings:
 def load_reference_settings(database: Database) -> ReferenceSettings:
     values = AppSettingsStore(database).get_many((MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY))
     min_votes = _to_int(values[MIN_VOTES_KEY])
-    if min_votes is None or not MIN_VOTES_RANGE[0] <= min_votes <= MIN_VOTES_RANGE[1]:
+    if min_votes is None or min_votes < MIN_VOTES_MINIMUM:
         min_votes = DEFAULT_MIN_VOTES
     include_expansions = values[INCLUDE_EXPANSIONS_KEY] != "0"
     return ReferenceSettings(min_votes=min_votes, include_expansions=include_expansions)
 
 
 def save_reference_settings(database: Database, value: ReferenceSettings) -> ReferenceSettings:
-    if not MIN_VOTES_RANGE[0] <= value.min_votes <= MIN_VOTES_RANGE[1]:
-        raise BggReferenceError(
-            f"min_votes must be between {MIN_VOTES_RANGE[0]} and {MIN_VOTES_RANGE[1]}"
-        )
+    if value.min_votes < MIN_VOTES_MINIMUM:
+        raise BggReferenceError(f"min_votes must be at least {MIN_VOTES_MINIMUM}")
     AppSettingsStore(database).set_many(
         {
             MIN_VOTES_KEY: (str(value.min_votes), False),
@@ -274,6 +273,51 @@ class BggReferenceImporter:
 
     def import_path(self, path: Path) -> DumpImportResult:
         return self.import_bytes(path.read_bytes(), path.name)
+
+    def import_if_changed(self, import_dir: Path) -> DumpImportResult | None:
+        """Imports the dump found in the import folder once per file version.
+
+        The file is never moved or deleted. A cheap size/mtime signature avoids
+        rehashing an unchanged file; a content hash already recorded in
+        import_runs is never imported twice.
+        """
+        path = import_dir / DUMP_DEFAULT_FILENAME
+        if not path.is_file():
+            return None
+        stat = path.stat()
+        signature = f"{stat.st_size}:{stat.st_mtime_ns}"
+        if self._state(DUMP_WATCH_STATE_KEY) == signature:
+            return None
+        payload = path.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        with self.database.connect() as connection:
+            already = connection.execute(
+                "SELECT 1 FROM import_runs WHERE source_type = ? AND sha256 = ? LIMIT 1",
+                (DUMP_SOURCE_TYPE, digest),
+            ).fetchone()
+        result = None if already else self.import_bytes(payload, path.name)
+        self._set_state(DUMP_WATCH_STATE_KEY, signature)
+        return result
+
+    def _state(self, key: str) -> str | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM bgg_reference_sync_state WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else None
+
+    def _set_state(self, key: str, value: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO bgg_reference_sync_state (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value, datetime.now(UTC).isoformat()),
+            )
 
 
 def _fts_query(query: str) -> str | None:

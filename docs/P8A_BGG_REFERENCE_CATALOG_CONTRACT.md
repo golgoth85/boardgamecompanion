@@ -95,7 +95,7 @@ autori, editori, categorie, meccaniche e sondaggio sul numero di giocatori:
 
 ## Impostazioni (pagina impostazioni, salvate in `app_settings`)
 
-- `bgg_reference_min_votes` (10–10000, default 100)
+- `bgg_reference_min_votes` (≥ 0, nessun massimo, default 100; 0 mostra tutto)
 - `bgg_reference_min_wishing` (0–10000, default 50; 0 disattiva la regola 3)
 - `bgg_reference_crowdfunding_grace_days` (0–1095, default 540)
 - `bgg_reference_include_expansions` (default sì)
@@ -107,8 +107,10 @@ autori, editori, categorie, meccaniche e sondaggio sul numero di giocatori:
   sovrascrive (confronto `dump_imported_at` / `api_checked_at`).
 - Validazione dell'intestazione e delle colonne; righe malformate scartate e
   contate, mai import parziale silenzioso.
-- Lanciato dalla UI (pulsante) o rilevato in `/data/import`; il file non viene
-  spostato né cancellato.
+- Automatico: all'avvio e poi ogni ora BGC controlla
+  `/data/import/boardgames_ranks.csv`; importa solo se il contenuto (sha256) non
+  è già in `import_runs`. Nessuna azione dell'utente. Il file non viene
+  spostato né cancellato. `/api/reference/import-dump` resta per forzare.
 
 ## Fuori scope
 

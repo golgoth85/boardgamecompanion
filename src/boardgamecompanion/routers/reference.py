@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from boardgamecompanion.bgg_reference import (
     DUMP_DEFAULT_FILENAME,
-    MIN_VOTES_RANGE,
+    MIN_VOTES_MINIMUM,
     BggReferenceCatalog,
     BggReferenceError,
     BggReferenceImporter,
@@ -26,7 +26,7 @@ class DumpImportPayload(BaseModel):
 
 
 class ReferenceSettingsPayload(BaseModel):
-    min_votes: int = Field(ge=MIN_VOTES_RANGE[0], le=MIN_VOTES_RANGE[1])
+    min_votes: int = Field(ge=MIN_VOTES_MINIMUM)
     include_expansions: bool = True
 
 

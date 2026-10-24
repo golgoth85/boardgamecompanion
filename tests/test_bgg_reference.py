@@ -1,3 +1,5 @@
+import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -176,10 +178,39 @@ def test_settings_roundtrip_and_validation(database: Database) -> None:
     saved = save_reference_settings(database, ReferenceSettings(min_votes=250, include_expansions=False))
     assert saved == ReferenceSettings(min_votes=250, include_expansions=False)
     with pytest.raises(BggReferenceError):
-        save_reference_settings(database, ReferenceSettings(min_votes=1))
+        save_reference_settings(database, ReferenceSettings(min_votes=-1))
 
 
-def test_reference_api(tmp_path: Path) -> None:
+def test_dump_in_import_folder_is_imported_once(database: Database, tmp_path: Path) -> None:
+    import_dir = tmp_path / "import"
+    import_dir.mkdir()
+    importer = BggReferenceImporter(database)
+
+    assert importer.import_if_changed(import_dir) is None
+
+    dump = import_dir / "boardgames_ranks.csv"
+    dump.write_bytes(DUMP)
+    first = importer.import_if_changed(import_dir)
+    assert first is not None and first.created_count == 4
+    assert importer.import_if_changed(import_dir) is None
+
+    # Same content rewritten (new mtime): hashed again but not reimported.
+    dump.write_bytes(DUMP)
+    os.utime(dump, ns=(1, 1))
+    assert importer.import_if_changed(import_dir) is None
+
+    dump.write_bytes(DUMP.replace(b"15000,0", b"15500,0"))
+    second = importer.import_if_changed(import_dir)
+    assert second is not None and second.updated_count == 1
+    assert dump.exists()
+    with database.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM import_runs WHERE source_type = 'bgg_ranks_dump'"
+        ).fetchone()[0] == 2
+
+
+def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "bgg_reference_dump_worker_enabled", False)
     settings.config_dir = tmp_path / "config"
     settings.import_dir = tmp_path / "import"
     settings.manuals_dir = tmp_path / "manuals"
@@ -198,10 +229,32 @@ def test_reference_api(tmp_path: Path) -> None:
         assert (status["total"], status["visible"]) == (4, 3)
         assert status["last_dump_import"]["row_count"] == 4
 
-        assert client.put("/api/reference/settings", json={"min_votes": 5}).status_code == 422
-        updated = client.put("/api/reference/settings", json={"min_votes": 20000 // 2})
-        assert updated.json()["min_votes"] == 10000
-        assert client.get("/api/reference/status").json()["visible"] == 2
+        assert client.put("/api/reference/settings", json={"min_votes": -1}).status_code == 422
+        updated = client.put("/api/reference/settings", json={"min_votes": 50000})
+        assert updated.json()["min_votes"] == 50000
+        assert client.get("/api/reference/status").json()["visible"] == 1
+        everything = client.put("/api/reference/settings", json={"min_votes": 0})
+        assert everything.json()["min_votes"] == 0
+        assert client.get("/api/reference/status").json()["visible"] == 4
+        client.put("/api/reference/settings", json={"min_votes": 100})
 
         search = client.get("/api/reference/search", params={"q": "brass"}).json()
         assert [item["bgg_id"] for item in search["items"]] == [28720, 224517]
+
+
+def test_startup_imports_dump_without_user_action(tmp_path: Path) -> None:
+    settings.config_dir = tmp_path / "config"
+    settings.import_dir = tmp_path / "import"
+    settings.manuals_dir = tmp_path / "manuals"
+    settings.import_dir.mkdir(parents=True)
+    (settings.import_dir / "boardgames_ranks.csv").write_bytes(DUMP)
+
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 10
+        status = client.get("/api/reference/status").json()
+        while status["total"] == 0 and time.monotonic() < deadline:
+            time.sleep(0.05)
+            status = client.get("/api/reference/status").json()
+
+    assert status["total"] == 4
+    assert status["last_dump_import"]["source_filename"] == "boardgames_ranks.csv"

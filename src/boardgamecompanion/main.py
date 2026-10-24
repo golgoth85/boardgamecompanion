@@ -38,6 +38,7 @@ from boardgamecompanion.bgg_collection_sync import (
     BggCollectionSyncService,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
+from boardgamecompanion.bgg_reference import BggReferenceImporter
 from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
     BggApiClient,
@@ -649,6 +650,30 @@ async def _tutorial_video_worker(stop_event: asyncio.Event) -> None:
             pass
 
 
+async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
+    importer = BggReferenceImporter(get_database())
+    while not stop_event.is_set():
+        try:
+            result = await asyncio.to_thread(importer.import_if_changed, settings.import_dir)
+            if result is not None:
+                LOGGER.info(
+                    "BGG reference dump imported: %s created, %s updated, %s rejected",
+                    result.created_count,
+                    result.updated_count,
+                    result.rejected_count,
+                )
+        except Exception:
+            LOGGER.exception("BGG reference dump import failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.bgg_reference_dump_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -659,6 +684,8 @@ async def lifespan(_: FastAPI):
     worker_tasks.append(asyncio.create_task(_bgg_collection_sync_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
     worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
+    if settings.bgg_reference_dump_worker_enabled:
+        worker_tasks.append(asyncio.create_task(_bgg_reference_dump_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_crowdfunding_notification_worker(worker_stop)))
     if settings.youtube_tutorial_worker_enabled:
         worker_tasks.append(asyncio.create_task(_tutorial_video_worker(worker_stop)))
