@@ -170,7 +170,7 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   vuoto è marcato `removed_at` (mai cancellato), una risposta completamente vuota
   rinvia il lotto di 6 ore. Impostazioni `min_wishing` e `daily_budget` in API e
   UI; `/api/reference/status` include lo stato del worker.
-- Fatto (2026-10-24, nessuna migrazione): segnali. A ogni giro del worker,
+- Fatto e distribuito (2026-10-24, `4805f7e`, nessuna migrazione, schema 25): segnali. A ogni giro del worker,
   prima delle code BGG e anche senza token, le campagne già in cache del modulo
   `crowdfunding` (nessuna richiesta di rete) sono abbinate fail closed:
   titolo normalizzato uguale al nome o a un titolo alternativo di **un solo**
@@ -186,6 +186,8 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   segnale valgono solo sotto soglia voti e vince la scadenza più lontana (una
   `upcoming` di 30 giorni non accorcia una `crowdfunding`/`hot`). Nessuna
   scrittura su `board_games`.
+  Primo giro in produzione: 28 campagne abbinate (27 attive su 74), visibili
+  da 25.404 a 25.418; la lista hot parte col budget del giorno dopo.
 - Osservato in produzione (2026-10-24, primo giorno): budget 1500/1500 usato,
   29.865 titoli interrogati, solo `boardgame`/`boardgameexpansion`, 1 ID
   marcato rimosso, 1.798 ammissioni `upcoming`, nessun errore. La coda
