@@ -3313,6 +3313,37 @@ async function loadItalianTranslation(bggId) {
   return text;
 }
 
+function setDescriptionBusy(busy) {
+  const button = document.querySelector("#regenerateDescription");
+  if (!button?.isConnected) return;
+  button.disabled = busy;
+  const label = button.querySelector("span");
+  if (label) label.textContent = busy ? "Scrittura in corso…" : "Rigenera descrizione";
+}
+
+async function regenerateGameDescription(bggId) {
+  const node = document.querySelector("#gameDescriptionText");
+  if (!node?.isConnected) return;
+  setDescriptionBusy(true);
+  node.setAttribute("aria-busy", "true");
+  try {
+    const result = await api(`/api/games/${bggId}/description-ai/generate?force=true`, {method: "POST"});
+    const text = result.description?.text;
+    if (text && node.isConnected) {
+      node.textContent = text;
+      node.dataset.source = "ai";
+      showDescriptionSources(result.description);
+      showToast("Descrizione rigenerata.");
+    }
+  } catch (error) {
+    // The current text stays on screen: it is only replaced once a new one exists.
+    showToast(`Rigenerazione non riuscita: ${error.message}`, true);
+  } finally {
+    node.removeAttribute("aria-busy");
+    setDescriptionBusy(false);
+  }
+}
+
 // The AI description is written the first time a game page is opened; until it is
 // ready the publisher text (translated) is shown, and stays available afterwards.
 async function ensureGameDescription(bggId) {
@@ -3341,6 +3372,7 @@ async function ensureGameDescription(bggId) {
   if (!node.dataset.source) {
     node.textContent = "Sto scrivendo la descrizione di questo gioco… può richiedere fino a un minuto.";
   }
+  setDescriptionBusy(true);
   try {
     const generated = await api(`/api/games/${bggId}/description-ai/generate`, {method: "POST"});
     const text = generated.description?.text;
@@ -3355,6 +3387,8 @@ async function ensureGameDescription(bggId) {
     if (node.isConnected && !node.dataset.source) {
       node.textContent = "Descrizione non disponibile al momento.";
     }
+  } finally {
+    setDescriptionBusy(false);
   }
 }
 
@@ -3525,6 +3559,10 @@ async function renderDetail(bggId) {
             <h2 id="gameDescriptionTitle">Descrizione</h2>
             <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}" data-translation="${aiDescription ? "false" : italianDescription ? "true" : "false"}">${description}</div>
             <p class="game-description-sources" id="gameDescriptionSources" ${aiDescription ? "" : "hidden"}>${escapeHtml(descriptionSourcesText(game.description_ai))}</p>
+            <div class="game-description-actions">
+              <button class="button button-ghost" id="regenerateDescription" type="button"
+                      title="Riscrive la descrizione con il prompt e i provider attuali">${icon("refresh")}<span>Rigenera descrizione</span></button>
+            </div>
             <details class="game-publisher-description" id="gamePublisherDescription" ${aiDescription && italianDescription ? "" : "hidden"}>
               <summary>Testo originale dell'editore</summary>
               <div class="game-description-text" id="gamePublisherDescriptionText">${escapeHtml(aiDescription ? italianDescription : "")}</div>
@@ -3726,6 +3764,9 @@ async function renderDetail(bggId) {
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
     setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
+    document.querySelector("#regenerateDescription")?.addEventListener("click", () => {
+      void regenerateGameDescription(game.bgg_id);
+    });
     ensureGameDescription(game.bgg_id);
     void loadRelevantExpansions(game.bgg_id);
 

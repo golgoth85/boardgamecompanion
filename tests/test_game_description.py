@@ -276,3 +276,18 @@ def test_model_override_is_preview_only_and_cloud_only(tmp_path, monkeypatch) ->
 
 def test_reasoning_blocks_are_removed_from_output() -> None:
     assert _clean_output("<think>ragiono\nqui</think>\nTesto finale.") == "Testo finale."
+
+
+def test_force_regenerates_even_when_cached(tmp_path, monkeypatch) -> None:
+    other = GOOD.replace("Al centro del tavolo", "Sul tavolo si apre")
+    database, service, calls = _service(tmp_path, monkeypatch, [GOOD, other])
+    _seed(database)
+
+    first = service.generate(340237)
+    assert service.generate(340237)["description"]["text"] == first["description"]["text"]
+    assert len(calls) == 1
+
+    again = service.generate(340237, force=True)
+    assert len(calls) == 2
+    assert again["description"]["text"] == _clean_output(other)
+    assert service.get_cached(340237)["text"] == _clean_output(other)
