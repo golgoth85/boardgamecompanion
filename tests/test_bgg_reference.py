@@ -211,6 +211,7 @@ def test_dump_in_import_folder_is_imported_once(database: Database, tmp_path: Pa
 
 def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "bgg_reference_dump_worker_enabled", False)
+    monkeypatch.setattr(settings, "bgg_reference_api_worker_enabled", False)
     settings.config_dir = tmp_path / "config"
     settings.import_dir = tmp_path / "import"
     settings.manuals_dir = tmp_path / "manuals"
@@ -230,6 +231,8 @@ def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert status["last_dump_import"]["row_count"] == 4
 
         assert client.put("/api/reference/settings", json={"min_votes": -1}).status_code == 422
+        assert client.put("/api/reference/settings", json={"min_votes": 1, "daily_budget": 5001}).status_code == 422
+        assert client.get("/api/reference/status").json()["worker"]["budget_used"] == 0
         updated = client.put("/api/reference/settings", json={"min_votes": 50000})
         assert updated.json()["min_votes"] == 50000
         assert client.get("/api/reference/status").json()["visible"] == 1

@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     bgg_timeout_seconds: float = Field(default=20.0, ge=1.0, le=60.0)
     bgg_min_interval_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
     bgg_reference_dump_worker_enabled: bool = True
+    bgg_reference_api_worker_enabled: bool = True
+    bgg_reference_api_poll_seconds: float = Field(default=60 * 60, ge=60.0, le=86400.0)
     bgg_reference_dump_poll_seconds: float = Field(default=60 * 60, ge=60.0, le=86400.0)
     bgg_metadata_refresh_seconds: int = Field(default=30 * 24 * 60 * 60, ge=86400, le=365 * 24 * 60 * 60)
     suggestions_cache_ttl_seconds: int = Field(default=24 * 60 * 60, ge=3600, le=7 * 24 * 60 * 60)

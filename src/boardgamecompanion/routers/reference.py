@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 
 from boardgamecompanion.bgg_reference import (
     DUMP_DEFAULT_FILENAME,
+    DEFAULT_DAILY_BUDGET,
+    DEFAULT_MIN_WISHING,
+    MAX_DAILY_BUDGET,
+    MAX_MIN_WISHING,
     MIN_VOTES_MINIMUM,
     BggReferenceCatalog,
     BggReferenceError,
@@ -15,6 +19,7 @@ from boardgamecompanion.bgg_reference import (
     load_reference_settings,
     save_reference_settings,
 )
+from boardgamecompanion.bgg_reference_worker import worker_status
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.service_factories import get_bgg_api_client
 from boardgamecompanion.settings import settings
@@ -29,6 +34,8 @@ class DumpImportPayload(BaseModel):
 class ReferenceSettingsPayload(BaseModel):
     min_votes: int = Field(ge=MIN_VOTES_MINIMUM)
     include_expansions: bool = True
+    min_wishing: int = Field(default=DEFAULT_MIN_WISHING, ge=0, le=MAX_MIN_WISHING)
+    daily_budget: int = Field(default=DEFAULT_DAILY_BUDGET, ge=0, le=MAX_DAILY_BUDGET)
 
 
 def _import_file(filename: str) -> Path:
@@ -44,7 +51,7 @@ def _import_file(filename: str) -> Path:
 def reference_status() -> dict[str, object]:
     database = get_database()
     database.initialize()
-    return BggReferenceCatalog(database).status()
+    return {**BggReferenceCatalog(database).status(), "worker": worker_status(database)}
 
 
 @router.get("/api/reference/search")
@@ -109,6 +116,8 @@ def reference_settings_put(payload: ReferenceSettingsPayload) -> dict[str, objec
         ReferenceSettings(
             min_votes=payload.min_votes,
             include_expansions=payload.include_expansions,
+            min_wishing=payload.min_wishing,
+            daily_budget=payload.daily_budget,
         ),
     )
     return saved.to_dict()

@@ -153,7 +153,24 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   non lo restituisce) e valorizza `api_checked_at`. Senza
   token o con BGG in errore risponde comunque con i dati del dump
   (`detail_error`). UI: scheda dettagli aperta dal titolo nei risultati.
-- Da fare: worker API, segnali
+- Fatto (non ancora distribuito): worker API (`bgg_reference_worker.py`),
+  un ciclo ogni ora (`bgg_reference_api_poll_seconds`, disattivabile con
+  `bgg_reference_api_worker_enabled`). Senza token non fa nulla
+  (`status: no_token`). Budget giornaliero in richieste (ogni `/thing` da 20 ID
+  è una richiesta), contatore UTC in `bgg_reference_sync_state`. Code in ordine:
+  1. nuovi ID oltre il massimo visto, una scansione al giorno, stop dopo 3
+     lotti vuoti; il cursore resta sull'ultimo ID reale, quindi la coda vuota
+     si riprova il giorno dopo; accettati solo `boardgame`/`boardgameexpansion`;
+  2. candidati (anno ≥ anno corrente − 1 o assente, voti sotto soglia), ricontrollo
+     ogni 7 giorni; con `wishing ≥ min_wishing` ammissione `upcoming` per 30
+     giorni, mai sopra un'ammissione crowdfunding/hot; i titoli sotto soglia più
+     vecchi non vengono toccati;
+  3. rotazione degli ammessi per voti (`next_check_at` +14 giorni).
+  Ogni risposta è salvata con l'XML completo; un ID assente da un lotto non
+  vuoto è marcato `removed_at` (mai cancellato), una risposta completamente vuota
+  rinvia il lotto di 6 ore. Impostazioni `min_wishing` e `daily_budget` in API e
+  UI; `/api/reference/status` include lo stato del worker.
+- Da fare: segnali
   crowdfunding/hot/in uscita.
 
 ## Rilascio

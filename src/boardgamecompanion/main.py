@@ -40,6 +40,7 @@ from boardgamecompanion.bgg_collection_sync import (
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_reference import BggReferenceImporter
+from boardgamecompanion.bgg_reference_worker import BggReferenceWorker
 from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
     BggApiClient,
@@ -702,6 +703,25 @@ async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
             pass
 
 
+async def _bgg_reference_api_worker(stop_event: asyncio.Event) -> None:
+    worker = BggReferenceWorker(get_database(), get_bgg_api_client)
+    while not stop_event.is_set():
+        try:
+            summary = await asyncio.to_thread(worker.run_once)
+            if summary["requests"]:
+                LOGGER.info("BGG reference API worker: %s", summary)
+        except Exception:
+            LOGGER.exception("BGG reference API worker failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.bgg_reference_api_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
@@ -714,6 +734,8 @@ async def lifespan(_: FastAPI):
     worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
     if settings.bgg_reference_dump_worker_enabled:
         worker_tasks.append(asyncio.create_task(_bgg_reference_dump_worker(worker_stop)))
+    if settings.bgg_reference_api_worker_enabled:
+        worker_tasks.append(asyncio.create_task(_bgg_reference_api_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_crowdfunding_notification_worker(worker_stop)))
     if settings.youtube_tutorial_worker_enabled:
         worker_tasks.append(asyncio.create_task(_tutorial_video_worker(worker_stop)))

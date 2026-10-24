@@ -102,6 +102,8 @@ const saveSettings = document.querySelector("#saveSettings");
 const referenceMinVotes = document.querySelector("#referenceMinVotes");
 const referenceIncludeExpansions = document.querySelector("#referenceIncludeExpansions");
 const referenceStatus = document.querySelector("#referenceStatus");
+const referenceMinWishing = document.querySelector("#referenceMinWishing");
+const referenceDailyBudget = document.querySelector("#referenceDailyBudget");
 const saveTestSettings = document.querySelector("#saveTestSettings");
 const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
 const settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
@@ -1149,22 +1151,39 @@ function renderReferenceStatus(status) {
   const value = status.settings || {};
   referenceMinVotes.value = value.min_votes ?? 100;
   referenceIncludeExpansions.checked = value.include_expansions !== false;
+  referenceMinWishing.value = value.min_wishing ?? 50;
+  referenceDailyBudget.value = value.daily_budget ?? 1500;
   const last = status.last_dump_import;
   const when = last?.imported_at ? formatBggSyncTime(last.imported_at) : "mai";
+  const worker = status.worker || {};
+  const sync = worker.last_error
+    ? `ultimo errore API: ${String(worker.last_error).slice(0, 120)}`
+    : worker.last_run
+      ? `aggiornamento API: ${formatBggSyncTime(worker.last_run)} · ${formatNumber(worker.budget_used || 0, 0)}/${formatNumber(worker.daily_budget || 0, 0)} richieste oggi`
+      : "aggiornamento API: mai eseguito (richiede il token BGG)";
   referenceStatus.textContent =
-    `${formatNumber(status.visible, 0)} titoli visibili su ${formatNumber(status.total, 0)} · ultimo import: ${when}`;
+    `${formatNumber(status.visible, 0)} titoli visibili su ${formatNumber(status.total, 0)} · ultimo import: ${when} · ${sync}`;
+}
+
+function readIntegerField(input, label) {
+  const value = Number.parseInt(input.value, 10);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} deve essere un numero intero ≥ 0.`);
+  }
+  return value;
 }
 
 async function saveReferenceSettings() {
   if (!referenceMinVotes || referenceMinVotes.value === "") return;
-  const minVotes = Number.parseInt(referenceMinVotes.value, 10);
-  if (!Number.isInteger(minVotes) || minVotes < 0) {
-    throw new Error("I voti minimi devono essere un numero intero ≥ 0.");
-  }
   await api("/api/reference/settings", {
     method: "PUT",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({min_votes: minVotes, include_expansions: referenceIncludeExpansions.checked}),
+    body: JSON.stringify({
+      min_votes: readIntegerField(referenceMinVotes, "I voti minimi"),
+      include_expansions: referenceIncludeExpansions.checked,
+      min_wishing: readIntegerField(referenceMinWishing, "Il wishing minimo"),
+      daily_budget: readIntegerField(referenceDailyBudget, "Le richieste al giorno"),
+    }),
   });
   renderReferenceStatus(await api("/api/reference/status"));
 }

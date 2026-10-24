@@ -28,7 +28,13 @@ DUMP_REQUIRED_COLUMNS = {
 
 MIN_VOTES_KEY = "bgg_reference_min_votes"
 INCLUDE_EXPANSIONS_KEY = "bgg_reference_include_expansions"
+MIN_WISHING_KEY = "bgg_reference_min_wishing"
+DAILY_BUDGET_KEY = "bgg_reference_daily_budget"
 DEFAULT_MIN_VOTES = 100
+DEFAULT_MIN_WISHING = 50
+MAX_MIN_WISHING = 10000
+DEFAULT_DAILY_BUDGET = 1500
+MAX_DAILY_BUDGET = 5000
 MIN_VOTES_MINIMUM = 0
 DUMP_WATCH_STATE_KEY = "dump_file_signature"
 
@@ -68,30 +74,70 @@ def _to_float(value: str | None) -> float | None:
 class ReferenceSettings:
     min_votes: int = DEFAULT_MIN_VOTES
     include_expansions: bool = True
+    min_wishing: int = DEFAULT_MIN_WISHING
+    daily_budget: int = DEFAULT_DAILY_BUDGET
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
+def _bounded_int(raw: str | None, default: int, low: int, high: int | None) -> int:
+    value = _to_int(raw)
+    if value is None or value < low or (high is not None and value > high):
+        return default
+    return value
+
+
 def load_reference_settings(database: Database) -> ReferenceSettings:
-    values = AppSettingsStore(database).get_many((MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY))
-    min_votes = _to_int(values[MIN_VOTES_KEY])
-    if min_votes is None or min_votes < MIN_VOTES_MINIMUM:
-        min_votes = DEFAULT_MIN_VOTES
-    include_expansions = values[INCLUDE_EXPANSIONS_KEY] != "0"
-    return ReferenceSettings(min_votes=min_votes, include_expansions=include_expansions)
+    values = AppSettingsStore(database).get_many(
+        (MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY, MIN_WISHING_KEY, DAILY_BUDGET_KEY)
+    )
+    return ReferenceSettings(
+        min_votes=_bounded_int(values[MIN_VOTES_KEY], DEFAULT_MIN_VOTES, MIN_VOTES_MINIMUM, None),
+        include_expansions=values[INCLUDE_EXPANSIONS_KEY] != "0",
+        min_wishing=_bounded_int(values[MIN_WISHING_KEY], DEFAULT_MIN_WISHING, 0, MAX_MIN_WISHING),
+        daily_budget=_bounded_int(values[DAILY_BUDGET_KEY], DEFAULT_DAILY_BUDGET, 0, MAX_DAILY_BUDGET),
+    )
 
 
 def save_reference_settings(database: Database, value: ReferenceSettings) -> ReferenceSettings:
     if value.min_votes < MIN_VOTES_MINIMUM:
         raise BggReferenceError(f"min_votes must be at least {MIN_VOTES_MINIMUM}")
+    if not 0 <= value.min_wishing <= MAX_MIN_WISHING:
+        raise BggReferenceError(f"min_wishing must be between 0 and {MAX_MIN_WISHING}")
+    if not 0 <= value.daily_budget <= MAX_DAILY_BUDGET:
+        raise BggReferenceError(f"daily_budget must be between 0 and {MAX_DAILY_BUDGET}")
     AppSettingsStore(database).set_many(
         {
             MIN_VOTES_KEY: (str(value.min_votes), False),
             INCLUDE_EXPANSIONS_KEY: ("1" if value.include_expansions else "0", False),
+            MIN_WISHING_KEY: (str(value.min_wishing), False),
+            DAILY_BUDGET_KEY: (str(value.daily_budget), False),
         }
     )
     return load_reference_settings(database)
+
+
+def get_sync_state(database: Database, key: str) -> str | None:
+    with database.connect() as connection:
+        row = connection.execute(
+            "SELECT value FROM bgg_reference_sync_state WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else None
+
+
+def set_sync_state(database: Database, key: str, value: str) -> None:
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO bgg_reference_sync_state (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, datetime.now(UTC).isoformat()),
+        )
 
 
 @dataclass(frozen=True)
@@ -314,24 +360,10 @@ class BggReferenceImporter:
         return result
 
     def _state(self, key: str) -> str | None:
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT value FROM bgg_reference_sync_state WHERE key = ?", (key,)
-            ).fetchone()
-        return row["value"] if row else None
+        return get_sync_state(self.database, key)
 
     def _set_state(self, key: str, value: str) -> None:
-        with self.database.transaction() as connection:
-            connection.execute(
-                """
-                INSERT INTO bgg_reference_sync_state (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = excluded.updated_at
-                """,
-                (key, value, datetime.now(UTC).isoformat()),
-            )
+        set_sync_state(self.database, key, value)
 
 
 def _fts_query(query: str) -> str | None:
@@ -435,7 +467,7 @@ class BggReferenceCatalog:
                 except Exception as exc:  # network, XML or rate-limit failures
                     detail_error = f"{type(exc).__name__}: {exc}"[:300]
                 else:
-                    self._store_api_detail(bgg_id, metadata, raw_xml)
+                    self.store_api_detail(bgg_id, metadata, raw_xml)
                     row = self._detail_row(bgg_id)
         try:
             details = json.loads(row["details_json"] or "{}")
@@ -473,7 +505,7 @@ class BggReferenceCatalog:
                 (bgg_id,),
             ).fetchone()
 
-    def _store_api_detail(self, bgg_id: int, metadata: dict[str, Any], raw_xml: str) -> None:
+    def store_api_detail(self, bgg_id: int, metadata: dict[str, Any], raw_xml: str) -> None:
         now = datetime.now(UTC).isoformat()
         alt_names = "\n".join(metadata.get("alternate_titles") or [])
         with self.database.connect() as connection:
@@ -487,7 +519,7 @@ class BggReferenceCatalog:
                     wishing = ?, owned_count = ?,
                     thumbnail_url = ?, image_url = ?, description = ?,
                     alt_names = ?, details_json = ?,
-                    source = 'api', api_checked_at = ?, updated_at = ?
+                    source = 'api', api_checked_at = ?, updated_at = ?, removed_at = NULL
                 WHERE bgg_id = ?
                 """,
                 (

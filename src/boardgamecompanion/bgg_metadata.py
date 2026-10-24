@@ -198,17 +198,29 @@ class BggApiClient:
         return items[identifier]
 
     def thing_with_xml(self, bgg_id: int) -> tuple[dict[str, Any], str]:
-        """Like ``thing`` but also returns the item's complete XML, unmodified."""
+        """Like ``thing`` but also returns the item's complete XML."""
         identifier = int(bgg_id)
-        if identifier <= 0:
-            raise ValueError("BGG ID must be positive")
-        content = self._request_things((identifier,))
-        items = _parse_things(content, expected_bgg_ids={identifier})
+        items = self.things_with_xml([identifier])
         if identifier not in items:
             raise BggMetadataError("BGG API did not return exactly one item")
+        return items[identifier]
+
+    def things_with_xml(
+        self, bgg_ids: list[int] | tuple[int, ...]
+    ) -> dict[int, tuple[dict[str, Any], str]]:
+        """One request for up to MAX_THING_IDS IDs; missing IDs are simply absent."""
+        identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
+        if not identifiers or len(identifiers) > MAX_THING_IDS:
+            raise ValueError(f"BGG thing batch must contain between 1 and {MAX_THING_IDS} IDs")
+        if any(value <= 0 for value in identifiers):
+            raise ValueError("BGG IDs must be positive")
+        content = self._request_things(identifiers)
+        parsed = _parse_things(content, expected_bgg_ids=set(identifiers))
         root = ET.fromstring(content)
-        item = next(node for node in root.findall("item") if node.attrib.get("id") == str(identifier))
-        return items[identifier], ET.tostring(item, encoding="unicode")
+        return {
+            int(node.attrib["id"]): (parsed[int(node.attrib["id"])], ET.tostring(node, encoding="unicode"))
+            for node in root.findall("item")
+        }
 
     def things(self, bgg_ids: list[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
         identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
