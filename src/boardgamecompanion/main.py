@@ -17,6 +17,7 @@ from boardgamecompanion.answer_generation import (
     AnswerProviderError,
     AnswerSourceNotReady,
     GeminiGenerationProvider,
+    CloudGenerationProvider,
     LMStudioGenerationProvider,
     OllamaGenerationProvider,
 )
@@ -89,6 +90,10 @@ from boardgamecompanion.routers.personal import router as personal_router
 from boardgamecompanion.routers.search import router as search_router
 from boardgamecompanion.routers.reference import router as reference_router
 from boardgamecompanion.routers.wishlist import router as wishlist_router
+from boardgamecompanion.game_description import (
+    GameDescriptionError,
+    GameDescriptionService,
+)
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     DescriptionTranslationService,
@@ -133,6 +138,7 @@ from boardgamecompanion.embedding_retrieval import (
     OllamaEmbeddingProvider,
 )
 from boardgamecompanion.service_factories import (
+    get_bgg_api_client,
     get_bgg_metadata_store,
     get_crowdfunding_service,
     get_expansion_service,
@@ -250,6 +256,12 @@ def get_description_translation_service() -> DescriptionTranslationService:
     return DescriptionTranslationService(database)
 
 
+def get_game_description_service() -> GameDescriptionService:
+    database = get_database()
+    database.initialize()
+    return GameDescriptionService(database, bgg_client_factory=get_bgg_api_client)
+
+
 def get_youtube_tutorial_service() -> YouTubeTutorialService:
     database = get_database()
     database.initialize()
@@ -274,7 +286,12 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     )
     fallback_providers: list = []
     rag = resolve_rag_settings(database)
-    if rag.gemini_api_key:
+    if rag.web_provider == "deepseek":
+        # Discovery remains review-only. Never bypass the guarded PDF acquisition path.
+        from boardgamecompanion.cloud_ai import cloud_client
+        from boardgamecompanion.deepseek_search import DeepSeekRulebookProvider
+        fallback_providers.append(DeepSeekRulebookProvider(cloud_client(rag, "deepseek", rate_limiter=limiter)))
+    elif rag.gemini_api_key:
         fallback_providers.append(
             GeminiBggFileProvider(
                 base_url=rag.gemini_url,
@@ -377,8 +394,8 @@ class RagSettingsUpdate(BaseModel):
     embedding_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
         min_length=1, max_length=3
     )
-    generation_provider_order: list[Literal["ollama", "lmstudio", "gemini"]] = Field(
-        min_length=1, max_length=3
+    generation_provider_order: list[Literal["ollama", "lmstudio", "gemini", "deepseek", "groq"]] = Field(
+        min_length=1, max_length=5
     )
     ollama_url: str | None = Field(default=None, max_length=4096)
     ollama_embedding_model: str | None = Field(default=None, max_length=500)
@@ -400,6 +417,17 @@ class RagSettingsUpdate(BaseModel):
     clear_gemini_api_key: bool = False
     gemini_embedding_model: str | None = Field(default=None, max_length=500)
     gemini_generation_model: str | None = Field(default=None, max_length=500)
+    deepseek_api_key: str | None = Field(default=None, max_length=4096)
+    clear_deepseek_api_key: bool = False
+    deepseek_generation_model: str | None = Field(default=None, max_length=200)
+    groq_api_key: str | None = Field(default=None, max_length=4096)
+    clear_groq_api_key: bool = False
+    groq_generation_model: str | None = Field(default=None, max_length=200)
+    web_provider: Literal["auto", "deepseek", "gemini"] | None = None
+
+
+class CloudProviderVerification(BaseModel):
+    api_key: str | None = Field(default=None, max_length=4096)
 
 
 class RetrievalPayload(BaseModel):
@@ -725,7 +753,30 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
-app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser must revalidate (ETag) before reuse.
+
+    Without Cache-Control browsers pick their own freshness, so after a deploy
+    they may keep running the previous JavaScript for hours. Revalidating costs a
+    bodiless 304 per file; the versioned zxing bundle never changes and stays cached.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+                if path.startswith("zxing-browser-") and path.endswith(".min.js")
+                else "no-cache"
+            )
+        return response
+
+
+def _web_page() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+app.mount("/static", RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
 app.include_router(diagnostics_router)
 app.include_router(expansions_router)
@@ -738,82 +789,82 @@ app.include_router(reference_router)
 
 @app.get("/", include_in_schema=False)
 def web_home() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/games/{bgg_id}", include_in_schema=False)
 def web_game(bgg_id: int) -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/lists", include_in_schema=False)
 def web_lists() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/wishlist", include_in_schema=False)
 def web_wishlist() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/reviews", include_in_schema=False)
 def web_reviews() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/updates", include_in_schema=False)
 def web_updates() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/discovery", include_in_schema=False)
 def web_discovery() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/rankings", include_in_schema=False)
 def web_rankings() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/play-next", include_in_schema=False)
 def web_play_next() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/new", include_in_schema=False)
 def web_new() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/completed", include_in_schema=False)
 def web_completed() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/crowdfunding", include_in_schema=False)
 def web_crowdfunding() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/suggestions", include_in_schema=False)
 def web_suggestions() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/explore", include_in_schema=False)
 def web_explore() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/categories", include_in_schema=False)
 def web_categories() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/mechanics", include_in_schema=False)
 def web_mechanics() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return _web_page()
 
 
 @app.get("/health", tags=["system"])
@@ -1070,6 +1121,8 @@ def get_game(bgg_id: int) -> dict[str, object]:
     game["description_it"] = (
         cached_translation["translated_text"] if cached_translation else None
     )
+    cached_ai_description = GameDescriptionService(database).get_cached(bgg_id)
+    game["description_ai"] = cached_ai_description
     return game
 
 
@@ -1120,6 +1173,54 @@ def translate_game_description_it(bgg_id: int) -> dict[str, object]:
     try:
         return get_description_translation_service().translate(bgg_id)
     except DescriptionTranslationError as exc:
+        detail = str(exc)
+        if "not found" in detail:
+            code = 404
+        elif "No BGG description" in detail:
+            code = 409
+        else:
+            code = 503
+        raise HTTPException(status_code=code, detail=detail) from exc
+
+
+class GameDescriptionPromptUpdate(BaseModel):
+    prompt: str
+
+
+@app.get("/api/settings/game-description-prompt", tags=["settings"])
+def get_game_description_prompt() -> dict[str, object]:
+    return get_game_description_service().prompt_settings()
+
+
+@app.put("/api/settings/game-description-prompt", tags=["settings"])
+def update_game_description_prompt(payload: GameDescriptionPromptUpdate) -> dict[str, object]:
+    try:
+        return get_game_description_service().save_prompt(payload.prompt)
+    except GameDescriptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/games/{bgg_id}/description-ai", tags=["catalog"])
+def get_game_description_ai(bgg_id: int) -> dict[str, object]:
+    try:
+        return get_game_description_service().status(bgg_id)
+    except GameDescriptionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/games/{bgg_id}/description-ai/generate", tags=["catalog"])
+def generate_game_description_ai(
+    bgg_id: int,
+    force: bool = Query(default=False),
+    provider: Literal["gemini", "deepseek", "groq", "lmstudio", "ollama"] | None = Query(default=None),
+    model: str | None = Query(default=None, max_length=200),
+    preview: bool = Query(default=False),
+) -> dict[str, object]:
+    try:
+        return get_game_description_service().generate(
+            bgg_id, force=force, provider=provider, model=model, preview=preview
+        )
+    except GameDescriptionError as exc:
         detail = str(exc)
         if "not found" in detail:
             code = 404
@@ -1733,7 +1834,10 @@ def get_answer_generation_service() -> AnswerGenerationService:
     database.initialize()
     rag = resolve_rag_settings(database)
     selected = rag.generation_provider
-    if selected == "lmstudio":
+    if selected in {"deepseek", "groq"}:
+        from boardgamecompanion.cloud_ai import cloud_client
+        provider = CloudGenerationProvider(cloud_client(rag))
+    elif selected == "lmstudio":
         if not rag.lmstudio_url or not rag.lmstudio_generation_model:
             raise HTTPException(
                 status_code=503,
@@ -2272,10 +2376,29 @@ def update_rag_settings(payload: RagSettingsUpdate) -> dict[str, object]:
             clear_gemini_api_key=payload.clear_gemini_api_key,
             gemini_embedding_model=payload.gemini_embedding_model,
             gemini_generation_model=payload.gemini_generation_model,
+            deepseek_api_key=payload.deepseek_api_key,
+            clear_deepseek_api_key=payload.clear_deepseek_api_key,
+            deepseek_generation_model=payload.deepseek_generation_model,
+            groq_api_key=payload.groq_api_key,
+            clear_groq_api_key=payload.clear_groq_api_key,
+            groq_generation_model=payload.groq_generation_model,
+            web_provider=payload.web_provider,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return resolved.public_dict()
+
+
+@app.post("/api/settings/ai/{provider}/verify", tags=["settings"])
+def verify_cloud_provider(provider: Literal["deepseek", "groq"], payload: CloudProviderVerification) -> dict:
+    from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+    database = get_database()
+    database.initialize()
+    try:
+        client = cloud_client(resolve_rag_settings(database), provider, api_key=payload.api_key)
+        return {"provider": provider, "verified": True, "models": client.models()}
+    except (CloudAIError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/system/lmstudio/wake", tags=["system"])

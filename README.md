@@ -87,6 +87,73 @@ BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
 
 `BGC_LMSTUDIO_API_KEY` is optional when LM Studio authentication is disabled. `BGC_LMSTUDIO_EMBEDDING_DIMENSIONS`, batch size, timeouts and TLS verification can also be overridden through the corresponding `BGC_LMSTUDIO_*` settings.
 
+### Descrizioni dei giochi
+
+La prima volta che si apre la scheda di un gioco, l'AI scrive in italiano una
+descrizione pensata per aiutare a scegliere: ambientazione, un breve cenno al
+funzionamento, ricezione del pubblico, punti di forza e limiti, in prosa senza tono
+pubblicitario. Le fonti sono: testo dell'editore e metadati BGG; alcuni passaggi del
+regolamento indicizzato (solo per capire il tipo di gioco, letti direttamente dal
+database, senza embedding né Wake-on-LAN); una sintesi di un campione bilanciato di
+commenti degli utenti BGG, ottenuta via XML API2 con il token configurato (i commenti
+non vengono salvati né citati). Senza regolamento o senza token BGG la descrizione si
+scrive con le fonti disponibili. La scheda mostra sotto il testo le fonti usate,
+il provider e il modello.
+
+Ogni gioco riceve un profilo di stile (angolo di apertura, ordine degli argomenti,
+registro) che ruota col numero di descrizioni già salvate, e il modello vede gli
+incipit e le frasi finali recenti da non ripetere. Bozze con formule promozionali,
+inviti al lettore, sezioni etichettate o incipit già usati vengono riscritte una
+volta e poi scartate. Il testo è in `board_game_ai_descriptions` (con `sources_json`)
+e si rigenera se cambiano prompt, descrizione BGG, dati stabili o regolamento (non
+rating o peso); se una fonte è fallita per un errore passeggero (per esempio BGG
+non raggiungibile) la descrizione viene rigenerata alla prima apertura dopo 6 ore.
+Se la generazione non riesce, la scheda mostra la traduzione del testo
+dell'editore. Il prompt si modifica da Impostazioni → AI e
+provider («Salva come modello», «Ripristina», «Originale»); i provider seguono la
+priorità «Risposte e testi».
+
+### DeepSeek e Groq
+
+Da **Impostazioni → AI e provider**, le priorità si scelgono con caselle e frecce:
+**Indice dei regolamenti** mantiene gli embedding esistenti; **Risposte e testi**
+controlla risposte RAG, traduzioni, descrizioni dei giochi, riassunti, suggerimenti
+e assistente catalogo.
+Il primo provider è attivo per il RAG; gli altri restano selezionabili senza
+riscrivere i nomi. Traduzioni, descrizioni e testi dei suggerimenti provano, in caso di errore,
+solo i provider presenti nelle priorità; quelli esclusi non vengono chiamati.
+I provider preesistenti restano disponibili.
+
+Per DeepSeek o Groq: incollare la chiave, usare **Verifica chiave e carica modelli**,
+scegliere il modello dall'elenco e premere **Usa DeepSeek** / **Usa Groq**, poi **Salva**.
+La verifica legge l'elenco modelli e non salva la chiave né avvia generazioni.
+La chiave vuota conserva quella esistente; non viene restituita al browser.
+La selezione DeepSeek imposta anche la ricerca web, senza cambiare gli embedding.
+Groq gestisce le funzioni testuali; la ricerca web rimane selezionabile separatamente
+fra Gemini e DeepSeek. In modalità automatica usa il primo di questi due nelle priorità.
+
+Configurazione alternativa tramite ambiente:
+
+```text
+BGC_GENERATION_PROVIDER=deepseek
+BGC_DEEPSEEK_API_KEY=<chiave>
+BGC_DEEPSEEK_GENERATION_MODEL=deepseek-flash
+# Per Groq:
+BGC_GROQ_API_KEY=<chiave>
+BGC_GROQ_GENERATION_MODEL=openai/gpt-oss-120b
+```
+
+Gli endpoint cloud sono fissi, HTTPS, senza redirect o proxy d'ambiente.
+DeepSeek usa JSON Output e thinking disattivato; Groq limita il ragionamento
+sui modelli GPT-OSS. Le risposte RAG conservano le validazioni di pagina e citazione.
+La ricerca dei regolamenti è limitata a due query e tre letture: i link devono
+comparire nei risultati/pagine e l'identità del titolo deve coincidere. I candidati
+restano non ufficiali e in revisione (40 per scoperta generica, 70 per comunità BGG),
+senza promozione automatica dell'identificatore BGG o della fiducia.
+I prezzi richiedono URL di negozi ammessi e una citazione testuale contenente
+l'importo in euro nella pagina recuperata. Nessun download PDF passa attraverso
+Search/Fetch: acquisizione e provenienza restano gestite dal percorso protetto esistente.
+
 ### Gemini
 
 Gemini uses Google's HTTPS Gemini API directly through `httpx`; no Google SDK is required. The API key is passed only in the `x-goog-api-key` request header and must be supplied through runtime configuration.

@@ -1161,8 +1161,12 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         page.locator("#bggUsername").fill("browser-user")
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
         page.get_by_role("tab", name="AI e provider").click()
-        page.locator("#ragEmbeddingOrder").fill("lmstudio,ollama")
-        page.locator("#ragGenerationOrder").fill("lmstudio,gemini")
+        page.locator("#ragEmbeddingOrder").get_by_role("checkbox", name="Usa LM Studio", exact=True).check()
+        page.locator("#ragEmbeddingOrder").get_by_role("button", name="Sposta LM Studio su", exact=True).click()
+        page.locator("#ragGenerationOrder").get_by_role("checkbox", name="Usa LM Studio", exact=True).check()
+        page.locator("#ragGenerationOrder").get_by_role("button", name="Sposta LM Studio su", exact=True).click()
+        page.locator("#ragGenerationOrder").get_by_role("checkbox", name="Usa Gemini", exact=True).check()
+        page.locator("#ragGenerationOrder").get_by_role("checkbox", name="Usa Ollama", exact=True).uncheck()
         page.locator("#lmstudioSettings summary").click()
         page.locator("#geminiSettings summary").click()
         page.locator("#lmstudioUrl").fill("http://lmstudio.test:1234")
@@ -3233,5 +3237,49 @@ def test_notification_center_badge_and_read_navigation(browser, live_server):
         page.locator(".notification-item").click()
         expect(page).to_have_url(re.compile(r"/games/900001\?expansion=990001$"))
         assert read_calls
+    finally:
+        context.close()
+
+
+def test_cloud_ai_settings_choose_models_and_preserve_index(browser, live_server):
+    context, page = new_page(browser)
+    errors = []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.route('**/api/settings/ai/*/verify', lambda route: route.fulfill(
+        content_type='application/json', body=json.dumps({
+            'verified': True,
+            'models': [{'id': 'test-model-v1', 'name': 'Modello verificato'}],
+        })))
+    try:
+        page.goto(live_server)
+        before = page.request.get(f'{live_server}/api/settings/rag').json()['embedding_provider_order']
+        page.get_by_role('button', name='Impostazioni', exact=True).click()
+        page.get_by_role('tab', name='AI e provider', exact=True).click()
+        assert page.locator('#ragEmbeddingOrder input[type=text]').count() == 0
+        for provider, label in [('deepseek', 'DeepSeek'), ('groq', 'Groq')]:
+            page.locator(f'#{provider}Settings summary').click()
+            page.locator(f'#{provider}ApiKey').fill(f'{provider}-browser-secret')
+            page.locator(f'#{provider}Verify').click()
+            expect(page.locator(f'#{provider}VerifyStatus')).to_contain_text('Chiave verificata')
+            expect(page.locator(f'#{provider}GenerationModel')).to_have_value('test-model-v1')
+            page.locator(f'#{provider}Use').click()
+        expect(page.locator('#aiWebProvider')).to_have_value('deepseek')
+        page.get_by_role('button', name='Salva', exact=True).click()
+        expect(page.locator('#settingsResult')).to_contain_text('Impostazioni salvate')
+        response = page.request.get(f'{live_server}/api/settings/rag')
+        data = response.json()
+        assert 'browser-secret' not in response.text()
+        assert data['embedding_provider_order'] == before
+        assert data['generation_provider_order'][:2] == ['groq', 'deepseek']
+        assert data['web_provider'] == 'deepseek'
+        for provider in ['groq', 'deepseek']:
+            expect(page.locator(f'#{provider}ApiKey')).to_have_value('')
+            assert data['providers'][provider]['generation_model'] == 'test-model-v1'
+        # Ordering also works by keyboard, and does not duplicate providers.
+        up = page.locator('#ragGenerationOrder').get_by_role('button', name='Sposta DeepSeek su', exact=True)
+        up.focus()
+        page.keyboard.press('Enter')
+        assert json.loads(page.locator('#ragGenerationOrder').get_attribute('data-order'))[0] == 'deepseek'
+        assert not errors
     finally:
         context.close()

@@ -279,12 +279,14 @@ def save_crowdfunding_settings(
 
 
 RAG_PROVIDERS = ("ollama", "lmstudio", "gemini")
+GENERATION_PROVIDERS = (*RAG_PROVIDERS, "deepseek", "groq")
 
 
 def _normalize_provider_order(
     value: object,
     *,
     default: tuple[str, ...],
+    allowed: tuple[str, ...] = RAG_PROVIDERS,
 ) -> tuple[str, ...]:
     if value is None:
         return default
@@ -297,9 +299,9 @@ def _normalize_provider_order(
     if not isinstance(raw, (list, tuple)):
         raise ValueError("RAG provider order must be a list")
     result = tuple(str(item).strip().lower() for item in raw)
-    if not result or len(result) > len(RAG_PROVIDERS):
-        raise ValueError("RAG provider order must contain between 1 and 3 providers")
-    if len(set(result)) != len(result) or any(item not in RAG_PROVIDERS for item in result):
+    if not result or len(result) > len(allowed):
+        raise ValueError(f"RAG provider order must contain between 1 and {len(allowed)} providers")
+    if len(set(result)) != len(result) or any(item not in allowed for item in result):
         raise ValueError("RAG provider order contains duplicates or unsupported providers")
     return result
 
@@ -328,6 +330,20 @@ class ResolvedRagSettings:
     gemini_api_key_source: str | None
     gemini_embedding_model: str
     gemini_generation_model: str
+    deepseek_api_key: str | None = None
+    deepseek_api_key_source: str | None = None
+    deepseek_generation_model: str = "deepseek-flash"
+    groq_api_key: str | None = None
+    groq_api_key_source: str | None = None
+    groq_generation_model: str = "openai/gpt-oss-120b"
+    web_provider_preference: str = "auto"
+
+    @property
+    def web_provider(self) -> str:
+        if self.web_provider_preference != "auto":
+            return self.web_provider_preference
+        return next((p for p in self.generation_provider_order
+                     if p in {"deepseek", "gemini"}), "gemini")
 
     @property
     def embedding_provider(self) -> str:
@@ -344,6 +360,8 @@ class ResolvedRagSettings:
             "effective_embedding_provider": self.embedding_provider,
             "effective_generation_provider": self.generation_provider,
             "automatic_fallback": False,
+            "web_provider": self.web_provider,
+            "web_provider_preference": self.web_provider_preference,
             "providers": {
                 "ollama": {
                     "url": self.ollama_url,
@@ -364,6 +382,12 @@ class ResolvedRagSettings:
                     "wol_broadcast": self.lmstudio_wol_broadcast,
                     "wol_port": self.lmstudio_wol_port,
                 },
+                **{provider: {
+                    "api_key_configured": bool(getattr(self, f"{provider}_api_key")),
+                    "api_key_source": getattr(self, f"{provider}_api_key_source"),
+                    "generation_model": getattr(self, f"{provider}_generation_model"),
+                    "capabilities": ["generation", "web_search"] if provider == "deepseek" else ["generation"],
+                } for provider in ("deepseek", "groq")},
                 "gemini": {
                     "url": self.gemini_url,
                     "api_key_configured": bool(self.gemini_api_key),
@@ -399,6 +423,8 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
         "rag_gemini_embedding_model",
         "rag_gemini_generation_model",
     )
+    keys += ("rag_deepseek_api_key", "rag_deepseek_generation_model",
+             "rag_groq_api_key", "rag_groq_generation_model", "rag_web_provider")
     values = store.get_many(keys)
 
     stored_lmstudio_key = values["rag_lmstudio_api_key"]
@@ -406,7 +432,19 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
     lmstudio_api_key = stored_lmstudio_key or settings.lmstudio_api_key
     gemini_api_key = stored_gemini_key or settings.gemini_api_key
 
+    cloud_values = {}
+    for provider in ("deepseek", "groq"):
+        stored = values[f"rag_{provider}_api_key"]
+        runtime = getattr(settings, f"{provider}_api_key")
+        cloud_values[f"{provider}_api_key"] = stored or runtime
+        cloud_values[f"{provider}_api_key_source"] = "stored" if stored else "environment" if runtime else None
+        cloud_values[f"{provider}_generation_model"] = values[f"rag_{provider}_generation_model"] or getattr(settings, f"{provider}_generation_model")
+    web_preference = values["rag_web_provider"] or "auto"
+    if web_preference not in {"auto", "deepseek", "gemini"}:
+        raise ValueError("Provider ricerca web non valido")
     return ResolvedRagSettings(
+        **cloud_values,
+        web_provider_preference=web_preference,
         embedding_provider_order=_normalize_provider_order(
             values["rag_embedding_provider_order"],
             default=(settings.effective_embedding_provider,),
@@ -414,6 +452,7 @@ def resolve_rag_settings(database: Database) -> ResolvedRagSettings:
         generation_provider_order=_normalize_provider_order(
             values["rag_generation_provider_order"],
             default=(settings.effective_generation_provider,),
+            allowed=GENERATION_PROVIDERS,
         ),
         ollama_url=values["rag_ollama_url"] or settings.ollama_url,
         ollama_embedding_model=(
@@ -529,6 +568,13 @@ def save_rag_settings(
     clear_gemini_api_key: bool,
     gemini_embedding_model: str | None,
     gemini_generation_model: str | None,
+    deepseek_api_key: str | None = None,
+    clear_deepseek_api_key: bool = False,
+    deepseek_generation_model: str | None = None,
+    groq_api_key: str | None = None,
+    clear_groq_api_key: bool = False,
+    groq_generation_model: str | None = None,
+    web_provider: str | None = None,
 ) -> ResolvedRagSettings:
     embedding_order = _normalize_provider_order(
         embedding_provider_order,
@@ -537,6 +583,7 @@ def save_rag_settings(
     generation_order = _normalize_provider_order(
         generation_provider_order,
         default=(settings.effective_generation_provider,),
+        allowed=GENERATION_PROVIDERS,
     )
     store = AppSettingsStore(database)
     values = {
@@ -576,5 +623,21 @@ def save_rag_settings(
     elif gemini_api_key is not None and gemini_api_key.strip():
         updates["rag_gemini_api_key"] = (gemini_api_key.strip(), True)
 
+    for provider, key, clear, model in (
+        ("deepseek", deepseek_api_key, clear_deepseek_api_key, deepseek_generation_model),
+        ("groq", groq_api_key, clear_groq_api_key, groq_generation_model),
+    ):
+        if clear:
+            updates[f"rag_{provider}_api_key"] = (None, True)
+        elif key and key.strip():
+            updates[f"rag_{provider}_api_key"] = (key.strip(), True)
+        if model is not None:
+            from boardgamecompanion.cloud_ai import CloudAIClient
+            CloudAIClient(provider=provider, api_key=None, model=model)
+            updates[f"rag_{provider}_generation_model"] = (model, False)
+    if web_provider is not None:
+        if web_provider not in {"auto", "deepseek", "gemini"}:
+            raise ValueError("Provider ricerca web non valido")
+        updates["rag_web_provider"] = (web_provider, False)
     store.set_many(updates)
     return resolve_rag_settings(database)

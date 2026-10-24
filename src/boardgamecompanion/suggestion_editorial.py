@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+
 import hashlib
 import json
 from pathlib import Path
@@ -319,16 +321,20 @@ class SuggestionEditorialService:
         items: list[dict[str, Any]],
     ) -> tuple[dict[int, dict[str, str]], str, str]:
         rag = resolve_rag_settings(self.database)
-        provider_order = [rag.generation_provider]
-        if rag.generation_provider != "gemini" and rag.gemini_api_key:
-            provider_order.append("gemini")
+        provider_order = getattr(rag, "generation_provider_order", (rag.generation_provider,))
         payload = {
             "items": [_stable_payload(item) for item in items],
         }
         failures: list[str] = []
         for provider in provider_order:
             try:
-                if provider == "gemini":
+                if provider in {"deepseek", "groq"}:
+                    try:
+                        structured = cloud_client(rag, provider).structured(SYSTEM_PROMPT, payload, schema=EDITORIAL_SCHEMA)
+                        model = getattr(rag, f"{provider}_generation_model")
+                    except CloudAIError as exc:
+                        raise SuggestionEditorialError(str(exc)) from exc
+                elif provider == "gemini":
                     structured, model = self._gemini(payload, rag)
                 elif provider == "lmstudio":
                     structured, model = self._lmstudio(payload, rag)

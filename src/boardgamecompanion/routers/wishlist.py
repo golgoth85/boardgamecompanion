@@ -49,7 +49,7 @@ def refresh_wishlist_prices(item_id: str) -> dict[str, object]:
     if provider is None:
         raise HTTPException(
             status_code=409,
-            detail="Configura la chiave Gemini nelle impostazioni per cercare i prezzi.",
+            detail="Configura la chiave del provider di ricerca web nelle impostazioni AI per cercare i prezzi.",
         )
     try:
         offers = provider.search(title=item["title"], year=item["year_published"])

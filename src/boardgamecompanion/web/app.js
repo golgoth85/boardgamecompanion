@@ -1,4 +1,5 @@
 import {api} from "./api-client.js";
+import {renderProviderPriority, readProviderPriority, setupCloudProviderControls, setupDescriptionPrompt, applyCloudProviderSettings, cloudProviderPayload} from "./ai-settings.js";
 import {personalStatusLabel, starRatingMarkup} from "./personal-components.js";
 import {shellRouteKey, shellSectionLabels} from "./routing.js";
 import {
@@ -259,6 +260,8 @@ let importInProgress = false;
 let settingsBusy = false;
 let currentBggSettings = null;
 let currentRagSettings = null;
+setupCloudProviderControls({api, generationControl: ragGenerationOrder, onSelect: (label) => showToast(`${label} selezionato. Salva impostazioni per applicare.`)});
+setupDescriptionPrompt({api});
 let currentYoutubeSettings = null;
 let currentCrowdfundingSettings = null;
 let copyBusy = false;
@@ -975,8 +978,9 @@ function applyRagSettingsToForm(data) {
   const lmstudio = providers.lmstudio || {};
   const gemini = providers.gemini || {};
 
-  ragEmbeddingOrder.value = (data.embedding_provider_order || []).join(",");
-  ragGenerationOrder.value = (data.generation_provider_order || []).join(",");
+  renderProviderPriority(ragEmbeddingOrder, ["lmstudio", "ollama", "gemini"], data.embedding_provider_order);
+  renderProviderPriority(ragGenerationOrder, ["deepseek", "groq", "lmstudio", "ollama", "gemini"], data.generation_provider_order);
+  applyCloudProviderSettings(data);
   ollamaUrl.value = ollama.url || "";
   ollamaEmbeddingModel.value = ollama.embedding_model || "";
   ollamaGenerationModel.value = ollama.generation_model || "";
@@ -1008,22 +1012,6 @@ function applyRagSettingsToForm(data) {
     : "Nessuna Gemini API key configurata.";
 }
 
-function parseProviderOrder(value, label) {
-  const allowed = new Set(["ollama", "lmstudio", "gemini"]);
-  const result = String(value || "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  if (!result.length || result.length > 3) {
-    throw new Error(`${label}: indica da 1 a 3 provider.`);
-  }
-  if (new Set(result).size !== result.length || result.some((item) => !allowed.has(item))) {
-    throw new Error(
-      `${label}: usa solo ollama, lmstudio, gemini senza duplicati.`,
-    );
-  }
-  return result;
-}
 
 async function openSettingsDialog(initialTab = "general") {
   if (settingsCollapseExpansions) {
@@ -1066,14 +1054,9 @@ async function persistSettings({verifyAfter = false} = {}) {
 
   try {
     const ragPayload = {
-      embedding_provider_order: parseProviderOrder(
-        ragEmbeddingOrder.value,
-        "Priorità embedding",
-      ),
-      generation_provider_order: parseProviderOrder(
-        ragGenerationOrder.value,
-        "Priorità generation",
-      ),
+      embedding_provider_order: readProviderPriority(ragEmbeddingOrder),
+      generation_provider_order: readProviderPriority(ragGenerationOrder),
+      ...cloudProviderPayload(),
       ollama_url: ollamaUrl.value.trim() || null,
       ollama_embedding_model: ollamaEmbeddingModel.value.trim() || null,
       ollama_generation_model: ollamaGenerationModel.value.trim() || null,
@@ -3283,34 +3266,113 @@ function setupRagPanel(bggId, documentItems) {
   void refreshRagIndexStatus(bggId, documentItems);
 }
 
-async function ensureItalianDescription(bggId) {
+function descriptionSourcesText(description) {
+  if (!description?.text) return "";
+  const sources = description.sources || {};
+  const parts = ["descrizione dell'editore e dati BGG"];
+  if (sources.rulebook?.pages?.length) parts.push(`regolamento (pp. ${sources.rulebook.pages.join(", ")})`);
+  if (sources.community?.comments_sampled) {
+    parts.push(`sintesi di ${sources.community.comments_sampled} commenti BGG su ${sources.community.comments_total}`);
+  }
+  const author = [description.provider, description.model].filter(Boolean).join(" · ");
+  return `Fonti: ${parts.join(" · ")}.${author ? ` Scritta da ${author}.` : ""}`;
+}
+
+function showDescriptionSources(description) {
+  const node = document.querySelector("#gameDescriptionSources");
+  const text = descriptionSourcesText(description);
+  if (!node?.isConnected || !text) return;
+  node.textContent = text;
+  node.hidden = false;
+}
+
+// The description (and the AI text built from it) needs the BGG publisher text:
+// fetch the BGG metadata first when it is not stored yet.
+async function ensureDescriptionSource(bggId) {
+  const status = await api(`/api/games/${bggId}/description-it`);
+  if (status.source_available) return status;
+  const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
+  const cover = document.querySelector(".game-summary-cover .detail-cover");
+  if (cover?.isConnected && metadata.cover_url) {
+    const placeholder = cover.querySelector(".cover-image, .cover-initials");
+    if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+  }
+  return api(`/api/games/${bggId}/description-it`);
+}
+
+async function loadItalianTranslation(bggId) {
+  const status = await ensureDescriptionSource(bggId);
+  if (status.translation?.translated_text) return status.translation.translated_text;
+  if (!status.source_available) return "";
+  const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
+  return translated.translation?.translated_text || "";
+}
+
+function setDescriptionBusy(busy) {
+  const button = document.querySelector("#regenerateDescription");
+  if (!button?.isConnected) return;
+  button.disabled = busy;
+  const label = button.querySelector("span");
+  if (label) label.textContent = busy ? "Scrittura in corso…" : "Rigenera descrizione";
+}
+
+async function regenerateGameDescription(bggId) {
   const node = document.querySelector("#gameDescriptionText");
-  if (!node?.isConnected || node.dataset.ready === "true" || navigator.webdriver) return;
+  if (!node?.isConnected) return;
+  setDescriptionBusy(true);
+  node.setAttribute("aria-busy", "true");
   try {
-    let status = await api(`/api/games/${bggId}/description-it`);
-    if (!status.source_available) {
-      const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
-      const cover = document.querySelector(".game-summary-cover .detail-cover");
-      if (cover?.isConnected && metadata.cover_url) {
-        const placeholder = cover.querySelector(".cover-image, .cover-initials");
-        if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
-      }
-      status = await api(`/api/games/${bggId}/description-it`);
+    const result = await api(`/api/games/${bggId}/description-ai/generate?force=true`, {method: "POST"});
+    const text = result.description?.text;
+    if (text && node.isConnected) {
+      node.textContent = text;
+      node.dataset.source = "ai";
+      showDescriptionSources(result.description);
+      showToast("Descrizione rigenerata.");
     }
-    if (status.translation?.translated_text) {
-      node.textContent = status.translation.translated_text;
-      node.dataset.ready = "true";
-      return;
-    }
-    const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
-    if (translated.translation?.translated_text && node.isConnected) {
-      node.textContent = translated.translation.translated_text;
-      node.dataset.ready = "true";
+  } catch (error) {
+    // The current text stays on screen: it is only replaced once a new one exists.
+    showToast(`Rigenerazione non riuscita: ${error.message}`, true);
+  } finally {
+    node.removeAttribute("aria-busy");
+    setDescriptionBusy(false);
+  }
+}
+
+// The AI description is written the first time a game page is opened. Until it is
+// ready the stored translation of the publisher text (if any) stays on screen; the
+// translation is only produced as a fallback when the AI text cannot be written.
+async function ensureGameDescription(bggId) {
+  const node = document.querySelector("#gameDescriptionText");
+  if (!node?.isConnected || navigator.webdriver || node.dataset.source === "ai") return;
+  if (!node.dataset.source) {
+    node.textContent = "Sto scrivendo la descrizione di questo gioco… può richiedere fino a un minuto.";
+  }
+  setDescriptionBusy(true);
+  try {
+    await ensureDescriptionSource(bggId);
+    const generated = await api(`/api/games/${bggId}/description-ai/generate`, {method: "POST"});
+    const text = generated.description?.text;
+    if (text && node.isConnected) {
+      node.textContent = text;
+      node.dataset.source = "ai";
+      showDescriptionSources(generated.description);
     }
   } catch (_) {
-    if (node?.isConnected) {
-      node.textContent = "Descrizione italiana non disponibile al momento.";
+    try {
+      const text = await loadItalianTranslation(bggId);
+      if (text && node.isConnected && node.dataset.source !== "ai") {
+        node.textContent = text;
+        node.dataset.source = "translation";
+      }
+    } catch (__) {
+      // Nothing more to try: the message below covers it.
     }
+    if (node.isConnected && !node.dataset.source) {
+      node.textContent = "Descrizione non disponibile al momento.";
+    }
+  } finally {
+    setDescriptionBusy(false);
   }
 }
 
@@ -3398,9 +3460,11 @@ async function renderDetail(bggId) {
     const tutorialItems = tutorials.items || [];
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
     const italianDescription = String(game.description_it || "").trim();
-    const description = italianDescription
-      ? escapeHtml(italianDescription).replace(/\r?\n/g, "<br>")
-      : "Traduzione italiana in preparazione…";
+    const aiDescription = String(game.description_ai?.text || "").trim();
+    const descriptionSource = aiDescription ? "ai" : italianDescription ? "translation" : "";
+    const description = aiDescription || italianDescription
+      ? escapeHtml(aiDescription || italianDescription)
+      : "Descrizione in preparazione…";
     const firstRulebook = rulebooks[0] || null;
 
     app.innerHTML = `
@@ -3477,7 +3541,12 @@ async function renderDetail(bggId) {
           <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
             <p class="eyebrow">Il gioco</p>
             <h2 id="gameDescriptionTitle">Descrizione</h2>
-            <div class="game-description-text" id="gameDescriptionText" data-ready="${italianDescription ? "true" : "false"}">${description}</div>
+            <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}">${description}</div>
+            <p class="game-description-sources" id="gameDescriptionSources" ${aiDescription ? "" : "hidden"}>${escapeHtml(descriptionSourcesText(game.description_ai))}</p>
+            <div class="game-description-actions">
+              <button class="button button-ghost" id="regenerateDescription" type="button"
+                      title="Riscrive la descrizione con il prompt e i provider attuali">${icon("refresh")}<span>Rigenera descrizione</span></button>
+            </div>
           </section>
 
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
@@ -3675,7 +3744,10 @@ async function renderDetail(bggId) {
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
     setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
-    ensureItalianDescription(game.bgg_id);
+    document.querySelector("#regenerateDescription")?.addEventListener("click", () => {
+      void regenerateGameDescription(game.bgg_id);
+    });
+    ensureGameDescription(game.bgg_id);
     void loadRelevantExpansions(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;

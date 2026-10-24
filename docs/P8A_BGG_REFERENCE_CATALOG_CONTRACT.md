@@ -129,7 +129,7 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
 
 ## Stato
 
-- Fatto: migrazione 22 (`bgg-reference-catalog`), importatore del dump,
+- Fatto: migrazione 24 (`bgg-reference-catalog`), importatore del dump,
   ricerca FTS con soglia, impostazioni `min_votes`/`include_expansions`, API
   `/api/reference/{status,search,import-dump,settings}`.
 - Da fare: UI, worker API e dettagli su richiesta, segnali crowdfunding/hot/in

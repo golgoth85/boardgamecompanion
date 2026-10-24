@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+
 import hashlib
 import html
 import re
@@ -278,16 +280,7 @@ class DescriptionTranslationService:
             }
 
         rag = resolve_rag_settings(self.database)
-        provider_order = tuple(
-            dict.fromkeys(
-                (
-                    rag.generation_provider,
-                    "lmstudio",
-                    "ollama",
-                    "gemini",
-                )
-            )
-        )
+        provider_order = getattr(rag, "generation_provider_order", (rag.generation_provider,))
         translated: str | None = None
         provider_name: str | None = None
         model: str | None = None
@@ -295,7 +288,14 @@ class DescriptionTranslationService:
 
         for provider in provider_order:
             try:
-                if provider == "gemini":
+                if provider in {"deepseek", "groq"}:
+                    try:
+                        translated = _validate_translation(cloud_client(rag, provider).text(_TRANSLATION_SYSTEM, source_text, max_tokens=8192))
+                        provider_name = provider
+                        model = getattr(rag, f"{provider}_generation_model")
+                    except CloudAIError as exc:
+                        raise DescriptionTranslationError(str(exc)) from exc
+                elif provider == "gemini":
                     translated, provider_name, model = self._translate_gemini(
                         source_text,
                         rag,

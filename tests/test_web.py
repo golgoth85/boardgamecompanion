@@ -152,3 +152,27 @@ def test_icon_sprite_covers_every_referenced_icon(tmp_path: Path) -> None:
     used |= {f"i-{name}" for name in ("crown", "diamond", "gem", "hourglass")}
     assert used
     assert used <= defined, used - defined
+
+
+def test_static_assets_are_revalidated_after_deploys(tmp_path: Path) -> None:
+    _configure(tmp_path)
+    with TestClient(app) as client:
+        first = client.get("/static/app.js")
+        assert first.status_code == 200
+        assert first.headers["cache-control"] == "no-cache"
+        again = client.get("/static/app.js", headers={"If-None-Match": first.headers["etag"]})
+        assert again.status_code == 304 and again.content == b""
+        assert again.headers["cache-control"] == "no-cache"
+
+        # The versioned third-party bundle never changes: keep it cached.
+        bundle = client.get("/static/zxing-browser-0.2.1.min.js")
+        assert "immutable" in bundle.headers["cache-control"]
+
+        for path in ("/", "/games/1", "/lists", "/wishlist", "/reviews"):
+            assert client.get(path).headers["cache-control"] == "no-cache", path
+
+
+def test_game_page_has_regenerate_button_but_no_publisher_box() -> None:
+    script = (Path(__file__).parents[1] / "src/boardgamecompanion/web/app.js").read_text(encoding="utf-8")
+    assert 'id="regenerateDescription"' in script
+    assert "gamePublisherDescription" not in script

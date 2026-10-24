@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
+
 import json
 import re
 import unicodedata
@@ -380,7 +382,13 @@ class CatalogAssistantService:
             "catalog": _compact_candidates(filtered_candidates),
         }
 
-        if provider == "lmstudio":
+        if provider in {"deepseek", "groq"}:
+            try:
+                structured = cloud_client(rag).structured(SYSTEM_PROMPT, payload, schema=ASSISTANT_SCHEMA)
+                model = getattr(rag, f"{provider}_generation_model")
+            except CloudAIError as exc:
+                raise CatalogAssistantError(str(exc)) from exc
+        elif provider == "lmstudio":
             structured, model = self._lmstudio(payload, rag)
         elif provider == "gemini":
             structured, model = self._gemini(payload, rag)
