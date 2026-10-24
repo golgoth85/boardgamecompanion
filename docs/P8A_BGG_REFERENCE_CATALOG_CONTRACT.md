@@ -170,8 +170,28 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   vuoto è marcato `removed_at` (mai cancellato), una risposta completamente vuota
   rinvia il lotto di 6 ore. Impostazioni `min_wishing` e `daily_budget` in API e
   UI; `/api/reference/status` include lo stato del worker.
-- Da fare: segnali
-  crowdfunding/hot/in uscita.
+- Fatto (2026-10-24, nessuna migrazione): segnali. A ogni giro del worker,
+  prima delle code BGG e anche senza token, le campagne già in cache del modulo
+  `crowdfunding` (nessuna richiesta di rete) sono abbinate fail closed:
+  titolo normalizzato uguale al nome o a un titolo alternativo di **un solo**
+  titolo recente/non pubblicato non rimosso; ambiguo o assente → nessun
+  collegamento. Campagne `failed`/`canceled`/`suspended` ignorate.
+  L'abbinamento dà `crowdfunding` fino a chiusura (o oggi, se non ancora
+  lanciata) + `bgg_reference_crowdfunding_grace_days` (UI nella scheda); i
+  collegamenti sono in `bgg_reference_sync_state` (`crowdfunding_matches`),
+  esposti come `bgg_id` in `GET /api/crowdfunding` e contati in
+  `/api/reference/status` (`worker.crowdfunding_matched`). Lista hot
+  (`/hot?type=boardgame`, una richiesta al giorno nel budget): ID sconosciuti
+  inseriti via `/thing`, ammissione `hot` per 90 giorni. Le ammissioni per
+  segnale valgono solo sotto soglia voti e vince la scadenza più lontana (una
+  `upcoming` di 30 giorni non accorcia una `crowdfunding`/`hot`). Nessuna
+  scrittura su `board_games`.
+- Osservato in produzione (2026-10-24, primo giorno): budget 1500/1500 usato,
+  29.865 titoli interrogati, solo `boardgame`/`boardgameexpansion`, 1 ID
+  marcato rimosso, 1.798 ammissioni `upcoming`, nessun errore. La coda
+  candidati conta circa 29.000 titoli (anno recente o assente) e ricade tutta
+  nello stesso giorno ogni 7 giorni: con il budget attuale regge (≈ 1.450
+  richieste), ma ritarda di un giorno la rotazione degli ammessi.
 
 ## Rilascio
 

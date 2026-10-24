@@ -30,11 +30,14 @@ MIN_VOTES_KEY = "bgg_reference_min_votes"
 INCLUDE_EXPANSIONS_KEY = "bgg_reference_include_expansions"
 MIN_WISHING_KEY = "bgg_reference_min_wishing"
 DAILY_BUDGET_KEY = "bgg_reference_daily_budget"
+CROWDFUNDING_GRACE_KEY = "bgg_reference_crowdfunding_grace_days"
 DEFAULT_MIN_VOTES = 100
 DEFAULT_MIN_WISHING = 50
 MAX_MIN_WISHING = 10000
 DEFAULT_DAILY_BUDGET = 1500
 MAX_DAILY_BUDGET = 5000
+DEFAULT_CROWDFUNDING_GRACE_DAYS = 540
+MAX_CROWDFUNDING_GRACE_DAYS = 1095
 MIN_VOTES_MINIMUM = 0
 DUMP_WATCH_STATE_KEY = "dump_file_signature"
 
@@ -76,6 +79,7 @@ class ReferenceSettings:
     include_expansions: bool = True
     min_wishing: int = DEFAULT_MIN_WISHING
     daily_budget: int = DEFAULT_DAILY_BUDGET
+    crowdfunding_grace_days: int = DEFAULT_CROWDFUNDING_GRACE_DAYS
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -90,13 +94,16 @@ def _bounded_int(raw: str | None, default: int, low: int, high: int | None) -> i
 
 def load_reference_settings(database: Database) -> ReferenceSettings:
     values = AppSettingsStore(database).get_many(
-        (MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY, MIN_WISHING_KEY, DAILY_BUDGET_KEY)
+        (MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY, MIN_WISHING_KEY, DAILY_BUDGET_KEY, CROWDFUNDING_GRACE_KEY)
     )
     return ReferenceSettings(
         min_votes=_bounded_int(values[MIN_VOTES_KEY], DEFAULT_MIN_VOTES, MIN_VOTES_MINIMUM, None),
         include_expansions=values[INCLUDE_EXPANSIONS_KEY] != "0",
         min_wishing=_bounded_int(values[MIN_WISHING_KEY], DEFAULT_MIN_WISHING, 0, MAX_MIN_WISHING),
         daily_budget=_bounded_int(values[DAILY_BUDGET_KEY], DEFAULT_DAILY_BUDGET, 0, MAX_DAILY_BUDGET),
+        crowdfunding_grace_days=_bounded_int(
+            values[CROWDFUNDING_GRACE_KEY], DEFAULT_CROWDFUNDING_GRACE_DAYS, 0, MAX_CROWDFUNDING_GRACE_DAYS
+        ),
     )
 
 
@@ -107,12 +114,17 @@ def save_reference_settings(database: Database, value: ReferenceSettings) -> Ref
         raise BggReferenceError(f"min_wishing must be between 0 and {MAX_MIN_WISHING}")
     if not 0 <= value.daily_budget <= MAX_DAILY_BUDGET:
         raise BggReferenceError(f"daily_budget must be between 0 and {MAX_DAILY_BUDGET}")
+    if not 0 <= value.crowdfunding_grace_days <= MAX_CROWDFUNDING_GRACE_DAYS:
+        raise BggReferenceError(
+            f"crowdfunding_grace_days must be between 0 and {MAX_CROWDFUNDING_GRACE_DAYS}"
+        )
     AppSettingsStore(database).set_many(
         {
             MIN_VOTES_KEY: (str(value.min_votes), False),
             INCLUDE_EXPANSIONS_KEY: ("1" if value.include_expansions else "0", False),
             MIN_WISHING_KEY: (str(value.min_wishing), False),
             DAILY_BUDGET_KEY: (str(value.daily_budget), False),
+            CROWDFUNDING_GRACE_KEY: (str(value.crowdfunding_grace_days), False),
         }
     )
     return load_reference_settings(database)
@@ -447,6 +459,33 @@ class BggReferenceCatalog:
             }
             for row in rows
         ]
+
+    def match_campaign_title(self, title: str, *, since_year: int) -> int | None:
+        """Fail-closed campaign link: the normalized title must equal the name or an
+        alternate title of exactly one recent or unpublished reference title."""
+        target = normalize_title_text(title)
+        match = _fts_query(title)
+        if not target or match is None:
+            return None
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT g.bgg_id, g.name, g.alt_names
+                FROM bgg_reference_games_fts f
+                JOIN bgg_reference_games g ON g.bgg_id = f.rowid
+                WHERE bgg_reference_games_fts MATCH :match
+                  AND g.removed_at IS NULL
+                  AND (g.year_published IS NULL OR g.year_published >= :since_year)
+                """,
+                {"match": match, "since_year": since_year},
+            ).fetchall()
+        found = {
+            int(row["bgg_id"])
+            for row in rows
+            if target
+            in {normalize_title_text(name) for name in [row["name"], *(row["alt_names"] or "").split("\n")]}
+        }
+        return found.pop() if len(found) == 1 else None
 
     def detail(self, bgg_id: int, client: Any | None = None) -> dict[str, Any] | None:
         """Reference row plus API details, fetching one /thing if never queried.

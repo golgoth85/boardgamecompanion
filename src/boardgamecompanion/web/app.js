@@ -104,6 +104,7 @@ const referenceIncludeExpansions = document.querySelector("#referenceIncludeExpa
 const referenceStatus = document.querySelector("#referenceStatus");
 const referenceMinWishing = document.querySelector("#referenceMinWishing");
 const referenceDailyBudget = document.querySelector("#referenceDailyBudget");
+const referenceCrowdfundingGrace = document.querySelector("#referenceCrowdfundingGrace");
 const saveTestSettings = document.querySelector("#saveTestSettings");
 const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
 const settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
@@ -1153,6 +1154,7 @@ function renderReferenceStatus(status) {
   referenceIncludeExpansions.checked = value.include_expansions !== false;
   referenceMinWishing.value = value.min_wishing ?? 50;
   referenceDailyBudget.value = value.daily_budget ?? 1500;
+  referenceCrowdfundingGrace.value = value.crowdfunding_grace_days ?? 540;
   const last = status.last_dump_import;
   const when = last?.imported_at ? formatBggSyncTime(last.imported_at) : "mai";
   const worker = status.worker || {};
@@ -1161,8 +1163,11 @@ function renderReferenceStatus(status) {
     : worker.last_run
       ? `aggiornamento API: ${formatBggSyncTime(worker.last_run)} · ${formatNumber(worker.budget_used || 0, 0)}/${formatNumber(worker.daily_budget || 0, 0)} richieste oggi`
       : "aggiornamento API: mai eseguito (richiede il token BGG)";
+  const campaigns = worker.crowdfunding_matched
+    ? ` · ${formatNumber(worker.crowdfunding_matched, 0)} campagne abbinate`
+    : "";
   referenceStatus.textContent =
-    `${formatNumber(status.visible, 0)} titoli visibili su ${formatNumber(status.total, 0)} · ultimo import: ${when} · ${sync}`;
+    `${formatNumber(status.visible, 0)} titoli visibili su ${formatNumber(status.total, 0)} · ultimo import: ${when} · ${sync}${campaigns}`;
 }
 
 function readIntegerField(input, label) {
@@ -1183,6 +1188,7 @@ async function saveReferenceSettings() {
       include_expansions: referenceIncludeExpansions.checked,
       min_wishing: readIntegerField(referenceMinWishing, "Il wishing minimo"),
       daily_budget: readIntegerField(referenceDailyBudget, "Le richieste al giorno"),
+      crowdfunding_grace_days: readIntegerField(referenceCrowdfundingGrace, "I giorni dopo la campagna"),
     }),
   });
   renderReferenceStatus(await api("/api/reference/status"));

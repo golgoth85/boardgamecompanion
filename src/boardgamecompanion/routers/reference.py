@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 
 from boardgamecompanion.bgg_reference import (
     DUMP_DEFAULT_FILENAME,
+    DEFAULT_CROWDFUNDING_GRACE_DAYS,
     DEFAULT_DAILY_BUDGET,
     DEFAULT_MIN_WISHING,
+    MAX_CROWDFUNDING_GRACE_DAYS,
     MAX_DAILY_BUDGET,
     MAX_MIN_WISHING,
     MIN_VOTES_MINIMUM,
@@ -36,6 +38,9 @@ class ReferenceSettingsPayload(BaseModel):
     include_expansions: bool = True
     min_wishing: int = Field(default=DEFAULT_MIN_WISHING, ge=0, le=MAX_MIN_WISHING)
     daily_budget: int = Field(default=DEFAULT_DAILY_BUDGET, ge=0, le=MAX_DAILY_BUDGET)
+    crowdfunding_grace_days: int = Field(
+        default=DEFAULT_CROWDFUNDING_GRACE_DAYS, ge=0, le=MAX_CROWDFUNDING_GRACE_DAYS
+    )
 
 
 def _import_file(filename: str) -> Path:
@@ -118,6 +123,7 @@ def reference_settings_put(payload: ReferenceSettingsPayload) -> dict[str, objec
             include_expansions=payload.include_expansions,
             min_wishing=payload.min_wishing,
             daily_budget=payload.daily_budget,
+            crowdfunding_grace_days=payload.crowdfunding_grace_days,
         ),
     )
     return saved.to_dict()

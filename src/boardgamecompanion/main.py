@@ -40,7 +40,7 @@ from boardgamecompanion.bgg_collection_sync import (
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_reference import BggReferenceImporter
-from boardgamecompanion.bgg_reference_worker import BggReferenceWorker
+from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, crowdfunding_matches
 from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
     BggApiClient,
@@ -704,7 +704,11 @@ async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
 
 
 async def _bgg_reference_api_worker(stop_event: asyncio.Event) -> None:
-    worker = BggReferenceWorker(get_database(), get_bgg_api_client)
+    worker = BggReferenceWorker(
+        get_database(),
+        get_bgg_api_client,
+        campaigns=lambda: get_crowdfunding_service().cached_campaigns(),
+    )
     while not stop_event.is_set():
         try:
             summary = await asyncio.to_thread(worker.run_once)
@@ -926,6 +930,10 @@ def list_crowdfunding(
             )
         except Exception:
             LOGGER.exception("Crowdfunding notification scan failed")
+        links = crowdfunding_matches(get_database())
+        for item in payload.get("items") or []:
+            if isinstance(item, dict):
+                item["bgg_id"] = links.get(str(item.get("id") or ""))
         return payload
     except CrowdfundingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

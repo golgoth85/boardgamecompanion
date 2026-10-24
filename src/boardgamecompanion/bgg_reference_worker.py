@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -23,20 +24,28 @@ NEW_IDS_DAY_KEY = "new_ids_day"
 NEW_ID_CURSOR_KEY = "new_id_cursor"
 LAST_ERROR_KEY = "worker_last_error"
 LAST_RUN_KEY = "worker_last_run"
+HOT_DAY_KEY = "hot_day"
+CROWDFUNDING_MATCHES_KEY = "crowdfunding_matches"
 
 EMPTY_BATCHES_BEFORE_STOP = 3
 CANDIDATE_RECHECK_DAYS = 7
 ADMITTED_RECHECK_DAYS = 14
 UPCOMING_ADMISSION_DAYS = 30
+HOT_ADMISSION_DAYS = 90
+HOT_LIST_LIMIT = 50
 ACCEPTED_ITEM_TYPES = {"boardgame", "boardgameexpansion"}
+# Campaigns that will never deliver do not keep a title visible.
+DEAD_CAMPAIGN_STATUSES = {"failed", "canceled", "cancelled", "suspended"}
 
 
 class BggReferenceWorker:
     """Keeps the reference catalog fresh through XML API2 within a daily budget.
 
-    Queues, in priority order: new IDs beyond the highest one seen, recent or
-    unpublished titles below the vote threshold, and a rotation over visible
-    titles. Without a token the catalog simply stays where it is.
+    Signals first (crowdfunding campaigns already cached locally, the BGG hot
+    list once a day), then queues in priority order: new IDs beyond the highest
+    one seen, recent or unpublished titles below the vote threshold, and a
+    rotation over visible titles. Without a token only the local campaign
+    matching runs.
     """
 
     def __init__(
@@ -44,10 +53,12 @@ class BggReferenceWorker:
         database: Database,
         client_factory: Callable[[], Any | None],
         *,
+        campaigns: Callable[[], list[dict[str, Any]]] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.database = database
         self._client_factory = client_factory
+        self._campaigns = campaigns
         self._now = now or (lambda: datetime.now(UTC))
 
     # -- budget -----------------------------------------------------------
@@ -65,18 +76,27 @@ class BggReferenceWorker:
 
     # -- entry point --------------------------------------------------------
     def run_once(self) -> dict[str, Any]:
-        summary: dict[str, Any] = {"status": "ok", "requests": 0, "stored": 0, "new": 0, "removed": 0}
+        summary: dict[str, Any] = {
+            "status": "ok", "requests": 0, "stored": 0, "new": 0, "removed": 0,
+            "crowdfunding_matched": 0, "hot_admitted": 0,
+        }
         reference = load_reference_settings(self.database)
         if reference.daily_budget <= 0:
             return {**summary, "status": "suspended"}
-        client = self._client_factory()
-        if client is None:
-            return {**summary, "status": "no_token"}
         self._summary = summary
-        self._client = client
         self._reference = reference
         self._catalog = BggReferenceCatalog(self.database)
         try:
+            self._match_campaigns()
+        except Exception as exc:  # a broken campaign cache must not stop the BGG queues
+            LOGGER.exception("BGG reference campaign matching failed")
+            set_sync_state(self.database, LAST_ERROR_KEY, f"{type(exc).__name__}: {exc}"[:300])
+        client = self._client_factory()
+        if client is None:
+            return {**summary, "status": "no_token"}
+        self._client = client
+        try:
+            self._refresh_hot()
             self._scan_new_ids()
             self._refresh_queue(self._candidate_ids, CANDIDATE_RECHECK_DAYS)
             self._refresh_queue(self._admitted_ids, ADMITTED_RECHECK_DAYS)
@@ -97,6 +117,75 @@ class BggReferenceWorker:
         self._spend()
         self._summary["requests"] += 1
         return self._client.things_with_xml(ids)
+
+    # -- signals ------------------------------------------------------------
+    def _admit(self, connection: Any, bgg_id: int, reason: str, until: datetime) -> bool:
+        """Grant a signal admission below the vote threshold.
+
+        The admission lasting longest wins, so a short signal never cuts a longer
+        one (e.g. `upcoming` over a crowdfunding grace period).
+        """
+        cursor = connection.execute(
+            """
+            UPDATE bgg_reference_games SET admission_reason = :reason, admission_until = :until
+            WHERE bgg_id = :bgg_id AND removed_at IS NULL AND users_rated < :min_votes
+              AND (admission_reason IS NULL OR admission_until < :until)
+            """,
+            {"reason": reason, "until": until.isoformat(), "bgg_id": bgg_id, "min_votes": self._reference.min_votes},
+        )
+        return cursor.rowcount > 0
+
+    def _match_campaigns(self) -> None:
+        if self._campaigns is None:
+            return
+        now = self._now()
+        grace = timedelta(days=self._reference.crowdfunding_grace_days)
+        matches: dict[str, int] = {}
+        for campaign in self._campaigns():
+            campaign_id = str(campaign.get("id") or "")
+            title = str(campaign.get("title") or "")
+            if not campaign_id or not title:
+                continue
+            if str(campaign.get("raw_status") or "").casefold() in DEAD_CAMPAIGN_STATUSES:
+                continue
+            bgg_id = self._catalog.match_campaign_title(title, since_year=now.year - 1)
+            if bgg_id is None:
+                continue
+            matches[campaign_id] = bgg_id
+            end = _parse_time(campaign.get("campaign_end"))
+            # Grace runs from the close; a campaign still announced has no close yet.
+            with self.database.transaction() as connection:
+                self._admit(connection, bgg_id, "crowdfunding", max(now, end or now) + grace)
+        set_sync_state(self.database, CROWDFUNDING_MATCHES_KEY, json.dumps(matches, sort_keys=True))
+        self._summary["crowdfunding_matched"] = len(matches)
+
+    def _refresh_hot(self) -> None:
+        today = self._now().date().isoformat()
+        if get_sync_state(self.database, HOT_DAY_KEY) == today:
+            return
+        if self._remaining_budget(self._reference.daily_budget) <= 0:
+            raise _BudgetExhausted
+        self._spend()
+        self._summary["requests"] += 1
+        hot_ids = [int(item["bgg_id"]) for item in self._client.hot(limit=HOT_LIST_LIMIT)]
+        with self.database.connect() as connection:
+            known = {
+                int(row["bgg_id"])
+                for row in connection.execute(
+                    f"SELECT bgg_id FROM bgg_reference_games WHERE bgg_id IN ({','.join('?' * len(hot_ids))})",
+                    hot_ids,
+                ).fetchall()
+            } if hot_ids else set()
+        missing = [bgg_id for bgg_id in hot_ids if bgg_id not in known]
+        for start in range(0, len(missing), MAX_THING_IDS):
+            for bgg_id, (metadata, raw_xml) in sorted(self._fetch(missing[start:start + MAX_THING_IDS]).items()):
+                self._insert_new(bgg_id, metadata, raw_xml)
+        until = self._now() + timedelta(days=HOT_ADMISSION_DAYS)
+        with self.database.transaction() as connection:
+            for bgg_id in hot_ids:
+                if self._admit(connection, bgg_id, "hot", until):
+                    self._summary["hot_admitted"] += 1
+        set_sync_state(self.database, HOT_DAY_KEY, today)
 
     # -- new IDs ------------------------------------------------------------
     def _scan_new_ids(self) -> None:
@@ -221,14 +310,7 @@ class BggReferenceWorker:
                     (bgg_id,),
                 )
             elif recent and self._reference.min_wishing > 0 and wishing >= self._reference.min_wishing:
-                # Never override a crowdfunding or hot admission.
-                connection.execute(
-                    """
-                    UPDATE bgg_reference_games SET admission_reason = 'upcoming', admission_until = ?
-                    WHERE bgg_id = ? AND (admission_reason IS NULL OR admission_reason = 'upcoming')
-                    """,
-                    ((now + timedelta(days=UPCOMING_ADMISSION_DAYS)).isoformat(), bgg_id),
-                )
+                self._admit(connection, bgg_id, "upcoming", now + timedelta(days=UPCOMING_ADMISSION_DAYS))
             connection.execute(
                 "UPDATE bgg_reference_games SET next_check_at = ? WHERE bgg_id = ?",
                 ((now + timedelta(days=recheck_days)).isoformat(), bgg_id),
@@ -257,6 +339,25 @@ class _BudgetExhausted(Exception):
     pass
 
 
+def _parse_time(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def crowdfunding_matches(database: Database) -> dict[str, int]:
+    """Campaign ID → bgg_id links from the last matching pass (fail closed)."""
+    try:
+        raw = json.loads(get_sync_state(database, CROWDFUNDING_MATCHES_KEY) or "{}")
+    except ValueError:
+        return {}
+    return {str(key): int(value) for key, value in raw.items()} if isinstance(raw, dict) else {}
+
+
 def worker_status(database: Database, reference: ReferenceSettings | None = None) -> dict[str, Any]:
     value = reference or load_reference_settings(database)
     return {
@@ -266,4 +367,6 @@ def worker_status(database: Database, reference: ReferenceSettings | None = None
         "last_run": get_sync_state(database, LAST_RUN_KEY),
         "last_error": get_sync_state(database, LAST_ERROR_KEY) or None,
         "new_id_cursor": int(get_sync_state(database, NEW_ID_CURSOR_KEY) or 0),
+        "hot_day": get_sync_state(database, HOT_DAY_KEY),
+        "crowdfunding_matched": len(crowdfunding_matches(database)),
     }

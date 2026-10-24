@@ -10,7 +10,7 @@ from boardgamecompanion.bgg_reference import (
     get_sync_state,
     save_reference_settings,
 )
-from boardgamecompanion.bgg_reference_worker import BggReferenceWorker
+from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, crowdfunding_matches
 from boardgamecompanion.database import Database
 
 HEADER = (
@@ -55,6 +55,11 @@ class FakeClient:
             result[bgg_id] = (metadata, f"<item id='{bgg_id}'/>")
         return result
 
+    def hot(self, *, limit=50):
+        return [{"bgg_id": bgg_id} for bgg_id in self.hot_ids][:limit]
+
+    hot_ids: list[int] = []
+
 
 @pytest.fixture()
 def database(tmp_path: Path) -> Database:
@@ -64,9 +69,14 @@ def database(tmp_path: Path) -> Database:
     return database
 
 
-def worker(database: Database, client, now: datetime | None = None) -> BggReferenceWorker:
+def worker(database: Database, client, now: datetime | None = None, campaigns=None) -> BggReferenceWorker:
     clock = now or datetime(YEAR, 10, 24, 12, tzinfo=UTC)
-    return BggReferenceWorker(database, lambda: client, now=lambda: clock)
+    return BggReferenceWorker(
+        database,
+        lambda: client,
+        campaigns=(lambda: campaigns) if campaigns is not None else None,
+        now=lambda: clock,
+    )
 
 
 def row(database: Database, bgg_id: int):
@@ -153,9 +163,120 @@ def test_missing_id_in_non_empty_batch_is_marked_removed_not_deleted(database: D
 
 def test_provider_error_is_recorded_without_raising(database: Database) -> None:
     class Broken:
+        def hot(self, *, limit=50):
+            return []
+
         def things_with_xml(self, ids):
             raise RuntimeError("down")
 
     summary = worker(database, Broken()).run_once()
     assert summary["status"] == "error"
     assert "down" in get_sync_state(database, "worker_last_error")
+
+
+def add_reference(database: Database, bgg_id: int, name: str, year: int | None, alt_names: str = "") -> None:
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO bgg_reference_games (bgg_id, name, year_published, alt_names, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'api', '2026-10-01', '2026-10-01')
+            """,
+            (bgg_id, name, year, alt_names),
+        )
+
+
+def campaign(title: str, end: str | None = "2026-11-30T18:00:00Z", **extra) -> dict:
+    return {"id": f"gamefound:{title.lower().replace(' ', '-')}", "title": title, "campaign_end": end, **extra}
+
+
+def test_campaign_matches_unique_exact_title_and_admits_with_grace(database: Database) -> None:
+    add_reference(database, 600, "Nebula Harbour", None, alt_names="Porto Nebulosa")
+    summary = worker(database, None, campaigns=[campaign("Nebula Harbour!"), campaign("Porto nebulosa", end=None)]).run_once()
+    assert summary["status"] == "no_token" and summary["crowdfunding_matched"] == 2
+    admitted = row(database, 600)
+    assert admitted["admission_reason"] == "crowdfunding"
+    # grace (540 days) counts from the campaign close, not from today
+    assert admitted["admission_until"].startswith("2028-05-23")
+    assert crowdfunding_matches(database) == {"gamefound:nebula-harbour!": 600, "gamefound:porto-nebulosa": 600}
+    assert [i["bgg_id"] for i in BggReferenceCatalog(database).search("porto nebulosa")] == [600]
+
+
+def test_campaign_link_fails_closed_when_ambiguous_absent_or_old(database: Database) -> None:
+    add_reference(database, 601, "Twin Peaks Duel", 2026)
+    add_reference(database, 602, "Twin Peaks Duel", None)
+    campaigns = [
+        campaign("Twin Peaks Duel"),  # two recent titles: ambiguous
+        campaign("Recent Quiet: Deluxe Edition"),  # not an exact title
+        campaign("Old Obscure"),  # exact, but published long ago
+        campaign("Never Heard Of It"),
+    ]
+    summary = worker(database, None, campaigns=campaigns).run_once()
+    assert summary["crowdfunding_matched"] == 0
+    assert crowdfunding_matches(database) == {}
+    for bgg_id in (601, 602, 12, 13):
+        assert row(database, bgg_id)["admission_reason"] is None
+
+
+def test_dead_campaigns_and_titles_above_threshold_get_no_admission(database: Database) -> None:
+    add_reference(database, 603, "Doomed Venture", 2026)
+    add_reference(database, 604, "Already Loved", 2026)
+    with database.transaction() as connection:
+        connection.execute("UPDATE bgg_reference_games SET users_rated = 900 WHERE bgg_id = 604")
+    campaigns = [campaign("Doomed Venture", raw_status="failed"), campaign("Already Loved")]
+    worker(database, None, campaigns=campaigns).run_once()
+    assert row(database, 603)["admission_reason"] is None
+    assert row(database, 604)["admission_reason"] is None  # votes already admit it
+    assert crowdfunding_matches(database) == {"gamefound:already-loved": 604}
+
+
+def test_signal_admissions_expire(database: Database) -> None:
+    add_reference(database, 605, "Short Lived", 2026)
+    worker(database, None, campaigns=[campaign("Short Lived", end="2026-10-01T00:00:00Z")]).run_once()
+    save_reference_settings(database, ReferenceSettings(crowdfunding_grace_days=0))
+    catalog = BggReferenceCatalog(database)
+    assert [i["bgg_id"] for i in catalog.search("short lived")] == [605]
+    with database.transaction() as connection:
+        connection.execute("UPDATE bgg_reference_games SET admission_until = '2026-10-02T00:00:00+00:00' WHERE bgg_id = 605")
+    assert catalog.search("short lived") == []
+    assert catalog.status()["visible"] == 1  # only the voted title remains
+
+
+def test_longest_admission_wins_over_a_shorter_signal(database: Database) -> None:
+    add_reference(database, 606, "Long Haul", None)
+    worker(database, None, campaigns=[campaign("Long Haul")]).run_once()
+    client = FakeClient(606, {606: {"bgg_wishing": 500, "bgg_users_rated": 4}})
+    worker(database, client).run_once()
+    kept = row(database, 606)
+    assert kept["api_checked_at"] is not None
+    assert kept["admission_reason"] == "crowdfunding" and kept["admission_until"].startswith("2028")
+
+
+def test_hot_list_admits_for_90_days_inserts_unknown_ids_once_a_day(database: Database) -> None:
+    client = FakeClient(13, {13: {"bgg_users_rated": 3}, 700: {"title": "Fresh Hot", "bgg_users_rated": 1}})
+    client.last_id = 700
+    client.hot_ids = [13, 700, 10]
+    summary = worker(database, client).run_once()
+    assert summary["hot_admitted"] == 2  # 10 is admitted by votes already
+    for bgg_id in (13, 700):
+        hot = row(database, bgg_id)
+        assert hot["admission_reason"] == "hot" and hot["admission_until"].startswith("2027-01-22")
+    assert row(database, 700)["name"] == "Fresh Hot"
+    assert row(database, 10)["admission_reason"] is None
+    assert get_sync_state(database, "hot_day") == "2026-10-24"
+    again = worker(database, client).run_once()
+    assert again["hot_admitted"] == 0
+
+
+def test_signals_never_touch_board_games(database: Database) -> None:
+    add_reference(database, 607, "Hands Off", 2026)
+    client = FakeClient(13)
+    client.hot_ids = [13]
+    worker(database, client, campaigns=[campaign("Hands Off")]).run_once()
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM board_games").fetchone()[0] == 0
+
+
+def test_crowdfunding_grace_setting_is_bounded(database: Database) -> None:
+    assert save_reference_settings(database, ReferenceSettings(crowdfunding_grace_days=30)).crowdfunding_grace_days == 30
+    with pytest.raises(ValueError):
+        save_reference_settings(database, ReferenceSettings(crowdfunding_grace_days=1096))
