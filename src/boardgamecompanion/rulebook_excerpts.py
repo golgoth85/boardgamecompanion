@@ -68,21 +68,10 @@ def rank_excerpts(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def select_excerpts(database: Database, board_game_id: int) -> dict[str, Any] | None:
-    """Return excerpts from the best indexed rulebook of a game, or None."""
-    with database.connect() as connection:
-        rows = connection.execute(
-            """
-            SELECT document_id,chunk_run_id,page_number,chunk_index,text,language,
-                   is_official,created_at
-            FROM document_chunks
-            WHERE board_game_id=? AND document_type='rulebook'
-            """,
-            (int(board_game_id),),
-        ).fetchall()
+def _best_run(rows: list[Any]) -> tuple[str, str, dict[str, dict[str, Any]]] | None:
+    """Pick the document (Italian, then English, then official) and its latest run."""
     if not rows:
         return None
-
     documents: dict[str, dict[str, Any]] = {}
     for row in rows:
         entry = documents.setdefault(
@@ -100,6 +89,40 @@ def select_excerpts(database: Database, board_game_id: int) -> dict[str, Any] | 
     )
     runs = documents[best_id]["runs"]
     run_id = max(runs, key=lambda key: (runs[key], key))
+    return best_id, run_id, documents
+
+
+def current_rulebook_key(database: Database, board_game_id: int) -> str | None:
+    """Identity of the rulebook content that excerpts would come from, or None."""
+    with database.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT document_id,chunk_run_id,language,is_official,created_at
+            FROM document_chunks
+            WHERE board_game_id=? AND document_type='rulebook'
+            """,
+            (int(board_game_id),),
+        ).fetchall()
+    best = _best_run(rows)
+    return f"{best[0]}:{best[1]}" if best else None
+
+
+def select_excerpts(database: Database, board_game_id: int) -> dict[str, Any] | None:
+    """Return excerpts from the best indexed rulebook of a game, or None."""
+    with database.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT document_id,chunk_run_id,page_number,chunk_index,text,language,
+                   is_official,created_at
+            FROM document_chunks
+            WHERE board_game_id=? AND document_type='rulebook'
+            """,
+            (int(board_game_id),),
+        ).fetchall()
+    best = _best_run(rows)
+    if best is None:
+        return None
+    best_id, run_id, documents = best
     chunks = [
         dict(row)
         for row in rows

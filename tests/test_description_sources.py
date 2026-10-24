@@ -15,7 +15,7 @@ from boardgamecompanion.bgg_reception import (
 )
 from boardgamecompanion.database import Database
 from boardgamecompanion.game_description import (
-    EXTENDED_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
     GameDescriptionError,
     SECOND_PERSON_RE,
     GameDescriptionService,
@@ -149,7 +149,7 @@ class FakeClient:
         return _xml(12, [(r, LONG + str(r)) for r in range(1, 13)])
 
 
-def test_extended_preview_uses_all_sources(tmp_path, monkeypatch) -> None:
+def test_preview_uses_all_sources(tmp_path, monkeypatch) -> None:
     database, service, calls = _service(tmp_path, monkeypatch, FakeClient())
     _seed(database)
     rules = "Obiettivo: vittoria e punti vittoria a fine del gioco. Nel turno si eseguono azioni."
@@ -157,13 +157,13 @@ def test_extended_preview_uses_all_sources(tmp_path, monkeypatch) -> None:
         game_id = connection.execute("SELECT id FROM board_games").fetchone()["id"]
     _insert_chunk(database, "doc", "run", "it", 1, 4, rules, "2026-10-01", game_id)
 
-    result = service.generate(340237, provider="deepseek", preview=True, extended=True)
+    result = service.generate(340237, provider="deepseek", preview=True)
 
     assert result["status"] == "preview" and result["style_problems"] == []
     used = result["sources_used"]
     assert used["rulebook"]["pages"] == [4] and used["community"]["comments_sampled"] >= 4
     final_system, final_prompt = calls[-1]
-    assert final_system == EXTENDED_SYSTEM_PROMPT.strip()
+    assert final_system == SYSTEM_PROMPT.strip()
     request = json.loads(final_prompt)
     assert request["community_reception"].startswith("Sintesi della community")
     assert request["rulebook_excerpts"][0]["text"].startswith("Obiettivo")
@@ -173,22 +173,15 @@ def test_extended_preview_uses_all_sources(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("client", [FakeClient(fail=True), None])
-def test_extended_degrades_without_comments(tmp_path, monkeypatch, client) -> None:
+def test_generation_degrades_without_comments(tmp_path, monkeypatch, client) -> None:
     database, service, calls = _service(tmp_path, monkeypatch, client)
     _seed(database)
 
-    result = service.generate(340237, provider="deepseek", preview=True, extended=True)
+    result = service.generate(340237, provider="deepseek", preview=True)
 
     assert result["status"] == "preview"
     assert result["sources_used"]["community"] is None and result["sources_used"]["notes"]
     assert "community_reception" not in json.loads(calls[-1][1])
-
-
-def test_extended_is_preview_only(tmp_path, monkeypatch) -> None:
-    database, service, _ = _service(tmp_path, monkeypatch, None)
-    _seed(database)
-    with pytest.raises(GameDescriptionError, match="anteprima"):
-        service.generate(340237, extended=True)
 
 
 def test_style_checks_reject_second_person_and_wrap_up() -> None:
@@ -235,3 +228,58 @@ def test_style_profile_rotates_with_stored_descriptions(tmp_path, monkeypatch) -
     assert before["register"] != after["register"]
     assert service._style_profile(2, second, preview=True) != after
     assert "immagina" in SECOND_PERSON_RE.pattern
+
+
+def test_generation_stores_sources_and_shows_them_when_cached(tmp_path, monkeypatch) -> None:
+    database, service, _ = _service(tmp_path, monkeypatch, FakeClient())
+    _seed(database)
+
+    result = service.generate(340237, provider="deepseek")
+
+    sources = result["description"]["sources"]
+    assert sources["community"]["comments_total"] == 12 and sources["rulebook"] is None
+    assert "nessun regolamento indicizzato" in sources["notes"]
+    assert service.get_cached(340237)["sources"] == sources
+
+
+def test_new_rulebook_regenerates_and_transient_failure_retries_later(tmp_path, monkeypatch) -> None:
+    database, service, calls = _service(tmp_path, monkeypatch, FakeClient(fail=True))
+    board_game_id = _seed(database)
+    service.generate(340237)
+    assert service.status(340237)["status"] == "ready"
+    assert service.get_cached(340237)["sources"]["retry"] is True
+
+    # A transient BGG failure is retried once the retry window has passed.
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE board_game_ai_descriptions SET generated_at='2020-01-01T00:00:00+00:00'"
+        )
+    assert service.status(340237)["status"] == "pending"
+    service.bgg_client_factory = lambda: FakeClient()
+    service.generate(340237)
+    assert service.get_cached(340237)["sources"]["community"] is not None
+    assert "retry" not in service.get_cached(340237)["sources"]
+
+    # Indexing a rulebook later changes the digest, so the text is rewritten.
+    rules = "Obiettivo: vittoria e punti vittoria a fine del gioco. Nel turno si eseguono azioni."
+    _insert_chunk(database, "doc", "run", "it", 1, 4, rules, "2026-10-01", board_game_id)
+    assert service.status(340237)["status"] == "pending"
+
+
+def test_concurrent_requests_generate_once(tmp_path, monkeypatch) -> None:
+    import threading
+
+    database, service, calls = _service(tmp_path, monkeypatch, None)
+    _seed(database)
+    outputs = []
+
+    def run():
+        outputs.append(service.generate(340237)["description"]["text"])
+
+    threads = [threading.Thread(target=run) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(outputs) == 3 and len(set(outputs)) == 1
+    assert sum(1 for system, _ in calls if system == SYSTEM_PROMPT.strip()) == 1

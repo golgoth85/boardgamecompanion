@@ -535,13 +535,6 @@ def _run_bgg_collection_sync(force: bool = False) -> dict[str, object] | None:
                     "BGG collection sync: Italian description translation failed for BGG #%s",
                     bgg_id,
                 )
-            try:
-                get_game_description_service().generate(bgg_id)
-            except Exception:
-                LOGGER.exception(
-                    "BGG collection sync: AI description generation failed for BGG #%s",
-                    bgg_id,
-                )
 
     return result.to_dict()
 
@@ -1170,12 +1163,10 @@ def generate_game_description_ai(
     provider: Literal["gemini", "deepseek", "groq", "lmstudio", "ollama"] | None = Query(default=None),
     model: str | None = Query(default=None, max_length=200),
     preview: bool = Query(default=False),
-    extended: bool = Query(default=False),
 ) -> dict[str, object]:
     try:
         return get_game_description_service().generate(
-            bgg_id, force=force, provider=provider, model=model, preview=preview,
-            extended=extended,
+            bgg_id, force=force, provider=provider, model=model, preview=preview
         )
     except GameDescriptionError as exc:
         detail = str(exc)

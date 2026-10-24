@@ -1627,6 +1627,12 @@ def _ai_game_descriptions(connection: sqlite3.Connection) -> None:
     )
 
 
+def _ai_description_sources(connection: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(board_game_ai_descriptions)")}
+    if "sources_json" not in columns:
+        connection.execute("ALTER TABLE board_game_ai_descriptions ADD COLUMN sources_json TEXT")
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1650,6 +1656,7 @@ MIGRATIONS = (
     Migration(20, "half-star-personal-ratings", _half_star_personal_ratings),
     Migration(21, "tutorial-discovery-state", _tutorial_discovery_state),
     Migration(22, "ai-game-descriptions", _ai_game_descriptions),
+    Migration(23, "ai-description-sources", _ai_description_sources),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

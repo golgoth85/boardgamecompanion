@@ -89,16 +89,29 @@ BGC_LMSTUDIO_GENERATION_TIMEOUT_SECONDS=300
 
 ### Descrizioni dei giochi
 
-La scheda di un gioco mostra una descrizione scritta dall'AI in italiano a partire
-dalla descrizione dell'editore su BGG e dai metadati BGG (meccaniche, giocatori,
-durata, peso, dipendenza dalla lingua, espansioni). Serve a decidere se il gioco fa
-al caso proprio: contesto, meccaniche centrali, punti di forza e limiti, in prosa
-senza tono pubblicitario. Ogni gioco riceve un punto di attacco diverso e il modello
-vede gli incipit recenti da non ripetere; bozze promozionali, con sezioni etichettate
-o con incipit già usati vengono riscritte una volta e poi scartate. Il testo è salvato
-in `board_game_ai_descriptions` con provider e modello e si rigenera solo se cambiano
-la descrizione BGG o i dati stabili (non rating o peso). Se la generazione non
-riesce, la scheda mostra la traduzione; il testo dell'editore resta consultabile.
+La prima volta che si apre la scheda di un gioco, l'AI scrive in italiano una
+descrizione pensata per aiutare a scegliere: ambientazione, un breve cenno al
+funzionamento, ricezione del pubblico, punti di forza e limiti, in prosa senza tono
+pubblicitario. Le fonti sono: testo dell'editore e metadati BGG; alcuni passaggi del
+regolamento indicizzato (solo per capire il tipo di gioco, letti direttamente dal
+database, senza embedding né Wake-on-LAN); una sintesi di un campione bilanciato di
+commenti degli utenti BGG, ottenuta via XML API2 con il token configurato (i commenti
+non vengono salvati né citati). Senza regolamento o senza token BGG la descrizione si
+scrive con le fonti disponibili. La scheda mostra sotto il testo le fonti usate,
+il provider e il modello.
+
+Ogni gioco riceve un profilo di stile (angolo di apertura, ordine degli argomenti,
+registro) che ruota col numero di descrizioni già salvate, e il modello vede gli
+incipit e le frasi finali recenti da non ripetere. Bozze con formule promozionali,
+inviti al lettore, sezioni etichettate o incipit già usati vengono riscritte una
+volta e poi scartate. Il testo è in `board_game_ai_descriptions` (con `sources_json`)
+e si rigenera se cambiano prompt, descrizione BGG, dati stabili o regolamento (non
+rating o peso); se una fonte è fallita per un errore passeggero (per esempio BGG
+non raggiungibile) la descrizione viene rigenerata alla prima apertura dopo 6 ore.
+Se la generazione non riesce, la scheda mostra la traduzione e il testo
+dell'editore resta consultabile. Il prompt si modifica da Impostazioni → AI e
+provider («Salva come modello», «Ripristina», «Originale»); i provider seguono la
+priorità «Risposte e testi».
 
 ### DeepSeek e Groq
 
