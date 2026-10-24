@@ -129,9 +129,15 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
 
 ## Stato
 
-- Fatto: migrazione 24 (`bgg-reference-catalog`), importatore del dump,
-  ricerca FTS con soglia, impostazioni `min_votes`/`include_expansions`, API
-  `/api/reference/{status,search,import-dump,settings}`.
+- Fatto e distribuito (2026-10-24, `d151b02`): migrazione 24
+  (`bgg-reference-catalog`), importatore del dump in lotti da 5000 righe con
+  import automatico, ricerca FTS con soglia, impostazioni
+  `min_votes`/`include_expansions`, API
+  `/api/reference/{status,search,import-dump,settings}`. Produzione: 182.377
+  titoli, 23.601 visibili con soglia 100.
+- Limite noto: i nomi del dump sono solo quelli principali BGG; titoli
+  italiani (es. «Castelli della Borgogna») non si trovano finché non arrivano
+  i titoli alternativi da `/thing`.
 - Da fare: UI, worker API e dettagli su richiesta, segnali crowdfunding/hot/in
   uscita.
 
