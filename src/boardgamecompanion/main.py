@@ -86,6 +86,7 @@ from boardgamecompanion.routers.lists import router as lists_router
 from boardgamecompanion.routers.notifications import router as notifications_router
 from boardgamecompanion.routers.personal import router as personal_router
 from boardgamecompanion.routers.search import router as search_router
+from boardgamecompanion.routers.reference import router as reference_router
 from boardgamecompanion.routers.wishlist import router as wishlist_router
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
@@ -705,6 +706,7 @@ app.include_router(wishlist_router)
 app.include_router(lists_router)
 app.include_router(notifications_router)
 app.include_router(search_router)
+app.include_router(reference_router)
 
 
 @app.get("/", include_in_schema=False)

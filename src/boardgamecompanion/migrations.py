@@ -1604,6 +1604,99 @@ def _tutorial_discovery_state(connection: sqlite3.Connection) -> None:
     )
 
 
+def _bgg_reference_catalog(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bgg_reference_games (
+            bgg_id INTEGER PRIMARY KEY CHECK(bgg_id > 0),
+            name TEXT NOT NULL,
+            year_published INTEGER,
+            is_expansion INTEGER NOT NULL DEFAULT 0 CHECK(is_expansion IN (0, 1)),
+            rank INTEGER,
+            bayes_average REAL,
+            average REAL,
+            users_rated INTEGER NOT NULL DEFAULT 0 CHECK(users_rated >= 0),
+            wishing INTEGER,
+            owned_count INTEGER,
+            thumbnail_url TEXT,
+            image_url TEXT,
+            description TEXT,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            admission_reason TEXT
+                CHECK(admission_reason IN ('crowdfunding', 'hot', 'upcoming')),
+            admission_until TEXT,
+            source TEXT NOT NULL CHECK(source IN ('dump', 'api')),
+            dump_imported_at TEXT,
+            api_checked_at TEXT,
+            next_check_at TEXT,
+            removed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_bgg_reference_users_rated
+        ON bgg_reference_games(users_rated)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_bgg_reference_next_check
+        ON bgg_reference_games(next_check_at)
+        """
+    )
+    connection.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS bgg_reference_games_fts USING fts5(
+            name,
+            content='bgg_reference_games',
+            content_rowid='bgg_id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS bgg_reference_games_fts_insert
+        AFTER INSERT ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(rowid, name)
+            VALUES (NEW.bgg_id, NEW.name);
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS bgg_reference_games_fts_delete
+        AFTER DELETE ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(bgg_reference_games_fts, rowid, name)
+            VALUES ('delete', OLD.bgg_id, OLD.name);
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS bgg_reference_games_fts_update
+        AFTER UPDATE OF name ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(bgg_reference_games_fts, rowid, name)
+            VALUES ('delete', OLD.bgg_id, OLD.name);
+            INSERT INTO bgg_reference_games_fts(rowid, name)
+            VALUES (NEW.bgg_id, NEW.name);
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bgg_reference_sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1626,6 +1719,7 @@ MIGRATIONS = (
     Migration(19, "crowdfunding-notification-baseline", _crowdfunding_notification_baseline),
     Migration(20, "half-star-personal-ratings", _half_star_personal_ratings),
     Migration(21, "tutorial-discovery-state", _tutorial_discovery_state),
+    Migration(22, "bgg-reference-catalog", _bgg_reference_catalog),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

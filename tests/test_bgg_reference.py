@@ -1,0 +1,207 @@
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from boardgamecompanion.bgg_csv import BggCsvImporter
+from boardgamecompanion.bgg_reference import (
+    BggReferenceCatalog,
+    BggReferenceError,
+    BggReferenceImporter,
+    ReferenceSettings,
+    load_reference_settings,
+    parse_ranks_dump,
+    save_reference_settings,
+)
+from boardgamecompanion.database import Database
+from boardgamecompanion.main import app
+from boardgamecompanion.settings import settings
+
+HEADER = (
+    "id,name,yearpublished,rank,bayesaverage,average,usersrated,is_expansion,"
+    "abstracts_rank,cgs_rank,childrensgames_rank,familygames_rank,partygames_rank,"
+    "strategygames_rank,thematic_rank,wargames_rank\n"
+)
+DUMP = (
+    HEADER
+    + '224517,"Brass: Birmingham",2018,1,8.39048,8.5586,60686,0,,,,,,1,,\n'
+    + "28720,Brass,2007,250,7.3,7.5,15000,0,,,,,,200,,\n"
+    + '900100,"Brass: Birmingham – Promo",2019,0,0,7.1,40,1,,,,,,,,\n'
+    + "900200,Café Obscure,0,0,0,6.0,150,0,,,,,,,,\n"
+    + ",Missing Id,2020,0,0,0,10,0,,,,,,,,\n"
+    + "28720,Brass duplicate,2007,0,0,0,10,0,,,,,,,,\n"
+    + "900300,Bad Flag,2020,0,0,0,10,x,,,,,,,,\n"
+).encode("utf-8")
+COLLECTION_FIXTURE = Path(__file__).parent / "fixtures" / "bgg_collection_sample.csv"
+
+
+@pytest.fixture()
+def database(tmp_path: Path) -> Database:
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    return database
+
+
+def test_parse_rejects_malformed_rows_and_duplicates() -> None:
+    rows, rejected = parse_ranks_dump(DUMP)
+
+    assert [row.bgg_id for row in rows] == [224517, 28720, 900100, 900200]
+    assert rejected == 3
+    brass = rows[0]
+    assert brass.name == "Brass: Birmingham"
+    assert brass.rank == 1
+    assert brass.users_rated == 60686
+    assert rows[2].is_expansion == 1
+    assert rows[2].rank is None
+    assert rows[3].year_published is None
+
+
+def test_parse_requires_dump_columns() -> None:
+    with pytest.raises(BggReferenceError, match="Missing required dump columns"):
+        parse_ranks_dump(b"objectid,objectname\n1,Foo\n")
+    with pytest.raises(BggReferenceError, match="no valid rows"):
+        parse_ranks_dump(HEADER.encode())
+
+
+def test_import_is_idempotent_and_does_not_touch_board_games(database: Database) -> None:
+    importer = BggReferenceImporter(database)
+
+    first = importer.import_bytes(DUMP, "boardgames_ranks.csv")
+    second = importer.import_bytes(DUMP, "boardgames_ranks.csv")
+
+    assert (first.created_count, first.updated_count, first.unchanged_count) == (4, 0, 0)
+    assert first.rejected_count == 3
+    assert (second.created_count, second.updated_count, second.unchanged_count) == (0, 0, 4)
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM board_games").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM import_runs WHERE source_type = 'bgg_ranks_dump'"
+        ).fetchone()[0] == 2
+
+
+def test_import_updates_dump_rows_but_preserves_api_rows(database: Database) -> None:
+    importer = BggReferenceImporter(database)
+    importer.import_bytes(DUMP, "boardgames_ranks.csv")
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE bgg_reference_games
+            SET users_rated = 99999, source = 'api', api_checked_at = '2026-10-24T00:00:00+00:00'
+            WHERE bgg_id = 224517
+            """
+        )
+
+    newer = DUMP.replace(b"15000,0", b"15500,0").replace(b"60686,0", b"61000,0")
+    result = importer.import_bytes(newer, "boardgames_ranks.csv")
+
+    assert result.updated_count == 1
+    with database.connect() as connection:
+        votes = dict(
+            connection.execute("SELECT bgg_id, users_rated FROM bgg_reference_games").fetchall()
+        )
+    assert votes[28720] == 15500
+    assert votes[224517] == 99999
+
+
+def test_search_applies_vote_threshold_and_expansion_setting(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+
+    default = catalog.search("brass")
+    assert [item["bgg_id"] for item in default] == [28720, 224517]
+
+    low = ReferenceSettings(min_votes=10)
+    assert [item["bgg_id"] for item in catalog.search("brass", reference_settings=low)] == [
+        28720,
+        224517,
+        900100,
+    ]
+    no_expansions = ReferenceSettings(min_votes=10, include_expansions=False)
+    assert 900100 not in {
+        item["bgg_id"] for item in catalog.search("brass", reference_settings=no_expansions)
+    }
+
+
+def test_search_prefix_diacritics_and_exact_title_first(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+
+    assert [item["bgg_id"] for item in catalog.search("cafe obs")] == [900200]
+    assert [item["bgg_id"] for item in catalog.search("birmingham")] == [224517]
+    assert catalog.search("bir")[0]["bgg_id"] == 224517
+    assert catalog.search('"*') == []
+
+
+def test_signal_admission_expires(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+    future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE bgg_reference_games
+            SET admission_reason = 'crowdfunding', admission_until = ?
+            WHERE bgg_id = 900100
+            """,
+            (future,),
+        )
+    found = catalog.search("promo")
+    assert [item["admission_reason"] for item in found] == ["crowdfunding"]
+
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE bgg_reference_games SET admission_until = ? WHERE bgg_id = 900100",
+            (past,),
+        )
+    assert catalog.search("promo") == []
+
+
+def test_search_marks_titles_already_in_catalog(database: Database) -> None:
+    BggCsvImporter(database).import_path(COLLECTION_FIXTURE)
+    with database.connect() as connection:
+        owned = connection.execute("SELECT bgg_id, title FROM board_games LIMIT 1").fetchone()
+    payload = (HEADER + f'{owned["bgg_id"]},"{owned["title"]}",2020,0,0,7,500,0,,,,,,,,\n').encode()
+    BggReferenceImporter(database).import_bytes(payload, "boardgames_ranks.csv")
+
+    found = BggReferenceCatalog(database).search(owned["title"])
+
+    assert found[0]["in_catalog"] is True
+
+
+def test_settings_roundtrip_and_validation(database: Database) -> None:
+    assert load_reference_settings(database) == ReferenceSettings(min_votes=100)
+    saved = save_reference_settings(database, ReferenceSettings(min_votes=250, include_expansions=False))
+    assert saved == ReferenceSettings(min_votes=250, include_expansions=False)
+    with pytest.raises(BggReferenceError):
+        save_reference_settings(database, ReferenceSettings(min_votes=1))
+
+
+def test_reference_api(tmp_path: Path) -> None:
+    settings.config_dir = tmp_path / "config"
+    settings.import_dir = tmp_path / "import"
+    settings.manuals_dir = tmp_path / "manuals"
+    settings.import_dir.mkdir(parents=True)
+    (settings.import_dir / "boardgames_ranks.csv").write_bytes(DUMP)
+
+    with TestClient(app) as client:
+        assert client.post("/api/reference/import-dump", json={"filename": "../x.csv"}).status_code == 400
+        assert client.post("/api/reference/import-dump", json={"filename": "nope.csv"}).status_code == 404
+
+        imported = client.post("/api/reference/import-dump")
+        assert imported.status_code == 200
+        assert imported.json()["created_count"] == 4
+
+        status = client.get("/api/reference/status").json()
+        assert (status["total"], status["visible"]) == (4, 3)
+        assert status["last_dump_import"]["row_count"] == 4
+
+        assert client.put("/api/reference/settings", json={"min_votes": 5}).status_code == 422
+        updated = client.put("/api/reference/settings", json={"min_votes": 20000 // 2})
+        assert updated.json()["min_votes"] == 10000
+        assert client.get("/api/reference/status").json()["visible"] == 2
+
+        search = client.get("/api/reference/search", params={"q": "brass"}).json()
+        assert [item["bgg_id"] for item in search["items"]] == [28720, 224517]

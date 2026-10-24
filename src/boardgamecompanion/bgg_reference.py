@@ -1,0 +1,390 @@
+from __future__ import annotations
+
+import csv
+import hashlib
+import io
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from boardgamecompanion.app_settings import AppSettingsStore
+from boardgamecompanion.database import Database
+from boardgamecompanion.title_search import normalize_title_text
+
+DUMP_SOURCE_TYPE = "bgg_ranks_dump"
+DUMP_DEFAULT_FILENAME = "boardgames_ranks.csv"
+DUMP_REQUIRED_COLUMNS = {
+    "id",
+    "name",
+    "yearpublished",
+    "rank",
+    "bayesaverage",
+    "average",
+    "usersrated",
+    "is_expansion",
+}
+
+MIN_VOTES_KEY = "bgg_reference_min_votes"
+INCLUDE_EXPANSIONS_KEY = "bgg_reference_include_expansions"
+DEFAULT_MIN_VOTES = 100
+MIN_VOTES_RANGE = (10, 10000)
+
+
+class BggReferenceError(ValueError):
+    pass
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _to_int(value: str | None) -> int | None:
+    value = _blank_to_none(value)
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except ValueError:
+        return None
+
+
+def _to_float(value: str | None) -> float | None:
+    value = _blank_to_none(value)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class ReferenceSettings:
+    min_votes: int = DEFAULT_MIN_VOTES
+    include_expansions: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def load_reference_settings(database: Database) -> ReferenceSettings:
+    values = AppSettingsStore(database).get_many((MIN_VOTES_KEY, INCLUDE_EXPANSIONS_KEY))
+    min_votes = _to_int(values[MIN_VOTES_KEY])
+    if min_votes is None or not MIN_VOTES_RANGE[0] <= min_votes <= MIN_VOTES_RANGE[1]:
+        min_votes = DEFAULT_MIN_VOTES
+    include_expansions = values[INCLUDE_EXPANSIONS_KEY] != "0"
+    return ReferenceSettings(min_votes=min_votes, include_expansions=include_expansions)
+
+
+def save_reference_settings(database: Database, value: ReferenceSettings) -> ReferenceSettings:
+    if not MIN_VOTES_RANGE[0] <= value.min_votes <= MIN_VOTES_RANGE[1]:
+        raise BggReferenceError(
+            f"min_votes must be between {MIN_VOTES_RANGE[0]} and {MIN_VOTES_RANGE[1]}"
+        )
+    AppSettingsStore(database).set_many(
+        {
+            MIN_VOTES_KEY: (str(value.min_votes), False),
+            INCLUDE_EXPANSIONS_KEY: ("1" if value.include_expansions else "0", False),
+        }
+    )
+    return load_reference_settings(database)
+
+
+@dataclass(frozen=True)
+class DumpRow:
+    bgg_id: int
+    name: str
+    year_published: int | None
+    rank: int | None
+    bayes_average: float | None
+    average: float | None
+    users_rated: int
+    is_expansion: int
+
+
+@dataclass(frozen=True)
+class DumpImportResult:
+    source_filename: str
+    sha256: str
+    row_count: int
+    created_count: int
+    updated_count: int
+    unchanged_count: int
+    rejected_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def parse_ranks_dump(payload: bytes) -> tuple[list[DumpRow], int]:
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise BggReferenceError("BGG ranks dump must be UTF-8 encoded") from exc
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise BggReferenceError("Dump has no header row")
+    header = {name.strip().lower() for name in reader.fieldnames if name}
+    missing = DUMP_REQUIRED_COLUMNS - header
+    if missing:
+        raise BggReferenceError(f"Missing required dump columns: {', '.join(sorted(missing))}")
+
+    rows: list[DumpRow] = []
+    seen: set[int] = set()
+    rejected = 0
+    for source_row in reader:
+        row = {(key or "").strip().lower(): value for key, value in source_row.items() if key}
+        bgg_id = _to_int(row.get("id"))
+        name = _blank_to_none(row.get("name"))
+        users_rated = _to_int(row.get("usersrated"))
+        expansion = _blank_to_none(row.get("is_expansion"))
+        if (
+            bgg_id is None
+            or bgg_id <= 0
+            or bgg_id in seen
+            or name is None
+            or users_rated is None
+            or users_rated < 0
+            or expansion not in {"0", "1"}
+        ):
+            rejected += 1
+            continue
+        seen.add(bgg_id)
+        rank = _to_int(row.get("rank"))
+        rows.append(
+            DumpRow(
+                bgg_id=bgg_id,
+                name=name,
+                year_published=_to_int(row.get("yearpublished")) or None,
+                rank=rank if rank and rank > 0 else None,
+                bayes_average=_to_float(row.get("bayesaverage")) or None,
+                average=_to_float(row.get("average")) or None,
+                users_rated=users_rated,
+                is_expansion=int(expansion),
+            )
+        )
+
+    if not rows:
+        raise BggReferenceError("Dump contains no valid rows")
+    return rows, rejected
+
+
+class BggReferenceImporter:
+    """Imports the BGG ranks dump into the reference catalog.
+
+    Rows already refreshed through XML API2 are left untouched: the dump is
+    only a bootstrap source and is older than any API observation.
+    """
+
+    def __init__(self, database: Database):
+        self.database = database
+
+    def import_bytes(self, payload: bytes, source_filename: str) -> DumpImportResult:
+        digest = hashlib.sha256(payload).hexdigest()
+        rows, rejected = parse_ranks_dump(payload)
+        now = datetime.now(UTC).isoformat()
+        created = updated = 0
+
+        with self.database.transaction(immediate=True) as connection:
+            existing = {
+                int(row["bgg_id"])
+                for row in connection.execute("SELECT bgg_id FROM bgg_reference_games")
+            }
+            for row in rows:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO bgg_reference_games (
+                        bgg_id, name, year_published, is_expansion, rank,
+                        bayes_average, average, users_rated, source,
+                        dump_imported_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dump', ?, ?, ?)
+                    ON CONFLICT(bgg_id) DO UPDATE SET
+                        name = excluded.name,
+                        year_published = excluded.year_published,
+                        is_expansion = excluded.is_expansion,
+                        rank = excluded.rank,
+                        bayes_average = excluded.bayes_average,
+                        average = excluded.average,
+                        users_rated = excluded.users_rated,
+                        dump_imported_at = excluded.dump_imported_at,
+                        updated_at = excluded.updated_at
+                    WHERE bgg_reference_games.api_checked_at IS NULL
+                      AND (
+                        bgg_reference_games.name IS NOT excluded.name
+                        OR bgg_reference_games.year_published IS NOT excluded.year_published
+                        OR bgg_reference_games.is_expansion IS NOT excluded.is_expansion
+                        OR bgg_reference_games.rank IS NOT excluded.rank
+                        OR bgg_reference_games.bayes_average IS NOT excluded.bayes_average
+                        OR bgg_reference_games.average IS NOT excluded.average
+                        OR bgg_reference_games.users_rated IS NOT excluded.users_rated
+                      )
+                    """,
+                    (
+                        row.bgg_id,
+                        row.name,
+                        row.year_published,
+                        row.is_expansion,
+                        row.rank,
+                        row.bayes_average,
+                        row.average,
+                        row.users_rated,
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+                if row.bgg_id not in existing:
+                    created += 1
+                elif cursor.rowcount:
+                    updated += 1
+
+            connection.execute(
+                """
+                INSERT INTO import_runs (
+                    source_type, source_filename, sha256, row_count,
+                    created_count, updated_count, unchanged_count, imported_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    DUMP_SOURCE_TYPE,
+                    source_filename,
+                    digest,
+                    len(rows),
+                    created,
+                    updated,
+                    len(rows) - created - updated,
+                    now,
+                ),
+            )
+
+        return DumpImportResult(
+            source_filename=source_filename,
+            sha256=digest,
+            row_count=len(rows),
+            created_count=created,
+            updated_count=updated,
+            unchanged_count=len(rows) - created - updated,
+            rejected_count=rejected,
+        )
+
+    def import_path(self, path: Path) -> DumpImportResult:
+        return self.import_bytes(path.read_bytes(), path.name)
+
+
+def _fts_query(query: str) -> str | None:
+    tokens = normalize_title_text(query).split()
+    if not tokens:
+        return None
+    return " ".join(f'"{token}"*' for token in tokens)
+
+
+_VISIBLE_SQL = """
+    g.removed_at IS NULL
+    AND (
+        g.users_rated >= :min_votes
+        OR (
+            g.admission_reason IS NOT NULL
+            AND (g.admission_until IS NULL OR g.admission_until > :now)
+        )
+    )
+    AND (:include_expansions = 1 OR g.is_expansion = 0)
+"""
+
+
+def _visibility_params(value: ReferenceSettings) -> dict[str, Any]:
+    return {
+        "min_votes": value.min_votes,
+        "include_expansions": 1 if value.include_expansions else 0,
+        "now": datetime.now(UTC).isoformat(),
+    }
+
+
+class BggReferenceCatalog:
+    def __init__(self, database: Database):
+        self.database = database
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        reference_settings: ReferenceSettings | None = None,
+    ) -> list[dict[str, Any]]:
+        match = _fts_query(query)
+        if match is None:
+            return []
+        value = reference_settings or load_reference_settings(self.database)
+        params = {
+            **_visibility_params(value),
+            "match": match,
+            "exact": query.strip(),
+            "limit": limit,
+        }
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.admission_reason, b.id AS board_game_id
+                FROM bgg_reference_games_fts f
+                JOIN bgg_reference_games g ON g.bgg_id = f.rowid
+                LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
+                WHERE bgg_reference_games_fts MATCH :match
+                  AND {_VISIBLE_SQL}
+                ORDER BY (g.name = :exact COLLATE NOCASE) DESC,
+                         g.users_rated DESC, g.bgg_id
+                LIMIT :limit
+                """,
+                params,
+            ).fetchall()
+        return [
+            {
+                "bgg_id": int(row["bgg_id"]),
+                "name": row["name"],
+                "year_published": row["year_published"],
+                "is_expansion": bool(row["is_expansion"]),
+                "rank": row["rank"],
+                "average": row["average"],
+                "users_rated": int(row["users_rated"]),
+                "thumbnail_url": row["thumbnail_url"],
+                "admission_reason": row["admission_reason"] or "votes",
+                "in_catalog": row["board_game_id"] is not None,
+            }
+            for row in rows
+        ]
+
+    def status(self, reference_settings: ReferenceSettings | None = None) -> dict[str, Any]:
+        value = reference_settings or load_reference_settings(self.database)
+        with self.database.connect() as connection:
+            totals = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total,
+                       COALESCE(SUM(CASE WHEN {_VISIBLE_SQL} THEN 1 ELSE 0 END), 0) AS visible,
+                       COALESCE(SUM(CASE WHEN g.api_checked_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS api_checked
+                FROM bgg_reference_games g
+                """,
+                _visibility_params(value),
+            ).fetchone()
+            last_import = connection.execute(
+                """
+                SELECT source_filename, sha256, row_count, created_count,
+                       updated_count, unchanged_count, imported_at
+                FROM import_runs
+                WHERE source_type = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (DUMP_SOURCE_TYPE,),
+            ).fetchone()
+        return {
+            "settings": value.to_dict(),
+            "total": int(totals["total"]),
+            "visible": int(totals["visible"]),
+            "api_checked": int(totals["api_checked"]),
+            "last_dump_import": dict(last_import) if last_import else None,
+        }
