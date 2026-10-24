@@ -99,6 +99,9 @@ const settingsForm = document.querySelector("#settingsForm");
 const closeSettings = document.querySelector("#closeSettings");
 const cancelSettings = document.querySelector("#cancelSettings");
 const saveSettings = document.querySelector("#saveSettings");
+const referenceMinVotes = document.querySelector("#referenceMinVotes");
+const referenceIncludeExpansions = document.querySelector("#referenceIncludeExpansions");
+const referenceStatus = document.querySelector("#referenceStatus");
 const saveTestSettings = document.querySelector("#saveTestSettings");
 const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
 const settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
@@ -499,8 +502,12 @@ async function performGlobalSearch(query, target) {
   }
   target.innerHTML = '<p class="muted">Ricerca…</p>';
   try {
-    const payload = await api(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
+    const [payload, referencePayload] = await Promise.all([
+      api(`/api/search?q=${encodeURIComponent(query)}&limit=8`),
+      api(`/api/reference/search?q=${encodeURIComponent(query)}&limit=8`).catch(() => ({items: []})),
+    ]);
     if (query !== latestGlobalSearchQuery) return;
+    const reference = (referencePayload.items || []).filter((item) => !item.in_catalog);
     const games = payload.groups?.games || [];
     const sections = payload.groups?.sections || [];
     const wishlist = payload.groups?.wishlist || [];
@@ -521,6 +528,12 @@ async function performGlobalSearch(query, target) {
               <span><strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"} · ${escapeHtml(personalStatusLabel(game.progress))}</small></span>
             </a>
           `).join("")}
+        </section>
+      ` : ""}
+      ${reference.length ? `
+        <section class="global-search-group">
+          <h3>Catalogo BGG</h3>
+          ${reference.map(referenceSearchResult).join("")}
         </section>
       ` : ""}
       ${wishlist.length ? `
@@ -595,13 +608,72 @@ async function performGlobalSearch(query, target) {
           `).join("")}
         </section>
       ` : ""}
-      ${!games.length && !wishlist.length && !lists.length && !rulebooks.length && !crowdfunding.length && !sections.length
+      ${!games.length && !reference.length && !wishlist.length && !lists.length && !rulebooks.length && !crowdfunding.length && !sections.length
         ? '<div class="empty">Nessun risultato.</div>'
         : ""}
     `;
+    bindWishlistActions(target);
+    bindReferenceActions(target);
   } catch (error) {
     target.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
+}
+
+function referenceSearchResult(item) {
+  const key = String(item.bgg_id);
+  const wishlist = wishlistEntry("bgg", key);
+  const details = [
+    item.year_published || "—",
+    item.is_expansion ? "Espansione" : null,
+    item.rank ? `#${formatNumber(item.rank, 0)} BGG` : null,
+    `${formatNumber(item.users_rated, 0)} voti`,
+  ].filter(Boolean).join(" · ");
+  return `
+    <div class="global-search-result reference-result">
+      <span class="global-search-cover">
+        ${item.thumbnail_url
+          ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span>${escapeHtml(initials(item.name))}</span>`}
+      </span>
+      <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(details)}</small></span>
+      <span class="reference-result-actions">
+        <button class="wishlist-heart ${wishlist ? "is-active" : ""}" type="button"
+                aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+                title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+                data-wishlist-source-kind="bgg"
+                data-wishlist-source-key="${escapeHtml(key)}"
+                data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
+                data-wishlist-bgg-id="${Number(item.bgg_id)}"
+                data-wishlist-title="${escapeHtml(item.name)}"
+                data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
+                data-wishlist-cover="${escapeHtml(item.thumbnail_url || "")}"
+                data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
+          <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
+        </button>
+        <button class="button button-ghost" type="button"
+                data-reference-collection="${Number(item.bgg_id)}"
+                aria-label="Aggiungi ${escapeHtml(item.name)} alla collezione">Collezione</button>
+      </span>
+    </div>
+  `;
+}
+
+function bindReferenceActions(root = document) {
+  root.querySelectorAll?.("[data-reference-collection]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      button.disabled = true;
+      try {
+        await api(`/api/reference/${encodeURIComponent(button.dataset.referenceCollection)}/collection`, {method: "POST"});
+        button.textContent = "In collezione";
+        showToast("Aggiunto alla collezione.");
+      } catch (error) {
+        button.disabled = false;
+        showToast(error.message, true);
+      }
+    });
+  });
 }
 
 function setNotificationBadge(count) {
@@ -1013,6 +1085,31 @@ function applyRagSettingsToForm(data) {
 }
 
 
+function renderReferenceStatus(status) {
+  if (!referenceStatus) return;
+  const value = status.settings || {};
+  referenceMinVotes.value = value.min_votes ?? 100;
+  referenceIncludeExpansions.checked = value.include_expansions !== false;
+  const last = status.last_dump_import;
+  const when = last?.imported_at ? formatBggSyncTime(last.imported_at) : "mai";
+  referenceStatus.textContent =
+    `${formatNumber(status.visible, 0)} titoli visibili su ${formatNumber(status.total, 0)} · ultimo import: ${when}`;
+}
+
+async function saveReferenceSettings() {
+  if (!referenceMinVotes || referenceMinVotes.value === "") return;
+  const minVotes = Number.parseInt(referenceMinVotes.value, 10);
+  if (!Number.isInteger(minVotes) || minVotes < 0) {
+    throw new Error("I voti minimi devono essere un numero intero ≥ 0.");
+  }
+  await api("/api/reference/settings", {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({min_votes: minVotes, include_expansions: referenceIncludeExpansions.checked}),
+  });
+  renderReferenceStatus(await api("/api/reference/status"));
+}
+
 async function openSettingsDialog(initialTab = "general") {
   if (settingsCollapseExpansions) {
     settingsCollapseExpansions.checked = Boolean(state.collapseExpansions);
@@ -1025,6 +1122,9 @@ async function openSettingsDialog(initialTab = "general") {
   settingsResult.textContent = "";
   setSettingsBusy(true);
   try {
+    api("/api/reference/status").then(renderReferenceStatus).catch(() => {
+      if (referenceStatus) referenceStatus.textContent = "Stato del catalogo non disponibile.";
+    });
     const [bggData, ragData, youtubeData, crowdfundingData, syncData] = await Promise.all([
       api("/api/settings/bgg"),
       api("/api/settings/rag"),
@@ -1120,6 +1220,8 @@ async function persistSettings({verifyAfter = false} = {}) {
       body: JSON.stringify(youtubePayload),
     });
     applyYoutubeSettingsToForm(savedYoutube);
+
+    await saveReferenceSettings();
 
     const savedCrowdfunding = await saveCrowdfundingSettings();
     applyCrowdfundingSettingsToForm(savedCrowdfunding);

@@ -819,3 +819,7 @@
 @media(max-width:620px){
   .catalog-scan-button{position:static;top:auto;right:auto;align-self:auto}
 }
+.global-search-result.reference-result{grid-template-columns:2.6rem minmax(0,1fr) auto}
+.global-search-result.reference-result>span.reference-result-actions{display:flex;gap:.35rem;align-items:center}
+.reference-result-actions .button{padding:.25rem .55rem;font-size:.6rem;white-space:nowrap}
+@media (max-width:480px){.global-search-result.reference-result{grid-template-columns:2.6rem minmax(0,1fr)}.reference-result-actions{grid-column:1 / -1;justify-content:flex-end}}

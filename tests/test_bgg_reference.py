@@ -238,6 +238,15 @@ def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert client.get("/api/reference/status").json()["visible"] == 4
         client.put("/api/reference/settings", json={"min_votes": 100})
 
+        assert client.post("/api/reference/777/collection").status_code == 404
+        added = client.post("/api/reference/28720/collection")
+        assert added.status_code == 201
+        assert added.json()["created_game"] and added.json()["created_entry"]
+        again = client.post("/api/reference/28720/collection").json()
+        assert not again["created_game"] and not again["created_entry"]
+        flagged = client.get("/api/reference/search", params={"q": "brass"}).json()["items"]
+        assert {i["bgg_id"]: i["in_catalog"] for i in flagged} == {28720: True, 224517: False}
+
         search = client.get("/api/reference/search", params={"q": "brass"}).json()
         assert [item["bgg_id"] for item in search["items"]] == [28720, 224517]
 

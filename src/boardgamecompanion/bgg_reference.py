@@ -415,6 +415,72 @@ class BggReferenceCatalog:
             for row in rows
         ]
 
+    def add_to_collection(self, bgg_id: int) -> dict[str, Any]:
+        """Promote a reference title into board_games as an owned collection entry.
+
+        Idempotent: an existing board game or collection entry is never overwritten.
+        """
+        now = datetime.now(UTC).isoformat()
+        with self.database.connect() as connection:
+            reference = connection.execute(
+                """
+                SELECT bgg_id, name, year_published, is_expansion, rank,
+                       bayes_average, average
+                FROM bgg_reference_games
+                WHERE bgg_id = ? AND removed_at IS NULL
+                """,
+                (bgg_id,),
+            ).fetchone()
+            board = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id = ?", (bgg_id,)
+            ).fetchone()
+            if reference is None and board is None:
+                raise BggReferenceError(f"BGG #{bgg_id} is not in the reference catalog")
+            created_game = board is None
+            if board is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO board_games(
+                        bgg_id, title, year_published, item_type, bgg_average,
+                        bgg_bayes_average, bgg_rank, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        bgg_id,
+                        reference["name"],
+                        reference["year_published"],
+                        "expansion" if reference["is_expansion"] else "standalone",
+                        reference["average"] or None,
+                        reference["bayes_average"] or None,
+                        reference["rank"] or None,
+                        now,
+                        now,
+                    ),
+                )
+                board_game_id = int(cursor.lastrowid)
+            else:
+                board_game_id = int(board["id"])
+            entry = connection.execute(
+                "SELECT id FROM collection_entries WHERE board_game_id = ? LIMIT 1",
+                (board_game_id,),
+            ).fetchone()
+            created_entry = entry is None
+            if entry is None:
+                connection.execute(
+                    """
+                    INSERT INTO collection_entries(
+                        board_game_id, own, first_seen_at, created_at, updated_at
+                    ) VALUES (?, 1, ?, ?, ?)
+                    """,
+                    (board_game_id, now, now, now),
+                )
+        return {
+            "bgg_id": bgg_id,
+            "board_game_id": board_game_id,
+            "created_game": created_game,
+            "created_entry": created_entry,
+        }
+
     def status(self, reference_settings: ReferenceSettings | None = None) -> dict[str, Any]:
         value = reference_settings or load_reference_settings(self.database)
         with self.database.connect() as connection:

@@ -226,6 +226,27 @@
           </label>
         </section>
 
+        <section class="settings-card" id="referenceSettings">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Catalogo BGG</p>
+              <h3>Catalogo di riferimento</h3>
+              <p class="muted">Anagrafica BGG locale per cercare e aggiungere titoli. Non modifica la tua collezione.</p>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span>Voti minimi per mostrare un titolo</span>
+              <input id="referenceMinVotes" type="number" min="0" step="1" inputmode="numeric">
+            </label>
+            <label class="settings-check">
+              <input id="referenceIncludeExpansions" type="checkbox">
+              <span>Includi le espansioni</span>
+            </label>
+          </div>
+          <p class="muted" id="referenceStatus" role="status">Caricamento…</p>
+        </section>
+
         <section class="settings-card" id="youtubeSettings">
           <div class="settings-section-head">
             <div>

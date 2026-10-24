@@ -57,6 +57,16 @@ def reference_search(
     return {"query": q, "items": items}
 
 
+@router.post("/api/reference/{bgg_id}/collection", status_code=201)
+def reference_add_to_collection(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    try:
+        return BggReferenceCatalog(database).add_to_collection(bgg_id)
+    except BggReferenceError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/api/reference/import-dump")
 def reference_import_dump(payload: DumpImportPayload | None = None) -> dict[str, object]:
     path = _import_file((payload or DumpImportPayload()).filename)
