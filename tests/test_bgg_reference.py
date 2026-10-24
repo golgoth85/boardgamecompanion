@@ -258,3 +258,16 @@ def test_startup_imports_dump_without_user_action(tmp_path: Path) -> None:
 
     assert status["total"] == 4
     assert status["last_dump_import"]["source_filename"] == "boardgames_ranks.csv"
+
+
+def test_import_in_small_batches_keeps_counts(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("boardgamecompanion.bgg_reference.IMPORT_BATCH_SIZE", 3)
+    importer = BggReferenceImporter(database)
+
+    first = importer.import_bytes(DUMP, "boardgames_ranks.csv")
+    second = importer.import_bytes(DUMP.replace(b"150,0", b"151,0"), "boardgames_ranks.csv")
+
+    assert (first.created_count, first.updated_count) == (4, 0)
+    assert (second.created_count, second.updated_count, second.unchanged_count) == (0, 1, 3)

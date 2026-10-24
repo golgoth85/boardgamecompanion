@@ -173,6 +173,53 @@ def parse_ranks_dump(payload: bytes) -> tuple[list[DumpRow], int]:
     return rows, rejected
 
 
+IMPORT_BATCH_SIZE = 5000
+
+_DUMP_UPSERT_SQL = """
+    INSERT INTO bgg_reference_games (
+        bgg_id, name, year_published, is_expansion, rank,
+        bayes_average, average, users_rated, source,
+        dump_imported_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dump', ?, ?, ?)
+    ON CONFLICT(bgg_id) DO UPDATE SET
+        name = excluded.name,
+        year_published = excluded.year_published,
+        is_expansion = excluded.is_expansion,
+        rank = excluded.rank,
+        bayes_average = excluded.bayes_average,
+        average = excluded.average,
+        users_rated = excluded.users_rated,
+        dump_imported_at = excluded.dump_imported_at,
+        updated_at = excluded.updated_at
+    WHERE bgg_reference_games.api_checked_at IS NULL
+      AND (
+        bgg_reference_games.name IS NOT excluded.name
+        OR bgg_reference_games.year_published IS NOT excluded.year_published
+        OR bgg_reference_games.is_expansion IS NOT excluded.is_expansion
+        OR bgg_reference_games.rank IS NOT excluded.rank
+        OR bgg_reference_games.bayes_average IS NOT excluded.bayes_average
+        OR bgg_reference_games.average IS NOT excluded.average
+        OR bgg_reference_games.users_rated IS NOT excluded.users_rated
+      )
+"""
+
+
+def _dump_params(row: DumpRow, now: str) -> tuple[object, ...]:
+    return (
+        row.bgg_id,
+        row.name,
+        row.year_published,
+        row.is_expansion,
+        row.rank,
+        row.bayes_average,
+        row.average,
+        row.users_rated,
+        now,
+        now,
+        now,
+    )
+
+
 class BggReferenceImporter:
     """Imports the BGG ranks dump into the reference catalog.
 
@@ -189,59 +236,25 @@ class BggReferenceImporter:
         now = datetime.now(UTC).isoformat()
         created = updated = 0
 
-        with self.database.transaction(immediate=True) as connection:
+        with self.database.connect() as connection:
             existing = {
                 int(row["bgg_id"])
                 for row in connection.execute("SELECT bgg_id FROM bgg_reference_games")
             }
-            for row in rows:
-                cursor = connection.execute(
-                    """
-                    INSERT INTO bgg_reference_games (
-                        bgg_id, name, year_published, is_expansion, rank,
-                        bayes_average, average, users_rated, source,
-                        dump_imported_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dump', ?, ?, ?)
-                    ON CONFLICT(bgg_id) DO UPDATE SET
-                        name = excluded.name,
-                        year_published = excluded.year_published,
-                        is_expansion = excluded.is_expansion,
-                        rank = excluded.rank,
-                        bayes_average = excluded.bayes_average,
-                        average = excluded.average,
-                        users_rated = excluded.users_rated,
-                        dump_imported_at = excluded.dump_imported_at,
-                        updated_at = excluded.updated_at
-                    WHERE bgg_reference_games.api_checked_at IS NULL
-                      AND (
-                        bgg_reference_games.name IS NOT excluded.name
-                        OR bgg_reference_games.year_published IS NOT excluded.year_published
-                        OR bgg_reference_games.is_expansion IS NOT excluded.is_expansion
-                        OR bgg_reference_games.rank IS NOT excluded.rank
-                        OR bgg_reference_games.bayes_average IS NOT excluded.bayes_average
-                        OR bgg_reference_games.average IS NOT excluded.average
-                        OR bgg_reference_games.users_rated IS NOT excluded.users_rated
-                      )
-                    """,
-                    (
-                        row.bgg_id,
-                        row.name,
-                        row.year_published,
-                        row.is_expansion,
-                        row.rank,
-                        row.bayes_average,
-                        row.average,
-                        row.users_rated,
-                        now,
-                        now,
-                        now,
-                    ),
-                )
-                if row.bgg_id not in existing:
-                    created += 1
-                elif cursor.rowcount:
-                    updated += 1
 
+        # Short write transactions: a single one over ~180k rows held the
+        # SQLite write lock long enough to starve the other workers.
+        for start in range(0, len(rows), IMPORT_BATCH_SIZE):
+            batch = rows[start : start + IMPORT_BATCH_SIZE]
+            with self.database.transaction(immediate=True) as connection:
+                for row in batch:
+                    cursor = connection.execute(_DUMP_UPSERT_SQL, _dump_params(row, now))
+                    if row.bgg_id not in existing:
+                        created += 1
+                    elif cursor.rowcount:
+                        updated += 1
+
+        with self.database.transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO import_runs (
