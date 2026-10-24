@@ -192,7 +192,7 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   29.865 titoli interrogati, solo `boardgame`/`boardgameexpansion`, 1 ID
   marcato rimosso, 1.798 ammissioni `upcoming`, nessun errore. La coda
   candidati conta circa 29.000 titoli (anno recente o assente).
-- Fatto (2026-10-24): ricontrolli scaglionati. Ogni ID ha i propri giorni del
+- Fatto e distribuito (2026-10-24, `7680a7b`): ricontrolli scaglionati. Ogni ID ha i propri giorni del
   ciclo (`(giorno + bgg_id) % giorni_ciclo == 0`); dopo un controllo il
   successivo cade sul primo di questi entro il ciclo (da 1 a 7/14 giorni). Il
   primo giro in blocco si distribuisce quindi sul ciclo seguente e poi resta
