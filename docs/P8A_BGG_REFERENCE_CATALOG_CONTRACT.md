@@ -138,12 +138,12 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
 - Limite noto: i nomi del dump sono solo quelli principali BGG; titoli
   italiani (es. «Castelli della Borgogna») non si trovano finché non arrivano
   i titoli alternativi da `/thing`.
-- Fatto (non ancora distribuito): UI. Scheda «Catalogo di riferimento» nelle
+- Fatto (distribuito 2026-10-24, `28d290e`, schema 25): UI. Scheda «Catalogo di riferimento» nelle
   impostazioni (soglia voti, espansioni, stato import); gruppo «Catalogo BGG»
   nella ricerca globale con wishlist (`source_kind=bgg`) e «Collezione»
   (`POST /api/reference/{bgg_id}/collection`: crea riga `board_games` e voce
   collezione `own=1`, idempotente, senza sovrascrivere).
-- Fatto (non ancora distribuito): dettagli su richiesta. Migrazione 25
+- Fatto (distribuito 2026-10-24, `28d290e`, schema 25): dettagli su richiesta. Migrazione 25
   (`bgg-reference-alt-names`: colonna `alt_names`, FTS a due colonne
   ricostruito). `GET /api/reference/{bgg_id}` restituisce la riga e, solo se
   mai interrogata, fa una `/thing?stats=1` singola (stesso limitatore e token
@@ -153,7 +153,7 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   non lo restituisce) e valorizza `api_checked_at`. Senza
   token o con BGG in errore risponde comunque con i dati del dump
   (`detail_error`). UI: scheda dettagli aperta dal titolo nei risultati.
-- Fatto (non ancora distribuito): worker API (`bgg_reference_worker.py`),
+- Fatto (distribuito 2026-10-24, `28d290e`, schema 25): worker API (`bgg_reference_worker.py`),
   un ciclo ogni ora (`bgg_reference_api_poll_seconds`, disattivabile con
   `bgg_reference_api_worker_enabled`). Senza token non fa nulla
   (`status: no_token`). Budget giornaliero in richieste (ogni `/thing` da 20 ID
