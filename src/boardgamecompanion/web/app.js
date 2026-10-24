@@ -614,14 +614,40 @@ async function performGlobalSearch(query, target) {
     `;
     bindWishlistActions(target);
     bindReferenceActions(target);
+    target.querySelectorAll("[data-reference-detail]").forEach((button) => {
+      button.addEventListener("click", () => void openReferenceDetail(button.dataset.referenceDetail));
+    });
   } catch (error) {
     target.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
-function referenceSearchResult(item) {
+function referenceActionButtons(item) {
   const key = String(item.bgg_id);
   const wishlist = wishlistEntry("bgg", key);
+  const thumbnail = item.thumbnail_url || item.image_url || "";
+  return `
+    <button class="wishlist-heart ${wishlist ? "is-active" : ""}" type="button"
+            aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+            title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+            data-wishlist-source-kind="bgg"
+            data-wishlist-source-key="${escapeHtml(key)}"
+            data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
+            data-wishlist-bgg-id="${Number(item.bgg_id)}"
+            data-wishlist-title="${escapeHtml(item.name)}"
+            data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
+            data-wishlist-cover="${escapeHtml(thumbnail)}"
+            data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
+      <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
+    </button>
+    <button class="button button-ghost" type="button"
+            data-reference-collection="${Number(item.bgg_id)}"
+            ${item.in_catalog ? "disabled" : ""}
+            aria-label="Aggiungi ${escapeHtml(item.name)} alla collezione">${item.in_catalog ? "In collezione" : "Collezione"}</button>
+  `;
+}
+
+function referenceSearchResult(item) {
   const details = [
     item.year_published || "—",
     item.is_expansion ? "Espansione" : null,
@@ -635,27 +661,60 @@ function referenceSearchResult(item) {
           ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(item.name))}</span>`}
       </span>
-      <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(details)}</small></span>
-      <span class="reference-result-actions">
-        <button class="wishlist-heart ${wishlist ? "is-active" : ""}" type="button"
-                aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
-                title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
-                data-wishlist-source-kind="bgg"
-                data-wishlist-source-key="${escapeHtml(key)}"
-                data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
-                data-wishlist-bgg-id="${Number(item.bgg_id)}"
-                data-wishlist-title="${escapeHtml(item.name)}"
-                data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
-                data-wishlist-cover="${escapeHtml(item.thumbnail_url || "")}"
-                data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
-          <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
-        </button>
-        <button class="button button-ghost" type="button"
-                data-reference-collection="${Number(item.bgg_id)}"
-                aria-label="Aggiungi ${escapeHtml(item.name)} alla collezione">Collezione</button>
-      </span>
+      <button class="reference-open" type="button" data-reference-detail="${Number(item.bgg_id)}">
+        <strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(details)}</small>
+      </button>
+      <span class="reference-result-actions">${referenceActionButtons(item)}</span>
     </div>
   `;
+}
+
+async function openReferenceDetail(bggId) {
+  const dialog = document.querySelector("#referenceDetailDialog");
+  const title = document.querySelector("#referenceDetailTitle");
+  const body = document.querySelector("#referenceDetailBody");
+  title.textContent = "Caricamento…";
+  body.innerHTML = '<p class="muted">Caricamento…</p>';
+  openDialog(dialog);
+  try {
+    const item = await api(`/api/reference/${encodeURIComponent(bggId)}`);
+    title.textContent = item.name;
+    const facts = [
+      item.year_published || null,
+      item.rank ? `#${formatNumber(item.rank, 0)} BGG` : null,
+      item.average ? `Media ${Number(item.average).toFixed(1)}` : null,
+      `${formatNumber(item.users_rated, 0)} voti`,
+      Number.isFinite(item.wishing) ? `${formatNumber(item.wishing, 0)} in wishlist` : null,
+    ].filter(Boolean).join(" · ");
+    const note = item.detail_error === "no_token"
+      ? "Descrizione non disponibile: configura il token BGG nelle impostazioni."
+      : item.detail_error
+        ? "Descrizione non disponibile: BGG non ha risposto, riprova più tardi."
+        : "";
+    body.innerHTML = `
+      <div class="reference-detail">
+        ${item.image_url
+          ? `<img class="reference-detail-image" src="${escapeHtml(item.image_url)}" alt="" referrerpolicy="no-referrer">`
+          : ""}
+        <p class="muted">${escapeHtml(facts)}</p>
+        ${item.alternate_names.length
+          ? `<p class="muted"><strong>Altri titoli:</strong> ${item.alternate_names.slice(0, 12).map(escapeHtml).join(" · ")}</p>`
+          : ""}
+        ${item.description
+          ? `<p class="game-description-text">${escapeHtml(item.description)}</p>`
+          : (note ? `<p class="muted">${escapeHtml(note)}</p>` : "")}
+        <div class="reference-detail-actions">
+          ${referenceActionButtons(item)}
+          <a class="button button-ghost" href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+             target="_blank" rel="noopener noreferrer">BGG ${icon("external")}</a>
+        </div>
+      </div>
+    `;
+    bindWishlistActions(body);
+    bindReferenceActions(body);
+  } catch (error) {
+    body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function bindReferenceActions(root = document) {
@@ -6370,6 +6429,7 @@ document.addEventListener("pointerdown", (event) => {
 });
 mobileSearchButton?.addEventListener("click", openGlobalSearchDialog);
 closeGlobalSearch?.addEventListener("click", closeGlobalSearchDialog);
+document.querySelector("#closeReferenceDetail")?.addEventListener("click", () => closeDialog(document.querySelector("#referenceDetailDialog")));
 bindDialogCancel(globalSearchDialog, closeGlobalSearchDialog);
 globalSearchInput?.addEventListener("input", () => {
   window.clearTimeout(globalSearchTimer);

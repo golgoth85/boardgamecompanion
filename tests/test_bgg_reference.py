@@ -239,6 +239,10 @@ def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         client.put("/api/reference/settings", json={"min_votes": 100})
 
         assert client.post("/api/reference/777/collection").status_code == 404
+        assert client.get("/api/reference/settings").status_code == 200
+        assert client.get("/api/reference/777").status_code == 404
+        offline = client.get("/api/reference/28720").json()
+        assert offline["name"] == "Brass" and offline["detail_error"] == "no_token"
         added = client.post("/api/reference/28720/collection")
         assert added.status_code == 201
         assert added.json()["created_game"] and added.json()["created_entry"]
@@ -280,3 +284,60 @@ def test_import_in_small_batches_keeps_counts(
 
     assert (first.created_count, first.updated_count) == (4, 0)
     assert (second.created_count, second.updated_count, second.unchanged_count) == (0, 1, 3)
+
+
+class FakeThingClient:
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def thing(self, bgg_id: int) -> dict:
+        self.calls.append(bgg_id)
+        return {
+            "bgg_id": bgg_id,
+            "title": "Brass",
+            "alternate_titles": ["Brass: Imperio del Carbone", "Castelli Fittizi"],
+            "description": "Una descrizione.",
+            "cover_url": "https://cf.geekdo-images.com/x.jpg",
+            "thumbnail_url": "https://cf.geekdo-images.com/t.jpg",
+            "bgg_rank": 100,
+            "bgg_average": 7.9,
+            "bgg_bayes_average": 7.6,
+            "bgg_users_rated": 16000,
+            "bgg_wishing": 321,
+            "bgg_num_owned": 20000,
+        }
+
+
+def test_detail_fetches_once_and_indexes_alternate_titles(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+    assert catalog.search("castelli fittizi") == []
+
+    offline = catalog.detail(28720, None)
+    assert offline["detail_error"] == "no_token" and offline["description"] is None
+    assert catalog.detail(777, None) is None
+
+    client = FakeThingClient()
+    first = catalog.detail(28720, client)
+    assert first["description"] == "Una descrizione."
+    assert first["alternate_names"] == ["Brass: Imperio del Carbone", "Castelli Fittizi"]
+    assert first["wishing"] == 321 and first["users_rated"] == 16000
+    catalog.detail(28720, client)
+    assert client.calls == [28720]
+
+    assert [i["bgg_id"] for i in catalog.search("castelli fittizi")] == [28720]
+    # a later dump import must not overwrite API data
+    BggReferenceImporter(database).import_bytes(DUMP + b"", "again.csv")
+    assert catalog.detail(28720, None)["description"] == "Una descrizione."
+
+
+def test_detail_provider_failure_keeps_dump_data(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+
+    class Broken:
+        def thing(self, bgg_id: int) -> dict:
+            raise RuntimeError("boom")
+
+    item = BggReferenceCatalog(database).detail(28720, Broken())
+    assert item["name"] == "Brass" and "boom" in item["detail_error"]
+    assert item["api_checked_at"] is None

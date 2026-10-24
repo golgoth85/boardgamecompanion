@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -414,6 +415,97 @@ class BggReferenceCatalog:
             }
             for row in rows
         ]
+
+    def detail(self, bgg_id: int, client: Any | None = None) -> dict[str, Any] | None:
+        """Reference row plus API details, fetching one /thing if never queried.
+
+        Provider failures never hide the dump data: they are reported in
+        ``detail_error`` and the call still succeeds.
+        """
+        row = self._detail_row(bgg_id)
+        if row is None:
+            return None
+        detail_error = None
+        if row["api_checked_at"] is None:
+            if client is None:
+                detail_error = "no_token"
+            else:
+                try:
+                    metadata = client.thing(bgg_id)
+                except Exception as exc:  # network, XML or rate-limit failures
+                    detail_error = f"{type(exc).__name__}: {exc}"[:300]
+                else:
+                    self._store_api_detail(bgg_id, metadata)
+                    row = self._detail_row(bgg_id)
+        try:
+            details = json.loads(row["details_json"] or "{}")
+        except ValueError:
+            details = {}
+        return {
+            "bgg_id": int(row["bgg_id"]),
+            "name": row["name"],
+            "year_published": row["year_published"],
+            "is_expansion": bool(row["is_expansion"]),
+            "rank": row["rank"] or None,
+            "average": row["average"] or None,
+            "users_rated": int(row["users_rated"]),
+            "wishing": row["wishing"],
+            "thumbnail_url": row["thumbnail_url"],
+            "image_url": row["image_url"],
+            "description": row["description"],
+            "alternate_names": [n for n in (row["alt_names"] or "").split("\n") if n],
+            "details": details,
+            "api_checked_at": row["api_checked_at"],
+            "detail_error": detail_error,
+            "in_catalog": row["board_game_id"] is not None,
+        }
+
+    def _detail_row(self, bgg_id: int) -> Any:
+        with self.database.connect() as connection:
+            return connection.execute(
+                """
+                SELECT g.*, b.id AS board_game_id
+                FROM bgg_reference_games g
+                LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
+                WHERE g.bgg_id = ? AND g.removed_at IS NULL
+                """,
+                (bgg_id,),
+            ).fetchone()
+
+    def _store_api_detail(self, bgg_id: int, metadata: dict[str, Any]) -> None:
+        now = datetime.now(UTC).isoformat()
+        alt_names = "\n".join(metadata.get("alternate_titles") or [])
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE bgg_reference_games SET
+                    rank = COALESCE(?, rank),
+                    bayes_average = COALESCE(?, bayes_average),
+                    average = COALESCE(?, average),
+                    users_rated = COALESCE(?, users_rated),
+                    wishing = ?, owned_count = ?,
+                    thumbnail_url = ?, image_url = ?, description = ?,
+                    alt_names = ?, details_json = ?,
+                    source = 'api', api_checked_at = ?, updated_at = ?
+                WHERE bgg_id = ?
+                """,
+                (
+                    metadata.get("bgg_rank"),
+                    metadata.get("bgg_bayes_average"),
+                    metadata.get("bgg_average"),
+                    metadata.get("bgg_users_rated"),
+                    metadata.get("bgg_wishing"),
+                    metadata.get("bgg_num_owned"),
+                    metadata.get("thumbnail_url"),
+                    metadata.get("cover_url"),
+                    metadata.get("description"),
+                    alt_names,
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    now,
+                    now,
+                    bgg_id,
+                ),
+            )
 
     def add_to_collection(self, bgg_id: int) -> dict[str, Any]:
         """Promote a reference title into board_games as an owned collection entry.

@@ -1726,6 +1726,58 @@ def _bgg_reference_catalog(connection: sqlite3.Connection) -> None:
     )
 
 
+def _bgg_reference_alt_names(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE bgg_reference_games ADD COLUMN alt_names TEXT NOT NULL DEFAULT ''"
+    )
+    for trigger in ("insert", "delete", "update"):
+        connection.execute(f"DROP TRIGGER IF EXISTS bgg_reference_games_fts_{trigger}")
+    connection.execute("DROP TABLE IF EXISTS bgg_reference_games_fts")
+    connection.execute(
+        """
+        CREATE VIRTUAL TABLE bgg_reference_games_fts USING fts5(
+            name,
+            alt_names,
+            content='bgg_reference_games',
+            content_rowid='bgg_id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER bgg_reference_games_fts_insert
+        AFTER INSERT ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(rowid, name, alt_names)
+            VALUES (NEW.bgg_id, NEW.name, NEW.alt_names);
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER bgg_reference_games_fts_delete
+        AFTER DELETE ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(bgg_reference_games_fts, rowid, name, alt_names)
+            VALUES ('delete', OLD.bgg_id, OLD.name, OLD.alt_names);
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER bgg_reference_games_fts_update
+        AFTER UPDATE OF name, alt_names ON bgg_reference_games BEGIN
+            INSERT INTO bgg_reference_games_fts(bgg_reference_games_fts, rowid, name, alt_names)
+            VALUES ('delete', OLD.bgg_id, OLD.name, OLD.alt_names);
+            INSERT INTO bgg_reference_games_fts(rowid, name, alt_names)
+            VALUES (NEW.bgg_id, NEW.name, NEW.alt_names);
+        END
+        """
+    )
+    connection.execute(
+        "INSERT INTO bgg_reference_games_fts(bgg_reference_games_fts) VALUES ('rebuild')"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1751,6 +1803,7 @@ MIGRATIONS = (
     Migration(22, "ai-game-descriptions", _ai_game_descriptions),
     Migration(23, "ai-description-sources", _ai_description_sources),
     Migration(24, "bgg-reference-catalog", _bgg_reference_catalog),
+    Migration(25, "bgg-reference-alt-names", _bgg_reference_alt_names),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

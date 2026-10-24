@@ -16,6 +16,7 @@ from boardgamecompanion.bgg_reference import (
     save_reference_settings,
 )
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.service_factories import get_bgg_api_client
 from boardgamecompanion.settings import settings
 
 router = APIRouter(tags=["reference"])
@@ -57,7 +58,20 @@ def reference_search(
     return {"query": q, "items": items}
 
 
-@router.post("/api/reference/{bgg_id}/collection", status_code=201)
+@router.get("/api/reference/{bgg_id:int}")
+def reference_detail(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    catalog = BggReferenceCatalog(database)
+    # The existing row answers immediately; a single /thing is fetched only the
+    # first time the user opens a title that was never queried.
+    item = catalog.detail(bgg_id, get_bgg_api_client())
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"BGG #{bgg_id} is not in the reference catalog")
+    return item
+
+
+@router.post("/api/reference/{bgg_id:int}/collection", status_code=201)
 def reference_add_to_collection(bgg_id: int) -> dict[str, object]:
     database = get_database()
     database.initialize()

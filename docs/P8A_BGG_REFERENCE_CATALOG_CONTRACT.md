@@ -143,7 +143,16 @@ vuoti, rispetto del budget, comportamento senza token, nessun effetto su
   nella ricerca globale con wishlist (`source_kind=bgg`) e «Collezione»
   (`POST /api/reference/{bgg_id}/collection`: crea riga `board_games` e voce
   collezione `own=1`, idempotente, senza sovrascrivere).
-- Da fare: dettagli su richiesta e titoli alternativi, worker API, segnali
+- Fatto (non ancora distribuito): dettagli su richiesta. Migrazione 25
+  (`bgg-reference-alt-names`: colonna `alt_names`, FTS a due colonne
+  ricostruito). `GET /api/reference/{bgg_id}` restituisce la riga e, solo se
+  mai interrogata, fa una `/thing?stats=1` singola (stesso limitatore e token
+  dei job); salva descrizione, immagini, titoli alternativi, rank/voti/wishing e
+  `details_json` (metadati già analizzati dal parser, non l'XML grezzo: i
+  sondaggi occuperebbero troppo spazio) e valorizza `api_checked_at`. Senza
+  token o con BGG in errore risponde comunque con i dati del dump
+  (`detail_error`). UI: scheda dettagli aperta dal titolo nei risultati.
+- Da fare: worker API, segnali
   crowdfunding/hot/in uscita.
 
 ## Rilascio

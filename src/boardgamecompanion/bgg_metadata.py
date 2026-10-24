@@ -265,6 +265,21 @@ def _official_min_age(item: ET.Element) -> str | None:
     """Return the publisher-declared BGG minimum age, never the community poll."""
     return _attribute(item.find("minage"))
 
+def _bgg_image_url(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    parts = urlsplit(value)
+    if (
+        parts.scheme != "https"
+        or (parts.hostname or "").lower() not in BGG_IMAGE_HOSTS
+        or parts.username is not None
+        or parts.password is not None
+    ):
+        return None
+    return value
+
+
 def _parse_item(item: ET.Element) -> dict[str, Any]:
     try:
         observed_id = int(item.attrib["id"])
@@ -308,16 +323,8 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
 
     raw_description = item.findtext("description") or ""
     description = html.unescape(raw_description).strip()[:20_000] or None
-    image = (item.findtext("image") or "").strip() or None
-    if image:
-        image_parts = urlsplit(image)
-        if (
-            image_parts.scheme != "https"
-            or (image_parts.hostname or "").lower() not in BGG_IMAGE_HOSTS
-            or image_parts.username is not None
-            or image_parts.password is not None
-        ):
-            image = None
+    image = _bgg_image_url(item.findtext("image"))
+    thumbnail = _bgg_image_url(item.findtext("thumbnail"))
 
     year_text = _attribute(item.find("yearpublished"))
     best_players, recommended_players = _suggested_players(item)
@@ -352,6 +359,9 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "parent_bgg_id": parent_bgg_id,
         "expansions": linked_expansions,
         "cover_url": image,
+        "thumbnail_url": thumbnail,
+        "bgg_users_rated": int(value) if ratings is not None and (value := _number_attribute(ratings.find("usersrated"))) is not None else None,
+        "bgg_wishing": int(value) if ratings is not None and (value := _number_attribute(ratings.find("wishing"))) is not None else None,
         "description": description,
         "publishers": grouped.get("boardgamepublisher", []),
         "categories": grouped.get("boardgamecategory", []),
