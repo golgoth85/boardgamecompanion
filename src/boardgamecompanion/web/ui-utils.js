@@ -34,3 +34,8 @@ export function safeExternalHref(value, fallback = "#") {
 export function icon(name, className = "icon") {
   return `<svg class="${className}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
 }
+
+export function coverSrc(bggId, variant = "full") {
+  const base = `/api/covers/${encodeURIComponent(bggId)}`;
+  return variant === "full" ? base : `${base}?variant=${variant}`;
+}

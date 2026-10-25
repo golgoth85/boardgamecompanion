@@ -13,7 +13,7 @@ import {
   rankingState,
   state,
 } from "./state.js";
-import {escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
+import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
@@ -525,7 +525,7 @@ async function performGlobalSearch(query, target) {
             <a class="global-search-result" href="/games/${game.bgg_id}" data-nav>
               <span class="global-search-cover">
                 ${game.bgg_metadata?.cover_url
-                  ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`
+                  ? `<img src="${coverSrc(game.bgg_id)}" alt="" referrerpolicy="no-referrer">`
                   : `<span>${escapeHtml(initials(game.title))}</span>`}
               </span>
               <span><strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"} · ${escapeHtml(personalStatusLabel(game.progress))}</small></span>
@@ -661,7 +661,7 @@ function referenceSearchResult(item) {
     <div class="global-search-result reference-result">
       <span class="global-search-cover">
         ${item.thumbnail_url
-          ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(item.bgg_id, "thumb")}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(item.name))}</span>`}
       </span>
       <button class="reference-open" type="button" data-reference-detail="${Number(item.bgg_id)}">
@@ -697,7 +697,7 @@ async function openReferenceDetail(bggId) {
     body.innerHTML = `
       <div class="reference-detail">
         ${item.image_url
-          ? `<img class="reference-detail-image" src="${escapeHtml(item.image_url)}" alt="" referrerpolicy="no-referrer">`
+          ? `<img class="reference-detail-image" src="${coverSrc(item.bgg_id)}" alt="" referrerpolicy="no-referrer">`
           : ""}
         <p class="muted">${escapeHtml(facts)}</p>
         ${item.alternate_names.length
@@ -2333,7 +2333,7 @@ function expansionMiniCard(game) {
     <a class="expansion-mini-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri espansione ${escapeHtml(game.title)}">
       <span class="expansion-mini-cover">
         ${game.bgg_metadata?.cover_url
-          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(game.title))}</span>`}
       </span>
       <span class="expansion-mini-copy">
@@ -2358,7 +2358,7 @@ function gameCard(game, expansions = []) {
         <div class="cover">
           <span class="badge card-badge">${type}</span>
           ${game.bgg_metadata?.cover_url
-            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
+            ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
             : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
         </div>
         <div class="card-body">
@@ -2402,7 +2402,7 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       <a class="catalog-list-game" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
         <span class="catalog-list-cover">
           ${game.bgg_metadata?.cover_url
-            ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
             : `<span>${escapeHtml(initials(game.title))}</span>`}
         </span>
         <span class="catalog-list-title">
@@ -3481,7 +3481,7 @@ async function ensureDescriptionSource(bggId) {
   const cover = document.querySelector(".game-summary-cover .detail-cover");
   if (cover?.isConnected && metadata.cover_url) {
     const placeholder = cover.querySelector(".cover-image, .cover-initials");
-    if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+    if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${coverSrc(bggId)}" alt="" referrerpolicy="no-referrer">`;
   }
   return api(`/api/games/${bggId}/description-it`);
 }
@@ -3661,7 +3661,7 @@ async function renderDetail(bggId) {
           <div class="game-summary-cover">
             <div class="detail-cover">
               ${metadata.cover_url
-                ? `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+                ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
                 : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
               <div class="cover-rating-overlay" aria-label="Valutazione personale">
                 ${starRatingMarkup(game.progress?.rating, {interactive: true})}
@@ -4663,7 +4663,7 @@ function browseGameRow(game, index) {
       <span class="browse-rank">${index !== null ? index : rank}</span>
       <span class="browse-cover">
         ${game.bgg_metadata?.cover_url
-          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(game.title))}</span>`}
       </span>
       <span class="browse-game-title">
@@ -4743,7 +4743,7 @@ async function ensureRankingGameplaySummaries(items) {
 function rankingGameRow(item, index) {
   const game = item.game;
   const cover = game.bgg_metadata?.cover_url
-    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span>${escapeHtml(initials(game.title))}</span>`;
   const factors = (item.factors || []).map(
     (factor) => `<span>${escapeHtml(factor)}</span>`
@@ -5019,7 +5019,7 @@ function completionAchievementMarkup(game) {
 
 function trophyGameCard(game, {compact = false} = {}) {
   const cover = game.bgg_metadata?.cover_url
-    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`;
   const milestoneAt = game.progress?.completed_at || game.progress?.played_at || null;
   const milestoneLabel = game.progress?.completed ? "Completato" : "Giocato";
@@ -5821,7 +5821,7 @@ let bggCatalogSearchTimer;
 function bggCatalogCard(item) {
   const bggId = Number(item.bgg_id);
   const cover = item.image_url || item.thumbnail_url
-    ? `<img src="${escapeHtml(item.image_url || item.thumbnail_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+    ? `<img src="${coverSrc(bggId)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
     : `<span class="cover-initials" aria-hidden="true">${escapeHtml(initials(item.name))}</span>`;
   const facts = [
     item.year_published ? String(item.year_published) : "Anno —",

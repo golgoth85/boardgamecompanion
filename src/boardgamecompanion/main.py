@@ -83,6 +83,7 @@ from boardgamecompanion.crowdfunding_notifications import (
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.covers import router as covers_router
 from boardgamecompanion.routers.diagnostics import router as diagnostics_router
 from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
@@ -804,6 +805,7 @@ def _web_page() -> FileResponse:
 
 app.mount("/static", RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
+app.include_router(covers_router)
 app.include_router(diagnostics_router)
 app.include_router(expansions_router)
 app.include_router(wishlist_router)
