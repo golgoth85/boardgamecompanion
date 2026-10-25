@@ -1,22 +1,11 @@
 #!/usr/bin/env python3
-"""Controlli di validazione di BoardGameCompanion (Local CI, profilo pytest-browser-v1).
+"""Controlli di validazione di BoardGameCompanion, da eseguire nel container di sviluppo.
 
-Elenco unico dei controlli che la Local CI esegue per questo repository: il
-guest del runner d40i lancia solo `python scripts/ci_local.py` quando il file
-esiste (altrimenti usa la funzione storica `boardgamecompanion_checks`, con gli
-stessi controlli e gli stessi timeout). Controlli: pytest dell'applicazione
-(senza e2e) e test browser e2e (Chromium + Playwright, richiesti dal profilo
-pytest-browser-v1).
-
-Vincoli di esecuzione nel guest della Local CI (runner d40i):
-- la sorgente e' in sola lettura (file 0444, directory 0555): qui si scrive solo
-  sotto DATA_DIR / TMPDIR / HOME (mai nella sorgente, niente .pyc);
-- la rete e' bloccata (proxy verso 127.0.0.1:9): ogni controllo gira offline;
-- esecuzione come utente non privilegiato, con ambiente (PYTHONPATH, DATA_DIR,
-  ...) gia' preparato dal guest; qui lo si completa solo dove manca, per poter
-  lanciare lo script anche a mano;
-- uscita 0 solo se tutti i controlli eseguiti sono passati; budget complessivo
-  di 1500 s (il runner del guest ne concede 1700) e riepilogo finale.
+Elenco unico dei test: pytest dell'applicazione (senza e2e) e test browser e2e
+(Chromium + Playwright per Python; se mancano, l'e2e risulta saltato o fallito
+e la UI va provata con ~/.local/bin/ui-node). Ogni controllo gira offline, non
+scrive nella sorgente e cancella le directory temporanee dei test riusciti, così
+/tmp (tmpfs) non si riempie. Uscita 0 solo se tutti i controlli sono passati.
 
 Uso:
   python scripts/ci_local.py                       # tutti i controlli
@@ -87,7 +76,6 @@ def base_env(ctx: Context) -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"  # la sorgente puo' essere in sola lettura
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"  # i plugin si caricano esplicitamente con -p
-    env.setdefault("PYTHONNOUSERSITE", "1")
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
         env.setdefault(key, DEAD_PROXY)
     env.setdefault("NO_PROXY", "127.0.0.1,localhost")
@@ -171,7 +159,8 @@ def run_check(check: Check, ctx: Context, timeout: float, allow_missing_deps: bo
     return Result(check.name, "FAIL", elapsed, f"codice {code}", out)
 
 
-PYTEST = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+PYTEST = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+          "-o", "tmp_path_retention_policy=failed"]
 CHROMIUM = "/usr/bin/chromium"
 
 
@@ -205,7 +194,7 @@ def build_checks(ctx: Context, args: argparse.Namespace) -> list[Check]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Controlli di validazione del repository (Local CI).")
+    parser = argparse.ArgumentParser(description="Controlli di validazione del repository.")
     parser.add_argument("--list", action="store_true", help="elenca i controlli ed esce")
     parser.add_argument("--only", nargs="+", metavar="NOME", help="esegue solo i controlli indicati")
     parser.add_argument("--fail-fast", action="store_true", help="si ferma al primo controllo fallito")
