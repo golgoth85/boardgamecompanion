@@ -12,6 +12,7 @@ from boardgamecompanion.bgg_reference import (
     BggReferenceError,
     BggReferenceImporter,
     ReferenceSettings,
+    clear_browse_cache,
     load_reference_settings,
     parse_ranks_dump,
     save_reference_settings,
@@ -36,6 +37,13 @@ DUMP = (
     + "900300,Bad Flag,2020,0,0,0,10,x,,,,,,,,\n"
 ).encode("utf-8")
 COLLECTION_FIXTURE = Path(__file__).parent / "fixtures" / "bgg_collection_sample.csv"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_browse_cache():
+    clear_browse_cache()
+    yield
+    clear_browse_cache()
 
 
 @pytest.fixture()
@@ -146,6 +154,22 @@ def test_browse_paginates_sorts_and_filters_visible_titles(database: Database) -
     assert (filtered["total"], [item["bgg_id"] for item in filtered["items"]]) == (2, [224517, 28720])
     assert catalog.browse(query='"*')["total"] == 0
     assert catalog.browse(sort="unknown")["sort"] == "rank"
+
+
+def test_browse_caches_the_visible_scan_but_keeps_library_flags_fresh(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+    assert catalog.browse()["items"][1]["in_catalog"] is False
+
+    with database.transaction() as connection:
+        connection.execute("UPDATE bgg_reference_games SET removed_at = 'x' WHERE bgg_id = 900200")
+    catalog.add_to_collection(28720)
+
+    cached = catalog.browse()
+    assert cached["total"] == 3  # visibility comes from the cached scan
+    assert cached["items"][1]["in_catalog"] is True
+    assert [item["bgg_id"] for item in cached["items"]] == [224517, 28720]
+    assert catalog.browse(reference_settings=ReferenceSettings(min_votes=10))["total"] == 3
 
 
 def test_search_prefix_diacritics_and_exact_title_first(database: Database) -> None:

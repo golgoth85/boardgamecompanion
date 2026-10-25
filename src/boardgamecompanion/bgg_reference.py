@@ -4,6 +4,8 @@ import csv
 import hashlib
 import io
 import json
+import threading
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -415,6 +417,24 @@ BROWSE_SORT_SQL = {
 }
 
 
+# Cached rows are (bgg_id, name, year_published, rank, average, users_rated).
+BROWSE_SORT_KEYS = {
+    "rank": lambda r: (not r[3], r[3] or 0, -r[5], r[0]),
+    "votes": lambda r: (-r[5], r[0]),
+    "rating": lambda r: (r[4] is None, -(r[4] or 0), -r[5], r[0]),
+    "newest": lambda r: (r[2] is None, -(r[2] or 0), -r[5], r[0]),
+    "title": lambda r: (str(r[1]).casefold(), r[0]),
+}
+BROWSE_CACHE_SECONDS = 300
+_browse_cache_lock = threading.Lock()
+_browse_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
+
+
+def clear_browse_cache() -> None:
+    with _browse_cache_lock:
+        _browse_cache.clear()
+
+
 def _reference_item(row: Any) -> dict[str, Any]:
     return {
         "bgg_id": int(row["bgg_id"]),
@@ -481,23 +501,19 @@ class BggReferenceCatalog:
     ) -> dict[str, Any]:
         """Paginated listing of the visible reference titles, optionally filtered by title."""
         value = reference_settings or load_reference_settings(self.database)
-        order = BROWSE_SORT_SQL.get(sort, BROWSE_SORT_SQL["rank"])
-        params: dict[str, Any] = {
-            **_visibility_params(value),
-            "limit": limit,
-            "offset": offset,
-        }
-        source = "bgg_reference_games g"
+        sort = sort if sort in BROWSE_SORT_SQL else "rank"
+        page = {"sort": sort, "limit": limit, "offset": offset}
         text = (query or "").strip()
-        if text:
-            match = _fts_query(text)
-            if match is None:
-                return {"items": [], "total": 0, "sort": sort, "limit": limit, "offset": offset}
-            params["match"] = match
-            source = (
-                "bgg_reference_games_fts f JOIN bgg_reference_games g ON g.bgg_id = f.rowid"
-            )
-        where = f"{'bgg_reference_games_fts MATCH :match AND ' if text else ''}{_VISIBLE_SQL}"
+        if not text:
+            ordered = self._browse_order(value, sort)
+            ids = ordered[offset : offset + limit]
+            return {"items": self._items_by_id(ids), "total": len(ordered), **page}
+        match = _fts_query(text)
+        if match is None:
+            return {"items": [], "total": 0, **page}
+        params = {**_visibility_params(value), "match": match, "limit": limit, "offset": offset}
+        source = "bgg_reference_games_fts f JOIN bgg_reference_games g ON g.bgg_id = f.rowid"
+        where = f"bgg_reference_games_fts MATCH :match AND {_VISIBLE_SQL}"
         with self.database.connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM {source} WHERE {where}", params
@@ -510,18 +526,59 @@ class BggReferenceCatalog:
                 FROM {source}
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
                 WHERE {where}
-                ORDER BY {order}
+                ORDER BY {BROWSE_SORT_SQL[sort]}
                 LIMIT :limit OFFSET :offset
                 """,
                 params,
             ).fetchall()
-        return {
-            "items": [_reference_item(row) for row in rows],
-            "total": int(total),
-            "sort": sort if sort in BROWSE_SORT_SQL else "rank",
-            "limit": limit,
-            "offset": offset,
-        }
+        return {"items": [_reference_item(row) for row in rows], "total": int(total), **page}
+
+    def _browse_order(self, value: ReferenceSettings, sort: str) -> list[int]:
+        # The visibility columns sit after details_json, so filtering the whole
+        # table walks every overflow page. One scan of the sort keys is cached
+        # briefly and shared by all sort orders; pages are then read by key.
+        key = (str(self.database.path), value.min_votes, value.include_expansions)
+        now = time.monotonic()
+        with _browse_cache_lock:
+            entry = _browse_cache.get(key)
+            if entry is None or now - entry["at"] > BROWSE_CACHE_SECONDS:
+                entry = None
+        if entry is None:
+            with self.database.connect() as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT g.bgg_id, g.name, g.year_published, g.rank, g.average, g.users_rated
+                    FROM bgg_reference_games g
+                    WHERE {_VISIBLE_SQL}
+                    """,
+                    _visibility_params(value),
+                ).fetchall()
+            entry = {"at": now, "rows": [tuple(row) for row in rows], "orders": {}}
+            with _browse_cache_lock:
+                _browse_cache[key] = entry
+        orders = entry["orders"]
+        if sort not in orders:
+            orders[sort] = [row[0] for row in sorted(entry["rows"], key=BROWSE_SORT_KEYS[sort])]
+        return orders[sort]
+
+    def _items_by_id(self, ids: list[int]) -> list[dict[str, Any]]:
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.admission_reason, b.id AS board_game_id
+                FROM bgg_reference_games g
+                LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
+                WHERE g.bgg_id IN ({placeholders}) AND g.removed_at IS NULL
+                """,
+                ids,
+            ).fetchall()
+        by_id = {int(row["bgg_id"]): _reference_item(row) for row in rows}
+        return [by_id[bgg_id] for bgg_id in ids if bgg_id in by_id]
 
     def match_campaign_title(self, title: str, *, since_year: int) -> int | None:
         """Fail-closed campaign link: the normalized title must equal the name or an
