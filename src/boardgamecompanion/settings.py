@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     config_dir: Path = Path("/config")
     import_dir: Path = Path("/data/import")
     manuals_dir: Path = Path("/data/manuals")
+    covers_dir: Path = Path("/data/covers")
     max_document_bytes: int = 100 * 1024 * 1024
     pdf_parse_timeout_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
     pdf_parse_max_pages: int = Field(default=2000, ge=1, le=10000)

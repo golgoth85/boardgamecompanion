@@ -159,6 +159,8 @@ def _system_prompt(repair_instruction: str | None) -> str:
 
 
 class OllamaGenerationProvider:
+    verify_model_stability = True
+
     def __init__(
         self,
         *,
@@ -304,6 +306,8 @@ class OllamaGenerationProvider:
 
 
 class LMStudioGenerationProvider:
+    verify_model_stability = True
+
     def __init__(
         self,
         *,
@@ -498,6 +502,8 @@ class LMStudioGenerationProvider:
         return structured
 
 class GeminiGenerationProvider:
+    verify_model_stability = False
+
     def __init__(
         self,
         *,
@@ -999,6 +1005,10 @@ class AnswerGenerationService:
         if not 1 <= self.max_claims <= 100:
             raise ValueError("Answer claim limit is invalid")
 
+    @property
+    def _verifies_model_stability(self) -> bool:
+        return bool(getattr(self.provider, "verify_model_stability", True))
+
     def _prepare_evidence(
         self,
         results: list[dict[str, Any]],
@@ -1157,11 +1167,12 @@ class AnswerGenerationService:
             descriptor=descriptor,
             max_claims=self.max_claims,
         )
-        descriptor_after = self.provider.describe()
-        if descriptor_after != descriptor:
-            raise AnswerProviderError(
-                "Generation model changed while the answer was produced"
-            )
+        if self._verifies_model_stability:
+            descriptor_after = self.provider.describe()
+            if descriptor_after != descriptor:
+                raise AnswerProviderError(
+                    "Generation model changed while the answer was produced"
+                )
 
         self.retrieval.validate_retrieval_current(retrieval_payload)
 
@@ -1181,11 +1192,12 @@ class AnswerGenerationService:
                 max_claims=self.max_claims,
                 repair_instruction=SUPPORT_QUOTE_REPAIR_PROMPT,
             )
-            descriptor_after_repair = self.provider.describe()
-            if descriptor_after_repair != descriptor:
-                raise AnswerProviderError(
-                    "Generation model changed while the answer was repaired"
-                )
+            if self._verifies_model_stability:
+                descriptor_after_repair = self.provider.describe()
+                if descriptor_after_repair != descriptor:
+                    raise AnswerProviderError(
+                        "Generation model changed while the answer was repaired"
+                    )
             self.retrieval.validate_retrieval_current(retrieval_payload)
             status, claims = _validate_generation(
                 raw,

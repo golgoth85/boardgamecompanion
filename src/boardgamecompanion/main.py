@@ -80,6 +80,7 @@ from boardgamecompanion.crowdfunding_notifications import (
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, PersonalStateStore
+from boardgamecompanion.routers.covers import router as covers_router
 from boardgamecompanion.routers.diagnostics import router as diagnostics_router
 from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
@@ -260,7 +261,9 @@ def get_youtube_tutorial_service() -> YouTubeTutorialService:
     )
 
 
-def get_rulebook_discovery_service() -> RulebookDiscoveryService:
+def get_rulebook_discovery_service(
+    *, include_llm_fallback: bool = True
+) -> RulebookDiscoveryService:
     database = get_database()
     database.initialize()
     limiter = PersistentRateLimiter(database).acquire
@@ -272,7 +275,7 @@ def get_rulebook_discovery_service() -> RulebookDiscoveryService:
     )
     fallback_providers: list = []
     rag = resolve_rag_settings(database)
-    if rag.gemini_api_key:
+    if include_llm_fallback and rag.gemini_api_key:
         fallback_providers.append(
             GeminiBggFileProvider(
                 base_url=rag.gemini_url,
@@ -464,7 +467,7 @@ async def _rulebook_discovery_worker(stop_event: asyncio.Event) -> None:
             pass
         try:
             await asyncio.to_thread(
-                get_rulebook_discovery_service().run_due,
+                get_rulebook_discovery_service(include_llm_fallback=False).run_due,
                 limit=settings.rulebook_discovery_batch_size,
             )
             await asyncio.to_thread(
@@ -699,6 +702,7 @@ app = FastAPI(
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
+app.include_router(covers_router)
 app.include_router(diagnostics_router)
 app.include_router(expansions_router)
 app.include_router(wishlist_router)

@@ -122,6 +122,10 @@ class ChangingProvider(FakeProvider):
             model_digest=digest,
             endpoint="in-process",
         )
+
+
+class StablePinnedProvider(FakeProvider):
+    verify_model_stability = False
 def _result(
     *,
     chunk_id: str,
@@ -891,6 +895,37 @@ def test_generation_model_digest_change_aborts_answer() -> None:
             top_k=8,
             min_score=0.0,
         )
+
+
+def test_pinned_provider_describes_once_per_answer() -> None:
+    provider = StablePinnedProvider(
+        {
+            "status": "answer",
+            "claims": [
+                {
+                    "text": "Claim",
+                    "supports": [{"evidence_id": "E1", "quote": "Evidence"}],
+                }
+            ],
+        }
+    )
+    service = _service(
+        _retrieval_payload([_result(chunk_id="chunk-1", text="Evidence")]),
+        provider,
+    )
+    result = service.answer(
+        bgg_id=900001,
+        query="Question",
+        requested_language="it",
+        document_type=None,
+        version_label=None,
+        edition=None,
+        top_k=8,
+        min_score=0.0,
+    )
+    assert result["status"] == "answer"
+    assert provider.generate_calls == 1
+    assert provider.describe_calls == 1
 
 
 def test_answer_expands_retrieval_recall_for_rule_reasoning() -> None:

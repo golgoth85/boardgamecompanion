@@ -12,7 +12,7 @@ import {
   rankingState,
   state,
 } from "./state.js";
-import {escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
+import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
@@ -357,6 +357,32 @@ function runWhenIdle(callback, timeout = 1500) {
   window.setTimeout(callback, 250);
 }
 
+const AUTO_LLM_RETRY_DELAY_MS = 30 * 60 * 1000;
+
+function autoLlmRetryKey(feature, id) {
+  return `bgc:auto-llm:${feature}:${id}`;
+}
+
+function autoLlmRetryBlocked(key) {
+  try {
+    return Number(window.localStorage.getItem(key) || 0) > Date.now();
+  } catch (_) {
+    return false;
+  }
+}
+
+function blockAutoLlmRetry(key) {
+  try {
+    window.localStorage.setItem(key, String(Date.now() + AUTO_LLM_RETRY_DELAY_MS));
+  } catch (_) {}
+}
+
+function clearAutoLlmRetry(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_) {}
+}
+
 function playerText(game) {
   const min = game.players?.min;
   const max = game.players?.max;
@@ -512,7 +538,7 @@ async function performGlobalSearch(query, target) {
             <a class="global-search-result" href="/games/${game.bgg_id}" data-nav>
               <span class="global-search-cover">
                 ${game.bgg_metadata?.cover_url
-                  ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`
+                  ? `<img src="${coverSrc(game.bgg_id)}" alt="" referrerpolicy="no-referrer">`
                   : `<span>${escapeHtml(initials(game.title))}</span>`}
               </span>
               <span><strong>${escapeHtml(game.title)}</strong><small>${game.year_published || "—"} · ${escapeHtml(personalStatusLabel(game.progress))}</small></span>
@@ -2164,7 +2190,7 @@ function expansionMiniCard(game) {
     <a class="expansion-mini-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri espansione ${escapeHtml(game.title)}">
       <span class="expansion-mini-cover">
         ${game.bgg_metadata?.cover_url
-          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(game.title))}</span>`}
       </span>
       <span class="expansion-mini-copy">
@@ -2189,8 +2215,9 @@ function gameCard(game, expansions = []) {
         <div class="cover">
           <span class="badge card-badge">${type}</span>
           ${game.bgg_metadata?.cover_url
-            ? `<img class="cover-image" src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
+            ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
             : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
+          <span class="rating card-rating-overlay">BGG ★ ${rating}</span>
         </div>
         <div class="card-body">
           <h3 class="card-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3>
@@ -2200,13 +2227,9 @@ function gameCard(game, expansions = []) {
             ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
             ${catalogMetric("Peso", weight)}
           </div>
-          <div class="card-footer-meta">
-            <span>${game.year_published || "—"}</span>
-            <span class="rating">BGG ★ ${rating}</span>
-            ${game.progress?.rating
-              ? `<span class="personal-card-rating">Tu ${starRatingMarkup(game.progress.rating, {compact: true})}</span>`
-              : ""}
-          </div>
+          ${game.progress?.rating
+            ? `<div class="card-footer-meta"><span class="personal-card-rating">Tu ${starRatingMarkup(game.progress.rating, {compact: true})}</span></div>`
+            : ""}
         </div>
       </a>
       ${expansions.length ? `
@@ -2233,7 +2256,7 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       <a class="catalog-list-game" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
         <span class="catalog-list-cover">
           ${game.bgg_metadata?.cover_url
-            ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
             : `<span>${escapeHtml(initials(game.title))}</span>`}
         </span>
         <span class="catalog-list-title">
@@ -3283,31 +3306,39 @@ function setupRagPanel(bggId, documentItems) {
   void refreshRagIndexStatus(bggId, documentItems);
 }
 
-async function ensureItalianDescription(bggId) {
+async function ensureItalianDescription(bggId, game = null) {
   const node = document.querySelector("#gameDescriptionText");
   if (!node?.isConnected || node.dataset.ready === "true" || navigator.webdriver) return;
+  const retryKey = autoLlmRetryKey("description-translation", bggId);
+  if (autoLlmRetryBlocked(retryKey)) return;
   try {
-    let status = await api(`/api/games/${bggId}/description-it`);
-    if (!status.source_available) {
-      const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
-      const cover = document.querySelector(".game-summary-cover .detail-cover");
-      if (cover?.isConnected && metadata.cover_url) {
-        const placeholder = cover.querySelector(".cover-image, .cover-initials");
-        if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="" referrerpolicy="no-referrer">`;
+    if (!String(game?.bgg_metadata?.description || "").trim()) {
+      let status = await api(`/api/games/${bggId}/description-it`);
+      if (!status.source_available) {
+        const metadata = await api(`/api/games/${bggId}/bgg-metadata/refresh`, {method: "POST"});
+        const cover = document.querySelector(".game-summary-cover .detail-cover");
+        if (cover?.isConnected && metadata.cover_url) {
+          const placeholder = cover.querySelector(".cover-image, .cover-initials");
+          if (placeholder) placeholder.outerHTML = `<img class="cover-image" src="${coverSrc(bggId)}" alt="" referrerpolicy="no-referrer">`;
+        }
+        status = await api(`/api/games/${bggId}/description-it`);
       }
-      status = await api(`/api/games/${bggId}/description-it`);
-    }
-    if (status.translation?.translated_text) {
-      node.textContent = status.translation.translated_text;
-      node.dataset.ready = "true";
-      return;
+      if (status.translation?.translated_text) {
+        node.textContent = status.translation.translated_text;
+        node.dataset.ready = "true";
+        clearAutoLlmRetry(retryKey);
+        return;
+      }
+      if (!status.source_available) return;
     }
     const translated = await api(`/api/games/${bggId}/description-it/translate`, {method: "POST"});
     if (translated.translation?.translated_text && node.isConnected) {
       node.textContent = translated.translation.translated_text;
       node.dataset.ready = "true";
+      clearAutoLlmRetry(retryKey);
     }
   } catch (_) {
+    blockAutoLlmRetry(retryKey);
     if (node?.isConnected) {
       node.textContent = "Descrizione italiana non disponibile al momento.";
     }
@@ -3411,7 +3442,7 @@ async function renderDetail(bggId) {
           <div class="game-summary-cover">
             <div class="detail-cover">
               ${metadata.cover_url
-                ? `<img class="cover-image" src="${escapeHtml(metadata.cover_url)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
+                ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
                 : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
               <div class="cover-rating-overlay" aria-label="Valutazione personale">
                 ${starRatingMarkup(game.progress?.rating, {interactive: true})}
@@ -3675,7 +3706,7 @@ async function renderDetail(bggId) {
     setupRagPanel(game.bgg_id, documentItems);
     setupGameDiscovery(game.bgg_id, game.title);
     setupTutorialDiscovery(game.bgg_id, Boolean(tutorials.configured));
-    ensureItalianDescription(game.bgg_id);
+    ensureItalianDescription(game.bgg_id, game);
     void loadRelevantExpansions(game.bgg_id);
 
     document.title = `${game.title} · BoardGameCompanion`;
@@ -4405,7 +4436,7 @@ function browseGameRow(game, index) {
       <span class="browse-rank">${index !== null ? index : rank}</span>
       <span class="browse-cover">
         ${game.bgg_metadata?.cover_url
-          ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(game.title))}</span>`}
       </span>
       <span class="browse-game-title">
@@ -4460,6 +4491,11 @@ async function ensureRankingGameplaySummaries(items) {
       && String(item.game?.bgg_metadata?.description || "").trim()
   ).slice(0, 8);
   if (!missing.length) return;
+  const retryKey = autoLlmRetryKey(
+    "gameplay-summaries",
+    missing.map((item) => Number(item.game.bgg_id)).join("-")
+  );
+  if (autoLlmRetryBlocked(retryKey)) return;
 
   try {
     const payload = await api("/api/catalog/gameplay-summaries/ensure", {
@@ -4477,15 +4513,17 @@ async function ensureRankingGameplaySummaries(items) {
       );
       if (target?.isConnected) target.textContent = summary;
     }
+    clearAutoLlmRetry(retryKey);
   } catch (_) {
-    // Ranking remains usable; cached summaries will be retried on a later visit.
+    blockAutoLlmRetry(retryKey);
+    // Ranking remains usable; the retry window prevents a call on every visit.
   }
 }
 
 function rankingGameRow(item, index) {
   const game = item.game;
   const cover = game.bgg_metadata?.cover_url
-    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span>${escapeHtml(initials(game.title))}</span>`;
   const factors = (item.factors || []).map(
     (factor) => `<span>${escapeHtml(factor)}</span>`
@@ -4761,7 +4799,7 @@ function completionAchievementMarkup(game) {
 
 function trophyGameCard(game, {compact = false} = {}) {
   const cover = game.bgg_metadata?.cover_url
-    ? `<img src="${escapeHtml(game.bgg_metadata.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`;
   const milestoneAt = game.progress?.completed_at || game.progress?.played_at || null;
   const milestoneLabel = game.progress?.completed ? "Completato" : "Giocato";
