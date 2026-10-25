@@ -11,7 +11,8 @@ from boardgamecompanion.wishlist import WishlistStore
 router = APIRouter(tags=["search"])
 
 SECTIONS = (
-    ("catalog", "Catalogo", "/", "La tua ludoteca"),
+    ("catalog", "Ludoteca", "/", "I giochi della tua collezione"),
+    ("bgg", "Catalogo", "/bgg", "Catalogo di riferimento BoardGameGeek"),
     ("explore", "Esplora", "/explore", "Generi e meccaniche"),
     ("rankings", "Classifiche", "/rankings", "Classifiche della collezione"),
     ("suggestions", "Suggerimenti", "/suggestions", "Giochi consigliati"),

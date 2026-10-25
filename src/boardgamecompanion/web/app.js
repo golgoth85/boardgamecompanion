@@ -2494,7 +2494,7 @@ async function renderCatalog() {
   app.innerHTML = `
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
-        <h1>Catalogo</h1>
+        <h1>Ludoteca</h1>
         ${activeFacet ? `
           <div class="catalog-hero-actions">
             <button class="active-facet-chip" id="clearFacet" type="button">
@@ -2519,7 +2519,7 @@ async function renderCatalog() {
       <div class="catalog-recent-list" id="achievementShowcaseGrid"></div>
     </section>
 
-    <section class="catalog-workspace" aria-label="Catalogo">
+    <section class="catalog-workspace" aria-label="Ludoteca">
       <span id="resultCount" hidden></span>
       <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
         <label class="field search-field">
@@ -3623,7 +3623,7 @@ async function loadRelevantExpansions(bggId) {
 
 async function renderDetail(bggId) {
   app.innerHTML = `
-    <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
+    <a class="detail-back" href="/" data-nav>← Torna alla ludoteca</a>
     <section class="game-page game-page-loading">
       <div class="game-summary-rail"><div class="skeleton"></div></div>
       <div class="game-main"><div class="skeleton"></div></div>
@@ -3654,7 +3654,7 @@ async function renderDetail(bggId) {
     const firstRulebook = rulebooks[0] || null;
 
     app.innerHTML = `
-      <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
+      <a class="detail-back" href="/" data-nav>← Torna alla ludoteca</a>
 
       <section class="game-page game-centric-detail">
         <aside class="game-summary-rail" aria-label="Riepilogo gioco">
@@ -3939,7 +3939,7 @@ async function renderDetail(bggId) {
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
     app.innerHTML = `
-      <a class="detail-back" href="/" data-nav>← Torna al catalogo</a>
+      <a class="detail-back" href="/" data-nav>← Torna alla ludoteca</a>
       <div class="empty">Impossibile caricare il gioco: ${escapeHtml(error.message)}</div>
     `;
     showToast(error.message, true);
@@ -5806,6 +5806,173 @@ async function renderSuggestions({forceRefresh = false} = {}) {
   }
 }
 
+const BGG_CATALOG_PAGE_SIZE = 48;
+const bggCatalogSorts = [
+  ["rank", "Classifica BGG"],
+  ["votes", "Più votati"],
+  ["rating", "Voto medio"],
+  ["newest", "Più recenti"],
+  ["title", "Titolo"],
+];
+const bggCatalogState = {q: "", sort: "rank", offset: 0, total: 0};
+let bggCatalogRequestController;
+let bggCatalogSearchTimer;
+
+function bggCatalogCard(item) {
+  const bggId = Number(item.bgg_id);
+  const cover = item.thumbnail_url
+    ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span class="cover-initials" aria-hidden="true">${escapeHtml(initials(item.name))}</span>`;
+  const facts = [
+    item.year_published ? String(item.year_published) : "Anno —",
+    item.is_expansion ? "Espansione" : null,
+    `${formatNumber(item.users_rated, 0)} voti`,
+  ].filter(Boolean);
+  const average = Number(item.average) > 0 ? Number(item.average).toFixed(1) : "";
+  return `
+    <article class="bgg-catalog-card ${item.in_catalog ? "is-in-library" : ""}">
+      <button class="bgg-catalog-open" type="button" data-reference-detail="${bggId}"
+              aria-label="Dettagli di ${escapeHtml(item.name)}">
+        <span class="bgg-catalog-cover">
+          ${cover}
+          ${item.rank ? `<span class="bgg-catalog-rank" title="Posizione nella classifica BGG">#${formatNumber(item.rank, 0)}</span>` : ""}
+          ${average ? `<span class="bgg-catalog-rating" title="Voto medio BGG">${escapeHtml(average)}</span>` : ""}
+        </span>
+        <span class="bgg-catalog-body">
+          <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
+          <small class="muted">${escapeHtml(facts.join(" · "))}</small>
+        </span>
+      </button>
+      <div class="bgg-catalog-actions">
+        ${item.in_catalog
+          ? `<a class="bgg-catalog-badge" href="/games/${bggId}" data-nav>${icon("check")}<span>In ludoteca</span></a>`
+          : referenceActionButtons(item)}
+      </div>
+    </article>
+  `;
+}
+
+function bindBggCatalogCards(root) {
+  bindWishlistActions(root);
+  bindReferenceActions(root);
+  root.querySelectorAll("[data-reference-detail]").forEach((button) => {
+    button.addEventListener("click", () => void openReferenceDetail(button.dataset.referenceDetail));
+  });
+}
+
+async function loadBggCatalog({append = false} = {}) {
+  const grid = document.querySelector("#bggCatalogGrid");
+  const summary = document.querySelector("#bggCatalogSummary");
+  const more = document.querySelector("#bggCatalogMore");
+  if (!grid || !summary || !more) return;
+  bggCatalogRequestController?.abort();
+  const controller = new AbortController();
+  bggCatalogRequestController = controller;
+  if (!append) {
+    bggCatalogState.offset = 0;
+    grid.innerHTML = skeletons();
+  }
+  more.disabled = true;
+  try {
+    const params = new URLSearchParams({
+      sort: bggCatalogState.sort,
+      limit: String(BGG_CATALOG_PAGE_SIZE),
+      offset: String(bggCatalogState.offset),
+    });
+    if (bggCatalogState.q) params.set("q", bggCatalogState.q);
+    const [payload] = await Promise.all([
+      api(`/api/reference/browse?${params}`, {signal: controller.signal}),
+      append ? null : refreshWishlistIndex().catch(() => null),
+    ]);
+    if (controller.signal.aborted || !grid.isConnected) return;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    bggCatalogState.total = Number(payload.total) || 0;
+    bggCatalogState.offset += items.length;
+    const totalText = `${formatNumber(bggCatalogState.total, 0)} ${bggCatalogState.total === 1 ? "gioco" : "giochi"}`;
+    summary.textContent = bggCatalogState.q
+      ? `${totalText} per “${bggCatalogState.q}”`
+      : `${totalText} nel catalogo BGG`;
+    if (!append && !items.length) {
+      grid.innerHTML = bggCatalogState.q
+        ? '<div class="empty-state"><strong>Nessun gioco trovato</strong><p class="muted">Prova con il titolo originale o con meno parole.</p></div>'
+        : '<div class="empty-state"><strong>Catalogo BGG vuoto</strong><p class="muted">Copia il dump <code>boardgames_ranks.csv</code> nella cartella di import: viene importato automaticamente. Soglie e stato sono nelle Impostazioni.</p></div>';
+    } else {
+      const html = items.map(bggCatalogCard).join("");
+      if (append) {
+        const holder = document.createElement("div");
+        holder.innerHTML = html;
+        bindBggCatalogCards(holder);
+        grid.append(...holder.children);
+      } else {
+        grid.innerHTML = html;
+        bindBggCatalogCards(grid);
+      }
+    }
+    more.hidden = bggCatalogState.offset >= bggCatalogState.total;
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    if (!append) grid.innerHTML = `<div class="empty-state"><strong>Catalogo non disponibile</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
+    showToast(error.message, true);
+  } finally {
+    if (bggCatalogRequestController === controller) {
+      bggCatalogRequestController = undefined;
+      more.disabled = false;
+    }
+  }
+}
+
+async function renderBggCatalog() {
+  document.title = "Catalogo · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="bgg-catalog-page">
+      <header class="page-header browse-header">
+        <div class="page-header-copy">
+          <h1>Catalogo</h1>
+          <p class="muted" id="bggCatalogSummary" aria-live="polite">Caricamento…</p>
+        </div>
+      </header>
+      <div class="bgg-catalog-controls">
+        <label class="bgg-catalog-search">
+          <span aria-hidden="true">${icon("search")}</span>
+          <input id="bggCatalogQuery" type="search" autocomplete="off" enterkeyhint="search" maxlength="200"
+                 placeholder="Cerca nel catalogo BoardGameGeek…" aria-label="Cerca nel catalogo BoardGameGeek"
+                 value="${escapeHtml(bggCatalogState.q)}">
+        </label>
+        <div class="suggestions-toolbar bgg-catalog-sorts" role="group" aria-label="Ordina catalogo">
+          ${bggCatalogSorts.map(([value, label]) => `<button type="button" data-bgg-catalog-sort="${value}" class="${bggCatalogState.sort === value ? "is-active" : ""}" aria-pressed="${bggCatalogState.sort === value}">${label}</button>`).join("")}
+        </div>
+      </div>
+      <div id="bggCatalogGrid" class="bgg-catalog-grid"></div>
+      <button class="button button-ghost bgg-catalog-more" id="bggCatalogMore" type="button" hidden>Carica altri</button>
+    </section>
+  `;
+  const input = document.querySelector("#bggCatalogQuery");
+  input?.addEventListener("input", () => {
+    window.clearTimeout(bggCatalogSearchTimer);
+    bggCatalogSearchTimer = window.setTimeout(() => {
+      const value = String(input.value || "").trim();
+      if (value === bggCatalogState.q) return;
+      bggCatalogState.q = value;
+      void loadBggCatalog();
+    }, 300);
+  });
+  document.querySelectorAll("[data-bgg-catalog-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      bggCatalogState.sort = button.dataset.bggCatalogSort || "rank";
+      document.querySelectorAll("[data-bgg-catalog-sort]").forEach((item) => {
+        const active = item === button;
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+      void loadBggCatalog();
+    });
+  });
+  document.querySelector("#bggCatalogMore")?.addEventListener("click", () => {
+    void loadBggCatalog({append: true});
+  });
+  await loadBggCatalog();
+}
+
 async function renderCrowdfunding({forceRefresh = false} = {}) {
   document.title = "Crowdfunding · BoardGameCompanion";
   const sortOptions = [
@@ -6315,6 +6482,7 @@ async function route() {
   catalogRequestController?.abort();
   exploreRequestController?.abort();
   rankingRequestController?.abort();
+  bggCatalogRequestController?.abort();
   closeSidebar();
   updateShellNavigation();
   if (!/^\/updates\/?$/.test(window.location.pathname)) {
@@ -6330,6 +6498,10 @@ async function route() {
   }
   if (/^\/discovery\/?$/.test(window.location.pathname)) {
     await renderDiscovery();
+    return;
+  }
+  if (/^\/bgg\/?$/.test(window.location.pathname)) {
+    await renderBggCatalog();
     return;
   }
   if (/^\/rankings\/?$/.test(window.location.pathname)) {

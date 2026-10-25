@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -68,6 +69,18 @@ def reference_search(
     database.initialize()
     items = BggReferenceCatalog(database).search(q, limit=limit)
     return {"query": q, "items": items}
+
+
+@router.get("/api/reference/browse")
+def reference_browse(
+    q: str | None = Query(default=None, max_length=200),
+    sort: Literal["rank", "votes", "rating", "newest", "title"] = Query(default="rank"),
+    limit: int = Query(default=48, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    return BggReferenceCatalog(database).browse(query=q, sort=sort, limit=limit, offset=offset)
 
 
 @router.get("/api/reference/{bgg_id:int}")

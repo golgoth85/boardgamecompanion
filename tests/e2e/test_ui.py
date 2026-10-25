@@ -275,7 +275,7 @@ def test_desktop_import_search_filter_navigation_and_repeat_import(browser, live
         page.get_by_role("button", name="Chiudi").click()
         expect(page.locator("#importDialog")).not_to_be_visible()
 
-        page.get_by_role("link", name="Torna al catalogo").click()
+        page.get_by_role("link", name="Torna alla ludoteca").click()
         expect(page).to_have_url(f"{live_server}/")
         expect(page.locator(".game-card")).to_have_count(2)
     finally:
@@ -586,10 +586,14 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         page.goto(live_server)
         sidebar = page.locator("#appSidebar")
         expect(sidebar).to_be_visible()
-        expect(sidebar.get_by_text("Ludoteca", exact=True)).to_be_visible()
         expect(sidebar.get_by_text("Strumenti", exact=True)).to_have_count(0)
-        expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
+        expect(sidebar.get_by_text("La tua ludoteca, in locale.")).to_have_count(0)
+        expect(sidebar.locator(".sidebar-brand img.brand-mark")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Ludoteca")).to_have_attribute(
             "aria-current", "page"
+        )
+        expect(sidebar.get_by_role("link", name="Catalogo")).to_have_attribute(
+            "href", "/bgg"
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()

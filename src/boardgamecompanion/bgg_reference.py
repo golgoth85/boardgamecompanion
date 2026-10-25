@@ -406,6 +406,30 @@ def _visibility_params(value: ReferenceSettings) -> dict[str, Any]:
     }
 
 
+BROWSE_SORT_SQL = {
+    "rank": "(g.rank IS NULL OR g.rank = 0), g.rank, g.users_rated DESC, g.bgg_id",
+    "votes": "g.users_rated DESC, g.bgg_id",
+    "rating": "(g.average IS NULL), g.average DESC, g.users_rated DESC, g.bgg_id",
+    "newest": "(g.year_published IS NULL), g.year_published DESC, g.users_rated DESC, g.bgg_id",
+    "title": "g.name COLLATE NOCASE, g.bgg_id",
+}
+
+
+def _reference_item(row: Any) -> dict[str, Any]:
+    return {
+        "bgg_id": int(row["bgg_id"]),
+        "name": row["name"],
+        "year_published": row["year_published"],
+        "is_expansion": bool(row["is_expansion"]),
+        "rank": row["rank"],
+        "average": row["average"],
+        "users_rated": int(row["users_rated"]),
+        "thumbnail_url": row["thumbnail_url"],
+        "admission_reason": row["admission_reason"] or "votes",
+        "in_catalog": row["board_game_id"] is not None,
+    }
+
+
 class BggReferenceCatalog:
     def __init__(self, database: Database):
         self.database = database
@@ -444,21 +468,60 @@ class BggReferenceCatalog:
                 """,
                 params,
             ).fetchall()
-        return [
-            {
-                "bgg_id": int(row["bgg_id"]),
-                "name": row["name"],
-                "year_published": row["year_published"],
-                "is_expansion": bool(row["is_expansion"]),
-                "rank": row["rank"],
-                "average": row["average"],
-                "users_rated": int(row["users_rated"]),
-                "thumbnail_url": row["thumbnail_url"],
-                "admission_reason": row["admission_reason"] or "votes",
-                "in_catalog": row["board_game_id"] is not None,
-            }
-            for row in rows
-        ]
+        return [_reference_item(row) for row in rows]
+
+    def browse(
+        self,
+        *,
+        query: str | None = None,
+        sort: str = "rank",
+        limit: int = 48,
+        offset: int = 0,
+        reference_settings: ReferenceSettings | None = None,
+    ) -> dict[str, Any]:
+        """Paginated listing of the visible reference titles, optionally filtered by title."""
+        value = reference_settings or load_reference_settings(self.database)
+        order = BROWSE_SORT_SQL.get(sort, BROWSE_SORT_SQL["rank"])
+        params: dict[str, Any] = {
+            **_visibility_params(value),
+            "limit": limit,
+            "offset": offset,
+        }
+        source = "bgg_reference_games g"
+        text = (query or "").strip()
+        if text:
+            match = _fts_query(text)
+            if match is None:
+                return {"items": [], "total": 0, "sort": sort, "limit": limit, "offset": offset}
+            params["match"] = match
+            source = (
+                "bgg_reference_games_fts f JOIN bgg_reference_games g ON g.bgg_id = f.rowid"
+            )
+        where = f"{'bgg_reference_games_fts MATCH :match AND ' if text else ''}{_VISIBLE_SQL}"
+        with self.database.connect() as connection:
+            total = connection.execute(
+                f"SELECT COUNT(*) FROM {source} WHERE {where}", params
+            ).fetchone()[0]
+            rows = connection.execute(
+                f"""
+                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.admission_reason, b.id AS board_game_id
+                FROM {source}
+                LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
+                WHERE {where}
+                ORDER BY {order}
+                LIMIT :limit OFFSET :offset
+                """,
+                params,
+            ).fetchall()
+        return {
+            "items": [_reference_item(row) for row in rows],
+            "total": int(total),
+            "sort": sort if sort in BROWSE_SORT_SQL else "rank",
+            "limit": limit,
+            "offset": offset,
+        }
 
     def match_campaign_title(self, title: str, *, since_year: int) -> int | None:
         """Fail-closed campaign link: the normalized title must equal the name or an

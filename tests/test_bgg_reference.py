@@ -125,6 +125,29 @@ def test_search_applies_vote_threshold_and_expansion_setting(database: Database)
     }
 
 
+def test_browse_paginates_sorts_and_filters_visible_titles(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+
+    ranked = catalog.browse()
+    assert ranked["total"] == 3
+    assert [item["bgg_id"] for item in ranked["items"]] == [224517, 28720, 900200]
+
+    page = catalog.browse(sort="title", limit=1, offset=1)
+    assert (page["total"], [item["bgg_id"] for item in page["items"]]) == (3, [224517])
+    assert [item["bgg_id"] for item in catalog.browse(sort="newest")["items"]] == [
+        224517,
+        28720,
+        900200,
+    ]
+    assert [item["bgg_id"] for item in catalog.browse(sort="votes")["items"]][0] == 224517
+
+    filtered = catalog.browse(query="brass", sort="votes")
+    assert (filtered["total"], [item["bgg_id"] for item in filtered["items"]]) == (2, [224517, 28720])
+    assert catalog.browse(query='"*')["total"] == 0
+    assert catalog.browse(sort="unknown")["sort"] == "rank"
+
+
 def test_search_prefix_diacritics_and_exact_title_first(database: Database) -> None:
     BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
     catalog = BggReferenceCatalog(database)
@@ -253,6 +276,11 @@ def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert not again["created_game"] and not again["created_entry"]
         flagged = client.get("/api/reference/search", params={"q": "brass"}).json()["items"]
         assert {i["bgg_id"]: i["in_catalog"] for i in flagged} == {28720: True, 224517: False}
+
+        browse = client.get("/api/reference/browse", params={"sort": "votes", "limit": 2}).json()
+        assert browse["total"] == 3
+        assert [(i["bgg_id"], i["in_catalog"]) for i in browse["items"]] == [(224517, False), (28720, True)]
+        assert client.get("/api/reference/browse", params={"sort": "nope"}).status_code == 422
 
         search = client.get("/api/reference/search", params={"q": "brass"}).json()
         assert [item["bgg_id"] for item in search["items"]] == [28720, 224517]

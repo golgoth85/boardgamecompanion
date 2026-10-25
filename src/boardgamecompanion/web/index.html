@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#121826">
   <title>BoardGameCompanion</title>
+  <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/game-centric.css">
 </head>
@@ -14,18 +15,18 @@
   <div class="app-frame">
     <aside class="sidebar" id="appSidebar" aria-label="Navigazione principale">
       <a class="brand sidebar-brand" href="/" data-nav data-route="catalog">
-        <span class="brand-mark" aria-hidden="true">BGC</span>
-        <span>
-          <strong>BoardGameCompanion</strong>
-          <small>La tua ludoteca, in locale.</small>
-        </span>
+        <img class="brand-mark" src="/static/logo.svg" alt="" width="44" height="44">
+        <span class="brand-name"><strong>BoardGame<span>Companion</span></strong></span>
       </a>
 
       <nav class="sidebar-nav" aria-label="Sezioni">
-        <section class="nav-group" aria-labelledby="navLibraryLabel">
-          <p class="nav-group-label" id="navLibraryLabel">Ludoteca</p>
+        <section class="nav-group" aria-label="Sezioni principali">
           <a class="nav-item" href="/" data-nav data-route="catalog">
-            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-catalog"/></svg></span>
+            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-shelf"/></svg></span>
+            <span>Ludoteca</span>
+          </a>
+          <a class="nav-item" href="/bgg" data-nav data-route="bgg">
+            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg></span>
             <span>Catalogo</span>
           </a>
           <a class="nav-item" href="/explore" data-nav data-route="explore">
