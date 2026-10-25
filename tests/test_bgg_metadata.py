@@ -95,6 +95,9 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
         {"bgg_id": 202976, "title": "7 Wonders Duel: Pantheon"},
         {"bgg_id": 236435, "title": "7 Wonders Duel: Agora"},
     ]
+    assert item["metadata"]["player_poll"] == [
+        {"players": "2", "best": 100, "recommended": 20, "not_recommended": 1},
+    ]
     # Official minage wins over the community suggested_playerage poll.
     assert item["metadata"]["bgg_recommended_age"] == "10"
     with store.database.connect() as connection:

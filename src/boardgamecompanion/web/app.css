@@ -1854,6 +1854,154 @@ a { color: inherit; text-decoration: none; }
   text-align: right;
 }
 
+/* Player count chart from the BGG community poll. */
+.game-summary-list > .player-chart {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: .45rem .8rem;
+  grid-column: 1 / -1;
+  border-radius: 0;
+  outline-offset: 4px;
+}
+.player-chart[tabindex] {
+  cursor: help;
+}
+.player-chart-counts,
+.player-chart-legend {
+  grid-column: 1 / -1;
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.player-chart-counts {
+  gap: .22rem;
+}
+.player-chart-count {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 1.55rem;
+  max-width: 2.6rem;
+  height: 1.7rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: .76rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.player-chart-count.is-best {
+  border-color: var(--accent-2);
+  color: #1b1303;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+}
+.player-chart-count.is-recommended {
+  border-color: rgba(251, 191, 36, .5);
+  color: var(--accent-2);
+  background: rgba(245, 158, 11, .16);
+}
+.player-chart-count.is-not_recommended {
+  color: #6f7b92;
+  background: rgba(11, 15, 23, .5);
+}
+.player-chart-count.is-unknown {
+  border-style: dashed;
+}
+.player-chart-legend {
+  flex-wrap: wrap;
+  gap: .15rem .7rem;
+  color: var(--muted);
+  font-size: .62rem;
+}
+.player-chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+}
+.player-chart-legend li::before {
+  content: "";
+  width: .55rem;
+  height: .55rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(11, 15, 23, .5);
+}
+.player-chart-legend .is-best::before {
+  border-color: var(--accent-2);
+  background: var(--accent);
+}
+.player-chart-legend .is-recommended::before {
+  border-color: rgba(251, 191, 36, .5);
+  background: rgba(245, 158, 11, .3);
+}
+.player-chart-tip {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + .1rem);
+  left: 0;
+  display: none;
+  width: max(100%, 15.5rem);
+  padding: .65rem .75rem .6rem;
+  border: 1px solid #34425f;
+  border-radius: 12px;
+  background: #0e131e;
+  box-shadow: var(--shadow);
+  font-size: .7rem;
+}
+.player-chart:hover .player-chart-tip,
+.player-chart:focus-within .player-chart-tip {
+  display: block;
+}
+.player-chart-tip strong {
+  display: block;
+  margin-bottom: .35rem;
+  color: var(--text);
+  font-size: .74rem;
+}
+.player-chart-tip table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.player-chart-tip th,
+.player-chart-tip td {
+  padding: .16rem .2rem;
+  text-align: right;
+  font-weight: 600;
+}
+.player-chart-tip thead th {
+  color: var(--muted);
+  font-size: .6rem;
+  font-weight: 700;
+}
+.player-chart-tip tbody th {
+  text-align: left;
+  color: var(--text);
+  font-weight: 800;
+}
+.player-chart-tip td {
+  color: #8d98ad;
+}
+.player-chart-tip tr.is-best td:nth-child(2),
+.player-chart-tip tr.is-recommended td:nth-child(3) {
+  color: var(--accent-2);
+  font-weight: 800;
+}
+.player-chart-tip tr.is-not_recommended td:nth-child(4) {
+  color: var(--text);
+  font-weight: 800;
+}
+.player-chart-tip small {
+  display: block;
+  margin-top: .35rem;
+  color: var(--muted);
+  font-size: .6rem;
+}
+
 .game-bgg-link {
   display: inline-block;
   margin-top: .8rem;
@@ -2051,6 +2199,11 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .game-page {
     grid-template-columns: 1fr;
+  }
+
+  .player-chart-tip {
+    right: 0;
+    left: auto;
   }
 
   .game-summary-rail {
@@ -2481,6 +2634,65 @@ a { color: inherit; text-decoration: none; }
   color: var(--muted);
   font-size: .7rem;
 }
+
+/* Ludoteca cards: the cover fills the frame, the BGG rating sits on it. */
+.catalog-results-cards .cover.has-image {
+  padding: 0;
+  background: var(--surface-2);
+}
+.catalog-results-cards .cover.has-image::before {
+  display: none;
+}
+.catalog-results-cards .cover.has-image .cover-image {
+  position: absolute;
+  inset: 0;
+  transition: transform .35s ease;
+}
+.catalog-results-cards .cover.has-image::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 42%;
+  background: linear-gradient(to top, rgba(11, 15, 23, .62), transparent);
+  pointer-events: none;
+}
+.catalog-results-cards .game-card:hover .cover-image {
+  transform: scale(1.035);
+}
+.catalog-results-cards .card-badge {
+  z-index: 2;
+  backdrop-filter: blur(8px);
+}
+.card-bgg-rating {
+  position: absolute;
+  z-index: 2;
+  right: .6rem;
+  bottom: .6rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: .22rem;
+  padding: .26rem .5rem .26rem .45rem;
+  border: 1px solid rgba(251, 191, 36, .34);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(11, 15, 23, .78);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+  font-size: .82rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.card-bgg-rating small {
+  color: var(--muted);
+  font-size: .56rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+}
+.card-bgg-rating b {
+  color: var(--accent-2);
+  font-size: .76rem;
+}
 .expansion-count-badge {
   position: absolute;
   z-index: 3;
@@ -2882,6 +3094,15 @@ a { color: inherit; text-decoration: none; }
   .expansion-count-badge {
     top: .45rem;
     right: .45rem;
+  }
+  .card-bgg-rating {
+    right: .45rem;
+    bottom: .45rem;
+    padding: .2rem .4rem;
+    font-size: .74rem;
+  }
+  .card-bgg-rating small {
+    display: none;
   }
 }
 
@@ -3295,7 +3516,33 @@ a { color: inherit; text-decoration: none; }
 }
 
 .catalog-metrics {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Columns follow their values, so ranges such as 60–120 never overlap. */
+  grid-template-columns: repeat(4, auto);
+  justify-content: space-between;
+  padding-inline: .7rem;
+}
+.catalog-metric {
+  padding: 0;
+}
+.catalog-results-cards .card-body {
+  container-type: inline-size;
+}
+/* Narrow cards keep players, duration and weight; the age stays in the game page. */
+@container (max-width: 190px) {
+  .catalog-metrics {
+    grid-template-columns: repeat(3, auto);
+  }
+  .catalog-metric:nth-child(2) {
+    display: none;
+  }
+  .catalog-metric:nth-child(4) {
+    display: block;
+  }
+}
+@media (max-width: 760px) {
+  .catalog-metrics {
+    grid-template-columns: repeat(3, auto);
+  }
 }
 .catalog-list-head,
 .catalog-list-row {

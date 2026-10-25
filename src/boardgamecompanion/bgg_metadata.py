@@ -249,7 +249,9 @@ def _number_attribute(node: ET.Element | None, name: str = "value") -> float | N
         return None
 
 
-def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
+def _suggested_players(
+    item: ET.Element,
+) -> tuple[str | None, str | None, list[dict[str, Any]]]:
     poll = next(
         (
             node
@@ -259,9 +261,11 @@ def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
         None,
     )
     if poll is None:
-        return None, None
+        return None, None, []
     best: list[str] = []
     recommended: list[str] = []
+    # Raw community votes per player count, shown as the player chart.
+    votes_by_count: list[dict[str, Any]] = []
     for result_group in poll.findall("results"):
         label = (result_group.attrib.get("numplayers") or "").strip()
         if not label:
@@ -276,6 +280,15 @@ def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
         best_votes = votes.get("best", 0)
         recommended_votes = votes.get("recommended", 0)
         not_recommended_votes = votes.get("not recommended", 0)
+        if len(votes_by_count) < 30:
+            votes_by_count.append(
+                {
+                    "players": label[:8],
+                    "best": best_votes,
+                    "recommended": recommended_votes,
+                    "not_recommended": not_recommended_votes,
+                }
+            )
         if best_votes > 0 and best_votes >= recommended_votes and best_votes >= not_recommended_votes:
             best.append(label)
         if best_votes + recommended_votes > not_recommended_votes:
@@ -283,6 +296,7 @@ def _suggested_players(item: ET.Element) -> tuple[str | None, str | None]:
     return (
         ", ".join(best) or None,
         ", ".join(recommended) or None,
+        votes_by_count,
     )
 
 
@@ -352,7 +366,7 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
     thumbnail = _bgg_image_url(item.findtext("thumbnail"))
 
     year_text = _attribute(item.find("yearpublished"))
-    best_players, recommended_players = _suggested_players(item)
+    best_players, recommended_players, player_poll = _suggested_players(item)
     ratings = item.find("statistics/ratings")
     rank = None
     if ratings is not None:
@@ -380,6 +394,7 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "bgg_num_owned": int(value) if ratings is not None and (value := _number_attribute(ratings.find("owned"))) is not None else None,
         "bgg_best_players": best_players,
         "bgg_recommended_players": recommended_players,
+        "player_poll": player_poll,
         "bgg_recommended_age": _official_min_age(item),
         "parent_bgg_id": parent_bgg_id,
         "expansions": linked_expansions,

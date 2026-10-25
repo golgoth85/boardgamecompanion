@@ -373,6 +373,106 @@ function playerText(game) {
   return min === max ? String(min) : `${min ?? "?"}–${max ?? "?"}`;
 }
 
+const PLAYER_VERDICTS = {
+  best: "Ideale",
+  recommended: "Consigliato",
+  not_recommended: "Sconsigliato",
+};
+
+// Expands BGG lists such as "2, 3", "2-4" or "5+" into player counts.
+function playerCountSet(text, max) {
+  const counts = new Set();
+  for (const part of String(text || "").split(",")) {
+    const range = part.trim().match(/^(\d+)\s*(?:[-–]\s*(\d+)|(\+))?$/);
+    if (!range) continue;
+    const low = Number(range[1]);
+    const high = range[2] ? Number(range[2]) : range[3] ? Math.max(low, max || low) : low;
+    for (let count = low; count <= high && count - low < 30; count += 1) counts.add(count);
+  }
+  return counts;
+}
+
+// One entry per player count in the box range, from the BGG community poll
+// when stored, otherwise from the best/recommended summaries.
+function playerChartRows(game, poll) {
+  const min = Number(game.players?.min) || 0;
+  const max = Number(game.players?.max) || min;
+  if (!min) return [];
+  const last = Math.min(max, min + 9);
+  const votesByCount = new Map(
+    (Array.isArray(poll) ? poll : [])
+      .filter((row) => /^\d+$/.test(String(row?.players || "")))
+      .map((row) => [Number(row.players), row])
+  );
+  const best = playerCountSet(game.bgg?.best_players, max);
+  const recommended = playerCountSet(game.bgg?.recommended_players, max);
+  const rows = [];
+  for (let count = min; count <= last; count += 1) {
+    const votes = votesByCount.get(count);
+    const total = votes ? votes.best + votes.recommended + votes.not_recommended : 0;
+    let verdict = "";
+    if (total) {
+      if (votes.best > 0 && votes.best >= votes.recommended && votes.best >= votes.not_recommended) verdict = "best";
+      else if (votes.best + votes.recommended > votes.not_recommended) verdict = "recommended";
+      else verdict = "not_recommended";
+    } else if (best.size || recommended.size) {
+      verdict = best.has(count) ? "best" : recommended.has(count) ? "recommended" : "not_recommended";
+    }
+    rows.push({
+      label: count === last && last < max ? `${count}+` : String(count),
+      verdict,
+      total,
+      shares: total
+        ? ["best", "recommended", "not_recommended"].map((key) => Math.round((votes[key] / total) * 100))
+        : null,
+    });
+  }
+  return rows;
+}
+
+function playerChartMarkup(game, poll) {
+  const rows = playerChartRows(game, poll);
+  if (!rows.length || !rows.some((row) => row.verdict)) {
+    return `<div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>`;
+  }
+  const withVotes = rows.some((row) => row.shares);
+  const summary = rows
+    .map((row) => `${row.label}: ${(PLAYER_VERDICTS[row.verdict] || "nessun dato").toLowerCase()}`)
+    .join(", ");
+  const tip = withVotes ? `
+    <div class="player-chart-tip" role="tooltip" id="playerChartTip">
+      <strong>Sondaggio BGG</strong>
+      <table>
+        <thead><tr><th scope="col">Giocatori</th><th scope="col">Ideale</th><th scope="col">Consigliato</th><th scope="col">Sconsigliato</th></tr></thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr class="is-${row.verdict || "unknown"}">
+              <th scope="row">${escapeHtml(row.label)}</th>
+              ${row.shares ? row.shares.map((share) => `<td>${share}%</td>`).join("") : '<td colspan="3">—</td>'}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      <small>Fino a ${formatNumber(Math.max(...rows.map((row) => row.total)), 0)} voti per numero di giocatori</small>
+    </div>
+  ` : "";
+  return `
+    <div class="player-chart" ${withVotes ? 'tabindex="0" aria-describedby="playerChartTip"' : ""}>
+      <dt>Giocatori</dt>
+      <dd>${escapeHtml(playerText(game))}</dd>
+      <ol class="player-chart-counts" aria-label="${escapeHtml(`Numero di giocatori secondo BGG: ${summary}`)}">
+        ${rows.map((row) => `
+          <li class="player-chart-count is-${row.verdict || "unknown"}" title="${escapeHtml(`${row.label} giocatori: ${PLAYER_VERDICTS[row.verdict] || "nessun dato"}`)}">${escapeHtml(row.label)}</li>
+        `).join("")}
+      </ol>
+      <ul class="player-chart-legend" aria-hidden="true">
+        <li class="is-best">Ideale</li><li class="is-recommended">Consigliato</li><li class="is-not_recommended">Sconsigliato</li>
+      </ul>
+      ${tip}
+    </div>
+  `;
+}
+
 function timeText(game) {
   const min = game.play_time?.min;
   const max = game.play_time?.max;
@@ -2355,11 +2455,12 @@ function gameCard(game, expansions = []) {
   return `
     <article class="game-card-wrap ${expansions.length ? "has-expansions" : ""}" data-game-id="${game.bgg_id}">
       <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
-        <div class="cover">
-          <span class="badge card-badge">${type}</span>
+        <div class="cover ${game.bgg_metadata?.cover_url ? "has-image" : ""}">
+          ${game.item_type === "expansion" ? `<span class="badge card-badge">${type}</span>` : ""}
           ${game.bgg_metadata?.cover_url
             ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
             : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
+          ${game.bgg?.average ? `<span class="card-bgg-rating" title="Voto medio BGG"><small>BGG</small><b aria-hidden="true">★</b>${rating}</span>` : ""}
         </div>
         <div class="card-body">
           <h3 class="card-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3>
@@ -2369,13 +2470,11 @@ function gameCard(game, expansions = []) {
             ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
             ${catalogMetric("Peso", weight)}
           </div>
-          <div class="card-footer-meta">
-            <span>${game.year_published || "—"}</span>
-            <span class="rating">BGG ★ ${rating}</span>
-            ${game.progress?.rating
-              ? `<span class="personal-card-rating">Tu ${starRatingMarkup(game.progress.rating, {compact: true})}</span>`
-              : ""}
-          </div>
+          ${game.progress?.rating ? `
+            <div class="card-footer-meta">
+              <span class="personal-card-rating">Il tuo voto ${starRatingMarkup(game.progress.rating, {compact: true})}</span>
+            </div>
+          ` : ""}
         </div>
       </a>
       ${expansions.length ? `
@@ -3677,9 +3776,7 @@ async function renderDetail(bggId) {
               ${game.year_published ? `<span class="badge">${game.year_published}</span>` : ""}
             </div>
             <dl class="game-summary-list game-facts-primary">
-              <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
-              <div><dt>Raccomandato per</dt><dd>${escapeHtml(bgg.recommended_players || "—")}</dd></div>
-              <div><dt>Ideale per</dt><dd>${escapeHtml(bgg.best_players || "—")}</dd></div>
+              ${playerChartMarkup(game, metadata.metadata?.player_poll)}
               <div><dt>Età ufficiale</dt><dd>${escapeHtml(ageText(game))}</dd></div>
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
