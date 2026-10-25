@@ -5820,8 +5820,8 @@ let bggCatalogSearchTimer;
 
 function bggCatalogCard(item) {
   const bggId = Number(item.bgg_id);
-  const cover = item.thumbnail_url
-    ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+  const cover = item.image_url || item.thumbnail_url
+    ? `<img src="${escapeHtml(item.image_url || item.thumbnail_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
     : `<span class="cover-initials" aria-hidden="true">${escapeHtml(initials(item.name))}</span>`;
   const facts = [
     item.year_published ? String(item.year_published) : "Anno —",

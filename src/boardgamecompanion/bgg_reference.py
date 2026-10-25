@@ -445,6 +445,7 @@ def _reference_item(row: Any) -> dict[str, Any]:
         "average": row["average"],
         "users_rated": int(row["users_rated"]),
         "thumbnail_url": row["thumbnail_url"],
+        "image_url": row["image_url"],
         "admission_reason": row["admission_reason"] or "votes",
         "in_catalog": row["board_game_id"] is not None,
     }
@@ -475,7 +476,7 @@ class BggReferenceCatalog:
             rows = connection.execute(
                 f"""
                 SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
                        g.admission_reason, b.id AS board_game_id
                 FROM bgg_reference_games_fts f
                 JOIN bgg_reference_games g ON g.bgg_id = f.rowid
@@ -521,7 +522,7 @@ class BggReferenceCatalog:
             rows = connection.execute(
                 f"""
                 SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
                        g.admission_reason, b.id AS board_game_id
                 FROM {source}
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
@@ -569,7 +570,7 @@ class BggReferenceCatalog:
             rows = connection.execute(
                 f"""
                 SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url,
+                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
                        g.admission_reason, b.id AS board_game_id
                 FROM bgg_reference_games g
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id

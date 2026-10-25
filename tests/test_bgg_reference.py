@@ -304,6 +304,7 @@ def test_reference_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         browse = client.get("/api/reference/browse", params={"sort": "votes", "limit": 2}).json()
         assert browse["total"] == 3
         assert [(i["bgg_id"], i["in_catalog"]) for i in browse["items"]] == [(224517, False), (28720, True)]
+        assert all("image_url" in i for i in browse["items"])
         assert client.get("/api/reference/browse", params={"sort": "nope"}).status_code == 422
 
         search = client.get("/api/reference/search", params={"q": "brass"}).json()
