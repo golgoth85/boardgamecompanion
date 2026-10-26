@@ -77,10 +77,13 @@ def reference_browse(
     sort: Literal["rank", "votes", "rating", "newest", "title"] = Query(default="rank"),
     limit: int = Query(default=48, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    item_type: Literal["standalone", "expansion"] | None = Query(default=None),
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    return BggReferenceCatalog(database).browse(query=q, sort=sort, limit=limit, offset=offset)
+    return BggReferenceCatalog(database).browse(
+        query=q, sort=sort, limit=limit, offset=offset, item_type=item_type
+    )
 
 
 @router.get("/api/reference/{bgg_id:int}")

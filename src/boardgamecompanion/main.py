@@ -368,8 +368,15 @@ class GameCompletionPayload(BaseModel):
     )
 
 
+class CatalogAssistantTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(max_length=4000)
+
+
 class CatalogAssistantPayload(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
+    scope: Literal["library", "all"] = "library"
+    history: list[CatalogAssistantTurn] = Field(default_factory=list, max_length=20)
 
 
 class GameplaySummaryBatchPayload(BaseModel):
@@ -870,6 +877,11 @@ def web_new() -> FileResponse:
     return _web_page()
 
 
+@app.get("/assistant", include_in_schema=False)
+def web_assistant() -> FileResponse:
+    return _web_page()
+
+
 @app.get("/completed", include_in_schema=False)
 def web_completed() -> FileResponse:
     return _web_page()
@@ -1139,7 +1151,11 @@ def ask_catalog_assistant(payload: CatalogAssistantPayload) -> dict[str, object]
     database = get_database()
     database.initialize()
     try:
-        return CatalogAssistantService(database).ask(payload.query)
+        return CatalogAssistantService(database).ask(
+            payload.query,
+            scope=payload.scope,
+            history=[turn.model_dump() for turn in payload.history],
+        )
     except CatalogAssistantError as exc:
         detail = str(exc)
         code = 503 if "configurato" in detail or "restituito" in detail else 400

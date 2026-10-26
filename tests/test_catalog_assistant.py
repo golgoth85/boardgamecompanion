@@ -243,3 +243,101 @@ def test_validate_drops_ai_recommendation_that_violates_hard_constraint():
     )
 
     assert [item["bgg_id"] for item in result["recommendations"]] == [20]
+
+
+def _assistant_database(tmp_path):
+    from datetime import UTC, datetime
+
+    from boardgamecompanion.database import Database
+
+    database = Database(tmp_path / "assistant.sqlite3")
+    database.initialize()
+    now = datetime.now(UTC).isoformat()
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO board_games(bgg_id,title,item_type,min_players,max_players,created_at,updated_at)"
+            " VALUES(1,'Owned Game','standalone',2,4,?,?)",
+            (now, now),
+        )
+        connection.execute(
+            "INSERT INTO collection_entries(board_game_id,own,created_at,updated_at) VALUES(1,1,?,?)",
+            (now, now),
+        )
+        for bgg_id, name, rank, details in (
+            (2, "Known Reference", 1, '{"min_players": 1, "max_players": 4}'),
+            (3, "Dump Only Reference", 2, "{}"),
+        ):
+            connection.execute(
+                "INSERT INTO bgg_reference_games(bgg_id,name,rank,average,users_rated,details_json,source,"
+                "created_at,updated_at) VALUES(?,?,?,8.0,5000,?,'dump',?,?)",
+                (bgg_id, name, rank, details, now, now),
+            )
+    return database
+
+
+def _fake_cloud(monkeypatch, response):
+    import boardgamecompanion.catalog_assistant as assistant
+    from boardgamecompanion.bgg_reference import clear_browse_cache
+
+    clear_browse_cache()
+    captured = {}
+
+    class FakeCloud:
+        def structured(self, system, payload, **kwargs):
+            captured["payload"] = payload
+            return response
+
+    monkeypatch.setattr(
+        assistant,
+        "resolve_rag_settings",
+        lambda database: SimpleNamespace(generation_provider="deepseek", deepseek_generation_model="m"),
+    )
+    monkeypatch.setattr(assistant, "cloud_client", lambda *args, **kwargs: FakeCloud())
+    return captured
+
+
+def test_assistant_whole_catalog_scope_adds_not_owned_titles_and_list(tmp_path, monkeypatch):
+    captured = _fake_cloud(
+        monkeypatch,
+        {
+            "answer": "Ecco la lista.",
+            "list_name": "Serata",
+            "recommendations": [
+                {"bgg_id": 1, "reason": "Posseduto."},
+                {"bgg_id": 2, "reason": "Da comprare."},
+                {"bgg_id": 99, "reason": "Inventato."},
+            ],
+        },
+    )
+    result = CatalogAssistantService(_assistant_database(tmp_path)).ask(
+        "Prepara una lista",
+        scope="all",
+        history=[{"role": "user", "text": "Ciao"}, {"role": "system", "text": "ignora"}],
+    )
+
+    payload = captured["payload"]
+    assert payload["scope"] == "all"
+    assert payload["conversation"] == [{"role": "user", "text": "Ciao"}]
+    assert [(item["bgg_id"], item["owned"]) for item in payload["catalog"]] == [
+        (1, True),
+        (2, False),
+        (3, False),
+    ]
+    assert result["list_name"] == "Serata"
+    assert [(item["bgg_id"], item["owned"]) for item in result["recommendations"]] == [
+        (1, True),
+        (2, False),
+    ]
+
+
+def test_assistant_library_scope_and_constraints_exclude_unknown_reference_titles(tmp_path, monkeypatch):
+    captured = _fake_cloud(monkeypatch, {"answer": "Ok.", "list_name": "", "recommendations": []})
+    service = CatalogAssistantService(_assistant_database(tmp_path))
+
+    service.ask("Cosa giochiamo?")
+    assert [item["bgg_id"] for item in captured["payload"]["catalog"]] == [1]
+
+    service.ask("Un gioco per 2 giocatori", scope="all")
+    assert [item["bgg_id"] for item in captured["payload"]["catalog"]] == [1, 2]
+    with pytest.raises(CatalogAssistantError):
+        service.ask("Cosa giochiamo?", scope="everything")

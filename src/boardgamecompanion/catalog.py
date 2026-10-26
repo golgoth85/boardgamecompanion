@@ -136,6 +136,7 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             "recommended_age": row["bgg_recommended_age"],
             "min_age": row["bgg_recommended_age"],
             "language_dependence": row["bgg_language_dependence"],
+            "users_rated": metadata.get("bgg_users_rated"),
         },
         "collection": {
             "coll_id": row["coll_id"],
@@ -1108,6 +1109,7 @@ class Catalog:
                 {
                     "bgg_id": game["bgg_id"],
                     "title": game["title"],
+                    "owned": True,
                     "players": game["players"],
                     "recommended_players": game["bgg"]["recommended_players"],
                     "best_players": game["bgg"]["best_players"],

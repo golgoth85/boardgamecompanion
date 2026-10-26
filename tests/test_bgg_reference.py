@@ -172,6 +172,44 @@ def test_browse_caches_the_visible_scan_but_keeps_library_flags_fresh(database: 
     assert catalog.browse(reference_settings=ReferenceSettings(min_votes=10))["total"] == 3
 
 
+def test_browse_filters_by_type_and_returns_card_facts(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    with database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE bgg_reference_games
+            SET details_json = '{"min_players": 2, "max_players": 4, "playing_time": 120,
+                                 "bgg_average_weight": 3.9, "bgg_recommended_age": "14"}'
+            WHERE bgg_id = 224517
+            """
+        )
+    catalog = BggReferenceCatalog(database)
+    catalog.add_to_collection(28720)
+    low = ReferenceSettings(min_votes=10)
+
+    expansions = catalog.browse(item_type="expansion", reference_settings=low)
+    assert [item["bgg_id"] for item in expansions["items"]] == [900100]
+    searched = catalog.browse(query="brass", item_type="standalone", reference_settings=low)
+    assert {item["bgg_id"] for item in searched["items"]} == {224517, 28720}
+
+    items = {item["bgg_id"]: item for item in catalog.browse(item_type="standalone")["items"]}
+    assert items[224517]["players"] == {"min": 2, "max": 4}
+    assert items[224517]["play_time"]["playing"] == 120
+    assert (items[224517]["average_weight"], items[224517]["recommended_age"]) == (3.9, "14")
+    assert (items[224517]["owned"], items[28720]["owned"]) == (False, True)
+    assert catalog.detail(28720)["owned"] is True
+
+
+def test_assistant_candidates_skip_owned_titles_and_expansions(database: Database) -> None:
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+    catalog.add_to_collection(28720)
+
+    candidates = catalog.assistant_candidates(reference_settings=ReferenceSettings(min_votes=10))
+    assert [item["bgg_id"] for item in candidates] == [224517, 900200]
+    assert candidates[0]["owned"] is False and candidates[0]["players"] == {"min": None, "max": None}
+
+
 def test_search_prefix_diacritics_and_exact_title_first(database: Database) -> None:
     BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
     catalog = BggReferenceCatalog(database)

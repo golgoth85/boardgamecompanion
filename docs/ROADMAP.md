@@ -23,8 +23,9 @@ production evidence:
   PDF ingest, chunking, embeddings, retrieval and grounded Q&A;
 - bounded catalog-wide YouTube tutorial discovery with IT-first/EN fallback;
 - personalized Suggestions with a bounded rotating/history-aware candidate pool;
-- owned-catalog AI recommendations ("Consigliami un gioco") with deterministic
-  hard-constraint filtering before model ranking;
+- "Assistente AI" page (/assistant): recommendations, questions and proposed lists
+  over the owned catalog or, on request, the BGG reference catalog too, with
+  deterministic hard-constraint filtering before model ranking;
 - Gamefound/Kickstarter crowdfunding discovery with board-game relevance filtering;
 - relevant-expansion discovery and notifications;
 - LM Studio/Gemini provider configuration, diagnostics and Wake-on-LAN;

@@ -170,14 +170,6 @@ const documentEdition = document.querySelector("#documentEdition");
 const documentSourceUrl = document.querySelector("#documentSourceUrl");
 const documentOfficial = document.querySelector("#documentOfficial");
 const documentResult = document.querySelector("#documentResult");
-const catalogAssistantButton = document.querySelector("#catalogAssistantButton");
-const catalogAssistantDialog = document.querySelector("#catalogAssistantDialog");
-const catalogAssistantForm = document.querySelector("#catalogAssistantForm");
-const catalogAssistantQuestion = document.querySelector("#catalogAssistantQuestion");
-const catalogAssistantResult = document.querySelector("#catalogAssistantResult");
-const closeCatalogAssistant = document.querySelector("#closeCatalogAssistant");
-const cancelCatalogAssistant = document.querySelector("#cancelCatalogAssistant");
-const askCatalogAssistant = document.querySelector("#askCatalogAssistant");
 const globalSearchForm = document.querySelector("#globalSearchForm");
 const globalSearchBar = document.querySelector("#globalSearchBar");
 const mobileSearchButton = document.querySelector("#mobileSearchButton");
@@ -350,9 +342,7 @@ function tutorialVideoCard(item) {
           <span class="badge">${escapeHtml(language)}</span>
           <span class="badge ${item.is_official ? "document-official" : "document-unofficial"}">${kind}</span>
         </div>
-        <strong>${escapeHtml(item.title || "Video tutorial")}</strong>
         <p class="muted">${escapeHtml(meta)}</p>
-        <a class="external-link" href="${escapeHtml(item.watch_url)}" target="_blank" rel="noopener noreferrer">Apri su YouTube ${icon("external")}</a>
       </div>
     </article>
   `;
@@ -459,18 +449,27 @@ function playerChartMarkup(game, poll) {
   return `
     <div class="player-chart" ${withVotes ? 'tabindex="0" aria-describedby="playerChartTip"' : ""}>
       <dt>Giocatori</dt>
-      <dd>${escapeHtml(playerText(game))}</dd>
-      <ol class="player-chart-counts" aria-label="${escapeHtml(`Numero di giocatori secondo BGG: ${summary}`)}">
-        ${rows.map((row) => `
-          <li class="player-chart-count is-${row.verdict || "unknown"}" title="${escapeHtml(`${row.label} giocatori: ${PLAYER_VERDICTS[row.verdict] || "nessun dato"}`)}">${escapeHtml(row.label)}</li>
-        `).join("")}
-      </ol>
-      <ul class="player-chart-legend" aria-hidden="true">
-        <li class="is-best">Ideale</li><li class="is-recommended">Consigliato</li><li class="is-not_recommended">Sconsigliato</li>
-      </ul>
+      <dd>
+        <ol class="player-chart-counts" aria-label="${escapeHtml(`Numero di giocatori secondo BGG: ${summary}`)}">
+          ${rows.map((row) => `
+            <li class="player-chart-count is-${row.verdict || "unknown"}" title="${escapeHtml(`${row.label} giocatori: ${PLAYER_VERDICTS[row.verdict] || "nessun dato"}`)}">${escapeHtml(row.label)}</li>
+          `).join("")}
+        </ol>
+      </dd>
       ${tip}
     </div>
   `;
+}
+
+// BGG language dependence poll, summarised in four levels.
+function languageDependenceText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return "—";
+  if (text.startsWith("no necessary")) return "Nessuna";
+  if (text.startsWith("some necessary")) return "Leggera";
+  if (text.startsWith("moderate")) return "Moderata";
+  if (text.startsWith("extensive") || text.startsWith("unplayable")) return "Estesa";
+  return String(value);
 }
 
 function timeText(game) {
@@ -726,6 +725,9 @@ async function performGlobalSearch(query, target) {
 }
 
 function referenceActionButtons(item) {
+  if (item.owned) {
+    return `<span class="owned-pill">${icon("check")}<span>In ludoteca</span></span>`;
+  }
   const key = String(item.bgg_id);
   const wishlist = wishlistEntry("bgg", key);
   const thumbnail = item.thumbnail_url || item.image_url || "";
@@ -2445,22 +2447,75 @@ function expansionMiniCard(game) {
   `;
 }
 
-function gameCard(game, expansions = []) {
+function compactCount(value) {
+  const number = Number(value) || 0;
+  if (number >= 1_000_000) return `${formatNumber(number / 1_000_000, number < 10_000_000 ? 1 : 0)}M`;
+  if (number >= 1_000) return `${formatNumber(number / 1_000, number < 10_000 ? 1 : 0)}k`;
+  return formatNumber(number, 0);
+}
+
+// BGG average on the cover: star, value and a discreet voter count.
+function bggRatingBadge(bgg = {}) {
+  if (!bgg.average) return "";
+  const voters = Number(bgg.users_rated) || 0;
+  const title = voters
+    ? `Voto medio BGG · ${formatNumber(voters, 0)} votanti`
+    : "Voto medio BGG";
+  return `<span class="card-bgg-rating" title="${escapeHtml(title)}"><b aria-hidden="true">★</b>${formatNumber(bgg.average, 1)}${voters ? `<small aria-label="${formatNumber(voters, 0)} votanti">${compactCount(voters)}</small>` : ""}</span>`;
+}
+
+// Reference rows of the BGG catalog in the shape used by Ludoteca cards and rows.
+function referenceAsGame(item) {
+  return {
+    bgg_id: Number(item.bgg_id),
+    title: item.name,
+    year_published: item.year_published,
+    item_type: item.is_expansion ? "expansion" : "standalone",
+    players: item.players || {},
+    play_time: item.play_time || {},
+    bgg: {
+      average: Number(item.average) > 0 ? Number(item.average) : null,
+      users_rated: item.users_rated,
+      average_weight: item.average_weight,
+      recommended_age: item.recommended_age,
+      rank: item.rank,
+    },
+    bgg_metadata: {cover_url: item.image_url || item.thumbnail_url || ""},
+    collection: {own: Boolean(item.owned)},
+    progress: {},
+  };
+}
+
+// Owned titles open their Ludoteca page; the others open the BGG catalog sheet.
+function gameOpenAttributes(game, reference) {
+  if (!reference || game.collection?.own) {
+    return {tag: "a", attrs: `href="/games/${game.bgg_id}" data-nav`};
+  }
+  return {tag: "button", attrs: `type="button" data-reference-detail="${game.bgg_id}"`};
+}
+
+function gameCard(game, expansions = [], {reference = null} = {}) {
   const type = game.item_type === "expansion" ? "Espansione" : "Gioco base";
-  const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
   const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
   const groupId = `game-group-${game.bgg_id}`;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
+  const open = gameOpenAttributes(game, reference);
+  const rank = reference && Number(game.bgg?.rank) > 0 ? Number(game.bgg.rank) : 0;
   return `
-    <article class="game-card-wrap ${expansions.length ? "has-expansions" : ""}" data-game-id="${game.bgg_id}">
-      <a class="game-card" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
+    <article class="game-card-wrap ${expansions.length ? "has-expansions" : ""} ${reference ? "has-actions" : ""}" data-game-id="${game.bgg_id}">
+      <${open.tag} class="game-card" ${open.attrs} aria-label="Apri ${escapeHtml(game.title)}">
         <div class="cover ${game.bgg_metadata?.cover_url ? "has-image" : ""}">
-          ${game.item_type === "expansion" ? `<span class="badge card-badge">${type}</span>` : ""}
+          ${rank || game.item_type === "expansion" ? `
+            <span class="card-corner">
+              ${rank ? `<span class="card-rank" title="Posizione nella classifica BGG">#${formatNumber(rank, 0)}</span>` : ""}
+              ${game.item_type === "expansion" ? `<span class="badge card-badge">${type}</span>` : ""}
+            </span>
+          ` : ""}
           ${game.bgg_metadata?.cover_url
             ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" loading="lazy" referrerpolicy="no-referrer">`
             : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
-          ${game.bgg?.average ? `<span class="card-bgg-rating" title="Voto medio BGG"><small>BGG</small><b aria-hidden="true">★</b>${rating}</span>` : ""}
+          ${bggRatingBadge(game.bgg)}
         </div>
         <div class="card-body">
           <h3 class="card-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3>
@@ -2476,13 +2531,13 @@ function gameCard(game, expansions = []) {
             </div>
           ` : ""}
         </div>
-      </a>
+      </${open.tag}>
+      ${reference ? `<div class="card-actions">${referenceActionButtons(reference)}</div>` : ""}
       ${expansions.length ? `
         <button class="expansion-count-badge" type="button" data-expansion-toggle="${game.bgg_id}"
                 aria-controls="${groupId}" aria-expanded="${expanded ? "true" : "false"}"
-                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
-          <strong>${ownedExpansionCount}</strong><span>esp.</span>
-        </button>
+                aria-label="Espansioni: ${ownedExpansionCount} possedute su ${expansions.length}"
+                title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">${ownedExpansionCount}</button>
         <div class="expansion-drawer" id="${groupId}" ${expanded ? "" : "hidden"}>
           ${expansions.map(expansionMiniCard).join("")}
         </div>
@@ -2491,14 +2546,21 @@ function gameCard(game, expansions = []) {
   `;
 }
 
-function gameListRow(game, expansions = [], isExpansion = false) {
+function gameListRow(game, expansions = [], isExpansion = false, {reference = null} = {}) {
   const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
+  const voters = Number(game.bgg?.users_rated) || 0;
   const weight = game.bgg?.average_weight ? formatNumber(game.bgg.average_weight, 2) : "—";
   const ownedExpansionCount = expansions.filter((item) => item.collection?.own).length;
   const expanded = state.expandedGameGroups.has(String(game.bgg_id));
+  const open = gameOpenAttributes(game, reference);
+  const rank = reference && Number(game.bgg?.rank) > 0 ? `#${formatNumber(game.bgg.rank, 0)}` : "";
+  const subtitle = [
+    rank,
+    game.item_type === "expansion" ? "Espansione" : (game.year_published || (reference ? "" : "Gioco base")),
+  ].filter(Boolean).join(" · ");
   return `
-    <div class="catalog-list-row ${isExpansion ? "is-expansion-row" : ""}">
-      <a class="catalog-list-game" href="/games/${game.bgg_id}" data-nav aria-label="Apri ${escapeHtml(game.title)}">
+    <div class="catalog-list-row ${isExpansion ? "is-expansion-row" : ""} ${reference ? "is-reference-row" : ""}">
+      <${open.tag} class="catalog-list-game" ${open.attrs} aria-label="Apri ${escapeHtml(game.title)}">
         <span class="catalog-list-cover">
           ${game.bgg_metadata?.cover_url
             ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
@@ -2506,14 +2568,15 @@ function gameListRow(game, expansions = [], isExpansion = false) {
         </span>
         <span class="catalog-list-title">
           <strong>${escapeHtml(game.title)}</strong>
-          <small>${game.item_type === "expansion" ? "Espansione" : (game.year_published || "Gioco base")}</small>
+          <small>${escapeHtml(subtitle || "—")}</small>
         </span>
-      </a>
+      </${open.tag}>
       <span class="list-stat"><strong>${escapeHtml(playerText(game))}</strong><small>Giocatori</small></span>
       <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
       <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
       <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
-      <span class="list-rating"><strong>${rating}</strong><small>BGG</small></span>
+      <span class="list-rating" ${voters ? `title="${formatNumber(voters, 0)} votanti"` : ""}><strong>${rating}</strong><small>${voters ? compactCount(voters) : "BGG"}</small></span>
+      ${reference ? `<span class="list-actions">${referenceActionButtons(reference)}</span>` : `
       <span class="list-personal-rating">
         ${game.progress?.rating ? starRatingMarkup(game.progress.rating, {compact: true}) : "—"}
         <small>Tu</small>
@@ -2521,10 +2584,11 @@ function gameListRow(game, expansions = [], isExpansion = false) {
       ${expansions.length ? `
         <button class="list-expansion-toggle" type="button" data-expansion-toggle="${game.bgg_id}"
                 aria-expanded="${expanded ? "true" : "false"}"
+                aria-label="Espansioni: ${ownedExpansionCount} possedute su ${expansions.length}"
                 title="${ownedExpansionCount} espansioni possedute su ${expansions.length}">
-          <strong>${ownedExpansionCount}</strong><span>esp.</span><i aria-hidden="true">${icon(expanded ? "caret-up" : "caret-down")}</i>
+          <strong>${ownedExpansionCount}</strong><i aria-hidden="true">${icon(expanded ? "caret-up" : "caret-down")}</i>
         </button>
-      ` : '<span class="list-expansion-placeholder"></span>'}
+      ` : '<span class="list-expansion-placeholder"></span>'}`}
     </div>
     ${expansions.length ? `
       <div class="catalog-list-expansions" id="game-group-${game.bgg_id}" ${expanded ? "" : "hidden"}>
@@ -3690,8 +3754,7 @@ function relevantExpansionCard(item) {
 async function loadRelevantExpansions(bggId) {
   const section = document.querySelector("#relevantExpansionsSection");
   const grid = document.querySelector("#relevantExpansionsGrid");
-  const summary = document.querySelector("#relevantExpansionsSummary");
-  if (!section || !grid || !summary) return;
+  if (!section || !grid) return;
   try {
     const payload = await api(`/api/games/${bggId}/expansions`);
     if (!section.isConnected || !grid.isConnected) return;
@@ -3701,11 +3764,6 @@ async function loadRelevantExpansions(bggId) {
       return;
     }
     section.hidden = false;
-    const missing = Number(payload.missing_count || 0);
-    const owned = Number(payload.owned_count || 0);
-    summary.textContent = missing
-      ? `${missing} da valutare · ${owned} già possedute`
-      : `Tutte le espansioni principali rilevate risultano possedute`;
     grid.innerHTML = items.map(relevantExpansionCard).join("");
     const selected = new URLSearchParams(window.location.search).get("expansion");
     if (selected) {
@@ -3762,10 +3820,11 @@ async function renderDetail(bggId) {
               ${metadata.cover_url
                 ? `<img class="cover-image" src="${coverSrc(game.bgg_id)}" alt="Cover di ${escapeHtml(game.title)}" referrerpolicy="no-referrer">`
                 : `<span class="cover-initials">${escapeHtml(initials(game.title))}</span>`}
-              <div class="cover-rating-overlay" aria-label="Valutazione personale">
+              <div class="cover-rating-overlay" aria-label="Valutazione personale"
+                   title="${game.progress?.rating ? `Il tuo voto: ${String(game.progress.rating).replace(".", ",")}/5` : "Non valutato"}">
                 ${starRatingMarkup(game.progress?.rating, {interactive: true})}
-                <small>${game.progress?.rating ? `${String(game.progress.rating).replace(".", ",")}/5` : "Non valutato"}</small>
               </div>
+              ${bggRatingBadge(bgg)}
             </div>
           </div>
 
@@ -3780,7 +3839,7 @@ async function renderDetail(bggId) {
               <div><dt>Età ufficiale</dt><dd>${escapeHtml(ageText(game))}</dd></div>
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
-              <div><dt>Rating BGG</dt><dd>${bgg.average ? `★ ${formatNumber(bgg.average, 2)}` : "—"}</dd></div>
+              <div><dt>Dipendenza lingua</dt><dd ${bgg.language_dependence ? `title="${escapeHtml(bgg.language_dependence)}"` : ""}>${escapeHtml(languageDependenceText(bgg.language_dependence))}</dd></div>
             </dl>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
@@ -3834,11 +3893,7 @@ async function renderDetail(bggId) {
 
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
             <div class="simple-rulebook-head">
-              <div>
-                <p class="eyebrow">Espansioni</p>
-                <h2 id="relevantExpansionsTitle">Espansioni principali</h2>
-              </div>
-              <span class="muted" id="relevantExpansionsSummary">Controllo disponibilità…</span>
+              <h2 class="eyebrow section-eyebrow" id="relevantExpansionsTitle">Espansioni</h2>
             </div>
             <div class="relevant-expansions-grid" id="relevantExpansionsGrid">
               <div class="skeleton"></div><div class="skeleton"></div>
@@ -3847,10 +3902,7 @@ async function renderDetail(bggId) {
 
           <section class="game-section tutorial-videos-section" aria-labelledby="tutorialVideosTitle">
             <div class="simple-rulebook-head">
-              <div>
-                <p class="eyebrow">Video tutorial</p>
-                <h2 id="tutorialVideosTitle">Come si gioca</h2>
-              </div>
+              <h2 class="eyebrow section-eyebrow" id="tutorialVideosTitle">Video tutorial</h2>
               <button class="button button-ghost" id="tutorialDiscoveryAction" type="button">
                 ${tutorials.configured ? (tutorialItems.length ? "Aggiorna video" : "Cerca video") : "Configura YouTube API"}
               </button>
@@ -3866,10 +3918,7 @@ async function renderDetail(bggId) {
 
           <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
             <div class="simple-rulebook-head">
-              <div>
-                <p class="eyebrow">Regolamento</p>
-                <h2 id="rulesWorkspaceTitle">Regole</h2>
-              </div>
+              <h2 class="eyebrow section-eyebrow" id="rulesWorkspaceTitle">Regolamento</h2>
               <span class="rulebook-presence ${rulebooks.length ? "is-present" : "is-missing"}">
                 ${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
               </span>
@@ -3915,16 +3964,6 @@ async function renderDetail(bggId) {
             </section>
           </section>
 
-          <details class="game-section technical-game-details">
-            <summary><span><strong>Altri dati BGG</strong><small>Informazioni secondarie</small></span></summary>
-            <div class="technical-game-content">
-              <div class="fact-grid">
-                ${fact("Dipendenza lingua", bgg.language_dependence || "—")}
-                ${fact("Ranking BGG", bgg.rank ? `#${formatNumber(bgg.rank, 0)}` : "—")}
-                ${fact("Numero possessori BGG", bgg.num_owned ? formatNumber(bgg.num_owned, 0) : "—")}
-              </div>
-            </div>
-          </details>
         </article>
       </section>
     `;
@@ -4691,66 +4730,308 @@ async function renderUpdates({reset = false} = {}) {
 
 
 
-function openCatalogAssistant() {
-  catalogAssistantResult.innerHTML =
-    '<p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>';
-  catalogAssistantQuestion.value = "";
-  catalogAssistantDialog.showModal();
-  window.setTimeout(() => catalogAssistantQuestion.focus(), 0);
-}
+// Assistente AI: conversation kept for the browser session, never on the server.
+const ASSISTANT_STORAGE_KEY = "bgc.assistant";
+const assistantExamples = [
+  ["Un gioco semplice per 2 persone, massimo 45 minuti.", "library"],
+  ["Suggeriscimi un cooperativo per 3-4 persone, non troppo impegnativo.", "library"],
+  ["Crea una lista di giochi adatti a una serata con amici che non giocano spesso.", "library"],
+  ["Che differenze ci sono tra Brass: Birmingham e Ark Nova? Quale mi consigli?", "all"],
+];
+const assistantState = (() => {
+  try {
+    const stored = JSON.parse(window.sessionStorage.getItem(ASSISTANT_STORAGE_KEY) || "{}");
+    return {
+      scope: stored.scope === "all" ? "all" : "library",
+      turns: Array.isArray(stored.turns) ? stored.turns.slice(-20) : [],
+      busy: false,
+    };
+  } catch (_) {
+    return {scope: "library", turns: [], busy: false};
+  }
+})();
 
-function closeCatalogAssistantDialog() {
-  if (!askCatalogAssistant.disabled && catalogAssistantDialog.open) {
-    catalogAssistantDialog.close();
+function saveAssistantState() {
+  try {
+    window.sessionStorage.setItem(
+      ASSISTANT_STORAGE_KEY,
+      JSON.stringify({scope: assistantState.scope, turns: assistantState.turns}),
+    );
+  } catch (_) {
+    // Storage full or disabled: the conversation just won't survive a reload.
   }
 }
 
-function renderCatalogAssistantResult(payload) {
-  const recommendations = payload.recommendations || [];
-  catalogAssistantResult.innerHTML = `
-    <div class="assistant-answer">
-      <p>${escapeHtml(payload.answer || "")}</p>
-    </div>
-    ${recommendations.length ? `
-      <div class="assistant-recommendations">
-        ${recommendations.map((item) => `
-          <a class="assistant-game-card" href="/games/${encodeURIComponent(item.bgg_id)}" data-nav>
-            <span class="assistant-game-title">
-              <strong>${escapeHtml(item.title)}</strong>
-              <small>${item.best_players ? `Ideale: ${escapeHtml(item.best_players)}` : "Gioco posseduto"}</small>
-            </span>
-            <span class="assistant-game-reason">${escapeHtml(item.reason)}</span>
-            <span class="assistant-game-meta">
-              ${item.rating ? `★ ${formatNumber(item.rating, 1)}` : ""}
-              ${item.weight ? ` · peso ${formatNumber(item.weight, 1)}` : ""}
-            </span>
-          </a>
-        `).join("")}
-      </div>
-    ` : '<p class="muted">Nessun titolo del catalogo soddisfa abbastanza bene la richiesta.</p>'}
+function assistantHistoryPayload() {
+  return assistantState.turns
+    .filter((turn) => !turn.error)
+    .slice(-8)
+    .map((turn) => {
+      if (turn.role === "user") return {role: "user", text: turn.text};
+      const titles = (turn.payload?.recommendations || []).map((item) => item.title);
+      return {
+        role: "assistant",
+        text: [turn.payload?.answer || "", titles.length ? `Titoli proposti: ${titles.join(", ")}` : ""]
+          .filter(Boolean).join("\n").slice(0, 3500),
+      };
+    });
+}
+
+function assistantRecommendationCard(item) {
+  const game = {
+    bgg_id: Number(item.bgg_id),
+    title: item.title,
+    players: item.players || {},
+    play_time: item.minutes || {},
+    collection: {own: Boolean(item.owned)},
+  };
+  const open = gameOpenAttributes(game, item.owned ? null : item);
+  const facts = [
+    playerText(game) !== "—" ? `${playerText(game)} gioc.` : "",
+    timeText(game) !== "—" ? timeText(game) : "",
+    item.weight ? `peso ${formatNumber(item.weight, 1)}` : "",
+    item.rating ? `★ ${formatNumber(item.rating, 1)}` : "",
+  ].filter(Boolean).join(" · ");
+  const reference = {
+    bgg_id: item.bgg_id, name: item.title, year_published: "", thumbnail_url: "", owned: Boolean(item.owned),
+  };
+  return `
+    <article class="assistant-game">
+      <${open.tag} class="assistant-game-open" ${open.attrs} aria-label="Apri ${escapeHtml(item.title)}">
+        <span class="assistant-game-cover"><img src="${coverSrc(item.bgg_id, "thumb")}" alt="" loading="lazy" referrerpolicy="no-referrer"><span>${escapeHtml(initials(item.title))}</span></span>
+        <span class="assistant-game-copy">
+          <strong>${escapeHtml(item.title)}</strong>
+          ${facts ? `<small>${escapeHtml(facts)}</small>` : ""}
+          <span class="assistant-game-reason">${escapeHtml(item.reason)}</span>
+        </span>
+      </${open.tag}>
+      <span class="assistant-game-actions">${referenceActionButtons(reference)}</span>
+    </article>
   `;
 }
 
-async function submitCatalogAssistant() {
-  const query = catalogAssistantQuestion.value.trim();
-  if (!query || askCatalogAssistant.disabled) return;
-  askCatalogAssistant.disabled = true;
-  askCatalogAssistant.textContent = "Sto scegliendo…";
-  catalogAssistantResult.innerHTML = '<div class="assistant-thinking">Analizzo la tua ludoteca…</div>';
+function assistantTurnMarkup(turn, index) {
+  if (turn.role === "user") {
+    return `<div class="assistant-message is-user"><p>${escapeHtml(turn.text)}</p></div>`;
+  }
+  if (turn.error) {
+    return `<div class="assistant-message is-assistant"><div class="integration-error">${escapeHtml(turn.error)}</div></div>`;
+  }
+  const payload = turn.payload || {};
+  const items = payload.recommendations || [];
+  const owned = items.filter((item) => item.owned);
+  const missing = items.filter((item) => !item.owned);
+  const listBar = payload.list_name ? `
+    <div class="assistant-list-bar">
+      <span>${icon("list")}<span>Lista proposta: <strong>${escapeHtml(payload.list_name)}</strong> · ${items.length} ${items.length === 1 ? "gioco" : "giochi"}</span></span>
+      <span class="assistant-list-actions">
+        ${owned.length ? `<button class="button button-primary" type="button" data-assistant-create-list="${index}" ${turn.listCreated ? "disabled" : ""}>${turn.listCreated ? "Lista creata" : `Crea lista (${owned.length})`}</button>` : ""}
+        ${missing.length ? `<button class="button button-ghost" type="button" data-assistant-wishlist="${index}" ${turn.wishlistAdded ? "disabled" : ""}>${turn.wishlistAdded ? "In wishlist" : `Non posseduti in wishlist (${missing.length})`}</button>` : ""}
+        ${turn.listCreated ? `<a class="button button-ghost" href="/lists" data-nav>Apri Liste</a>` : ""}
+      </span>
+      ${owned.length && missing.length ? '<small class="muted">Le liste contengono solo giochi posseduti: gli altri possono andare in wishlist.</small>' : ""}
+    </div>
+  ` : "";
+  return `
+    <div class="assistant-message is-assistant">
+      <p class="assistant-answer">${escapeHtml(payload.answer || "")}</p>
+      ${items.length ? `<div class="assistant-games">${items.map(assistantRecommendationCard).join("")}</div>` : ""}
+      ${listBar}
+      ${payload.provider ? `<small class="assistant-provider">${escapeHtml(payload.scope === "all" ? "Ludoteca + catalogo BGG" : "Solo ludoteca")} · ${escapeHtml(payload.provider)}${payload.model ? ` · ${escapeHtml(payload.model)}` : ""}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderAssistantThread() {
+  const thread = document.querySelector("#assistantThread");
+  if (!thread) return;
+  if (!assistantState.turns.length && !assistantState.busy) {
+    thread.innerHTML = `
+      <div class="assistant-empty">
+        <p>Chiedi un consiglio per la prossima partita, fai domande su un gioco, posseduto o no, o fatti preparare una lista.</p>
+        <div class="assistant-examples" aria-label="Esempi">
+          ${assistantExamples.map(([text, scope]) => `<button type="button" data-assistant-example="${escapeHtml(text)}" data-assistant-example-scope="${scope}">${escapeHtml(text)}</button>`).join("")}
+        </div>
+      </div>
+    `;
+  } else {
+    thread.innerHTML = assistantState.turns.map(assistantTurnMarkup).join("")
+      + (assistantState.busy ? '<div class="assistant-message is-assistant"><p class="assistant-thinking">Sto pensando…</p></div>' : "");
+  }
+  bindWishlistActions(thread);
+  bindReferenceActions(thread);
+  thread.querySelectorAll("[data-reference-detail]").forEach((button) => {
+    button.addEventListener("click", () => void openReferenceDetail(button.dataset.referenceDetail));
+  });
+  thread.querySelectorAll("[data-assistant-example]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setAssistantScope(button.dataset.assistantExampleScope || "library");
+      const input = document.querySelector("#assistantQuestion");
+      if (!input) return;
+      input.value = button.dataset.assistantExample || "";
+      input.focus();
+    });
+  });
+  thread.querySelectorAll("[data-assistant-create-list]").forEach((button) => {
+    button.addEventListener("click", () => void createAssistantList(Number(button.dataset.assistantCreateList), button));
+  });
+  thread.querySelectorAll("[data-assistant-wishlist]").forEach((button) => {
+    button.addEventListener("click", () => void addAssistantWishlist(Number(button.dataset.assistantWishlist), button));
+  });
+  const last = thread.lastElementChild;
+  if (assistantState.turns.length) last?.scrollIntoView({block: "nearest", behavior: "smooth"});
+}
+
+function setAssistantScope(scope) {
+  assistantState.scope = scope === "all" ? "all" : "library";
+  saveAssistantState();
+  document.querySelectorAll("[data-assistant-scope]").forEach((button) => {
+    const active = button.dataset.assistantScope === assistantState.scope;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+async function createAssistantList(index, button) {
+  const turn = assistantState.turns[index];
+  const owned = (turn?.payload?.recommendations || []).filter((item) => item.owned);
+  if (!turn || !owned.length) return;
+  button.disabled = true;
+  try {
+    const created = await api("/api/lists", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name: turn.payload.list_name, kind: "manual"}),
+    });
+    for (const item of owned) {
+      await api(`/api/lists/${encodeURIComponent(created.id)}/items/${encodeURIComponent(item.bgg_id)}`, {method: "PUT"});
+    }
+    turn.listCreated = true;
+    saveAssistantState();
+    renderAssistantThread();
+    showToast(`Lista «${turn.payload.list_name}» creata.`);
+  } catch (error) {
+    button.disabled = false;
+    showToast(error.message, true);
+  }
+}
+
+async function addAssistantWishlist(index, button) {
+  const turn = assistantState.turns[index];
+  const missing = (turn?.payload?.recommendations || []).filter((item) => !item.owned);
+  if (!turn || !missing.length) return;
+  button.disabled = true;
+  try {
+    await refreshWishlistIndex();
+    for (const item of missing) {
+      if (wishlistEntry("bgg", String(item.bgg_id))) continue;
+      await api("/api/wishlist", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          source_kind: "bgg",
+          source_key: String(item.bgg_id),
+          title: item.title,
+          bgg_id: Number(item.bgg_id),
+          target_url: `https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}`,
+          metadata: {},
+        }),
+      });
+    }
+    await refreshWishlistIndex();
+    turn.wishlistAdded = true;
+    saveAssistantState();
+    renderAssistantThread();
+    showToast("Giochi aggiunti alla Wishlist.");
+  } catch (error) {
+    button.disabled = false;
+    showToast(error.message, true);
+  }
+}
+
+async function submitAssistantQuestion() {
+  const input = document.querySelector("#assistantQuestion");
+  const ask = document.querySelector("#assistantAsk");
+  const query = String(input?.value || "").trim();
+  if (!query || assistantState.busy) return;
+  const history = assistantHistoryPayload();
+  assistantState.turns.push({role: "user", text: query});
+  assistantState.busy = true;
+  input.value = "";
+  if (ask) ask.disabled = true;
+  renderAssistantThread();
   try {
     const payload = await api("/api/catalog/assistant", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({query}),
+      body: JSON.stringify({query, scope: assistantState.scope, history}),
     });
-    renderCatalogAssistantResult(payload);
+    assistantState.turns.push({role: "assistant", payload});
   } catch (error) {
-    catalogAssistantResult.innerHTML =
-      `<div class="integration-error">${escapeHtml(error.message)}</div>`;
+    assistantState.turns.push({role: "assistant", error: error.message});
   } finally {
-    askCatalogAssistant.disabled = false;
-    askCatalogAssistant.textContent = "Chiedi all'AI";
+    assistantState.busy = false;
+    assistantState.turns = assistantState.turns.slice(-20);
+    saveAssistantState();
+    if (ask) ask.disabled = false;
+    renderAssistantThread();
+    if (input?.isConnected) input.focus();
   }
+}
+
+async function renderAssistant() {
+  document.title = "Assistente AI · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="page-header catalog-page-header">
+      <div class="page-header-copy">
+        <h1>Assistente AI</h1>
+        <p class="muted catalog-page-summary">Consigli, domande e liste sui giochi da tavolo.</p>
+      </div>
+      <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Giochi considerati">
+        <button type="button" class="stat" data-assistant-scope="library"><span>Solo ludoteca</span></button>
+        <button type="button" class="stat" data-assistant-scope="all"><span>Ludoteca + catalogo BGG</span></button>
+      </div>
+    </section>
+    <section class="catalog-workspace assistant-workspace" aria-label="Conversazione con l'assistente">
+      <div class="assistant-thread" id="assistantThread" aria-live="polite"></div>
+      <form class="assistant-composer" id="assistantForm">
+        <label class="field assistant-question-field">
+          <textarea id="assistantQuestion" rows="2" maxlength="2000" required aria-label="La tua domanda"
+                    placeholder="Es. Un cooperativo per 2–3 persone, con deckbuilding e non troppo impegnativo."></textarea>
+        </label>
+        <div class="assistant-composer-actions">
+          <button class="button button-ghost" id="assistantReset" type="button">Nuova conversazione</button>
+          <button class="button button-primary" id="assistantAsk" type="submit">Chiedi</button>
+        </div>
+      </form>
+    </section>
+  `;
+  setAssistantScope(assistantState.scope);
+  document.querySelectorAll("[data-assistant-scope]").forEach((button) => {
+    button.addEventListener("click", () => setAssistantScope(button.dataset.assistantScope));
+  });
+  const input = document.querySelector("#assistantQuestion");
+  document.querySelector("#assistantForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitAssistantQuestion();
+  });
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      void submitAssistantQuestion();
+    }
+  });
+  document.querySelector("#assistantReset")?.addEventListener("click", () => {
+    if (assistantState.busy) return;
+    assistantState.turns = [];
+    saveAssistantState();
+    renderAssistantThread();
+    input?.focus();
+  });
+  if (assistantState.turns.some((turn) => turn.payload?.recommendations?.length)) {
+    await refreshWishlistIndex().catch(() => null);
+  }
+  renderAssistantThread();
 }
 
 function browseGameRow(game, index) {
@@ -5903,7 +6184,6 @@ async function renderSuggestions({forceRefresh = false} = {}) {
   }
 }
 
-const BGG_CATALOG_PAGE_SIZE = 48;
 const bggCatalogSorts = [
   ["rank", "Classifica BGG"],
   ["votes", "Più votati"],
@@ -5911,43 +6191,19 @@ const bggCatalogSorts = [
   ["newest", "Più recenti"],
   ["title", "Titolo"],
 ];
-const bggCatalogState = {q: "", sort: "rank", offset: 0, total: 0};
+const bggCatalogPageSizes = ["20", "50", "100", "200"];
+const storedBggCatalogPageSize = window.localStorage.getItem("bgc.bggCatalogPageSize");
+const bggCatalogState = {
+  q: "",
+  sort: "rank",
+  itemType: "",
+  offset: 0,
+  total: 0,
+  pageSize: bggCatalogPageSizes.includes(storedBggCatalogPageSize) ? storedBggCatalogPageSize : "50",
+};
 let bggCatalogRequestController;
 let bggCatalogSearchTimer;
-
-function bggCatalogCard(item) {
-  const bggId = Number(item.bgg_id);
-  const cover = item.image_url || item.thumbnail_url
-    ? `<img src="${coverSrc(bggId)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
-    : `<span class="cover-initials" aria-hidden="true">${escapeHtml(initials(item.name))}</span>`;
-  const facts = [
-    item.year_published ? String(item.year_published) : "Anno —",
-    item.is_expansion ? "Espansione" : null,
-    `${formatNumber(item.users_rated, 0)} voti`,
-  ].filter(Boolean);
-  const average = Number(item.average) > 0 ? Number(item.average).toFixed(1) : "";
-  return `
-    <article class="bgg-catalog-card ${item.in_catalog ? "is-in-library" : ""}">
-      <button class="bgg-catalog-open" type="button" data-reference-detail="${bggId}"
-              aria-label="Dettagli di ${escapeHtml(item.name)}">
-        <span class="bgg-catalog-cover">
-          ${cover}
-          ${item.rank ? `<span class="bgg-catalog-rank" title="Posizione nella classifica BGG">#${formatNumber(item.rank, 0)}</span>` : ""}
-          ${average ? `<span class="bgg-catalog-rating" title="Voto medio BGG">${escapeHtml(average)}</span>` : ""}
-        </span>
-        <span class="bgg-catalog-body">
-          <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
-          <small class="muted">${escapeHtml(facts.join(" · "))}</small>
-        </span>
-      </button>
-      <div class="bgg-catalog-actions">
-        ${item.in_catalog
-          ? `<a class="bgg-catalog-badge" href="/games/${bggId}" data-nav>${icon("check")}<span>In ludoteca</span></a>`
-          : referenceActionButtons(item)}
-      </div>
-    </article>
-  `;
-}
+let currentBggCatalogItems = null;
 
 function bindBggCatalogCards(root) {
   bindWishlistActions(root);
@@ -5957,92 +6213,151 @@ function bindBggCatalogCards(root) {
   });
 }
 
-async function loadBggCatalog({append = false} = {}) {
+function renderBggCatalogItems() {
+  const grid = document.querySelector("#bggCatalogGrid");
+  if (!grid || !currentBggCatalogItems) return;
+  const listView = state.catalogView === "list";
+  grid.className = `catalog-results bgg-catalog-results ${listView ? "catalog-results-list" : `catalog-results-cards catalog-columns-${state.cardsPerRow}`}`;
+  if (!currentBggCatalogItems.length) {
+    grid.innerHTML = bggCatalogState.q
+      ? '<div class="empty catalog-empty">Nessun gioco trovato. Prova con il titolo originale o con meno parole.</div>'
+      : '<div class="empty catalog-empty">Catalogo BGG vuoto: copia il dump <code>boardgames_ranks.csv</code> nella cartella di import, viene importato automaticamente. Soglie e stato sono nelle Impostazioni.</div>';
+    return;
+  }
+  const rows = currentBggCatalogItems.map((item) => [referenceAsGame(item), item]);
+  grid.innerHTML = listView
+    ? `
+      <div class="catalog-list-head">
+        <span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span><span>Peso</span><span>BGG</span><span aria-hidden="true"></span>
+      </div>
+      ${rows.map(([game, item]) => gameListRow(game, [], false, {reference: item})).join("")}
+    `
+    : rows.map(([game, item]) => gameCard(game, [], {reference: item})).join("");
+  bindBggCatalogCards(grid);
+}
+
+function renderBggCatalogPagination() {
+  const container = document.querySelector("#bggCatalogPagination");
+  if (!container) return;
+  const limit = Number(bggCatalogState.pageSize);
+  const page = Math.floor(bggCatalogState.offset / limit) + 1;
+  const pages = Math.max(1, Math.ceil(bggCatalogState.total / limit));
+  container.hidden = pages <= 1;
+  if (pages <= 1) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `
+    <button class="button button-ghost" type="button" data-bgg-catalog-page="-1" ${page <= 1 ? "disabled" : ""}>← Precedente</button>
+    <span class="muted">Pagina ${formatNumber(page, 0)} di ${formatNumber(pages, 0)} · ${limit} per pagina</span>
+    <button class="button button-ghost" type="button" data-bgg-catalog-page="1" ${page >= pages ? "disabled" : ""}>Successiva →</button>
+  `;
+  container.querySelectorAll("[data-bgg-catalog-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const step = Number(button.dataset.bggCatalogPage);
+      bggCatalogState.offset = Math.max(0, bggCatalogState.offset + step * limit);
+      void loadBggCatalog();
+      window.scrollTo({top: 0, behavior: "smooth"});
+    });
+  });
+}
+
+async function loadBggCatalog() {
   const grid = document.querySelector("#bggCatalogGrid");
   const summary = document.querySelector("#bggCatalogSummary");
-  const more = document.querySelector("#bggCatalogMore");
-  if (!grid || !summary || !more) return;
+  if (!grid || !summary) return;
   bggCatalogRequestController?.abort();
   const controller = new AbortController();
   bggCatalogRequestController = controller;
-  if (!append) {
-    bggCatalogState.offset = 0;
-    grid.innerHTML = skeletons();
-  }
-  more.disabled = true;
+  grid.innerHTML = skeletons();
   try {
     const params = new URLSearchParams({
       sort: bggCatalogState.sort,
-      limit: String(BGG_CATALOG_PAGE_SIZE),
+      limit: bggCatalogState.pageSize,
       offset: String(bggCatalogState.offset),
     });
     if (bggCatalogState.q) params.set("q", bggCatalogState.q);
+    if (bggCatalogState.itemType) params.set("item_type", bggCatalogState.itemType);
     const [payload] = await Promise.all([
       api(`/api/reference/browse?${params}`, {signal: controller.signal}),
-      append ? null : refreshWishlistIndex().catch(() => null),
+      refreshWishlistIndex().catch(() => null),
     ]);
     if (controller.signal.aborted || !grid.isConnected) return;
-    const items = Array.isArray(payload.items) ? payload.items : [];
+    currentBggCatalogItems = Array.isArray(payload.items) ? payload.items : [];
     bggCatalogState.total = Number(payload.total) || 0;
-    bggCatalogState.offset += items.length;
     const totalText = `${formatNumber(bggCatalogState.total, 0)} ${bggCatalogState.total === 1 ? "gioco" : "giochi"}`;
     summary.textContent = bggCatalogState.q
       ? `${totalText} per “${bggCatalogState.q}”`
       : `${totalText} nel catalogo BGG`;
-    if (!append && !items.length) {
-      grid.innerHTML = bggCatalogState.q
-        ? '<div class="empty-state"><strong>Nessun gioco trovato</strong><p class="muted">Prova con il titolo originale o con meno parole.</p></div>'
-        : '<div class="empty-state"><strong>Catalogo BGG vuoto</strong><p class="muted">Copia il dump <code>boardgames_ranks.csv</code> nella cartella di import: viene importato automaticamente. Soglie e stato sono nelle Impostazioni.</p></div>';
-    } else {
-      const html = items.map(bggCatalogCard).join("");
-      if (append) {
-        const holder = document.createElement("div");
-        holder.innerHTML = html;
-        bindBggCatalogCards(holder);
-        grid.append(...holder.children);
-      } else {
-        grid.innerHTML = html;
-        bindBggCatalogCards(grid);
-      }
-    }
-    more.hidden = bggCatalogState.offset >= bggCatalogState.total;
+    renderBggCatalogItems();
+    renderBggCatalogPagination();
   } catch (error) {
     if (error.name === "AbortError") return;
-    if (!append) grid.innerHTML = `<div class="empty-state"><strong>Catalogo non disponibile</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
+    grid.innerHTML = `<div class="empty catalog-empty">Catalogo non disponibile: ${escapeHtml(error.message)}</div>`;
     showToast(error.message, true);
   } finally {
-    if (bggCatalogRequestController === controller) {
-      bggCatalogRequestController = undefined;
-      more.disabled = false;
-    }
+    if (bggCatalogRequestController === controller) bggCatalogRequestController = undefined;
   }
 }
 
 async function renderBggCatalog() {
   document.title = "Catalogo · BoardGameCompanion";
+  currentBggCatalogItems = null;
+  const cardsView = state.catalogView === "cards";
   app.innerHTML = `
-    <section class="bgg-catalog-page">
-      <header class="page-header browse-header">
-        <div class="page-header-copy">
-          <h1>Catalogo</h1>
-          <p class="muted" id="bggCatalogSummary" aria-live="polite">Caricamento…</p>
-        </div>
-      </header>
-      <div class="bgg-catalog-controls">
-        <label class="bgg-catalog-search">
-          <span aria-hidden="true">${icon("search")}</span>
+    <section class="page-header catalog-page-header">
+      <div class="page-header-copy">
+        <h1>Catalogo</h1>
+        <p class="muted catalog-page-summary" id="bggCatalogSummary" aria-live="polite">Caricamento…</p>
+      </div>
+      <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Ordina catalogo">
+        ${bggCatalogSorts.map(([value, label]) => `<button type="button" class="stat ${bggCatalogState.sort === value ? "is-active" : ""}" data-bgg-catalog-sort="${value}" aria-pressed="${bggCatalogState.sort === value}"><span>${label}</span></button>`).join("")}
+      </div>
+    </section>
+
+    <section class="catalog-workspace" aria-label="Catalogo BGG">
+      <section class="toolbar catalog-simple-search" aria-label="Ricerca catalogo">
+        <label class="field search-field">
           <input id="bggCatalogQuery" type="search" autocomplete="off" enterkeyhint="search" maxlength="200"
-                 placeholder="Cerca nel catalogo BoardGameGeek…" aria-label="Cerca nel catalogo BoardGameGeek"
+                 placeholder="Cerca un gioco…" aria-label="Cerca nel catalogo BoardGameGeek"
                  value="${escapeHtml(bggCatalogState.q)}">
         </label>
-        <div class="suggestions-toolbar bgg-catalog-sorts" role="group" aria-label="Ordina catalogo">
-          ${bggCatalogSorts.map(([value, label]) => `<button type="button" data-bgg-catalog-sort="${value}" class="${bggCatalogState.sort === value ? "is-active" : ""}" aria-pressed="${bggCatalogState.sort === value}">${label}</button>`).join("")}
+        <label class="field catalog-type-field">
+          <select id="bggCatalogType" aria-label="Tipo">
+            <option value="">Tutti i tipi</option>
+            <option value="standalone" ${bggCatalogState.itemType === "standalone" ? "selected" : ""}>Giochi base</option>
+            <option value="expansion" ${bggCatalogState.itemType === "expansion" ? "selected" : ""}>Espansioni</option>
+          </select>
+        </label>
+        <div class="catalog-view-switch catalog-filter-view" aria-label="Vista catalogo">
+          <button class="view-switch-button ${cardsView ? "is-active" : ""}" id="bggCardViewButton" type="button"
+                  aria-label="Card" title="Card" aria-pressed="${cardsView}">${icon("catalog")}</button>
+          <button class="view-switch-button ${cardsView ? "" : "is-active"}" id="bggListViewButton" type="button"
+                  aria-label="Lista" title="Lista" aria-pressed="${!cardsView}">${icon("list")}</button>
         </div>
-      </div>
-      <div id="bggCatalogGrid" class="bgg-catalog-grid"></div>
-      <button class="button button-ghost bgg-catalog-more" id="bggCatalogMore" type="button" hidden>Carica altri</button>
+        <div class="catalog-density-fields">
+          <label class="catalog-density-field" id="bggCardsPerRowField" ${cardsView ? "" : "hidden"}>
+            <span class="catalog-density-label">Righe</span>
+            <select id="bggCardsPerRow" aria-label="Card per riga">
+              ${[3, 4, 5].map((value) => `<option value="${value}" ${state.cardsPerRow === value ? "selected" : ""}>${value}</option>`).join("")}
+            </select>
+          </label>
+          <label class="catalog-density-field">
+            <span class="catalog-density-label">Pagina</span>
+            <select id="bggCatalogPageSize" aria-label="Titoli per pagina">
+              ${bggCatalogPageSizes.map((value) => `<option value="${value}" ${bggCatalogState.pageSize === value ? "selected" : ""}>${value}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+      </section>
+      <section class="catalog-results catalog-results-cards catalog-columns-${state.cardsPerRow}" id="bggCatalogGrid"></section>
+      <nav class="pagination" id="bggCatalogPagination" aria-label="Paginazione" hidden></nav>
     </section>
   `;
+  const reload = () => {
+    bggCatalogState.offset = 0;
+    void loadBggCatalog();
+  };
   const input = document.querySelector("#bggCatalogQuery");
   input?.addEventListener("input", () => {
     window.clearTimeout(bggCatalogSearchTimer);
@@ -6050,8 +6365,12 @@ async function renderBggCatalog() {
       const value = String(input.value || "").trim();
       if (value === bggCatalogState.q) return;
       bggCatalogState.q = value;
-      void loadBggCatalog();
+      reload();
     }, 300);
+  });
+  document.querySelector("#bggCatalogType")?.addEventListener("change", (event) => {
+    bggCatalogState.itemType = event.target.value;
+    reload();
   });
   document.querySelectorAll("[data-bgg-catalog-sort]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -6061,11 +6380,37 @@ async function renderBggCatalog() {
         item.classList.toggle("is-active", active);
         item.setAttribute("aria-pressed", String(active));
       });
-      void loadBggCatalog();
+      reload();
     });
   });
-  document.querySelector("#bggCatalogMore")?.addEventListener("click", () => {
-    void loadBggCatalog({append: true});
+  const setView = (view) => {
+    if (state.catalogView === view) return;
+    state.catalogView = view;
+    window.localStorage.setItem("bgc.catalogView", view);
+    const cards = view === "cards";
+    for (const [id, active] of [["#bggCardViewButton", cards], ["#bggListViewButton", !cards]]) {
+      const button = document.querySelector(id);
+      button?.classList.toggle("is-active", active);
+      button?.setAttribute("aria-pressed", String(active));
+    }
+    const field = document.querySelector("#bggCardsPerRowField");
+    if (field) field.hidden = !cards;
+    renderBggCatalogItems();
+  };
+  document.querySelector("#bggCardViewButton")?.addEventListener("click", () => setView("cards"));
+  document.querySelector("#bggListViewButton")?.addEventListener("click", () => setView("list"));
+  document.querySelector("#bggCardsPerRow")?.addEventListener("change", (event) => {
+    const value = Number(event.target.value);
+    if (![3, 4, 5].includes(value)) return;
+    state.cardsPerRow = value;
+    window.localStorage.setItem("bgc.catalogColumns", String(value));
+    renderBggCatalogItems();
+  });
+  document.querySelector("#bggCatalogPageSize")?.addEventListener("change", (event) => {
+    if (!bggCatalogPageSizes.includes(event.target.value)) return;
+    bggCatalogState.pageSize = event.target.value;
+    window.localStorage.setItem("bgc.bggCatalogPageSize", event.target.value);
+    reload();
   });
   await loadBggCatalog();
 }
@@ -6621,6 +6966,10 @@ async function route() {
     await renderWishlist();
     return;
   }
+  if (/^\/assistant\/?$/.test(window.location.pathname)) {
+    await renderAssistant();
+    return;
+  }
   if (/^\/completed\/?$/.test(window.location.pathname)) {
     await renderCompleted();
     return;
@@ -6657,7 +7006,6 @@ document.addEventListener("click", (event) => {
   if (url.origin !== window.location.origin) return;
   event.preventDefault();
   if (settingsDialog?.open && link.closest("#settingsDialog")) settingsDialog.close();
-  if (catalogAssistantDialog?.open && link.closest("#catalogAssistantDialog")) catalogAssistantDialog.close();
   if (globalSearchDialog?.open) globalSearchDialog.close();
   if (notificationDialog?.open) notificationDialog.close();
   history.pushState({}, "", url.pathname + url.search);
@@ -6809,28 +7157,6 @@ settingsCollapseExpansions?.addEventListener("change", (event) => {
 });
 settingsTabs.forEach((tab) => {
   tab.addEventListener("click", () => setSettingsTab(tab.dataset.settingsTab));
-});
-
-catalogAssistantButton?.addEventListener("click", () => {
-  closeSidebar();
-  openCatalogAssistant();
-});
-catalogAssistantForm?.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void submitCatalogAssistant();
-});
-closeCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
-cancelCatalogAssistant?.addEventListener("click", closeCatalogAssistantDialog);
-catalogAssistantDialog?.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  closeCatalogAssistantDialog();
-});
-document.querySelectorAll("[data-assistant-example]").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (!catalogAssistantQuestion) return;
-    catalogAssistantQuestion.value = button.dataset.assistantExample || "";
-    catalogAssistantQuestion.focus();
-  });
 });
 
 closeSettings.addEventListener("click", closeSettingsDialog);

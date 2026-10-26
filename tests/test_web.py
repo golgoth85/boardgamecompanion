@@ -102,7 +102,7 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert css.status_code == 200
     assert "--accent:" in css.text
     assert extra_css.status_code == 200
-    assert ".assistant-dialog" in extra_css.text
+    assert ".assistant-thread" in extra_css.text
     assert ".tutorial-video-grid" in extra_css.text
     assert js.status_code == 200
     assert "renderCatalog" in js.text

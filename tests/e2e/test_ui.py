@@ -602,7 +602,9 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         expect(sidebar.get_by_role("link", name="Novità")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Meccaniche")).to_have_count(0)
-        expect(sidebar.get_by_role("button", name="Consigliami un gioco")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Assistente AI")).to_have_attribute(
+            "href", "/assistant"
+        )
         expect(sidebar.get_by_role("button", name="Scansiona barcode")).to_have_count(0)
         expect(page.locator("#scannerButton")).to_be_visible()
         expect(sidebar.get_by_role("button", name="Impostazioni")).to_be_visible()
@@ -1363,7 +1365,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         expect(page.get_by_text("10+", exact=True)).to_be_visible()
 
         description = page.get_by_role("heading", name="Descrizione")
-        rules = page.get_by_role("heading", name="Regole")
+        rules = page.get_by_role("heading", name="Regolamento", exact=True)
         expect(description).to_be_visible()
         expect(rules).to_be_visible()
         description_box = description.bounding_box()

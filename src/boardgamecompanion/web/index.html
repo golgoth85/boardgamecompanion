@@ -57,10 +57,10 @@
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-check-circle"/></svg></span>
             <span>Giochi giocati</span>
           </a>
-          <button class="nav-item nav-button nav-ai" id="catalogAssistantButton" type="button">
+          <a class="nav-item nav-ai" href="/assistant" data-nav data-route="assistant">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sparkle"/></svg></span>
-            <span>Consigliami un gioco</span>
-          </button>
+            <span>Assistente AI</span>
+          </a>
           <button class="nav-item nav-button" id="settingsButton" type="button"
                   aria-haspopup="dialog" aria-controls="settingsDialog">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-settings"/></svg></span>
@@ -525,36 +525,6 @@
         <button class="button button-ghost" type="button" id="cancelSettings">Chiudi</button>
         <button class="button button-ghost" type="submit" id="saveSettings">Salva</button>
         <button class="button button-primary" type="button" id="saveTestSettings">Salva e verifica BGG</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="catalogAssistantDialog" class="dialog assistant-dialog" aria-labelledby="catalogAssistantTitle">
-    <form id="catalogAssistantForm">
-      <div class="dialog-head">
-        <div>
-          <p class="eyebrow">Assistente ludoteca</p>
-          <h2 id="catalogAssistantTitle">Che cosa giochiamo?</h2>
-          <p class="muted">Descrivi persone, tempo, complessità o meccaniche desiderate.</p>
-        </div>
-        <button class="icon-button" id="closeCatalogAssistant" type="button" aria-label="Chiudi assistente">×</button>
-      </div>
-      <label class="assistant-question">
-        <span>La tua richiesta</span>
-        <textarea id="catalogAssistantQuestion" rows="4" maxlength="2000" required
-          placeholder="Es. Suggeriscimi un cooperativo ideale per 2–3 persone, con deckbuilding e non troppo impegnativo."></textarea>
-      </label>
-      <div class="assistant-examples" aria-label="Esempi">
-        <button type="button" data-assistant-example="Un gioco semplice per 2 persone, massimo 45 minuti.">2 giocatori · rapido</button>
-        <button type="button" data-assistant-example="Suggeriscimi un cooperativo per 2-3 persone, non troppo impegnativo.">Coop · 2–3</button>
-        <button type="button" data-assistant-example="Vorrei un gioco con deckbuilding, peso medio-basso e buona resa in 2.">Deckbuilding · in 2</button>
-      </div>
-      <div id="catalogAssistantResult" class="assistant-result">
-        <p class="muted">Le raccomandazioni vengono scelte esclusivamente tra i giochi posseduti nel catalogo.</p>
-      </div>
-      <div class="dialog-actions">
-        <button class="button button-ghost" id="cancelCatalogAssistant" type="button">Chiudi</button>
-        <button class="button button-primary" id="askCatalogAssistant" type="submit">Chiedi all'AI</button>
       </div>
     </form>
   </dialog>

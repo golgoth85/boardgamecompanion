@@ -417,7 +417,7 @@ BROWSE_SORT_SQL = {
 }
 
 
-# Cached rows are (bgg_id, name, year_published, rank, average, users_rated).
+# Cached rows are (bgg_id, name, year_published, rank, average, users_rated, is_expansion).
 BROWSE_SORT_KEYS = {
     "rank": lambda r: (not r[3], r[3] or 0, -r[5], r[0]),
     "votes": lambda r: (-r[5], r[0]),
@@ -435,8 +435,41 @@ def clear_browse_cache() -> None:
         _browse_cache.clear()
 
 
+# Card facts: the local library row wins, then the stored /thing details.
+_ITEM_SELECT = """
+    SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
+           g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
+           g.admission_reason, b.id AS board_game_id,
+           COALESCE(b.min_players, json_extract(g.details_json, '$.min_players')) AS min_players,
+           COALESCE(b.max_players, json_extract(g.details_json, '$.max_players')) AS max_players,
+           COALESCE(b.playing_time, json_extract(g.details_json, '$.playing_time')) AS playing_time,
+           COALESCE(b.min_play_time, json_extract(g.details_json, '$.min_play_time')) AS min_play_time,
+           COALESCE(b.max_play_time, json_extract(g.details_json, '$.max_play_time')) AS max_play_time,
+           COALESCE(b.bgg_average_weight, json_extract(g.details_json, '$.bgg_average_weight')) AS average_weight,
+           COALESCE(b.bgg_recommended_age, json_extract(g.details_json, '$.bgg_recommended_age')) AS recommended_age,
+           EXISTS(
+               SELECT 1 FROM collection_entries c WHERE c.board_game_id = b.id AND c.own = 1
+           ) AS owned
+"""
+
+
 def _reference_item(row: Any) -> dict[str, Any]:
+    keys = row.keys()
+    extra: dict[str, Any] = {}
+    if "owned" in keys:
+        extra = {
+            "owned": bool(row["owned"]),
+            "players": {"min": row["min_players"], "max": row["max_players"]},
+            "play_time": {
+                "playing": row["playing_time"],
+                "min": row["min_play_time"],
+                "max": row["max_play_time"],
+            },
+            "average_weight": row["average_weight"],
+            "recommended_age": row["recommended_age"],
+        }
     return {
+        **extra,
         "bgg_id": int(row["bgg_id"]),
         "name": row["name"],
         "year_published": row["year_published"],
@@ -475,9 +508,7 @@ class BggReferenceCatalog:
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
-                       g.admission_reason, b.id AS board_game_id
+                {_ITEM_SELECT}
                 FROM bgg_reference_games_fts f
                 JOIN bgg_reference_games g ON g.bgg_id = f.rowid
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
@@ -498,32 +529,41 @@ class BggReferenceCatalog:
         sort: str = "rank",
         limit: int = 48,
         offset: int = 0,
+        item_type: str | None = None,
         reference_settings: ReferenceSettings | None = None,
     ) -> dict[str, Any]:
-        """Paginated listing of the visible reference titles, optionally filtered by title."""
+        """Paginated listing of the visible reference titles, optionally filtered by title and type."""
         value = reference_settings or load_reference_settings(self.database)
         sort = sort if sort in BROWSE_SORT_SQL else "rank"
+        expansion = {"standalone": 0, "expansion": 1}.get(item_type or "")
         page = {"sort": sort, "limit": limit, "offset": offset}
         text = (query or "").strip()
         if not text:
-            ordered = self._browse_order(value, sort)
+            ordered = self._browse_order(value, sort, expansion)
             ids = ordered[offset : offset + limit]
             return {"items": self._items_by_id(ids), "total": len(ordered), **page}
         match = _fts_query(text)
         if match is None:
             return {"items": [], "total": 0, **page}
-        params = {**_visibility_params(value), "match": match, "limit": limit, "offset": offset}
+        params = {
+            **_visibility_params(value),
+            "match": match,
+            "limit": limit,
+            "offset": offset,
+            "expansion": expansion,
+        }
         source = "bgg_reference_games_fts f JOIN bgg_reference_games g ON g.bgg_id = f.rowid"
-        where = f"bgg_reference_games_fts MATCH :match AND {_VISIBLE_SQL}"
+        where = (
+            f"bgg_reference_games_fts MATCH :match AND {_VISIBLE_SQL}"
+            " AND (:expansion IS NULL OR g.is_expansion = :expansion)"
+        )
         with self.database.connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM {source} WHERE {where}", params
             ).fetchone()[0]
             rows = connection.execute(
                 f"""
-                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
-                       g.admission_reason, b.id AS board_game_id
+                {_ITEM_SELECT}
                 FROM {source}
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
                 WHERE {where}
@@ -534,7 +574,9 @@ class BggReferenceCatalog:
             ).fetchall()
         return {"items": [_reference_item(row) for row in rows], "total": int(total), **page}
 
-    def _browse_order(self, value: ReferenceSettings, sort: str) -> list[int]:
+    def _browse_order(
+        self, value: ReferenceSettings, sort: str, expansion: int | None = None
+    ) -> list[int]:
         # The visibility columns sit after details_json, so filtering the whole
         # table walks every overflow page. One scan of the sort keys is cached
         # briefly and shared by all sort orders; pages are then read by key.
@@ -548,7 +590,8 @@ class BggReferenceCatalog:
             with self.database.connect() as connection:
                 rows = connection.execute(
                     f"""
-                    SELECT g.bgg_id, g.name, g.year_published, g.rank, g.average, g.users_rated
+                    SELECT g.bgg_id, g.name, g.year_published, g.rank, g.average,
+                           g.users_rated, g.is_expansion
                     FROM bgg_reference_games g
                     WHERE {_VISIBLE_SQL}
                     """,
@@ -558,9 +601,13 @@ class BggReferenceCatalog:
             with _browse_cache_lock:
                 _browse_cache[key] = entry
         orders = entry["orders"]
-        if sort not in orders:
-            orders[sort] = [row[0] for row in sorted(entry["rows"], key=BROWSE_SORT_KEYS[sort])]
-        return orders[sort]
+        order_key = (sort, expansion)
+        if order_key not in orders:
+            rows = entry["rows"]
+            if expansion is not None:
+                rows = [row for row in rows if int(row[6]) == expansion]
+            orders[order_key] = [row[0] for row in sorted(rows, key=BROWSE_SORT_KEYS[sort])]
+        return orders[order_key]
 
     def _items_by_id(self, ids: list[int]) -> list[dict[str, Any]]:
         if not ids:
@@ -569,9 +616,7 @@ class BggReferenceCatalog:
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT g.bgg_id, g.name, g.year_published, g.is_expansion,
-                       g.rank, g.average, g.users_rated, g.thumbnail_url, g.image_url,
-                       g.admission_reason, b.id AS board_game_id
+                {_ITEM_SELECT}
                 FROM bgg_reference_games g
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
                 WHERE g.bgg_id IN ({placeholders}) AND g.removed_at IS NULL
@@ -579,6 +624,63 @@ class BggReferenceCatalog:
                 ids,
             ).fetchall()
         by_id = {int(row["bgg_id"]): _reference_item(row) for row in rows}
+        return [by_id[bgg_id] for bgg_id in ids if bgg_id in by_id]
+
+    def assistant_candidates(
+        self,
+        *,
+        scan: int = 800,
+        reference_settings: ReferenceSettings | None = None,
+    ) -> list[dict[str, Any]]:
+        """Best-ranked visible base games not owned, shaped like Catalog.assistant_candidates.
+
+        Only the top ``scan`` titles by BGG rank are read, so the stored /thing
+        details are parsed for a bounded set of rows.
+        """
+        value = reference_settings or load_reference_settings(self.database)
+        ids = self._browse_order(value, "rank", 0)[: max(1, scan)]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT g.bgg_id, g.name, g.rank, g.average, g.details_json
+                FROM bgg_reference_games g
+                LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
+                WHERE g.bgg_id IN ({placeholders})
+                  AND NOT EXISTS (
+                      SELECT 1 FROM collection_entries c
+                      WHERE c.board_game_id = b.id AND c.own = 1
+                  )
+                """,
+                ids,
+            ).fetchall()
+        by_id: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                details = json.loads(row["details_json"] or "{}")
+            except ValueError:
+                details = {}
+            by_id[int(row["bgg_id"])] = {
+                "bgg_id": int(row["bgg_id"]),
+                "title": row["name"],
+                "owned": False,
+                "players": {"min": details.get("min_players"), "max": details.get("max_players")},
+                "recommended_players": details.get("bgg_recommended_players"),
+                "best_players": details.get("bgg_best_players"),
+                "min_age": details.get("bgg_recommended_age"),
+                "minutes": {
+                    "playing": details.get("playing_time"),
+                    "min": details.get("min_play_time"),
+                    "max": details.get("max_play_time"),
+                },
+                "weight": details.get("bgg_average_weight"),
+                "rating": row["average"],
+                "rank": row["rank"],
+                "categories": [str(item) for item in details.get("categories") or []],
+                "mechanics": [str(item) for item in details.get("mechanics") or []],
+            }
         return [by_id[bgg_id] for bgg_id in ids if bgg_id in by_id]
 
     def match_campaign_title(self, title: str, *, since_year: int) -> int | None:
@@ -651,13 +753,18 @@ class BggReferenceCatalog:
             "api_checked_at": row["api_checked_at"],
             "detail_error": detail_error,
             "in_catalog": row["board_game_id"] is not None,
+            "owned": bool(row["owned"]),
         }
 
     def _detail_row(self, bgg_id: int) -> Any:
         with self.database.connect() as connection:
             return connection.execute(
                 """
-                SELECT g.*, b.id AS board_game_id
+                SELECT g.*, b.id AS board_game_id,
+                       EXISTS(
+                           SELECT 1 FROM collection_entries c
+                           WHERE c.board_game_id = b.id AND c.own = 1
+                       ) AS owned
                 FROM bgg_reference_games g
                 LEFT JOIN board_games b ON b.bgg_id = g.bgg_id
                 WHERE g.bgg_id = ? AND g.removed_at IS NULL
