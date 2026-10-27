@@ -190,6 +190,27 @@ def test_price_requires_fetched_known_url_and_verbatim_price():
     assert requests.count('/v1/tools/fetch') == 1
 
 
+def test_price_searches_each_shop_because_generic_results_are_never_shops():
+    queries = []
+    def handler(request):
+        path = request.url.path
+        if path.endswith('/search'):
+            query = json.loads(request.content)['query']
+            queries.append(query)
+            if 'site:dungeondice.it' in query:
+                return httpx.Response(200, json={'results': [{'url': 'https://dungeondice.it/catan', 'title': 'Catan'}]})
+            return httpx.Response(200, json={'results': [{'url': 'https://boardgamegeek.com/boardgame/13/catan', 'title': 'Catan'}]})
+        if path.endswith('/fetch'):
+            return httpx.Response(200, json={'title': 'Catan', 'content': 'Catan. Prezzo 29,99 EUR.'})
+        return response(json.dumps({'offers': [
+            {'url': 'https://dungeondice.it/catan', 'price_eur': 29.99, 'availability': 'in_stock', 'quote': 'Prezzo 29,99 EUR'},
+        ]}))
+    offers = DeepSeekPriceProvider(make_client(handler)).search(title='Catan', year=1995)
+    assert [offer['price_eur'] for offer in offers] == [29.99]
+    assert any(query.endswith('site:dungeondice.it') for query in queries)
+    assert not any('gioco prezzo Italia' in query for query in queries)
+
+
 def test_price_rejects_hallucinated_price_even_on_known_shop():
     def handler(request):
         if request.url.path.endswith('/search'):

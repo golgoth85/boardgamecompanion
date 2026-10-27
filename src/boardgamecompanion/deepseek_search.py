@@ -11,7 +11,7 @@ from boardgamecompanion.rulebook_providers import _title_matches
 from boardgamecompanion.rulebooks import (
     RulebookCandidate, RulebookProviderError, RulebookQuery, RulebookSource, canonical_http_url,
 )
-from boardgamecompanion.price_search import MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host
+from boardgamecompanion.price_search import ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host
 
 
 def matching_title(query: RulebookQuery, page: dict) -> bool:
@@ -139,20 +139,21 @@ class DeepSeekPriceProvider:
 
     def search(self, *, title: str, year: int | None = None) -> list[dict]:
         try:
-            results = self.web.search(f'"{title[:85]}" gioco prezzo Italia')
             pages = []
             read_failures = 0
             seen = set()
-            for result in results:
-                if shop_host(result["url"]) is None or result["url"] in seen:
-                    continue
-                seen.add(result["url"])
-                try:
-                    page = self.web.fetch(result)
-                except CloudAIError:
-                    read_failures += 1
-                    continue
-                pages.append(page)
+            for shop in sorted(ITALIAN_SHOP_HOSTS):
+                for result in self.web.search(f'"{title[:85]}" prezzo site:{shop}', count=2):
+                    if shop_host(result["url"]) is None or result["url"] in seen:
+                        continue
+                    seen.add(result["url"])
+                    try:
+                        pages.append(self.web.fetch(result))
+                    except CloudAIError:
+                        read_failures += 1
+                        continue
+                    if len(pages) == 4:
+                        break
                 if len(pages) == 4:
                     break
             if not pages:
