@@ -989,14 +989,11 @@ class Catalog:
         modes = {
             "overall": {
                 "title": "Migliori in assoluto",
-                "description": "Qualità BGG corretta con il Bayesian average quando disponibile.",
+                "description": "Giochi ordinati per voto medio BGG.",
             },
             "outside_top": {
                 "title": "Fuori dalla Top 500",
-                "description": (
-                    "I migliori giochi oltre la posizione 500 BGG, ordinati per "
-                    "Bayesian average: criterio esplicito, non una stima di popolarità."
-                ),
+                "description": "Giochi con voto medio solido oltre la posizione 500 BGG.",
             },
             "quality_time": {
                 "title": "Qualità / tempo",
@@ -1042,9 +1039,7 @@ class Catalog:
             return value if value > 0 else None
 
         def quality(row) -> float:
-            bayes = row["bgg_bayes_average"]
-            average = row["bgg_average"]
-            raw = bayes if bayes is not None and float(bayes) > 0 else average
+            raw = row["bgg_average"]
             if raw is None:
                 return 0.0
             return max(0.0, min(100.0, float(raw) * 10.0))
@@ -1080,9 +1075,9 @@ class Catalog:
             return max(20.0, min(100.0, 25.0 + (value - 2.0) * 30.0))
 
         def calculate(row, origin: str) -> tuple[float, str, list[str]] | None:
-            # Catalog titles admitted as upcoming or crowdfunding can carry a
-            # 10.0 average from a handful of votes: only BGG-ranked ones compete.
-            if origin == "catalog" and not (row["bgg_bayes_average"] or 0) > 0:
+            # Catalog titles without a BGG rank have too little rating history
+            # to compete in these rating-based lists.
+            if origin == "catalog" and int(row["bgg_rank"] or 0) <= 0:
                 return None
             q = quality(row)
             user_rating = (
@@ -1100,7 +1095,7 @@ class Catalog:
                 if q <= 0:
                     return None
                 score = q
-                reason = "Bayesian average BGG" if row["bgg_bayes_average"] else "rating BGG"
+                reason = "rating BGG"
 
             elif selected_mode == "outside_top":
                 if q < 60 or rank <= 500:

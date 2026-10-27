@@ -18,13 +18,13 @@ from boardgamecompanion.settings import settings
 MAX_BATCH = 8
 MAX_SOURCE_CHARS = 6000
 MIN_SUMMARY_CHARS = 45
-MAX_SUMMARY_CHARS = 420
-SUMMARY_STYLE_VERSION = "gameplay-v2-varied-openings"
+MAX_SUMMARY_CHARS = 630
+SUMMARY_STYLE_VERSION = "gameplay-v3-longer-varied-openings"
 
 _SYSTEM_PROMPT = """Scrivi micro-riassunti in italiano del gameplay di giochi da tavolo.
 
 Regole:
-- Per ogni gioco restituisci 1-2 frasi, circa 25-45 parole.
+- Per ogni gioco restituisci 2-3 frasi, circa 38-68 parole (circa il 50% in più rispetto ai riassunti precedenti).
 - Spiega cosa si fa concretamente durante una partita: azioni principali, ciclo di turno/round, interazione e obiettivo quando sono presenti nella fonte.
 - Varia nettamente l'attacco e la struttura delle frasi tra i giochi dello stesso batch.
 - Non iniziare più di una voce per batch con "I giocatori". Alterna naturalmente formule come "A turno...", "Ogni round...", "La partita ruota attorno a...", "Si costruisce...", "L'obiettivo è...", "Attraverso..." o altre aperture adatte al gioco.

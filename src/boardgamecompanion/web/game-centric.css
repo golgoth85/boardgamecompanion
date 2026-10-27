@@ -177,6 +177,7 @@
 .ranking-podium-body{display:grid;gap:.15rem;padding:.65rem .75rem .75rem;min-width:0}
 .ranking-podium-body strong{overflow:hidden;font-size:.9rem;text-overflow:ellipsis;white-space:nowrap}
 .ranking-podium-body small,.ranking-result-body>small{color:var(--muted);font-size:.66rem}
+.ranking-podium-summary{display:-webkit-box;overflow:hidden;color:#c9d2df;font-size:.68rem;line-height:1.45;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .ranking-podium-body em,.ranking-source-tag{color:#8ec5ff;font-style:normal}
 .ranking-position{display:grid;min-width:1.9rem;height:1.9rem;padding:0 .3rem;place-items:center;border-radius:999px;color:var(--muted);font-size:.8rem;font-weight:900}
 .ranking-podium-card .ranking-position{position:absolute;top:.6rem;left:.6rem;border:1px solid rgba(255,255,255,.2);color:#1f1605;background:#d6dde8;box-shadow:0 6px 18px rgba(0,0,0,.35)}
@@ -194,7 +195,7 @@
 .ranking-result-title{display:flex;align-items:baseline;gap:.45rem;min-width:0}
 .ranking-result-title strong{overflow:hidden;font-size:.84rem;text-overflow:ellipsis;white-space:nowrap}
 .ranking-source-tag{flex:0 0 auto;font-size:.6rem;font-weight:800}
-.ranking-result-summary{display:-webkit-box;overflow:hidden;color:#c9d2df;font-size:.68rem;line-height:1.45;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ranking-result-summary{display:-webkit-box;overflow:hidden;color:#c9d2df;font-size:.68rem;line-height:1.45;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .ranking-result-factors{display:flex;gap:.28rem;flex-wrap:wrap}.ranking-result-factors span{padding:.12rem .38rem;border-radius:999px;color:#aeb9ca;background:rgba(255,255,255,.045);font-size:.56rem}
 .ranking-more{justify-self:center;min-height:2.3rem;padding:.35rem .9rem;font-size:.74rem}
 .ranking-group-chips{display:grid;gap:.3rem}

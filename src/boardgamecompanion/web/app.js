@@ -5219,10 +5219,11 @@ async function ensureRankingGameplaySummaries(items) {
     for (const item of payload.items || []) {
       const summary = String(item.summary || "").trim();
       if (!summary) continue;
-      const target = document.querySelector(
+      document.querySelectorAll(
         `[data-ranking-summary-bgg="${CSS.escape(String(item.bgg_id))}"]`
-      );
-      if (target?.isConnected) target.textContent = summary;
+      ).forEach((target) => {
+        if (target.isConnected) target.textContent = summary;
+      });
     }
   } catch (_) {
     // Ranking remains usable; cached summaries will be retried on a later visit.
@@ -5270,6 +5271,7 @@ function rankingPodiumCard(item, index) {
       <span class="ranking-podium-body">
         <strong>${escapeHtml(view.game.title)}</strong>
         <small>${rankingMeta(view.game)}${view.catalog ? ' · <em>Catalogo</em>' : ""}</small>
+        ${view.summary ? `<span class="ranking-podium-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
       </span>
       <span class="ranking-score" title="${escapeHtml(item.reason || "")}">${formatNumber(item.score, 1)}</span>
     </a>
