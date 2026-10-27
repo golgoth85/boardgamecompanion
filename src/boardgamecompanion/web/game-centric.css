@@ -869,7 +869,7 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 }
 
 /* Scheda gioco: copertina, riepilogo e sezioni compatte */
-.game-summary-cover .detail-cover .card-bgg-rating{right:auto;left:.6rem;bottom:.6rem}
+.game-summary-cover .detail-cover .card-bgg-rating{right:.6rem;left:auto;bottom:.6rem}
 .cover-rating-overlay{
   inset:.6rem .6rem auto auto;min-height:0;padding:.28rem .45rem;gap:0;border-color:rgba(241,200,96,.28);border-radius:999px;
   background:rgba(8,12,19,.74);box-shadow:0 6px 18px rgba(0,0,0,.3)
@@ -890,7 +890,7 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
   .cover-rating-overlay{position:static;justify-content:center;margin-top:.3rem;padding:0;border:0;background:none;box-shadow:none;backdrop-filter:none}
   .cover-rating-overlay .personal-star-control{width:1.05rem;height:1.2rem}
   .cover-rating-overlay .personal-star-glyph{font-size:.95rem}
-  .game-summary-cover .detail-cover .card-bgg-rating{left:.3rem;bottom:1.8rem;padding:.14rem .34rem;font-size:.66rem}
+  .game-summary-cover .detail-cover .card-bgg-rating{right:.3rem;left:auto;bottom:1.8rem;padding:.14rem .34rem;font-size:.66rem}
   .game-summary-cover .detail-cover .card-bgg-rating small{font-size:.52rem}
 }
 
@@ -910,7 +910,7 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 
 .tutorial-videos-section{gap:.7rem}
 .tutorial-videos-section .simple-rulebook-head .button{min-height:2rem;padding:.3rem .7rem;font-size:.72rem}
-.tutorial-video-grid{grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.7rem}
+.tutorial-video-grid{grid-template-columns:repeat(auto-fill,minmax(16.5rem,1fr));gap:.7rem}
 .tutorial-video-card{border-radius:12px}
 .tutorial-video-body{gap:.35rem;padding:.55rem .65rem .6rem}
 .tutorial-video-body .muted{font-size:.7rem;line-height:1.35}
@@ -922,8 +922,15 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .rules-simple .simple-rulebook-actions{gap:.45rem;margin-top:.7rem}
 .rules-simple .simple-rulebook-actions .button{min-height:2rem;padding:.3rem .75rem;font-size:.74rem}
 .rules-simple .simple-rag{margin-top:.75rem!important;padding:.75rem!important}
-.rules-simple .simple-rag h3{margin:0 0 .5rem;font-size:.85rem}
-.rules-simple .rag-index-status{font-size:.66rem}
+.rules-simple .simple-rulebook-status{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:.4rem}
+.rules-simple .rulebook-presence{font-weight:400}
+.rules-simple .simple-rulebook-status .rag-index-status{
+  display:inline-flex;align-items:center;margin:0;min-height:1.7rem;padding:.25rem .55rem;border:1px solid var(--line);border-radius:999px;
+  font-size:.66rem;font-weight:400;line-height:1.2;color:var(--muted)
+}
+.rules-simple .simple-rulebook-status .rag-index-status.success{color:#8ee7b4;border-color:rgba(73,190,132,.35);background:rgba(73,190,132,.1)}
+.rules-simple .simple-rulebook-status .rag-index-status.error{color:#f0a0a5;border-color:rgba(240,160,165,.35)}
+.rules-simple .simple-rulebook-status .rag-prepare-index{min-height:1.7rem;padding:.25rem .55rem;font-size:.66rem}
 .rules-simple .rag-question-field textarea{min-height:4.2rem;font-size:.8rem}
 .rules-simple .rag-query-actions .button{min-height:2rem;padding:.3rem .85rem;font-size:.76rem}
 

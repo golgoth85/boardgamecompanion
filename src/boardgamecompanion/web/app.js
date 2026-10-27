@@ -3880,9 +3880,7 @@ async function renderDetail(bggId) {
             </div>
           </header>
 
-          <section class="game-description-panel" aria-labelledby="gameDescriptionTitle">
-            <p class="eyebrow">Il gioco</p>
-            <h2 id="gameDescriptionTitle">Descrizione</h2>
+          <section class="game-description-panel">
             <div class="game-description-text" id="gameDescriptionText" data-source="${descriptionSource}">${description}</div>
             <p class="game-description-sources" id="gameDescriptionSources" ${aiDescription ? "" : "hidden"}>${escapeHtml(descriptionSourcesText(game.description_ai))}</p>
             <div class="game-description-actions">
@@ -3919,15 +3917,20 @@ async function renderDetail(bggId) {
           <section class="game-section rules-workspace rules-simple" aria-labelledby="rulesWorkspaceTitle">
             <div class="simple-rulebook-head">
               <h2 class="eyebrow section-eyebrow" id="rulesWorkspaceTitle">Regolamento</h2>
-              <span class="rulebook-presence ${rulebooks.length ? "is-present" : "is-missing"}">
-                ${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
-              </span>
+              <div class="simple-rulebook-status">
+                <span class="rulebook-presence ${rulebooks.length ? "is-present" : "is-missing"}">
+                  ${rulebooks.length ? "✓ Regolamento presente" : "Regolamento non presente"}
+                </span>
+                <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo disponibilità assistente…</span>
+                <button class="button button-ghost rag-prepare-index" type="button" hidden
+                        ${documentItems.length ? "" : "disabled"}>Riprova preparazione</button>
+              </div>
             </div>
 
             <div class="simple-rulebook-actions">
               <button class="button button-primary" id="rulebookSearchAction" type="button">Cerca automaticamente</button>
-              <button class="button button-ghost" id="addDocument" type="button">Carica PDF</button>
-              ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri regolamento</a>` : ""}
+              <button class="button button-ghost" id="addDocument" type="button">Upload</button>
+              ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri</a>` : ""}
             </div>
             <p id="gameDiscoveryStatus" hidden></p>
             <div class="game-document-list visually-hidden" id="gameDocumentList" aria-hidden="true">
@@ -3935,14 +3938,6 @@ async function renderDetail(bggId) {
             </div>
 
             <section class="rag-panel rag-panel-secondary simple-rag" id="ragPanel" data-index-busy="false">
-              <div class="rag-heading-row">
-                <h3>Fai una domanda sul regolamento</h3>
-                <div class="rag-index-line">
-                  <span class="rag-index-status" id="ragIndexStatus" role="status">Controllo disponibilità assistente…</span>
-                  <button class="button button-ghost rag-prepare-index" type="button" hidden
-                          ${documentItems.length ? "" : "disabled"}>Riprova preparazione</button>
-                </div>
-              </div>
               <form class="rag-query-form" id="ragQueryForm">
                 <label class="rag-question-field" for="ragQuestion">
                   <textarea id="ragQuestion" rows="3" maxlength="4000" required
@@ -4136,7 +4131,7 @@ async function setupGameDiscovery(bggId, gameTitle) {
     if (knownSourceMiss && availability) {
       button.textContent = "Riprova fonti ufficiali";
     } else if (knownSourceMiss) {
-      button.innerHTML = `Cerca PDF su Google ${icon("external")}`;
+      button.innerHTML = `Cerca su Google ${icon("external")}`;
     } else if (failures > 0) {
       button.textContent = "Riprova ricerca automatica";
     } else if (candidates > 0) {

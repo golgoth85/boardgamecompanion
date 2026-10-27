@@ -1378,7 +1378,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         expect(page.locator(".cover-rating-overlay")).to_be_visible()
         expect(page.locator(".game-title-block")).to_be_visible()
 
-        expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
+        expect(page.locator("#ragPanel")).to_be_visible()
         expect(page.locator("#ragQuestion")).to_be_visible()
 
         technical = page.locator(".technical-game-details")
@@ -1386,7 +1386,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
 
         expect(page.locator("#gameDiscoveryStatus")).not_to_be_visible()
         expect(page.get_by_role("button", name="Cerca automaticamente")).to_be_visible()
-        expect(page.get_by_role("button", name="Carica PDF")).to_be_visible()
+        expect(page.get_by_role("button", name="Upload")).to_be_visible()
     finally:
         context.close()
 
@@ -2468,7 +2468,7 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
         page.route("**/api/games/900001/answer", answer_route)
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
+        expect(page.locator("#ragPanel")).to_be_visible()
         expect(page.locator("#ragIndexStatus")).to_contain_text("Assistente disponibile")
 
         page.locator("#ragQuestion").fill("Come si prepara?")
@@ -2640,7 +2640,7 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_role("heading", name="Fai una domanda sul regolamento")).to_be_visible()
+        expect(page.locator("#ragPanel")).to_be_visible()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
             "Aggiungi un regolamento per rendere disponibile l’assistente"
         )
@@ -2729,7 +2729,7 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         import_csv(page, live_server, fixture)
         page.goto(f"{live_server}/games/900001")
         expect(page.locator(".detail-main h1")).to_have_text(malicious_title)
-        expect(page.get_by_role("link", name="Cerca PDF su Google")).to_have_count(0)
+        expect(page.get_by_role("link", name="Cerca su Google")).to_have_count(0)
         expect(page.get_by_role("button", name="Cerca automaticamente")).to_be_visible()
         href = page.evaluate(
             "(value) => import('/static/app.js').then((m) => m.googleRulebookSearchUrl(value))",
@@ -2738,7 +2738,7 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         query = parse_qs(urlsplit(href).query)["q"][0]
         assert query == '"Game site:example.invalid manual" regolamento italiano pdf'
         assert google_requests == []
-        expect(page.get_by_role("button", name="Carica PDF")).to_be_visible()
+        expect(page.get_by_role("button", name="Upload")).to_be_visible()
     finally:
         context.close()
 
@@ -2801,13 +2801,13 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
         panel = page.locator(".rules-simple")
         action = panel.get_by_role("button", name="Cerca automaticamente")
         expect(action).to_be_visible()
-        expect(panel.get_by_role("link", name="Cerca PDF su Google")).to_have_count(0)
+        expect(panel.get_by_role("link", name="Cerca su Google")).to_have_count(0)
 
         action.click()
         expect(page.locator("#toast")).to_contain_text(
             "Nessuna fonte nota trovata. Premi di nuovo"
         )
-        action = panel.get_by_role("button", name="Cerca PDF su Google")
+        action = panel.get_by_role("button", name="Cerca su Google")
         expect(action).to_be_visible()
         assert discovery_requests == ["POST"]
         assert google_requests == []
@@ -2816,7 +2816,7 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
         # not a transient browser flag.
         page.reload()
         panel = page.locator(".rules-simple")
-        action = panel.get_by_role("button", name="Cerca PDF su Google")
+        action = panel.get_by_role("button", name="Cerca su Google")
         expect(action).to_be_visible()
         assert google_requests == []
 
@@ -2903,7 +2903,7 @@ def test_rulebook_search_allows_google_after_completed_miss_with_provider_failur
         expect(page.locator("#toast")).to_contain_text(
             "alcune fonti note non hanno risposto"
         )
-        expect(page.get_by_role("button", name="Cerca PDF su Google")).to_be_visible()
+        expect(page.get_by_role("button", name="Cerca su Google")).to_be_visible()
         assert requests == ["POST"]
     finally:
         context.close()
@@ -2970,7 +2970,7 @@ def test_rulebook_search_candidates_keep_single_known_source_action(
         expect(
             page.get_by_role("button", name="Aggiorna ricerca automatica")
         ).to_be_visible()
-        expect(page.get_by_role("button", name="Cerca PDF su Google")).to_have_count(0)
+        expect(page.get_by_role("button", name="Cerca su Google")).to_have_count(0)
         expect(page.locator(".game-document-card")).to_have_count(0)
         assert requests == ["POST"]
     finally:
