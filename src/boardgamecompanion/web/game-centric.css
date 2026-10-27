@@ -205,7 +205,7 @@
 .ranking-group-chip.is-selected{border-color:rgba(251,191,36,.6);color:var(--accent-2);background:rgba(245,158,11,.14)}
 .ranking-group-chip.is-selected small{color:var(--accent-2)}
 .ranking-member-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem;padding-top:.45rem;border-top:1px dashed rgba(90,104,128,.35)}
-.ranking-member-chips .explore-facet-chip{min-height:1.9rem;font-size:.66rem}
+.ranking-member-chips .explore-facet-chip{min-height:1.9rem;font-size:.66rem;font-weight:400}
 
 .new-game-list{display:grid;gap:.45rem}.new-game-row{display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:.65rem;align-items:center;min-height:4.5rem;padding:.5rem .58rem;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(18,24,38,.5);text-decoration:none}.new-game-row:hover{border-color:rgba(73,190,132,.36);background:rgba(73,190,132,.045)}
 .new-game-cover{display:grid;width:3.4rem;height:3.4rem;place-items:center;overflow:hidden;border-radius:8px;color:#8ee7b4;background:rgba(73,190,132,.08);font-size:.7rem;font-weight:900}.new-game-cover img{width:100%;height:100%;object-fit:cover}
