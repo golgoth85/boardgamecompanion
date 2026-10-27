@@ -422,7 +422,7 @@
   border:1px solid var(--line);border-radius:16px;background:var(--surface)
 }
 .suggestion-card:hover{border-color:#3e4c68}
-.suggestion-cover{position:relative;display:grid;min-height:100%;place-items:center;overflow:hidden;background:var(--surface-2);color:var(--muted);text-decoration:none}
+.suggestion-cover{position:relative;display:grid;align-self:start;aspect-ratio:1/1;margin:.75rem 0 .75rem .75rem;place-items:center;overflow:hidden;border-radius:12px;background:var(--surface-2);color:var(--muted);text-decoration:none}
 .suggestion-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
 .suggestion-cover:hover img{transform:scale(1.035)}
 .suggestion-cover::after{content:"";position:absolute;inset:auto 0 0;height:40%;background:linear-gradient(to top,rgba(11,15,23,.62),transparent);pointer-events:none}
@@ -453,7 +453,7 @@
   .suggestions-profile{display:none}
   .catalog-workspace .suggestions-toolbar .button-primary{flex:1 1 auto;justify-content:center}
   .suggestion-card{grid-template-columns:1fr}
-  .suggestion-cover{min-height:0;aspect-ratio:16/9}
+  .suggestion-cover{min-height:0;aspect-ratio:16/9;margin:0;border-radius:0}
   .suggestion-heading{flex-direction:column;gap:.5rem}
   .suggestion-heading-actions{width:100%}
   .suggestion-heading-actions .suggestion-bgg-link{margin-right:auto}
