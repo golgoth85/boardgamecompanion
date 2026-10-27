@@ -1040,7 +1040,9 @@ class Catalog:
             return value if value > 0 else None
 
         def quality(row) -> float:
-            raw = row["bgg_average"]
+            bayes = row["bgg_bayes_average"]
+            average = row["bgg_average"]
+            raw = bayes if bayes is not None and float(bayes) > 0 else average
             if raw is None:
                 return 0.0
             return max(0.0, min(100.0, float(raw) * 10.0))
