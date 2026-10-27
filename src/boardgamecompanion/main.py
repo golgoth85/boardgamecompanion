@@ -691,6 +691,13 @@ async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
     importer = BggReferenceImporter(get_database())
     while not stop_event.is_set():
         try:
+            # Keeps the Esplora/Classifiche catalog scan warm, starting right at boot.
+            await asyncio.to_thread(
+                BggReferenceCatalog(get_database()).explore_rows, refresh=True
+            )
+        except Exception:
+            LOGGER.exception("BGG reference explore scan failed")
+        try:
             result = await asyncio.to_thread(importer.import_if_changed, settings.import_dir)
             if result is not None:
                 LOGGER.info(
@@ -699,15 +706,11 @@ async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
                     result.updated_count,
                     result.rejected_count,
                 )
+                await asyncio.to_thread(
+                    BggReferenceCatalog(get_database()).explore_rows, refresh=True
+                )
         except Exception:
             LOGGER.exception("BGG reference dump import failed")
-        try:
-            # Keeps the Esplora catalog scan warm so no page view pays for it.
-            await asyncio.to_thread(
-                BggReferenceCatalog(get_database()).explore_rows, refresh=True
-            )
-        except Exception:
-            LOGGER.exception("BGG reference explore scan failed")
         try:
             await asyncio.wait_for(
                 stop_event.wait(),

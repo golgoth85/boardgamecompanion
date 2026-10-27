@@ -1080,6 +1080,10 @@ class Catalog:
             return max(20.0, min(100.0, 25.0 + (value - 2.0) * 30.0))
 
         def calculate(row, origin: str) -> tuple[float, str, list[str]] | None:
+            # Catalog titles admitted as upcoming or crowdfunding can carry a
+            # 10.0 average from a handful of votes: only BGG-ranked ones compete.
+            if origin == "catalog" and not (row["bgg_bayes_average"] or 0) > 0:
+                return None
             q = quality(row)
             user_rating = (
                 float(row["user_rating"])

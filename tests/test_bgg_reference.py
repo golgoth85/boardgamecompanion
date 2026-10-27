@@ -520,7 +520,9 @@ def test_explore_and_rankings_sources_groups_and_language(database: Database) ->
     labels = {item["label"]: item["count"] for item in light_text["options"]["max_language"]}
     assert labels == {"Poca": 1, "Moderata": 1}
 
-    rank = lambda **kwargs: catalog.rankings(reference_rows=rows, **kwargs)  # noqa: E731
+    # 900200 has no Bayesian average in the dump: give it one, unranked titles are excluded.
+    ranked_rows = [{**row, "bgg_bayes_average": row["bgg_bayes_average"] or 6.0} for row in rows]
+    rank = lambda **kwargs: catalog.rankings(reference_rows=ranked_rows, **kwargs)  # noqa: E731
     assert [item["game"]["bgg_id"] for item in rank()["items"]] == [28720]
     both_ranked = rank(source="both")
     assert {item["game"]["bgg_id"] for item in both_ranked["items"]} == {224517, 28720, 900200}
@@ -536,3 +538,7 @@ def test_explore_and_rankings_sources_groups_and_language(database: Database) ->
         "Poca": 1, "Moderata": 1,
     }
     assert rank(source="catalog", mode="personal_favorites")["items"] == []
+    assert 900200 not in {
+        item["game"]["bgg_id"]
+        for item in catalog.rankings(reference_rows=rows, source="catalog")["items"]
+    }

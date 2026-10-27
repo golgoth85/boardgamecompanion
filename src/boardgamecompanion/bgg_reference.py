@@ -440,6 +440,8 @@ _browse_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
 
 
 _explore_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
+# One scan at a time: a request arriving during the startup scan waits for it.
+_explore_build_lock = threading.Lock()
 
 
 def clear_browse_cache() -> None:
@@ -697,11 +699,18 @@ class BggReferenceCatalog:
         if entry is not None and not refresh:
             # A stale scan is still served while the refresh runs in the background.
             return entry["rows"]
-        return self._build_explore_rows(value, key)
+        with _explore_build_lock:
+            if not refresh:
+                with _browse_cache_lock:
+                    entry = _explore_cache.get(key)
+                if entry is not None:
+                    return entry["rows"]
+            return self._build_explore_rows(value, key)
 
     def _refresh_explore_rows(self, value: ReferenceSettings, key: tuple[str, int, bool]) -> None:
         try:
-            self._build_explore_rows(value, key)
+            with _explore_build_lock:
+                self._build_explore_rows(value, key)
         except Exception:
             LOGGER.exception("BGG reference explore scan failed")
             with _browse_cache_lock:
