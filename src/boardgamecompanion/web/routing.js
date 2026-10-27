@@ -7,7 +7,7 @@ export const shellSectionLabels = Object.freeze({
   lists: "Liste",
   wishlist: "Wishlist",
   explore: "Esplora",
-  completed: "Giochi giocati",
+  plays: "Partite",
   assistant: "Assistente AI",
   reviews: "Fonti da verificare",
   updates: "Aggiornamenti regolamenti",
@@ -21,7 +21,7 @@ export function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
   if (/^\/lists\/?$/.test(pathname)) return "lists";
   if (/^\/wishlist\/?$/.test(pathname)) return "wishlist";
-  if (/^\/completed\/?$/.test(pathname)) return "completed";
+  if (/^\/(?:plays|completed)\/?$/.test(pathname)) return "plays";
   if (/^\/assistant\/?$/.test(pathname)) return "assistant";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";

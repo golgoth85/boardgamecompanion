@@ -597,7 +597,7 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         )
         expect(sidebar.get_by_role("link", name="Classifiche")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Esplora")).to_be_visible()
-        expect(sidebar.get_by_role("link", name="Giochi giocati")).to_be_visible()
+        expect(sidebar.get_by_role("link", name="Partite")).to_be_visible()
         expect(sidebar.get_by_role("link", name="Da giocare")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Novità")).to_have_count(0)
         expect(sidebar.get_by_role("link", name="Generi")).to_have_count(0)
@@ -810,10 +810,12 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
         page.get_by_role("button", name="Salva data").click()
         expect(page.locator("#completionDate")).to_have_value("2025-12-24")
 
-        page.get_by_role("link", name="Giochi giocati").click()
-        expect(page).to_have_url(f"{live_server}/completed")
-        expect(page.get_by_role("heading", name="Giochi giocati")).to_be_visible()
-        expect(page.locator(".trophy-card")).to_have_count(1)
+        page.get_by_role("link", name="Partite", exact=True).click()
+        expect(page).to_have_url(f"{live_server}/plays")
+        expect(page.get_by_role("heading", name="Partite", exact=True)).to_be_visible()
+        expect(page.locator("#playsStatCompleted")).to_have_text("1")
+        page.locator('[data-plays-view="games"]').click()
+        expect(page.locator(".plays-games .trophy-card")).to_have_count(1)
         expect(page.locator(".trophy-achievement")).to_contain_text("Completato")
         expect(page.locator(".trophy-card")).to_contain_text("24 dic 2025")
 
@@ -827,8 +829,10 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
 
     mobile_context, mobile_page = new_page(browser, mobile=True)
     try:
+        # The old address still works and opens the games played.
         mobile_page.goto(f"{live_server}/completed")
-        expect(mobile_page.get_by_role("heading", name="Giochi giocati")).to_be_visible()
+        expect(mobile_page).to_have_url(f"{live_server}/plays")
+        expect(mobile_page.get_by_role("heading", name="Partite", exact=True)).to_be_visible()
         expect(mobile_page.locator(".trophy-wall")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
@@ -2976,9 +2980,10 @@ def test_personal_rating_and_played_status_flow(browser, live_server):
         # correctly considered played even without a local played_at marker.
         expect(page.get_by_role("button", name="Rimuovi stato giocato")).to_be_visible()
 
-        page.get_by_role("link", name="Giochi giocati").click()
-        expect(page).to_have_url(f"{live_server}/completed")
-        expect(page.locator(".trophy-card")).to_have_count(1)
+        page.get_by_role("link", name="Partite", exact=True).click()
+        expect(page).to_have_url(f"{live_server}/plays")
+        page.locator('[data-plays-view="games"]').click()
+        expect(page.locator(".plays-games .trophy-card")).to_have_count(1)
         expect(page.locator(".trophy-achievement")).to_contain_text("Giocato")
         expect(page.locator(".trophy-achievement")).not_to_contain_text("Completato")
 
@@ -3201,5 +3206,44 @@ def test_cloud_ai_settings_choose_models_and_preserve_index(browser, live_server
         page.keyboard.press('Enter')
         assert json.loads(page.locator('#ragGenerationOrder').get_attribute('data-order'))[0] == 'deepseek'
         assert not errors
+    finally:
+        context.close()
+
+
+def test_play_log_copies_players_from_last_play(browser, live_server):
+    context, page = new_page(browser)
+    try:
+        import_csv(page, live_server)
+        page.goto(f"{live_server}/games/900001")
+        page.locator("#gameAddPlay").click()
+        dialog = page.locator(".play-dialog")
+        expect(dialog).to_be_visible()
+        rows = dialog.locator(".play-player-row")
+        rows.first.locator("input[type=text]").first.fill("Marco")
+        dialog.locator("#playAddPlayer").click()
+        rows.last.locator("input[type=text]").first.fill("Giulia")
+        rows.last.locator(".play-winner").click()
+        dialog.locator("#playActivity").fill("Scenario 1")
+        dialog.locator("#playOutcome").select_option("won")
+        dialog.locator("#savePlay").click()
+        expect(dialog).to_be_hidden()
+        expect(page.locator("#gamePlaysList .play-row")).to_have_count(1)
+        expect(page.locator("#gamePlaysList .play-chip.is-winner")).to_contain_text("Giulia")
+
+        # The next play starts with the same players and can reuse the activity.
+        page.locator("#gameAddPlay").click()
+        names = dialog.locator(".play-player-row input[type=text]:first-child")
+        expect(names).to_have_count(2)
+        expect(names.nth(0)).to_have_value("Marco")
+        expect(names.nth(1)).to_have_value("Giulia")
+        expect(dialog.locator("#playCopyNote")).to_be_visible()
+        dialog.locator("#playCopyActivity").click()
+        expect(dialog.locator("#playActivity")).to_have_value("Scenario 1")
+        dialog.locator("#cancelPlayDialog").click()
+
+        page.goto(f"{live_server}/plays")
+        expect(page.locator("#playsStatPlays")).to_have_text("1")
+        expect(page.locator(".plays-log .play-row")).to_have_count(1)
+        expect(page.locator(".plays-leaderboard")).to_contain_text("Giulia")
     finally:
         context.close()

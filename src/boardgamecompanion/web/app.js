@@ -2754,7 +2754,7 @@ async function renderCatalog() {
     <section class="catalog-recent" id="achievementShowcase" aria-labelledby="catalogRecentHeading" hidden>
       <div class="catalog-recent-head">
         <h2 class="catalog-recent-title" id="catalogRecentHeading">Giocati di recente</h2>
-        <a class="catalog-recent-all" href="/completed" data-nav>Vedi tutti ${icon("arrow-right")}</a>
+        <a class="catalog-recent-all" href="/plays" data-nav>Partite ${icon("arrow-right")}</a>
       </div>
       <div class="catalog-recent-list" id="achievementShowcaseGrid"></div>
     </section>
@@ -3966,6 +3966,14 @@ async function renderDetail(bggId) {
             </div>
           </section>
 
+          <section class="game-section game-plays-section" aria-labelledby="gamePlaysTitle">
+            <div class="simple-rulebook-head">
+              <h2 class="eyebrow section-eyebrow" id="gamePlaysTitle">Partite <small id="gamePlaysCount"></small></h2>
+              <button class="button button-primary" id="gameAddPlay" type="button">${icon("plus")}<span>Registra partita</span></button>
+            </div>
+            <div class="game-plays-list" id="gamePlaysList"><div class="skeleton"></div></div>
+          </section>
+
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
             <div class="simple-rulebook-head">
               <h2 class="eyebrow section-eyebrow" id="relevantExpansionsTitle">Espansioni</h2>
@@ -4143,6 +4151,15 @@ async function renderDetail(bggId) {
     });
     ensureGameDescription(game.bgg_id);
     void loadRelevantExpansions(game.bgg_id);
+    void refreshGamePlays(game);
+    document.querySelector("#gameAddPlay")?.addEventListener("click", () => {
+      void openPlayDialog({
+        bggId: game.bgg_id,
+        title: game.title,
+        // Logging a play can mark the game played or completed: reload the header too.
+        onSaved: () => renderDetail(game.bgg_id),
+      });
+    });
 
     document.title = `${game.title} · BoardGameCompanion`;
   } catch (error) {
@@ -5601,33 +5618,654 @@ async function refreshAchievementShowcase() {
   }
 }
 
-async function renderCompleted() {
-  app.innerHTML = `
-    <section class="page-header browse-header completed-header">
-      <div>
-        <h1>Giochi giocati</h1>
-      </div>
-      <span class="completed-header-mark" aria-hidden="true">${icon("crown")}</span>
-    </section>
-    <section class="trophy-wall" id="trophyWall">${skeletons()}</section>
-  `;
-  try {
-    const payload = await api(
-      "/api/games?owned=true&item_type=standalone&played=true&sort=played_desc&limit=250&offset=0"
-    );
-    const target = document.querySelector("#trophyWall");
-    if (!target) return;
-    target.innerHTML = payload.items.length
-      ? payload.items.map((game) => trophyGameCard(game)).join("")
-      : `<div class="empty trophy-empty">
-          <strong>Nessun gioco registrato.</strong>
-          <span>I giochi segnati come giocati o completati compariranno qui.</span>
-        </div>`;
-    document.title = "Giochi giocati · BoardGameCompanion";
-  } catch (error) {
-    document.querySelector("#trophyWall").innerHTML =
-      `<div class="empty">${escapeHtml(error.message)}</div>`;
+// ---------------------------------------------------------------------------
+// Partite: diario delle partite, giochi giocati/completati e statistiche.
+// ---------------------------------------------------------------------------
+const PLAY_OUTCOMES = {won: "Vittoria", lost: "Sconfitta", draw: "Pareggio"};
+const playsState = {view: "log", q: "", player: "", bggId: null};
+let playDialog = null;
+let playDialogContext = null;
+let ownedGamesForPlays = null;
+
+function todayIso() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function playDate(value, options = {day: "numeric", month: "short", year: "numeric"}) {
+  if (!value) return "—";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("it-IT", options);
+}
+
+function playDuration(minutes) {
+  const value = Number(minutes) || 0;
+  if (!value) return "";
+  if (value < 60) return `${value} min`;
+  const hours = Math.floor(value / 60);
+  const rest = value % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+function playPlayersMarkup(play) {
+  const players = Array.isArray(play.players) ? play.players : [];
+  if (!players.length) {
+    return play.player_count ? `<span class="play-chip">${formatNumber(play.player_count, 0)} giocatori</span>` : "";
   }
+  return players.map((player) => `
+    <span class="play-chip ${player.winner ? "is-winner" : ""}" ${player.winner ? 'title="Vincitore"' : ""}>
+      ${player.winner ? `<i aria-hidden="true">${icon("crown")}</i>` : ""}${escapeHtml(player.name || "Giocatore")}${player.score ? `<small>${escapeHtml(player.score)}</small>` : ""}
+    </span>
+  `).join("") + (play.player_count > players.length
+    ? `<span class="play-chip">+${formatNumber(play.player_count - players.length, 0)}</span>`
+    : "");
+}
+
+function playRow(play, {showGame = true} = {}) {
+  const facts = [
+    play.outcome ? `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}</span>` : "",
+    play.completed_game ? `<span class="play-outcome is-completed"><i aria-hidden="true">${icon("crown")}</i>Completato</span>` : "",
+    play.duration_minutes ? `<span>${escapeHtml(playDuration(play.duration_minutes))}</span>` : "",
+    play.location ? `<span>${escapeHtml(play.location)}</span>` : "",
+  ].filter(Boolean).join("");
+  return `
+    <article class="play-row ${showGame ? "" : "is-game-scoped"}" data-play-id="${Number(play.id)}">
+      ${showGame ? `
+        <a class="play-row-cover" href="/games/${Number(play.bgg_id)}" data-nav aria-hidden="true" tabindex="-1">
+          ${play.has_cover
+            ? `<img src="${coverSrc(play.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span>${escapeHtml(initials(play.title))}</span>`}
+        </a>
+      ` : ""}
+      <time class="play-row-date" datetime="${escapeHtml(play.played_on)}">
+        <strong>${escapeHtml(playDate(play.played_on, {day: "numeric"}))}</strong>
+        <small>${escapeHtml(playDate(play.played_on, {month: "short"}))}</small>
+      </time>
+      <div class="play-row-body">
+        <div class="play-row-head">
+          ${showGame ? `<a class="play-row-title" href="/games/${Number(play.bgg_id)}" data-nav>${escapeHtml(play.title)}</a>` : ""}
+          ${play.activity ? `<span class="play-row-activity">${escapeHtml(play.activity)}</span>` : ""}
+          <span class="play-row-facts">${facts}</span>
+        </div>
+        <div class="play-row-players">${playPlayersMarkup(play)}</div>
+        ${play.notes ? `<p class="play-row-notes">${escapeHtml(play.notes)}</p>` : ""}
+      </div>
+      <button class="icon-button play-row-edit" type="button" data-play-edit="${Number(play.id)}"
+              aria-label="Modifica la partita del ${escapeHtml(playDate(play.played_on))}" title="Modifica">${icon("settings")}</button>
+    </article>
+  `;
+}
+
+function bindPlayRows(root, plays, onSaved) {
+  root.querySelectorAll("[data-play-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const play = plays.find((item) => Number(item.id) === Number(button.dataset.playEdit));
+      if (play) void openPlayDialog({play, onSaved});
+    });
+  });
+}
+
+async function loadOwnedGamesForPlays() {
+  if (ownedGamesForPlays) return ownedGamesForPlays;
+  const payload = await api("/api/games?owned=true&sort=title&limit=2000&offset=0");
+  ownedGamesForPlays = (payload.items || []).map((game) => ({bgg_id: Number(game.bgg_id), title: game.title, item_type: game.item_type}));
+  return ownedGamesForPlays;
+}
+
+function ensurePlayDialog() {
+  if (playDialog) return playDialog;
+  playDialog = document.createElement("dialog");
+  playDialog.className = "dialog play-dialog";
+  playDialog.setAttribute("aria-labelledby", "playDialogTitle");
+  playDialog.innerHTML = `
+    <form id="playForm" novalidate>
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Partite</p>
+          <h2 id="playDialogTitle">Registra partita</h2>
+        </div>
+        <button class="icon-button" id="closePlayDialog" type="button" aria-label="Chiudi">×</button>
+      </div>
+      <div class="play-form-grid">
+        <label class="settings-field play-span-2" id="playGameField">
+          <span>Gioco</span>
+          <input id="playGame" type="text" list="playGameOptions" autocomplete="off" placeholder="Cerca nella ludoteca…" required>
+          <datalist id="playGameOptions"></datalist>
+        </label>
+        <p class="play-game-fixed play-span-2" id="playGameFixed" hidden></p>
+        <label class="settings-field">
+          <span>Data</span>
+          <input id="playDate" type="date" required>
+        </label>
+        <label class="settings-field">
+          <span>Durata (minuti)</span>
+          <input id="playDuration" type="number" min="1" max="10000" inputmode="numeric" placeholder="es. 90">
+        </label>
+        <fieldset class="play-players play-span-2">
+          <legend>Giocatori</legend>
+          <div class="play-copy-note" id="playCopyNote" hidden></div>
+          <div class="play-player-head" aria-hidden="true"><span>Nome</span><span>Punti</span><span>Vince</span><span></span></div>
+          <div id="playPlayerRows"></div>
+          <datalist id="playPlayerNames"></datalist>
+          <div class="play-player-actions">
+            <button class="button button-ghost" id="playAddPlayer" type="button">${icon("plus")}<span>Giocatore</span></button>
+            <label class="play-count-field">
+              <span>Totale giocatori</span>
+              <input id="playCount" type="number" min="1" max="99" inputmode="numeric">
+            </label>
+          </div>
+        </fieldset>
+        <label class="settings-field play-span-2">
+          <span class="play-label-row">Cosa abbiamo fatto
+            <button class="play-inline-action" id="playCopyActivity" type="button" hidden>Come l'ultima volta</button>
+          </span>
+          <input id="playActivity" type="text" maxlength="500" autocomplete="off" placeholder="Scenario, capitolo, missione, varianti…">
+        </label>
+        <label class="settings-field">
+          <span>Esito</span>
+          <select id="playOutcome">
+            <option value="">—</option>
+            ${Object.entries(PLAY_OUTCOMES).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
+          </select>
+        </label>
+        <label class="settings-field">
+          <span>Luogo</span>
+          <input id="playLocation" type="text" maxlength="120" list="playLocations" autocomplete="off" placeholder="es. Casa">
+          <datalist id="playLocations"></datalist>
+        </label>
+        <label class="settings-field play-span-2">
+          <span>Com'è andata</span>
+          <textarea id="playNotes" rows="3" maxlength="4000" placeholder="Momenti chiave, regole da ricordare, impressioni…"></textarea>
+        </label>
+        <label class="play-check play-span-2">
+          <input id="playCompleted" type="checkbox">
+          <span>Con questa partita abbiamo completato il gioco (campagna, finale, tutte le missioni)</span>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-ghost play-delete" type="button" id="deletePlay" hidden>Elimina</button>
+        <button class="button button-ghost" type="button" id="cancelPlayDialog">Annulla</button>
+        <button class="button button-primary" type="submit" id="savePlay">Salva partita</button>
+      </div>
+    </form>
+  `;
+  document.body.append(playDialog);
+  const close = () => playDialog.close();
+  playDialog.querySelector("#closePlayDialog").addEventListener("click", close);
+  playDialog.querySelector("#cancelPlayDialog").addEventListener("click", close);
+  playDialog.querySelector("#playAddPlayer").addEventListener("click", () => {
+    addPlayerRow({});
+    playDialog.querySelector("#playPlayerRows .play-player-row:last-child input")?.focus();
+  });
+  playDialog.querySelector("#playGame").addEventListener("change", () => void onPlayGameChosen());
+  playDialog.querySelector("#playCopyActivity").addEventListener("click", () => {
+    playDialog.querySelector("#playActivity").value = playDialogContext?.defaults?.last_play?.activity || "";
+  });
+  playDialog.querySelector("#playForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    void savePlay();
+  });
+  playDialog.querySelector("#deletePlay").addEventListener("click", () => void deletePlay());
+  return playDialog;
+}
+
+function addPlayerRow(player) {
+  const rows = playDialog.querySelector("#playPlayerRows");
+  const row = document.createElement("div");
+  row.className = "play-player-row";
+  row.innerHTML = `
+    <input type="text" maxlength="60" list="playPlayerNames" autocomplete="off" aria-label="Nome giocatore" placeholder="Nome" value="${escapeHtml(player.name || "")}">
+    <input type="text" maxlength="20" inputmode="decimal" aria-label="Punti" placeholder="—" value="${escapeHtml(player.score || "")}">
+    <label class="play-winner" title="Vincitore"><input type="checkbox" aria-label="Vincitore" ${player.winner ? "checked" : ""}><span aria-hidden="true">${icon("crown")}</span></label>
+    <button class="icon-button" type="button" aria-label="Rimuovi giocatore">×</button>
+  `;
+  row.querySelector("button").addEventListener("click", () => {
+    row.remove();
+    syncPlayerCount();
+  });
+  row.querySelector("input").addEventListener("input", syncPlayerCount);
+  rows.append(row);
+  syncPlayerCount();
+}
+
+function playerRowsData() {
+  return [...playDialog.querySelectorAll(".play-player-row")].map((row) => {
+    const [name, score] = row.querySelectorAll("input[type=text]");
+    return {
+      name: name.value.trim(),
+      score: score.value.trim() || null,
+      winner: row.querySelector("input[type=checkbox]").checked,
+    };
+  }).filter((player) => player.name || player.score || player.winner);
+}
+
+function syncPlayerCount() {
+  const count = playDialog.querySelector("#playCount");
+  const named = playerRowsData().length;
+  if (!count.dataset.touched || Number(count.value) < named) count.value = named ? String(named) : "";
+}
+
+function setPlayers(players) {
+  playDialog.querySelector("#playPlayerRows").innerHTML = "";
+  for (const player of players) addPlayerRow(player);
+  if (!players.length) addPlayerRow({});
+}
+
+// Players, place and activity are copied from the last play: of this game, else any.
+function applyPlayDefaults(defaults, {copy}) {
+  playDialogContext.defaults = defaults;
+  playDialog.querySelector("#playPlayerNames").innerHTML = (defaults.player_names || [])
+    .map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  playDialog.querySelector("#playLocations").innerHTML = (defaults.locations || [])
+    .map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  const last = defaults.last_play;
+  const note = playDialog.querySelector("#playCopyNote");
+  const copyActivity = playDialog.querySelector("#playCopyActivity");
+  copyActivity.hidden = !(defaults.same_game && last?.activity);
+  copyActivity.textContent = last?.activity ? `Come l'ultima volta: ${last.activity}` : "Come l'ultima volta";
+  if (!copy) {
+    note.hidden = true;
+    return;
+  }
+  if (!last) {
+    note.hidden = true;
+    setPlayers([]);
+    return;
+  }
+  setPlayers((last.players || []).map((player) => ({name: player.name})));
+  const count = playDialog.querySelector("#playCount");
+  if (last.player_count) {
+    count.value = String(last.player_count);
+    count.dataset.touched = "1";
+  }
+  if (!playDialog.querySelector("#playLocation").value) playDialog.querySelector("#playLocation").value = last.location || "";
+  note.hidden = false;
+  note.innerHTML = `
+    <span>Giocatori ripresi dall'ultima partita${defaults.same_game ? "" : ` (${escapeHtml(last.title)})`} del ${escapeHtml(playDate(last.played_on))}.</span>
+    <button class="play-inline-action" type="button" id="playClearCopy">Svuota</button>
+  `;
+  note.querySelector("#playClearCopy").addEventListener("click", () => {
+    delete count.dataset.touched;
+    setPlayers([]);
+    note.hidden = true;
+  });
+}
+
+async function onPlayGameChosen() {
+  const input = playDialog.querySelector("#playGame");
+  const games = ownedGamesForPlays || [];
+  const value = input.value.trim().toLowerCase();
+  const game = games.find((item) => item.title.toLowerCase() === value);
+  input.setCustomValidity(game ? "" : "Scegli un gioco della ludoteca");
+  if (!game || playDialogContext.bggId === game.bgg_id) return;
+  playDialogContext.bggId = game.bgg_id;
+  try {
+    applyPlayDefaults(await api(`/api/plays/defaults?bgg_id=${game.bgg_id}`), {copy: true});
+  } catch (_) {}
+}
+
+async function openPlayDialog({bggId = null, title = "", play = null, onSaved = null} = {}) {
+  ensurePlayDialog();
+  playDialogContext = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null};
+  const form = playDialog.querySelector("#playForm");
+  form.reset();
+  delete playDialog.querySelector("#playCount").dataset.touched;
+  playDialog.querySelector("#playDialogTitle").textContent = play ? "Modifica partita" : "Registra partita";
+  playDialog.querySelector("#deletePlay").hidden = !play;
+  playDialog.querySelector("#playCopyNote").hidden = true;
+  const dateInput = playDialog.querySelector("#playDate");
+  dateInput.max = todayIso();
+  dateInput.value = play?.played_on || todayIso();
+  const fixed = Boolean(playDialogContext.bggId);
+  playDialog.querySelector("#playGameField").hidden = fixed;
+  const fixedLabel = playDialog.querySelector("#playGameFixed");
+  fixedLabel.hidden = !fixed;
+  fixedLabel.innerHTML = fixed ? `<span>Gioco</span><strong>${escapeHtml(play?.title || title || `BGG #${playDialogContext.bggId}`)}</strong>` : "";
+  playDialog.querySelector("#playGame").required = !fixed;
+  if (play) {
+    setPlayers(play.players || []);
+    const count = playDialog.querySelector("#playCount");
+    count.value = play.player_count ? String(play.player_count) : "";
+    if (play.player_count) count.dataset.touched = "1";
+    playDialog.querySelector("#playDuration").value = play.duration_minutes || "";
+    playDialog.querySelector("#playActivity").value = play.activity || "";
+    playDialog.querySelector("#playOutcome").value = play.outcome || "";
+    playDialog.querySelector("#playLocation").value = play.location || "";
+    playDialog.querySelector("#playNotes").value = play.notes || "";
+    playDialog.querySelector("#playCompleted").checked = Boolean(play.completed_game);
+  } else {
+    setPlayers([]);
+  }
+  openDialog(playDialog, {focus: fixed ? dateInput : playDialog.querySelector("#playGame")});
+  try {
+    const [defaults] = await Promise.all([
+      api(`/api/plays/defaults${playDialogContext.bggId ? `?bgg_id=${playDialogContext.bggId}` : ""}`),
+      fixed ? null : loadOwnedGamesForPlays().then((games) => {
+        playDialog.querySelector("#playGameOptions").innerHTML = games
+          .map((game) => `<option value="${escapeHtml(game.title)}"></option>`).join("");
+      }),
+    ]);
+    applyPlayDefaults(defaults, {copy: !play});
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+async function savePlay() {
+  const form = playDialog.querySelector("#playForm");
+  if (!playDialogContext.bggId) {
+    await onPlayGameChosen();
+    if (!playDialogContext.bggId) {
+      form.reportValidity();
+      return;
+    }
+  }
+  const dateInput = playDialog.querySelector("#playDate");
+  if (!dateInput.value) {
+    dateInput.reportValidity();
+    return;
+  }
+  const number = (selector) => {
+    const value = Number(playDialog.querySelector(selector).value);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+  const text = (selector) => playDialog.querySelector(selector).value.trim() || null;
+  const players = playerRowsData();
+  const payload = {
+    played_on: dateInput.value,
+    players,
+    player_count: number("#playCount") || (players.length || null),
+    duration_minutes: number("#playDuration"),
+    activity: text("#playActivity"),
+    outcome: playDialog.querySelector("#playOutcome").value || null,
+    location: text("#playLocation"),
+    notes: text("#playNotes"),
+    completed_game: playDialog.querySelector("#playCompleted").checked,
+  };
+  const button = playDialog.querySelector("#savePlay");
+  button.disabled = true;
+  try {
+    const play = playDialogContext.play
+      ? await api(`/api/plays/${playDialogContext.play.id}`, {
+          method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        })
+      : await api(`/api/games/${playDialogContext.bggId}/plays`, {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
+        });
+    playDialog.close();
+    showToast(playDialogContext.play ? "Partita aggiornata." : `Partita a ${play.title} registrata.`);
+    await playDialogContext.onSaved?.(play);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deletePlay() {
+  const play = playDialogContext?.play;
+  if (!play || !window.confirm(`Eliminare la partita a ${play.title} del ${playDate(play.played_on)}?`)) return;
+  try {
+    await api(`/api/plays/${play.id}`, {method: "DELETE"});
+    playDialog.close();
+    showToast("Partita eliminata.");
+    await playDialogContext.onSaved?.(null);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+// Section of the Ludoteca game page: last plays and quick logging.
+async function refreshGamePlays(game) {
+  const target = document.querySelector("#gamePlaysList");
+  const count = document.querySelector("#gamePlaysCount");
+  if (!target) return;
+  try {
+    const payload = await api(`/api/plays?bgg_id=${game.bgg_id}&limit=5`);
+    if (!target.isConnected) return;
+    const imported = Number(game.progress?.imported_num_plays || 0);
+    count.textContent = payload.total
+      ? `${formatNumber(payload.total, 0)} ${payload.total === 1 ? "partita" : "partite"}`
+      : (imported ? `${formatNumber(imported, 0)} su BGG` : "");
+    target.innerHTML = payload.items.length
+      ? payload.items.map((play) => playRow(play, {showGame: false})).join("")
+        + (payload.total > payload.items.length
+          ? `<a class="play-more" href="/plays?game=${game.bgg_id}" data-nav>Tutte le ${formatNumber(payload.total, 0)} partite ${icon("arrow-right")}</a>`
+          : "")
+      : `<p class="play-empty">Nessuna partita registrata${imported ? ` qui (BGG ne riporta ${formatNumber(imported, 0)})` : ""}. Registra la prossima per tenere traccia di giocatori, scenari ed esiti.</p>`;
+    bindPlayRows(target, payload.items, () => refreshGamePlays(game));
+  } catch (error) {
+    target.innerHTML = `<p class="play-empty">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function playMonthChart(months) {
+  const now = new Date();
+  const series = Array.from({length: 12}, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 11 + index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    return {key, label: date.toLocaleDateString("it-IT", {month: "narrow"}), title: date.toLocaleDateString("it-IT", {month: "long", year: "numeric"}),
+      plays: Number((months || []).find((item) => item.month === key)?.plays || 0)};
+  });
+  const max = Math.max(1, ...series.map((item) => item.plays));
+  return `
+    <ol class="play-months" aria-label="Partite negli ultimi 12 mesi">
+      ${series.map((item) => `
+        <li title="${escapeHtml(`${item.title}: ${item.plays} partite`)}">
+          <span class="play-month-bar" style="--h:${Math.round((item.plays / max) * 100)}%"><b>${item.plays || ""}</b></span>
+          <small aria-hidden="true">${escapeHtml(item.label)}</small>
+        </li>
+      `).join("")}
+    </ol>
+  `;
+}
+
+function playedGameCard(game, stats) {
+  const plays = stats?.plays || 0;
+  const lastPlayed = stats?.last_played_on || game.progress?.played_at;
+  const lines = [
+    plays ? `${formatNumber(plays, 0)} ${plays === 1 ? "partita" : "partite"}` : "Giocato",
+    lastPlayed ? `${plays ? "ultima " : ""}${playDate(lastPlayed)}` : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <a class="trophy-card" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
+      <span class="trophy-crown" aria-hidden="true">${icon(game.progress?.completed ? "crown" : "diamond")}</span>
+      <span class="trophy-cover">${game.bgg_metadata?.cover_url
+        ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+        : `<span class="trophy-cover-fallback">${escapeHtml(initials(game.title))}</span>`}</span>
+      <span class="trophy-card-body">
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${escapeHtml(lines)}</small>
+        <span class="trophy-achievements">${completionAchievementMarkup(game)}</span>
+      </span>
+    </a>
+  `;
+}
+
+async function refreshPlaysPage() {
+  const list = document.querySelector("#playsList");
+  if (!list) return;
+  const params = new URLSearchParams({limit: "200"});
+  if (playsState.q) params.set("q", playsState.q);
+  if (playsState.player) params.set("player", playsState.player);
+  if (playsState.bggId) params.set("bgg_id", String(playsState.bggId));
+  try {
+    const [summary, plays, games] = await Promise.all([
+      api("/api/plays/summary"),
+      api(`/api/plays?${params.toString()}`),
+      api("/api/games?owned=true&played=true&sort=played_desc&limit=500&offset=0"),
+    ]);
+    if (!list.isConnected) return;
+    const completed = (games.items || []).filter((game) => game.progress?.completed);
+    document.querySelector("#playsStatPlays").textContent = formatNumber(summary.plays, 0);
+    document.querySelector("#playsStatGames").textContent = formatNumber((games.items || []).length, 0);
+    document.querySelector("#playsStatCompleted").textContent = formatNumber(completed.length, 0);
+    document.querySelector("#playsStatYear").textContent = formatNumber(summary.this_year, 0);
+    document.querySelector("#playsSummary").textContent = summary.last_played_on
+      ? `Ultima partita il ${playDate(summary.last_played_on)}${summary.minutes ? ` · ${playDuration(summary.minutes)} di gioco registrate` : ""}`
+      : "Registra le partite per costruire il tuo diario di gioco.";
+    const playerSelect = document.querySelector("#playsPlayer");
+    playerSelect.innerHTML = `<option value="">Tutti i giocatori</option>${summary.players
+      .map((player) => `<option value="${escapeHtml(player.name)}" ${player.name === playsState.player ? "selected" : ""}>${escapeHtml(player.name)}</option>`).join("")}`;
+
+    document.querySelector("#playsSide").innerHTML = `
+      <section class="plays-side-block">
+        <h2>Ultimi 12 mesi</h2>
+        ${playMonthChart(summary.months)}
+      </section>
+      <section class="plays-side-block">
+        <h2>Giocatori</h2>
+        ${summary.players.length ? `<ol class="plays-leaderboard">${summary.players.map((player) => `
+          <li><button type="button" data-plays-player="${escapeHtml(player.name)}" class="${player.name === playsState.player ? "is-active" : ""}">
+            <span>${escapeHtml(player.name)}</span>
+            <small>${formatNumber(player.plays, 0)} partite${player.wins ? ` · <b>${formatNumber(player.wins, 0)}</b> vittorie` : ""}</small>
+          </button></li>`).join("")}</ol>`
+          : '<p class="play-empty">I nomi dei giocatori registrati compariranno qui.</p>'}
+      </section>
+      ${completed.length ? `
+        <section class="plays-side-block">
+          <h2>Completati</h2>
+          <div class="plays-completed">${completed.slice(0, 6).map((game) => trophyGameCard(game, {compact: true})).join("")}</div>
+        </section>
+      ` : ""}
+    `;
+    document.querySelectorAll("[data-plays-player]").forEach((button) => {
+      button.addEventListener("click", () => {
+        playsState.player = playsState.player === button.dataset.playsPlayer ? "" : button.dataset.playsPlayer;
+        playsState.view = "log";
+        void renderPlays();
+      });
+    });
+
+    const filterGame = playsState.bggId ? (games.items || []).find((game) => Number(game.bgg_id) === playsState.bggId) : null;
+    const filters = [
+      filterGame || playsState.bggId ? `<button type="button" class="active-facet-chip" data-plays-clear="game">${escapeHtml(filterGame?.title || plays.items[0]?.title || `BGG #${playsState.bggId}`)} <span aria-hidden="true">×</span></button>` : "",
+      playsState.player ? `<button type="button" class="active-facet-chip" data-plays-clear="player">${escapeHtml(playsState.player)} <span aria-hidden="true">×</span></button>` : "",
+    ].join("");
+    document.querySelector("#playsFilters").innerHTML = filters;
+    // Filters narrow the diary only; the games view always lists every played game.
+    document.querySelector("#playsFilters").hidden = !filters || playsState.view === "games";
+    document.querySelectorAll("[data-plays-clear]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.dataset.playsClear === "game") {
+          playsState.bggId = null;
+          history.replaceState({}, "", "/plays");
+        } else {
+          playsState.player = "";
+        }
+        void renderPlays();
+      });
+    });
+
+    if (playsState.view === "games") {
+      const statsById = new Map(summary.games_played.map((item) => [Number(item.bgg_id), item]));
+      list.className = "trophy-wall plays-games";
+      list.innerHTML = (games.items || []).length
+        ? games.items.map((game) => playedGameCard(game, statsById.get(Number(game.bgg_id)))).join("")
+        : `<div class="empty trophy-empty"><strong>Nessun gioco giocato.</strong><span>Registra una partita o segna un gioco come giocato dalla sua scheda.</span></div>`;
+      return;
+    }
+    list.className = "plays-log";
+    if (!plays.items.length) {
+      list.innerHTML = `<div class="empty trophy-empty">
+        <strong>${summary.plays ? "Nessuna partita corrisponde ai filtri." : "Nessuna partita registrata."}</strong>
+        <span>${summary.plays ? "Cambia la ricerca o rimuovi i filtri." : "Con “Registra partita” tieni traccia di data, giocatori, scenario ed esito: i giocatori si ricopiano da soli nella partita successiva."}</span>
+      </div>`;
+      return;
+    }
+    let month = "";
+    list.innerHTML = plays.items.map((play) => {
+      const key = play.played_on.slice(0, 7);
+      const heading = key !== month
+        ? `<h2 class="plays-month">${escapeHtml(playDate(`${key}-01`, {month: "long", year: "numeric"}))}</h2>`
+        : "";
+      month = key;
+      return heading + playRow(play);
+    }).join("") + (plays.total > plays.items.length
+      ? `<p class="play-empty">Mostrate le ultime ${formatNumber(plays.items.length, 0)} di ${formatNumber(plays.total, 0)} partite: usa la ricerca per trovare le altre.</p>`
+      : "");
+    bindPlayRows(list, plays.items, () => refreshPlaysPage());
+  } catch (error) {
+    list.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function renderPlays() {
+  if (/^\/completed\/?$/.test(window.location.pathname)) {
+    history.replaceState({}, "", "/plays");
+    playsState.view = "games";
+  }
+  const params = new URLSearchParams(window.location.search);
+  playsState.bggId = Number(params.get("game")) || null;
+  document.title = "Partite · BoardGameCompanion";
+  app.innerHTML = `
+    <section class="page-header catalog-page-header plays-header">
+      <div class="page-header-copy">
+        <h1>Partite</h1>
+        <p class="muted catalog-page-summary" id="playsSummary" aria-live="polite">Caricamento…</p>
+      </div>
+      <section class="catalog-stats" aria-label="Riepilogo partite">
+        <div class="stat"><strong id="playsStatPlays">—</strong><span>Partite</span></div>
+        <div class="stat"><strong id="playsStatGames">—</strong><span>Giochi giocati</span></div>
+        <div class="stat"><strong id="playsStatCompleted">—</strong><span>Completati</span></div>
+        <div class="stat"><strong id="playsStatYear">—</strong><span>Quest'anno</span></div>
+      </section>
+    </section>
+
+    <section class="catalog-workspace plays-workspace" aria-label="Partite">
+      <section class="toolbar catalog-simple-search" aria-label="Filtra partite">
+        <label class="field search-field">
+          <input id="playsQuery" type="search" autocomplete="off" placeholder="Cerca gioco, giocatore, scenario, note…"
+                 aria-label="Cerca nelle partite" value="${escapeHtml(playsState.q)}">
+        </label>
+        <label class="field plays-player-field">
+          <select id="playsPlayer" aria-label="Giocatore"><option value="">Tutti i giocatori</option></select>
+        </label>
+        <div class="catalog-view-switch catalog-filter-view plays-view-switch" role="group" aria-label="Vista">
+          <button class="view-switch-button ${playsState.view === "log" ? "is-active" : ""}" type="button" data-plays-view="log"
+                  aria-pressed="${playsState.view === "log"}">${icon("list")}<span>Diario</span></button>
+          <button class="view-switch-button ${playsState.view === "games" ? "is-active" : ""}" type="button" data-plays-view="games"
+                  aria-pressed="${playsState.view === "games"}">${icon("catalog")}<span>Giochi</span></button>
+        </div>
+        <button class="button button-primary plays-add" id="playsAdd" type="button">${icon("plus")}<span>Registra partita</span></button>
+      </section>
+      <div class="plays-filters" id="playsFilters" hidden></div>
+      <div class="plays-layout">
+        <div class="plays-log" id="playsList">${skeletons()}</div>
+        <aside class="plays-side" id="playsSide" aria-label="Statistiche"></aside>
+      </div>
+    </section>
+  `;
+  let searchTimer = null;
+  const query = document.querySelector("#playsQuery");
+  query.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+      playsState.q = query.value.trim();
+      if (playsState.view !== "log") {
+        playsState.view = "log";
+        void renderPlays();
+        return;
+      }
+      void refreshPlaysPage();
+    }, 300);
+  });
+  document.querySelector("#playsPlayer").addEventListener("change", (event) => {
+    playsState.player = event.target.value;
+    playsState.view = "log";
+    void renderPlays();
+  });
+  document.querySelectorAll("[data-plays-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      playsState.view = button.dataset.playsView;
+      void renderPlays();
+    });
+  });
+  document.querySelector("#playsAdd").addEventListener("click", () => {
+    const game = playsState.bggId ? {bggId: playsState.bggId} : {};
+    void openPlayDialog({...game, onSaved: () => refreshPlaysPage()});
+  });
+  await refreshPlaysPage();
 }
 
 const discoverySources = [
@@ -7365,8 +8003,8 @@ async function route() {
     await renderAssistant();
     return;
   }
-  if (/^\/completed\/?$/.test(window.location.pathname)) {
-    await renderCompleted();
+  if (/^\/(?:plays|completed)\/?$/.test(window.location.pathname)) {
+    await renderPlays();
     return;
   }
   if (/^\/play-next\/?$/.test(window.location.pathname) || /^\/new\/?$/.test(window.location.pathname)) {

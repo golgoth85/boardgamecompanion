@@ -93,6 +93,7 @@ from boardgamecompanion.routers.expansions import router as expansions_router
 from boardgamecompanion.routers.lists import router as lists_router
 from boardgamecompanion.routers.notifications import router as notifications_router
 from boardgamecompanion.routers.personal import router as personal_router
+from boardgamecompanion.routers.plays import router as plays_router
 from boardgamecompanion.routers.search import router as search_router
 from boardgamecompanion.routers.reference import router as reference_router
 from boardgamecompanion.routers.wishlist import router as wishlist_router
@@ -826,6 +827,7 @@ def _web_page() -> FileResponse:
 
 app.mount("/static", RevalidatedStaticFiles(directory=WEB_DIR), name="static")
 app.include_router(personal_router)
+app.include_router(plays_router)
 app.include_router(covers_router)
 app.include_router(diagnostics_router)
 app.include_router(expansions_router)
@@ -903,6 +905,11 @@ def web_assistant() -> FileResponse:
 
 @app.get("/completed", include_in_schema=False)
 def web_completed() -> FileResponse:
+    return _web_page()
+
+
+@app.get("/plays", include_in_schema=False)
+def web_plays() -> FileResponse:
     return _web_page()
 
 

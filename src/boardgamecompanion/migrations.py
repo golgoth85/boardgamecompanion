@@ -1778,6 +1778,43 @@ def _bgg_reference_alt_names(connection: sqlite3.Connection) -> None:
     )
 
 
+def _game_plays(connection: sqlite3.Connection) -> None:
+    """Play log: one row per session, independent of the played/completed marks."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_plays (
+            id INTEGER PRIMARY KEY,
+            board_game_id INTEGER NOT NULL
+                REFERENCES board_games(id) ON DELETE CASCADE,
+            played_on TEXT NOT NULL,
+            player_count INTEGER CHECK(player_count IS NULL OR player_count BETWEEN 1 AND 99),
+            players_json TEXT NOT NULL DEFAULT '[]',
+            duration_minutes INTEGER
+                CHECK(duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 10000),
+            outcome TEXT CHECK(outcome IS NULL OR outcome IN ('won', 'lost', 'draw')),
+            activity TEXT,
+            notes TEXT,
+            location TEXT,
+            completed_game INTEGER NOT NULL DEFAULT 0 CHECK(completed_game IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_plays_game_date
+        ON game_plays(board_game_id, played_on DESC, id DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_game_plays_date
+        ON game_plays(played_on DESC, id DESC)
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1804,6 +1841,7 @@ MIGRATIONS = (
     Migration(23, "ai-description-sources", _ai_description_sources),
     Migration(24, "bgg-reference-catalog", _bgg_reference_catalog),
     Migration(25, "bgg-reference-alt-names", _bgg_reference_alt_names),
+    Migration(26, "game-plays", _game_plays),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

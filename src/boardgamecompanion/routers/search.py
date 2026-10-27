@@ -19,7 +19,7 @@ SECTIONS = (
     ("crowdfunding", "Crowdfunding", "/crowdfunding", "Campagne attive"),
     ("lists", "Liste", "/lists", "Liste personali e dinamiche"),
     ("wishlist", "Wishlist", "/wishlist", "Giochi che vuoi tenere d'occhio"),
-    ("completed", "Sala dei trofei", "/completed", "Giochi giocati e completati"),
+    ("plays", "Partite", "/plays", "Diario delle partite, giochi giocati e completati"),
 )
 
 
