@@ -5527,6 +5527,7 @@ async function renderRankings() {
         <h1>Classifiche</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
           <span>Confronta i giochi per voto, popolarità e altri criteri</span>
+          <span aria-hidden="true">·</span>
           <span id="rankingResultCount" aria-live="polite">Caricamento…</span>
         </p>
       </div>
@@ -6730,6 +6731,7 @@ async function renderExplore(initialTab = null) {
         <h1>Esplora</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
           <span>Trova giochi per genere, meccaniche e caratteristiche che ti interessano</span>
+          <span aria-hidden="true">·</span>
           <span id="exploreResultCount" aria-live="polite">Caricamento…</span>
         </p>
       </div>
@@ -7054,6 +7056,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
         <h1>Suggerimenti</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
           <span>Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca</span>
+          <span aria-hidden="true">·</span>
           <span id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</span>
         </p>
       </div>
@@ -7366,6 +7369,7 @@ async function renderBggCatalog() {
         <h1>Catalogo</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
           <span>Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca</span>
+          <span aria-hidden="true">·</span>
           <span id="bggCatalogSummary" aria-live="polite">Caricamento…</span>
         </p>
       </div>
