@@ -159,7 +159,7 @@
 .rankings-header{align-items:flex-end}
 .ranking-mode-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.5rem;margin:0 0 1rem}
 .ranking-mode-tile{display:grid;justify-items:center;align-content:start;gap:.42rem;min-width:0;padding:.7rem .45rem .6rem;border:1px solid var(--line);border-radius:14px;color:var(--text);background:rgba(18,24,38,.58);cursor:pointer;font:inherit;text-align:center;transition:border-color .15s ease,background .15s ease,transform .15s ease}
-.ranking-mode-tile strong{font-size:.72rem;font-weight:800;line-height:1.25}
+.ranking-mode-tile strong{font-size:.72rem;font-weight:400;line-height:1.25}
 .ranking-mode-tile:hover:not(:disabled){border-color:#3e4c68;transform:translateY(-1px)}
 .ranking-mode-tile.is-active{border-color:rgba(251,191,36,.7);background:rgba(245,158,11,.14)}
 .ranking-mode-tile.is-active strong{color:var(--accent-2)}
@@ -197,7 +197,7 @@
 .ranking-result-factors{display:flex;gap:.28rem;flex-wrap:wrap}.ranking-result-factors span{padding:.12rem .38rem;border-radius:999px;color:#aeb9ca;background:rgba(255,255,255,.045);font-size:.56rem}
 .ranking-more{justify-self:center;min-height:2.3rem;padding:.35rem .9rem;font-size:.74rem}
 .ranking-group-chips{display:grid;gap:.3rem}
-.ranking-group-chip{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.5rem;min-height:2.3rem;padding:.2rem .55rem .2rem .25rem;border:1px solid var(--line);border-radius:999px;color:var(--text);background:rgba(18,24,38,.62);cursor:pointer;font:inherit;font-size:.72rem;font-weight:400;text-align:left}
+.ranking-group-chip{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.5rem;min-height:2.3rem;padding:.2rem .55rem .2rem .25rem;border:1px solid var(--line);border-radius:999px;color:var(--text);background:rgba(18,24,38,.62);cursor:pointer;font:inherit;font-size:.72rem;font-weight:750;text-align:left}
 .ranking-group-chip .explore-group-art{width:1.8rem;height:1.8rem;padding:.26rem;border-radius:999px}
 .ranking-group-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ranking-group-chip small{color:var(--muted);font-size:.6rem;font-weight:700}
@@ -205,7 +205,7 @@
 .ranking-group-chip.is-selected{border-color:rgba(251,191,36,.6);color:var(--accent-2);background:rgba(245,158,11,.14)}
 .ranking-group-chip.is-selected small{color:var(--accent-2)}
 .ranking-member-chips{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem;padding-top:.45rem;border-top:1px dashed rgba(90,104,128,.35)}
-.ranking-member-chips .explore-facet-chip{min-height:1.9rem;font-size:.66rem;font-weight:400}
+.ranking-member-chips .explore-facet-chip{min-height:1.9rem;font-size:.66rem}
 
 .new-game-list{display:grid;gap:.45rem}.new-game-row{display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:.65rem;align-items:center;min-height:4.5rem;padding:.5rem .58rem;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(18,24,38,.5);text-decoration:none}.new-game-row:hover{border-color:rgba(73,190,132,.36);background:rgba(73,190,132,.045)}
 .new-game-cover{display:grid;width:3.4rem;height:3.4rem;place-items:center;overflow:hidden;border-radius:8px;color:#8ee7b4;background:rgba(73,190,132,.08);font-size:.7rem;font-weight:900}.new-game-cover img{width:100%;height:100%;object-fit:cover}
