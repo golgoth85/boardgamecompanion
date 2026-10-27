@@ -280,6 +280,43 @@ def _explore_facts(row, title: str) -> dict[str, Any]:
     }
 
 
+def _entry_payload(entry, metadata_by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    """Library game payload, or a catalog card payload shaped like /api/reference items."""
+    row = entry[0]
+    if entry[5] == "library":
+        return {
+            **_game_dict(row, metadata=metadata_by_id.get(int(row["bgg_id"]))),
+            "source": "library",
+        }
+    return {
+        "source": "catalog",
+        "bgg_id": int(row["bgg_id"]),
+        "name": row["name"],
+        "year_published": row["year_published"],
+        "is_expansion": False,
+        "rank": row["rank"],
+        "average": row["average"],
+        "users_rated": row["users_rated"],
+        "thumbnail_url": row["thumbnail_url"],
+        "image_url": row["image_url"],
+        "admission_reason": row["admission_reason"] or "votes",
+        "in_catalog": False,
+        "owned": False,
+        "players": {"min": row["min_players"], "max": row["max_players"]},
+        "play_time": {
+            "playing": row["playing_time"],
+            "min": row["min_play_time"],
+            "max": row["max_play_time"],
+        },
+        "average_weight": row["bgg_average_weight"],
+        "recommended_age": row["bgg_recommended_age"],
+        "best_players": row["bgg_best_players"],
+        "recommended_players": row["bgg_recommended_players"],
+        "language_dependence": row["bgg_language_dependence"],
+    }
+
+
+
 def _ideal_players_match(row, player_count: int) -> bool:
     if row["bgg_best_players"]:
         return _player_text_matches(row["bgg_best_players"], player_count)
@@ -585,48 +622,14 @@ class Catalog:
             ).fetchone()
         return int(row["count"] or 0)
 
-    def explore(
-        self,
-        *,
-        source: str = "library",
-        categories: list[str] | None = None,
-        mechanics: list[str] | None = None,
-        category_groups: list[str] | None = None,
-        mechanic_groups: list[str] | None = None,
-        supports_players: int | None = None,
-        ideal_players: int | None = None,
-        player_age: int | None = None,
-        weight: str | None = None,
-        max_minutes: int | None = None,
-        min_rating: float | None = None,
-        max_language: int | None = None,
-        limit: int = 250,
-        reference_rows: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        """Intersect owned games and/or BGG catalog titles on facets and parameters.
+    def _discovery_entries(
+        self, source: str, reference_rows: list[dict[str, Any]] | None
+    ) -> tuple[list[tuple[Any, ...]], dict[int, dict[str, Any]]]:
+        """Owned base games and/or visible catalog titles not owned, for Esplora and Classifiche.
 
-        ``source`` is ``library`` (owned base games), ``catalog`` (visible BGG
-        reference titles not owned) or ``both``. Selected macro groups match
-        a game having any member of the group; everything else is ANDed.
+        Each entry is (row, categories, mechanics, category groups, mechanic
+        groups, origin, facts); rows of both origins share library column names.
         """
-        source = source if source in {"library", "catalog", "both"} else "library"
-
-        def clean(values: list[str] | None) -> list[str]:
-            return list(dict.fromkeys(
-                text for value in (values or []) if (text := str(value).strip())
-            ))
-
-        selected_categories = clean(categories)
-        selected_mechanics = clean(mechanics)
-        selected_category_groups = [
-            key for key in clean(category_groups) if key in valid_group_keys("category")
-        ]
-        selected_mechanic_groups = [
-            key for key in clean(mechanic_groups) if key in valid_group_keys("mechanic")
-        ]
-        wanted_categories = {value.casefold() for value in selected_categories}
-        wanted_mechanics = {value.casefold() for value in selected_mechanics}
-
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
@@ -691,6 +694,52 @@ class Catalog:
                     derived = derive(row, row["categories"], row["mechanics"], row["name"])
                     row["_explore"] = derived
                 add_entry(row, derived, "catalog")
+
+        return entries, metadata_by_id
+
+    def explore(
+        self,
+        *,
+        source: str = "library",
+        categories: list[str] | None = None,
+        mechanics: list[str] | None = None,
+        category_groups: list[str] | None = None,
+        mechanic_groups: list[str] | None = None,
+        supports_players: int | None = None,
+        ideal_players: int | None = None,
+        player_age: int | None = None,
+        weight: str | None = None,
+        max_minutes: int | None = None,
+        min_rating: float | None = None,
+        max_language: int | None = None,
+        limit: int = 250,
+        reference_rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Intersect owned games and/or BGG catalog titles on facets and parameters.
+
+        ``source`` is ``library`` (owned base games), ``catalog`` (visible BGG
+        reference titles not owned) or ``both``. Selected macro groups match
+        a game having any member of the group; everything else is ANDed.
+        """
+        source = source if source in {"library", "catalog", "both"} else "library"
+
+        def clean(values: list[str] | None) -> list[str]:
+            return list(dict.fromkeys(
+                text for value in (values or []) if (text := str(value).strip())
+            ))
+
+        selected_categories = clean(categories)
+        selected_mechanics = clean(mechanics)
+        selected_category_groups = [
+            key for key in clean(category_groups) if key in valid_group_keys("category")
+        ]
+        selected_mechanic_groups = [
+            key for key in clean(mechanic_groups) if key in valid_group_keys("mechanic")
+        ]
+        wanted_categories = {value.casefold() for value in selected_categories}
+        wanted_mechanics = {value.casefold() for value in selected_mechanics}
+
+        entries, metadata_by_id = self._discovery_entries(source, reference_rows)
 
         faceted = [
             entry
@@ -863,40 +912,6 @@ class Catalog:
                 )
             return items
 
-        def game_payload(entry) -> dict[str, Any]:
-            row = entry[0]
-            if entry[5] == "library":
-                return {
-                    **_game_dict(row, metadata=metadata_by_id.get(int(row["bgg_id"]))),
-                    "source": "library",
-                }
-            return {
-                "source": "catalog",
-                "bgg_id": int(row["bgg_id"]),
-                "name": row["name"],
-                "year_published": row["year_published"],
-                "is_expansion": False,
-                "rank": row["rank"],
-                "average": row["average"],
-                "users_rated": row["users_rated"],
-                "thumbnail_url": row["thumbnail_url"],
-                "image_url": row["image_url"],
-                "admission_reason": row["admission_reason"] or "votes",
-                "in_catalog": False,
-                "owned": False,
-                "players": {"min": row["min_players"], "max": row["max_players"]},
-                "play_time": {
-                    "playing": row["playing_time"],
-                    "min": row["min_play_time"],
-                    "max": row["max_play_time"],
-                },
-                "average_weight": row["bgg_average_weight"],
-                "recommended_age": row["bgg_recommended_age"],
-                "best_players": row["bgg_best_players"],
-                "recommended_players": row["bgg_recommended_players"],
-                "language_dependence": row["bgg_language_dependence"],
-            }
-
         capped = max(1, min(int(limit), 250))
         return {
             "source": source,
@@ -905,7 +920,7 @@ class Catalog:
             "mechanic_groups": build_groups("mechanic", 4, selected_mechanic_groups),
             "categories": build_facets("category", 1, selected_categories),
             "mechanics": build_facets("mechanic", 2, selected_mechanics),
-            "games": [game_payload(entry) for entry in matched[:capped]],
+            "games": [_entry_payload(entry, metadata_by_id) for entry in matched[:capped]],
             "limit": capped,
             "filters": {
                 "categories": selected_categories,
@@ -954,13 +969,23 @@ class Catalog:
         self,
         *,
         mode: str = "overall",
+        source: str = "library",
         category: str | None = None,
         mechanic: str | None = None,
+        category_groups: list[str] | None = None,
+        mechanic_groups: list[str] | None = None,
         ideal_players: int | None = None,
         max_minutes: int | None = None,
         weight: str | None = None,
+        max_language: int | None = None,
         limit: int = 50,
+        reference_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        """Score owned games and/or catalog titles with one of the ranking algorithms.
+
+        Filters are ANDed; option and group counts exclude their own filter so
+        alternatives stay visible, as in Esplora.
+        """
         modes = {
             "overall": {
                 "title": "Migliori in assoluto",
@@ -969,8 +994,8 @@ class Catalog:
             "outside_top": {
                 "title": "Fuori dalla Top 500",
                 "description": (
-                    "I migliori giochi della tua ludoteca oltre la posizione 500 BGG, "
-                    "ordinati per Bayesian average: criterio esplicito, non una stima di popolarità."
+                    "I migliori giochi oltre la posizione 500 BGG, ordinati per "
+                    "Bayesian average: criterio esplicito, non una stima di popolarità."
                 ),
             },
             "quality_time": {
@@ -995,25 +1020,14 @@ class Catalog:
             },
         }
         selected_mode = mode if mode in modes else "overall"
-
-        with self.database.connect() as connection:
-            rows = connection.execute(
-                f"""
-                {self._select_sql()}
-                {self._from_sql()}
-                WHERE COALESCE(c.own,0)=1
-                  AND COALESCE(g.item_type,'standalone') != 'expansion'
-                ORDER BY g.title COLLATE NOCASE,g.bgg_id
-                """
-            ).fetchall()
-
-        unique: dict[int, Any] = {}
-        for row in rows:
-            unique.setdefault(int(row["bgg_id"]), row)
-        rows = list(unique.values())
-
-        wanted_category = str(category or "").strip().casefold()
-        wanted_mechanic = str(mechanic or "").strip().casefold()
+        source = source if source in {"library", "catalog", "both"} else "library"
+        selected_category_groups = [
+            key for key in dict.fromkeys(category_groups or []) if key in valid_group_keys("category")
+        ]
+        selected_mechanic_groups = [
+            key for key in dict.fromkeys(mechanic_groups or []) if key in valid_group_keys("mechanic")
+        ]
+        entries, metadata_by_id = self._discovery_entries(source, reference_rows)
 
         def minutes(row) -> int | None:
             raw = row["playing_time"]
@@ -1065,44 +1079,13 @@ class Catalog:
             value = float(raw_weight)
             return max(20.0, min(100.0, 25.0 + (value - 2.0) * 30.0))
 
-        def facet_match(row) -> bool:
-            metadata = _metadata_from_row(row)
-            if wanted_category:
-                categories = {value.casefold() for value in _metadata_list(metadata, "categories")}
-                if wanted_category not in categories:
-                    return False
-            if wanted_mechanic:
-                mechanics = {value.casefold() for value in _metadata_list(metadata, "mechanics")}
-                if wanted_mechanic not in mechanics:
-                    return False
-            return True
-
-        candidates: list[Any] = []
-        for row in rows:
-            if not facet_match(row):
-                continue
-            if ideal_players is not None and not _ideal_players_match(row, ideal_players):
-                continue
-            if max_minutes is not None:
-                value = minutes(row)
-                if value is None or value > int(max_minutes):
-                    continue
-            if weight:
-                raw_weight = row["bgg_average_weight"]
-                if raw_weight is None:
-                    continue
-                numeric = float(raw_weight)
-                if weight == "light" and numeric > 2.30:
-                    continue
-                if weight == "medium" and not (2.30 < numeric <= 3.50):
-                    continue
-                if weight == "heavy" and numeric <= 3.50:
-                    continue
-            candidates.append(row)
-
-        def calculate(row) -> tuple[float, str, list[str]] | None:
+        def calculate(row, origin: str) -> tuple[float, str, list[str]] | None:
             q = quality(row)
-            user_rating = float(row["user_rating"]) if row["user_rating"] is not None else None
+            user_rating = (
+                float(row["user_rating"])
+                if origin == "library" and row["user_rating"] is not None
+                else None
+            )
             raw_weight = row["bgg_average_weight"]
             weight_value = float(raw_weight) if raw_weight is not None else None
             duration = minutes(row)
@@ -1181,41 +1164,139 @@ class Catalog:
                 factors.append(f"età {age_label}")
             return max(0.0, min(100.0, score)), reason, factors[:4]
 
-        ranked: list[dict[str, Any]] = []
-        for row in candidates:
-            calculated = calculate(row)
-            if calculated is None:
-                continue
-            score, reason, factors = calculated
-            ranked.append(
-                {
-                    "game": _game_dict(row),
-                    "score": round(score, 1),
-                    "reason": reason,
-                    "factors": factors,
-                }
-            )
+        scored: list[tuple[tuple[Any, ...], tuple[float, str, list[str]]]] = []
+        for entry in entries:
+            calculated = calculate(entry[0], entry[5])
+            if calculated is not None:
+                scored.append((entry, calculated))
 
+        def weight_match(entry, value: str) -> bool:
+            numeric = entry[6]["weight"]
+            if numeric is None:
+                return False
+            if value == "light":
+                return numeric <= 2.30
+            if value == "medium":
+                return 2.30 < numeric <= 3.50
+            return numeric > 3.50
+
+        wanted_category = str(category or "").strip().casefold()
+        wanted_mechanic = str(mechanic or "").strip().casefold()
+        predicates: dict[str, tuple[Any, Any]] = {
+            "category": (wanted_category, lambda e, v: v in e[1]),
+            "mechanic": (wanted_mechanic, lambda e, v: v in e[2]),
+            "category_groups": (selected_category_groups, lambda e, v: all(k in e[3] for k in v)),
+            "mechanic_groups": (selected_mechanic_groups, lambda e, v: all(k in e[4] for k in v)),
+            "ideal_players": (ideal_players, lambda e, v: min(int(v), 6) in e[6]["ideal"]),
+            "max_minutes": (
+                max_minutes,
+                lambda e, v: (m := minutes(e[0])) is not None and m <= int(v),
+            ),
+            "weight": (weight, weight_match),
+            "max_language": (
+                max_language,
+                lambda e, v: e[6]["language"] is not None and e[6]["language"] <= int(v),
+            ),
+        }
+        active = [
+            (key, value, check)
+            for key, (value, check) in predicates.items()
+            if value not in (None, "", [])
+        ]
+
+        def passes(entry, *, skip: tuple[str, ...] = ()) -> bool:
+            return all(check(entry, value) for key, value, check in active if key not in skip)
+
+        option_specs: dict[str, list[tuple[Any, str]]] = {
+            "ideal_players": [(1, "1"), (2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6+")],
+            "max_minutes": [(30, "≤30"), (60, "≤60"), (90, "≤90"), (120, "≤120"), (180, "≤180")],
+            "weight": [("light", "Semplice"), ("medium", "Media"), ("heavy", "Impegnativa")],
+            "max_language": [(1, "Nessuna"), (2, "Poca"), (3, "Moderata")],
+        }
+
+        def options(key: str) -> list[dict[str, Any]]:
+            pool = [entry for entry, _ in scored if passes(entry, skip=(key,))]
+            current = predicates[key][0]
+            check = predicates[key][1]
+            items = []
+            for value, label in option_specs[key]:
+                count = sum(1 for entry in pool if check(entry, value))
+                selected = current not in (None, "") and str(current) == str(value)
+                if count or selected:
+                    items.append({"value": value, "label": label, "count": count, "selected": selected})
+            return items
+
+        def groups(kind: str, index: int, selected: list[str]) -> list[dict[str, Any]]:
+            pool = [
+                entry for entry, _ in scored
+                if passes(entry, skip=(f"{kind}_groups", kind))
+            ]
+            counts: Counter[str] = Counter()
+            for entry in pool:
+                counts.update(entry[index])
+            return [
+                {**group, "count": int(counts.get(group["key"], 0)), "selected": group["key"] in selected}
+                for group in group_definitions(kind)
+            ]
+
+        def facets(kind: str, index: int, wanted: str) -> list[dict[str, Any]]:
+            pool = [entry for entry, _ in scored if passes(entry, skip=(kind,))]
+            counts: Counter[str] = Counter()
+            names: dict[str, str] = {}
+            for entry in pool:
+                for folded, name in entry[index].items():
+                    counts[folded] += 1
+                    names.setdefault(folded, name)
+            items = [
+                {
+                    "name": names[folded],
+                    "group": group_key(kind, names[folded]),
+                    "count": count,
+                    "selected": folded == wanted,
+                }
+                for folded, count in counts.items()
+            ]
+            items.sort(key=lambda item: (-item["count"], item["name"].casefold()))
+            return items
+
+        ranked = [(entry, calc) for entry, calc in scored if passes(entry)]
         ranked.sort(
-            key=lambda item: (
-                -float(item["score"]),
-                str(item["game"]["title"]).casefold(),
-                int(item["game"]["bgg_id"]),
+            key=lambda pair: (
+                -round(pair[1][0], 1),
+                str(pair[0][0]["title"] if pair[0][5] == "library" else pair[0][0]["name"]).casefold(),
+                int(pair[0][0]["bgg_id"]),
             )
         )
         cap = max(1, min(int(limit), 100))
         return {
             "mode": selected_mode,
+            "source": source,
             "title": modes[selected_mode]["title"],
             "description": modes[selected_mode]["description"],
-            "items": ranked[:cap],
+            "items": [
+                {
+                    "game": _entry_payload(entry, metadata_by_id),
+                    "score": round(score, 1),
+                    "reason": reason,
+                    "factors": factors,
+                }
+                for entry, (score, reason, factors) in ranked[:cap]
+            ],
             "total": len(ranked),
+            "category_groups": groups("category", 3, selected_category_groups),
+            "mechanic_groups": groups("mechanic", 4, selected_mechanic_groups),
+            "categories": facets("category", 1, wanted_category),
+            "mechanics": facets("mechanic", 2, wanted_mechanic),
+            "options": {key: options(key) for key in option_specs},
             "filters": {
                 "category": category,
                 "mechanic": mechanic,
+                "category_groups": selected_category_groups,
+                "mechanic_groups": selected_mechanic_groups,
                 "ideal_players": ideal_players,
                 "max_minutes": max_minutes,
                 "weight": weight,
+                "max_language": max_language,
             },
         }
 

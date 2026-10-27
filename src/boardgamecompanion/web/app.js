@@ -9,7 +9,6 @@ import {
   exploreState,
   initialCatalogColumns,
   initialCatalogPageSize,
-  rankingGroups,
   rankingState,
   state,
 } from "./state.js";
@@ -192,7 +191,6 @@ const toast = document.querySelector("#toast");
 let exploreRequestController;
 let currentExplorePayload = null;
 let rankingRequestController;
-let rankingFacetsCache = null;
 
 function catalogSortHeader(label, key) {
   const [primary, secondary] = catalogColumnSorts[key];
@@ -5124,31 +5122,52 @@ function browseGameRow(game, index) {
   `;
 }
 
+const rankingModes = [
+  ["overall", "Migliori in assoluto"],
+  ["outside_top", "Fuori dalla Top 500"],
+  ["quality_time", "Qualità / tempo"],
+  ["gateway", "Gateway"],
+  ["expert", "Per esperti"],
+  ["safe_choice", "Scelta sicura"],
+  ["personal_favorites", "Preferiti personali"],
+];
+const RANKING_PAGE = 20;
+
 function rankingParams() {
   const params = new URLSearchParams({
     mode: rankingState.mode,
-    limit: "50",
+    source: rankingState.source,
+    limit: rankingState.expanded ? "100" : String(RANKING_PAGE),
   });
+  [...rankingState.categoryGroups].forEach((value) => params.append("category_group", value));
+  [...rankingState.mechanicGroups].forEach((value) => params.append("mechanic_group", value));
   for (const [key, value] of [
     ["category", rankingState.category],
     ["mechanic", rankingState.mechanic],
     ["ideal_players", rankingState.idealPlayers],
     ["max_minutes", rankingState.maxMinutes],
     ["weight", rankingState.weight],
+    ["max_language", rankingState.maxLanguage],
   ]) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
   return params;
 }
 
-function rankingModeButtons() {
-  const group = rankingGroups[rankingState.group] || rankingGroups.top;
-  return group.modes.map(([mode, label]) => `
-    <button class="ranking-mode-button ${rankingState.mode === mode ? "is-active" : ""}"
-            type="button" data-ranking-mode="${mode}">
-      ${escapeHtml(label)}
-    </button>
-  `).join("");
+function rankingModeTiles() {
+  const libraryIncluded = rankingState.source !== "catalog";
+  return rankingModes.map(([mode, label]) => {
+    // Personal votes exist only for owned games.
+    const disabled = mode === "personal_favorites" && !libraryIncluded;
+    const active = rankingState.mode === mode;
+    return `
+      <button class="ranking-mode-tile ${active ? "is-active" : ""}" type="button" role="radio"
+              aria-checked="${active}" data-ranking-mode="${mode}" ${disabled ? "disabled" : ""}>
+        ${exploreGroupArt(`mode-${mode}`)}
+        <strong>${escapeHtml(label)}</strong>
+      </button>
+    `;
+  }).join("");
 }
 
 function rankingGameSummary(game) {
@@ -5156,14 +5175,15 @@ function rankingGameSummary(game) {
   if (summary) return summary;
   return game.bgg_metadata?.description
     ? "Riassunto gameplay in preparazione…"
-    : "Descrizione gameplay non disponibile.";
+    : "";
 }
 
 async function ensureRankingGameplaySummaries(items) {
   if (navigator.webdriver) return;
   const missing = (items || []).filter(
     (item) =>
-      !String(item.game?.gameplay_summary || "").trim()
+      item.game?.source !== "catalog"
+      && !String(item.game?.gameplay_summary || "").trim()
       && String(item.game?.bgg_metadata?.description || "").trim()
   ).slice(0, 8);
   if (!missing.length) return;
@@ -5189,164 +5209,225 @@ async function ensureRankingGameplaySummaries(items) {
   }
 }
 
-function rankingGameRow(item, index) {
-  const game = item.game;
-  const cover = game.bgg_metadata?.cover_url
-    ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    : `<span>${escapeHtml(initials(game.title))}</span>`;
-  const factors = (item.factors || []).map(
-    (factor) => `<span>${escapeHtml(factor)}</span>`
-  ).join("");
-  const rating = game.bgg?.average
-    ? `BGG ${formatNumber(game.bgg.average, 1)}`
-    : "BGG —";
+// Library games and catalog titles share one row shape for the ranking list.
+function rankingGameView(game) {
+  if (game.source === "catalog") {
+    const asGame = referenceAsGame(game);
+    return {
+      game: asGame,
+      href: `/bgg/${encodeURIComponent(game.bgg_id)}`,
+      hasCover: Boolean(game.image_url || game.thumbnail_url),
+      summary: "",
+      catalog: true,
+    };
+  }
+  return {
+    game,
+    href: `/games/${encodeURIComponent(game.bgg_id)}`,
+    hasCover: Boolean(game.bgg_metadata?.cover_url),
+    summary: rankingGameSummary(game),
+    catalog: false,
+  };
+}
+
+function rankingCover(view) {
+  return view.hasCover
+    ? `<img src="${coverSrc(view.game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span>${escapeHtml(initials(view.game.title))}</span>`;
+}
+
+function rankingMeta(game) {
+  const rating = game.bgg?.average ? `★ ${formatNumber(game.bgg.average, 1)}` : "★ —";
+  return `${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}`;
+}
+
+function rankingPodiumCard(item, index) {
+  const view = rankingGameView(item.game);
   return `
-    <a class="ranking-result-row ${index <= 3 ? `is-podium podium-${index}` : ""}" href="/games/${encodeURIComponent(game.bgg_id)}" data-nav>
-      <span class="ranking-result-position">#${index}</span>
-      <span class="ranking-result-cover">${cover}</span>
-      <span class="ranking-result-body">
-        <span class="ranking-result-title">
-          <strong>${escapeHtml(game.title)}</strong>
-          <small>${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}</small>
-        </span>
-        <span class="ranking-result-summary" data-ranking-summary-bgg="${escapeHtml(game.bgg_id)}">${escapeHtml(rankingGameSummary(game))}</span>
-        <span class="ranking-result-factors">${factors}</span>
+    <a class="ranking-podium-card podium-${index}" href="${view.href}" data-nav>
+      <span class="ranking-podium-cover">${rankingCover(view)}</span>
+      <span class="ranking-position">${index}</span>
+      <span class="ranking-podium-body">
+        <strong>${escapeHtml(view.game.title)}</strong>
+        <small>${rankingMeta(view.game)}${view.catalog ? ' · <em>Catalogo</em>' : ""}</small>
       </span>
-      <span class="ranking-result-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">
-        <strong>${formatNumber(item.score, 1)}</strong>
-        <small>indice</small>
-      </span>
+      <span class="ranking-score" title="${escapeHtml(item.reason || "")}">${formatNumber(item.score, 1)}</span>
     </a>
   `;
 }
 
-function rankingSelectOptions(items, selected, placeholder) {
+function rankingGameRow(item, index) {
+  const view = rankingGameView(item.game);
+  const factors = (item.factors || []).map(
+    (factor) => `<span>${escapeHtml(factor)}</span>`
+  ).join("");
   return `
-    <option value="">${escapeHtml(placeholder)}</option>
-    ${items.map((item) => `
-      <option value="${escapeHtml(item.name)}"
-              ${selected === item.name ? "selected" : ""}>
-        ${escapeHtml(item.name)} (${formatNumber(item.count, 0)})
-      </option>
-    `).join("")}
+    <a class="ranking-result-row" href="${view.href}" data-nav>
+      <span class="ranking-position">${index}</span>
+      <span class="ranking-result-cover">${rankingCover(view)}</span>
+      <span class="ranking-result-body">
+        <span class="ranking-result-title">
+          <strong>${escapeHtml(view.game.title)}</strong>
+          ${view.catalog ? '<span class="ranking-source-tag">Catalogo</span>' : ""}
+        </span>
+        <small>${rankingMeta(view.game)}</small>
+        ${view.summary ? `<span class="ranking-result-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
+        <span class="ranking-result-factors">${factors}</span>
+      </span>
+      <span class="ranking-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">${formatNumber(item.score, 1)}</span>
+    </a>
   `;
 }
 
-function rankingFilterMarkup(facets) {
+const rankingOptionGroups = [
+  {apiKey: "ideal_players", stateKey: "idealPlayers", title: "Ideale in"},
+  {apiKey: "max_minutes", stateKey: "maxMinutes", title: "Durata (min)"},
+  {apiKey: "weight", stateKey: "weight", title: "Complessità"},
+  {apiKey: "max_language", stateKey: "maxLanguage", title: "Dipendenza dalla lingua"},
+];
+
+function rankingOptionGroup(group, options) {
+  const current = String(rankingState[group.stateKey] || "");
   return `
-    <section class="ranking-filter-group">
-      <strong>Giocatori ideali</strong>
-      <div class="ranking-filter-chips">
-        ${["", "1", "2", "3", "4", "5", "6"].map((value) => `
-          <button class="ranking-filter-chip ${rankingState.idealPlayers === value ? "is-active" : ""}"
-                  type="button" data-ranking-filter="idealPlayers" data-ranking-value="${value}">
-            ${value ? (value === "6" ? "6+" : value) : "Tutti"}
-          </button>
-        `).join("")}
+    <section class="explore-option-group">
+      <h3>${escapeHtml(group.title)}</h3>
+      <div class="explore-option-buttons">
+        ${(options || []).map((option) => {
+          const selected = Boolean(option.selected) || current === String(option.value);
+          return `
+            <button class="explore-option-button ${selected ? "is-selected" : ""}" type="button"
+                    data-ranking-filter="${group.stateKey}" data-ranking-value="${escapeHtml(String(option.value))}"
+                    aria-pressed="${selected}" title="${formatNumber(option.count, 0)} giochi">
+              <span>${escapeHtml(String(option.label))}</span><small>${formatNumber(option.count, 0)}</small>
+            </button>
+          `;
+        }).join("") || '<span class="explore-option-none">Nessun dato compatibile</span>'}
       </div>
     </section>
-
-    <section class="ranking-filter-group">
-      <strong>Durata massima</strong>
-      <div class="ranking-filter-chips">
-        ${[
-          ["", "Tutte"], ["30", "30 min"], ["60", "60 min"],
-          ["90", "90 min"], ["120", "2 h"], ["180", "3 h"],
-        ].map(([value, label]) => `
-          <button class="ranking-filter-chip ${rankingState.maxMinutes === value ? "is-active" : ""}"
-                  type="button" data-ranking-filter="maxMinutes" data-ranking-value="${value}">
-            ${label}
-          </button>
-        `).join("")}
-      </div>
-    </section>
-
-    <section class="ranking-filter-group">
-      <strong>Complessità</strong>
-      <div class="ranking-filter-chips">
-        ${[
-          ["", "Tutte"], ["light", "Semplice"],
-          ["medium", "Media"], ["heavy", "Impegnativa"],
-        ].map(([value, label]) => `
-          <button class="ranking-filter-chip ${rankingState.weight === value ? "is-active" : ""}"
-                  type="button" data-ranking-filter="weight" data-ranking-value="${value}">
-            ${label}
-          </button>
-        `).join("")}
-      </div>
-    </section>
-
-    <label class="ranking-filter-field">
-      <span>Genere</span>
-      <select id="rankingCategory">
-        ${rankingSelectOptions(facets.categories || [], rankingState.category, "Tutti i generi")}
-      </select>
-    </label>
-
-    <label class="ranking-filter-field">
-      <span>Meccanica</span>
-      <select id="rankingMechanic">
-        ${rankingSelectOptions(facets.mechanics || [], rankingState.mechanic, "Tutte le meccaniche")}
-      </select>
-    </label>
-
-    <button class="button button-ghost ranking-reset-filters" id="rankingResetFilters" type="button">
-      Azzera filtri
-    </button>
   `;
 }
 
-function bindRankingControls() {
-  document.querySelectorAll("[data-ranking-group]").forEach((button) => {
-    button.onclick = () => {
-      rankingState.group = button.dataset.rankingGroup;
-      const group = rankingGroups[rankingState.group] || rankingGroups.top;
-      if (!group.modes.some(([mode]) => mode === rankingState.mode)) {
-        rankingState.mode = group.modes[0][0];
-      }
-      renderRankings();
-    };
-  });
+// Macro groups in the panel; a selected group reveals its entries to narrow to one.
+function rankingFacetSection(kind, payload) {
+  const groups = (kind === "category" ? payload.category_groups : payload.mechanic_groups) || [];
+  const facets = (kind === "category" ? payload.categories : payload.mechanics) || [];
+  const selectedGroups = kind === "category" ? rankingState.categoryGroups : rankingState.mechanicGroups;
+  const selectedFacet = kind === "category" ? rankingState.category : rankingState.mechanic;
+  const members = facets.filter((item) => selectedGroups.has(item.group) || item.name === selectedFacet);
+  return `
+    <section class="explore-option-group">
+      <h3>${kind === "category" ? "Genere" : "Meccanica"}</h3>
+      <div class="ranking-group-chips">
+        ${groups.filter((group) => group.count > 0 || selectedGroups.has(group.key)).map((group) => `
+          <button class="ranking-group-chip ${selectedGroups.has(group.key) ? "is-selected" : ""}" type="button"
+                  data-ranking-group-kind="${kind}" data-ranking-group-key="${group.key}"
+                  aria-pressed="${selectedGroups.has(group.key)}" title="${formatNumber(group.count, 0)} giochi">
+            ${exploreGroupArt(group.key)}<span>${escapeHtml(group.label)}</span><small>${formatNumber(group.count, 0)}</small>
+          </button>
+        `).join("")}
+      </div>
+      ${members.length ? `
+        <div class="ranking-member-chips">
+          ${members.slice(0, 24).map((item) => `
+            <button class="explore-facet-chip ${item.name === selectedFacet ? "is-selected" : ""}" type="button"
+                    data-ranking-facet-kind="${kind}" data-ranking-facet="${escapeHtml(item.name)}"
+                    aria-pressed="${item.name === selectedFacet}">
+              <span>${escapeHtml(item.name)}</span><small>${formatNumber(item.count, 0)}</small>
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
 
-  document.querySelectorAll("[data-ranking-mode]").forEach((button) => {
-    button.onclick = () => {
-      rankingState.mode = button.dataset.rankingMode;
-      refreshRankings();
-    };
-  });
+function rankingActiveFilterCount() {
+  return [
+    rankingState.category, rankingState.mechanic, rankingState.idealPlayers,
+    rankingState.maxMinutes, rankingState.weight, rankingState.maxLanguage,
+  ].filter(Boolean).length + rankingState.categoryGroups.size + rankingState.mechanicGroups.size;
+}
 
-  document.querySelectorAll("[data-ranking-filter]").forEach((button) => {
-    button.onclick = () => {
-      rankingState[button.dataset.rankingFilter] = button.dataset.rankingValue || "";
-      refreshRankings();
-    };
-  });
-
-  const category = document.querySelector("#rankingCategory");
-  if (category) {
-    category.onchange = (event) => {
-      rankingState.category = event.target.value;
-      refreshRankings();
-    };
-  }
-  const mechanic = document.querySelector("#rankingMechanic");
-  if (mechanic) {
-    mechanic.onchange = (event) => {
-      rankingState.mechanic = event.target.value;
-      refreshRankings();
-    };
-  }
+function renderRankingFilters(payload) {
+  const container = document.querySelector("#rankingFilterOptions");
+  if (!container) return;
+  const options = payload.options || {};
+  container.innerHTML = [
+    ...rankingOptionGroups.map((group) => rankingOptionGroup(group, options[group.apiKey])),
+    rankingFacetSection("category", payload),
+    rankingFacetSection("mechanic", payload),
+  ].join("");
+  const active = rankingActiveFilterCount();
+  const toggleCount = document.querySelector("#rankingFilterToggleCount");
+  if (toggleCount) toggleCount.textContent = active ? String(active) : "";
   const reset = document.querySelector("#rankingResetFilters");
-  if (reset) {
-    reset.onclick = () => {
-      rankingState.category = "";
-      rankingState.mechanic = "";
-      rankingState.idealPlayers = "";
-      rankingState.maxMinutes = "";
-      rankingState.weight = "";
-      renderRankings();
-    };
-  }
+  if (reset) reset.disabled = !active;
+
+  const reload = () => {
+    rankingState.expanded = false;
+    refreshRankings();
+  };
+  container.querySelectorAll("[data-ranking-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.rankingFilter;
+      const value = button.dataset.rankingValue || "";
+      rankingState[key] = rankingState[key] === value ? "" : value;
+      reload();
+    });
+  });
+  container.querySelectorAll("[data-ranking-group-key]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const kind = button.dataset.rankingGroupKind;
+      const groups = kind === "category" ? rankingState.categoryGroups : rankingState.mechanicGroups;
+      const key = button.dataset.rankingGroupKey;
+      if (groups.has(key)) {
+        groups.delete(key);
+        // A single entry chosen inside the group goes with it.
+        const facet = ((kind === "category" ? payload.categories : payload.mechanics) || [])
+          .find((item) => item.name === rankingState[kind]);
+        if (facet?.group === key) rankingState[kind] = "";
+      } else {
+        groups.add(key);
+      }
+      reload();
+    });
+  });
+  container.querySelectorAll("[data-ranking-facet]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const kind = button.dataset.rankingFacetKind;
+      const name = button.dataset.rankingFacet;
+      rankingState[kind] = rankingState[kind] === name ? "" : name;
+      reload();
+    });
+  });
+}
+
+function renderRankingPayload(payload) {
+  const results = document.querySelector("#rankingResults");
+  const count = document.querySelector("#rankingResultCount");
+  const description = document.querySelector("#rankingCurrentDescription");
+  const more = document.querySelector("#rankingMore");
+  if (!results || !count || !description || !more) return;
+  count.textContent = payload.total === 1
+    ? "1 gioco classificato"
+    : `${formatNumber(payload.total, 0)} giochi classificati`;
+  description.textContent = payload.description || "";
+  const items = payload.items || [];
+  const podium = items.slice(0, 3);
+  const rest = items.slice(3);
+  results.innerHTML = items.length
+    ? `
+      <div class="ranking-podium">${podium.map((item, index) => rankingPodiumCard(item, index + 1)).join("")}</div>
+      ${rest.length ? `<div class="ranking-list">${rest.map((item, index) => rankingGameRow(item, index + 4)).join("")}</div>` : ""}
+    `
+    : '<div class="empty">Nessun gioco soddisfa questa classifica e i filtri selezionati.</div>';
+  const hidden = Math.max(0, Math.min(100, Number(payload.total || 0)) - items.length);
+  more.hidden = hidden === 0 && !rankingState.expanded;
+  more.textContent = rankingState.expanded ? "Mostra meno" : `Mostra altri ${formatNumber(hidden, 0)}`;
+  renderRankingFilters(payload);
+  runWhenIdle(() => {
+    void ensureRankingGameplaySummaries(items);
+  });
 }
 
 async function refreshRankings() {
@@ -5354,35 +5435,20 @@ async function refreshRankings() {
   const controller = new AbortController();
   rankingRequestController = controller;
   const results = document.querySelector("#rankingResults");
-  const heading = document.querySelector("#rankingCurrentHeading");
-  const description = document.querySelector("#rankingCurrentDescription");
-  const count = document.querySelector("#rankingResultCount");
-  if (!results || !heading || !description || !count) return;
+  if (!results) return;
 
+  const modes = document.querySelector("#rankingModes");
+  if (modes) modes.innerHTML = rankingModeTiles();
+  bindRankingModeTiles();
   results.classList.add("is-refreshing");
   results.setAttribute("aria-busy", "true");
   try {
-    const payload = await api(`/api/catalog/rankings?${rankingParams()}`, {
-      signal: controller.signal,
-    });
+    const [payload] = await Promise.all([
+      api(`/api/catalog/rankings?${rankingParams()}`, {signal: controller.signal}),
+      rankingState.source === "library" ? null : refreshWishlistIndex().catch(() => null),
+    ]);
     if (controller.signal.aborted || !document.querySelector("#rankingResults")) return;
-    heading.textContent = payload.title;
-    description.textContent = payload.description;
-    count.textContent = payload.total === 1
-      ? "1 gioco classificato"
-      : `${formatNumber(payload.total, 0)} giochi classificati`;
-    results.innerHTML = payload.items.length
-      ? payload.items.map((item, index) => rankingGameRow(item, index + 1)).join("")
-      : '<div class="empty">Nessun gioco soddisfa questa classifica e i filtri selezionati.</div>';
-    runWhenIdle(() => {
-      void ensureRankingGameplaySummaries(payload.items || []);
-    });
-
-    document.querySelector("#rankingModes").innerHTML = rankingModeButtons();
-    document.querySelector("#rankingFilters").innerHTML = rankingFilterMarkup(
-      rankingFacetsCache || {categories: [], mechanics: []}
-    );
-    bindRankingControls();
+    renderRankingPayload(payload);
   } catch (error) {
     if (error.name === "AbortError") return;
     results.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -5395,59 +5461,80 @@ async function refreshRankings() {
   }
 }
 
+function bindRankingModeTiles() {
+  document.querySelectorAll("[data-ranking-mode]").forEach((button) => {
+    button.onclick = () => {
+      rankingState.mode = button.dataset.rankingMode;
+      rankingState.expanded = false;
+      refreshRankings();
+    };
+  });
+}
+
+function bindRankingControls() {
+  bindSourceBoxes("ranking", rankingState, "bgc.rankingSource", () => {
+    if (rankingState.source === "catalog" && rankingState.mode === "personal_favorites") {
+      rankingState.mode = "overall";
+    }
+    rankingState.expanded = false;
+    refreshRankings();
+  });
+  document.querySelector("#rankingMore")?.addEventListener("click", () => {
+    rankingState.expanded = !rankingState.expanded;
+    refreshRankings();
+  });
+  document.querySelector("#rankingFilterToggle")?.addEventListener("click", (event) => {
+    const panel = document.querySelector("#rankingFilterPanel");
+    const open = !panel?.classList.contains("is-open");
+    panel?.classList.toggle("is-open", open);
+    event.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+  document.querySelector("#rankingResetFilters")?.addEventListener("click", () => {
+    for (const key of ["category", "mechanic", "idealPlayers", "maxMinutes", "weight", "maxLanguage"]) {
+      rankingState[key] = "";
+    }
+    rankingState.categoryGroups.clear();
+    rankingState.mechanicGroups.clear();
+    rankingState.expanded = false;
+    refreshRankings();
+  });
+}
+
 async function renderRankings() {
   app.innerHTML = `
-    <section class="page-header browse-header rankings-header">
-      <div>
+    <section class="page-header catalog-page-header rankings-header">
+      <div class="page-header-copy">
         <h1>Classifiche</h1>
+        <p class="muted catalog-page-summary" id="rankingResultCount" aria-live="polite">Caricamento…</p>
       </div>
-      <div class="ranking-result-count" id="rankingResultCount">— giochi classificati</div>
+      <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("ranking", rankingState.source)}</div>
     </section>
 
-    <nav class="ranking-groups" aria-label="Famiglie di classifiche">
-      ${Object.entries(rankingGroups).map(([key, group]) => `
-        <button class="ranking-group-button ${rankingState.group === key ? "is-active" : ""}"
-                type="button" data-ranking-group="${key}">
-          ${escapeHtml(group.label)}
-        </button>
-      `).join("")}
-    </nav>
+    <div class="ranking-mode-grid" id="rankingModes" role="radiogroup" aria-label="Classifica">${rankingModeTiles()}</div>
 
     <section class="rankings-layout">
       <div class="rankings-main">
-        <div class="ranking-mode-strip" id="rankingModes">${rankingModeButtons()}</div>
-        <header class="ranking-current-head">
-          <div>
-            <p class="eyebrow">Algoritmo attivo</p>
-            <h2 id="rankingCurrentHeading">Classifica</h2>
-            <p class="muted" id="rankingCurrentDescription"></p>
-          </div>
-          <span class="ranking-explainer-badge">Indice 0–100</span>
-        </header>
+        <div class="ranking-current-head">
+          <p class="muted" id="rankingCurrentDescription"></p>
+          <button class="button button-ghost explore-filter-toggle" id="rankingFilterToggle" type="button"
+                  aria-expanded="false" aria-controls="rankingFilterPanel">
+            Filtri <span class="explore-filter-toggle-count" id="rankingFilterToggleCount"></span>
+          </button>
+        </div>
         <div class="ranking-results" id="rankingResults">${skeletons()}</div>
+        <button class="button button-ghost ranking-more" id="rankingMore" type="button" hidden>Mostra altri</button>
       </div>
 
-      <aside class="ranking-filter-panel" id="rankingFilters" aria-label="Filtri classifica">
-        ${skeletons()}
+      <aside class="explore-filter-panel" id="rankingFilterPanel" aria-label="Filtri classifica">
+        <div class="explore-filter-options" id="rankingFilterOptions"></div>
+        <button class="button button-ghost explore-reset-optional" id="rankingResetFilters" type="button" disabled>Azzera filtri</button>
       </aside>
     </section>
   `;
 
   document.title = "Classifiche · BoardGameCompanion";
   bindRankingControls();
-
-  try {
-    if (!rankingFacetsCache) {
-      rankingFacetsCache = await api("/api/catalog/facets?limit=100");
-    }
-    const filters = document.querySelector("#rankingFilters");
-    if (filters) filters.innerHTML = rankingFilterMarkup(rankingFacetsCache);
-    bindRankingControls();
-    await refreshRankings();
-  } catch (error) {
-    const results = document.querySelector("#rankingResults");
-    if (results) results.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-  }
+  await refreshRankings();
 }
 
 function completionAchievementMarkup(game) {
@@ -5543,28 +5630,47 @@ async function renderCompleted() {
   }
 }
 
-const exploreSources = [
+const discoverySources = [
   ["library", "Ludoteca", "shelf", "Giochi base posseduti"],
   ["catalog", "Catalogo", "globe", "Catalogo BGG non posseduto"],
 ];
 
-function exploreSourceFlags() {
-  return {
-    library: exploreState.source !== "catalog",
-    catalog: exploreState.source !== "library",
-  };
+function sourceFlags(source) {
+  return {library: source !== "catalog", catalog: source !== "library"};
 }
 
-function exploreSourceBoxes() {
-  const flags = exploreSourceFlags();
-  return exploreSources.map(([key, label, iconName, hint]) => `
+// Ludoteca/Catalogo checkboxes shared by Esplora and Classifiche.
+function sourceBoxes(scope, source) {
+  const flags = sourceFlags(source);
+  return discoverySources.map(([key, label, iconName, hint]) => `
     <button class="explore-source-box ${flags[key] ? "is-active" : ""}" type="button"
-            role="checkbox" aria-checked="${flags[key]}" data-explore-source="${key}" title="${hint}">
+            role="checkbox" aria-checked="${flags[key]}" data-${scope}-source="${key}" title="${hint}">
       <span class="explore-source-icon" aria-hidden="true">${icon(iconName)}</span>
       <strong>${label}</strong>
       <span class="explore-source-check" aria-hidden="true">${icon("check")}</span>
     </button>
   `).join("");
+}
+
+function bindSourceBoxes(scope, target, storageKey, onChange) {
+  const selector = `[data-${scope}-source]`;
+  document.querySelectorAll(selector).forEach((button) => {
+    button.addEventListener("click", () => {
+      const flags = sourceFlags(target.source);
+      const key = button.getAttribute(`data-${scope}-source`);
+      flags[key] = !flags[key];
+      // At least one box stays checked: unchecking the last one switches to the other.
+      if (!flags.library && !flags.catalog) flags[key === "library" ? "catalog" : "library"] = true;
+      target.source = flags.library && flags.catalog ? "both" : (flags.library ? "library" : "catalog");
+      window.localStorage.setItem(storageKey, target.source);
+      document.querySelectorAll(selector).forEach((item) => {
+        const active = flags[item.getAttribute(`data-${scope}-source`)];
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-checked", String(active));
+      });
+      onChange();
+    });
+  });
 }
 
 function exploreParams() {
@@ -5928,23 +6034,9 @@ async function refreshExplore() {
 }
 
 function bindExploreControls() {
-  document.querySelectorAll("[data-explore-source]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const flags = exploreSourceFlags();
-      const key = button.dataset.exploreSource;
-      flags[key] = !flags[key];
-      // At least one box stays checked: unchecking the last one switches to the other.
-      if (!flags.library && !flags.catalog) flags[key === "library" ? "catalog" : "library"] = true;
-      exploreState.source = flags.library && flags.catalog ? "both" : (flags.library ? "library" : "catalog");
-      window.localStorage.setItem("bgc.exploreSource", exploreState.source);
-      document.querySelectorAll("[data-explore-source]").forEach((item) => {
-        const active = flags[item.dataset.exploreSource];
-        item.classList.toggle("is-active", active);
-        item.setAttribute("aria-checked", String(active));
-      });
-      exploreState.expandedResults = false;
-      refreshExplore();
-    });
+  bindSourceBoxes("explore", exploreState, "bgc.exploreSource", () => {
+    exploreState.expandedResults = false;
+    refreshExplore();
   });
 
   document.querySelectorAll("[data-explore-tab]").forEach((button) => {
@@ -5994,7 +6086,7 @@ async function renderExplore(initialTab = null) {
         <h1>Esplora</h1>
         <p class="muted catalog-page-summary" id="exploreResultCount" aria-live="polite">Caricamento…</p>
       </div>
-      <div class="explore-sources" role="group" aria-label="Dove cercare">${exploreSourceBoxes()}</div>
+      <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("explore", exploreState.source)}</div>
     </section>
 
     <section class="explore-layout">

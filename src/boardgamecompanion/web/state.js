@@ -63,50 +63,22 @@ export const exploreState = {
   expandedResults: false,
 };
 
+const storedRankingSource = window.localStorage.getItem("bgc.rankingSource");
+
 export const rankingState = {
-  group: "top",
   mode: "overall",
+  // "library", "catalog" or "both", as in Esplora.
+  source: ["library", "catalog", "both"].includes(storedRankingSource) ? storedRankingSource : "library",
   category: "",
   mechanic: "",
+  categoryGroups: new Set(),
+  mechanicGroups: new Set(),
   idealPlayers: "",
   maxMinutes: "",
   weight: "",
+  maxLanguage: "",
+  expanded: false,
 };
-
-export const rankingGroups = Object.freeze({
-  top: {
-    label: "Top",
-    modes: [
-      ["overall", "Migliori in assoluto"],
-      ["outside_top", "Fuori dalla Top 500"],
-      ["quality_time", "Qualità / tempo"],
-      ["safe_choice", "Scelta sicura"],
-    ],
-  },
-  situation: {
-    label: "Per situazione",
-    modes: [
-      ["gateway", "Gateway"],
-      ["expert", "Per esperti"],
-      ["quality_time", "Qualità / tempo"],
-      ["safe_choice", "Scelta sicura"],
-    ],
-  },
-  facets: {
-    label: "Generi & Meccaniche",
-    modes: [
-      ["overall", "Migliori"],
-      ["outside_top", "Fuori dalla Top 500"],
-      ["safe_choice", "Scelta sicura"],
-    ],
-  },
-  personal: {
-    label: "Personali",
-    modes: [
-      ["personal_favorites", "Preferiti personali"],
-    ],
-  },
-});
 
 export const catalogColumnSorts = Object.freeze({
   title: ["title", "title_desc"],

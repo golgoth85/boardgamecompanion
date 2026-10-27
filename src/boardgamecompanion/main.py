@@ -1057,28 +1057,36 @@ def catalog_rankings(
         "safe_choice",
         "personal_favorites",
     ] = Query(default="overall"),
+    source: Literal["library", "catalog", "both"] = Query(default="library"),
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
+    category_group: list[str] | None = Query(default=None, max_length=40),
+    mechanic_group: list[str] | None = Query(default=None, max_length=40),
     ideal_players: int | None = Query(default=None, ge=1, le=30),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
+    max_language: int | None = Query(default=None, ge=1, le=5),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
     payload = Catalog(database).rankings(
         mode=mode,
+        source=source,
         category=category,
         mechanic=mechanic,
+        category_groups=category_group,
+        mechanic_groups=mechanic_group,
         ideal_players=ideal_players,
         max_minutes=max_minutes,
         weight=weight,
+        max_language=max_language,
         limit=limit,
     )
     games = [
         item.get("game", {})
         for item in payload.get("items", [])
-        if isinstance(item, dict)
+        if isinstance(item, dict) and item.get("game", {}).get("source") == "library"
     ]
     bgg_ids = [
         int(game["bgg_id"])

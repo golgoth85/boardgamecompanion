@@ -743,6 +743,7 @@ class BggReferenceCatalog:
                     "name": row["name"],
                     "year_published": row["year_published"],
                     "rank": row["rank"],
+                    "bgg_rank": row["rank"],
                     "bgg_bayes_average": row["bayes_average"],
                     "bgg_average": average,
                     "average": row["average"],

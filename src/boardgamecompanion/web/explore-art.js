@@ -1,5 +1,6 @@
-// Static artwork for the Esplora macro groups: one line illustration and one
-// hue per group, keyed like explore_groups.py. Drawn on a 48×48 grid.
+// Static artwork for the Esplora macro groups (keyed like explore_groups.py)
+// and the Classifiche modes: one line illustration and one hue each, drawn on
+// a 48×48 grid.
 const art = {
   // Generi
   fantastic: [262, `
@@ -83,6 +84,30 @@ const art = {
   modes: [102, `
     <path d="M24 13c-5-4-11-4-17-2v26c6-2 12-2 17 2 5-4 11-4 17-2V11c-6-2-12-2-17 2z"/>
     <path d="M24 13v26"/>`],
+  // Classifiche
+  "mode-overall": [42, `
+    <path d="M15 8h18v9a9 9 0 01-18 0z"/>
+    <path d="M15 11H8c0 6 3 9 7 9M33 11h7c0 6-3 9-7 9"/>
+    <path d="M24 26v7M17 40h14l-2-7H19z"/>`],
+  "mode-outside_top": [190, `
+    <path d="M14 9h20l7 10-17 21L7 19z"/>
+    <path d="M7 19h34M19 9l-3 10 8 21 8-21-3-10"/>`],
+  "mode-quality_time": [28, `
+    <path d="M13 7h22M13 41h22"/>
+    <path d="M15 7c0 9 9 11 9 17s-9 8-9 17M33 7c0 9-9 11-9 17s9 8 9 17"/>
+    <path d="M19 36c2-2 8-2 10 0"/>`],
+  "mode-gateway": [150, `
+    <path d="M10 41V11a3 3 0 013-3h22a3 3 0 013 3v30"/>
+    <path d="M6 41h36"/>
+    <path d="M18 24h12M25 19l5 5-5 5"/>`],
+  "mode-expert": [262, `
+    <path d="M5 40l13-22 7 11 5-7 13 18z"/>
+    <path d="M18 18V7l8 3-8 3"/>`],
+  "mode-safe_choice": [150, `
+    <path d="M24 6l15 5v11c0 9-6 16-15 20-9-4-15-11-15-20V11z"/>
+    <path d="M17 24l5 5 9-10"/>`],
+  "mode-personal_favorites": [340, `
+    <path d="M24 40S8 30 8 18a8 8 0 0116-3 8 8 0 0116 3c0 12-16 22-16 22z"/>`],
   other: [215, `
     <circle cx="13" cy="24" r="3"/><circle cx="24" cy="24" r="3"/><circle cx="35" cy="24" r="3"/>`],
 };

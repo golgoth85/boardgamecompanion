@@ -444,7 +444,7 @@ def test_detail_provider_failure_keeps_dump_data(database: Database) -> None:
     assert item["api_checked_at"] is None
 
 
-def test_explore_sources_groups_and_language(database: Database) -> None:
+def test_explore_and_rankings_sources_groups_and_language(database: Database) -> None:
     import json
 
     from boardgamecompanion.catalog import Catalog
@@ -519,3 +519,20 @@ def test_explore_sources_groups_and_language(database: Database) -> None:
     assert [game["bgg_id"] for game in light_text["games"]] == [224517]
     labels = {item["label"]: item["count"] for item in light_text["options"]["max_language"]}
     assert labels == {"Poca": 1, "Moderata": 1}
+
+    rank = lambda **kwargs: catalog.rankings(reference_rows=rows, **kwargs)  # noqa: E731
+    assert [item["game"]["bgg_id"] for item in rank()["items"]] == [28720]
+    both_ranked = rank(source="both")
+    assert {item["game"]["bgg_id"] for item in both_ranked["items"]} == {224517, 28720, 900200}
+    assert {item["game"]["source"] for item in both_ranked["items"]} == {"library", "catalog"}
+    economy_ranked = rank(source="catalog", category_groups=["economy"])
+    assert [item["game"]["bgg_id"] for item in economy_ranked["items"]] == [224517]
+    # Group counts ignore the group filter itself, so alternatives stay visible.
+    party = next(group for group in economy_ranked["category_groups"] if group["key"] == "party")
+    assert party["count"] == 1
+    language_ranked = rank(source="both", max_language=2)
+    assert [item["game"]["bgg_id"] for item in language_ranked["items"]] == [224517]
+    assert {item["label"]: item["count"] for item in language_ranked["options"]["max_language"]} == {
+        "Poca": 1, "Moderata": 1,
+    }
+    assert rank(source="catalog", mode="personal_favorites")["items"] == []

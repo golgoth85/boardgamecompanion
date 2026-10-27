@@ -14,7 +14,7 @@ SECTIONS = (
     ("catalog", "Ludoteca", "/", "I giochi della tua collezione"),
     ("bgg", "Catalogo", "/bgg", "Catalogo di riferimento BoardGameGeek"),
     ("explore", "Esplora", "/explore", "Generi e meccaniche"),
-    ("rankings", "Classifiche", "/rankings", "Classifiche della collezione"),
+    ("rankings", "Classifiche", "/rankings", "Classifiche di ludoteca e catalogo"),
     ("suggestions", "Suggerimenti", "/suggestions", "Giochi consigliati"),
     ("crowdfunding", "Crowdfunding", "/crowdfunding", "Campagne attive"),
     ("lists", "Liste", "/lists", "Liste personali e dinamiche"),

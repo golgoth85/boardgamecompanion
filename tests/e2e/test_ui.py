@@ -614,26 +614,14 @@ def test_sidebar_is_game_centric_and_settings_hold_admin(browser, live_server):
         context.close()
 
 
-def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser, live_server):
-    context, page = new_page(browser)
-    ranking_requests = []
-
-    facets_payload = {
-        "categories": [
-            {"name": "Fantasy", "count": 12},
-            {"name": "Science Fiction", "count": 8},
-        ],
-        "mechanics": [
-            {"name": "Deck Building", "count": 7},
-            {"name": "Dice Rolling", "count": 10},
-        ],
-    }
-
-    def ranking_route(route):
-        query = parse_qs(urlsplit(route.request.url).query)
-        mode = query.get("mode", ["overall"])[0]
-        ranking_requests.append(query)
+def _ranking_payload(query, *, items=None):
+    mode = query.get("mode", ["overall"])[0]
+    source = query.get("source", ["library"])[0]
+    groups = query.get("category_group", [])
+    category = query.get("category", [""])[0]
+    if items is None:
         game = {
+            "source": "library",
             "bgg_id": 900001,
             "parent_bgg_id": None,
             "title": "Synthetic Alpha",
@@ -641,133 +629,120 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
             "item_type": "standalone",
             "players": {"min": 2, "max": 4},
             "play_time": {"playing": 60, "min": 45, "max": 90},
-            "bgg": {
-                "average": 7.8,
-                "average_weight": 2.2,
-                "rank": 42,
-                "best_players": "3",
-                "recommended_age": "10+",
-                "min_age": "10+",
-            },
+            "bgg": {"average": 7.8, "average_weight": 2.2, "rank": 42, "best_players": "3",
+                    "recommended_age": "10+", "min_age": "10+"},
             "collection": {"own": True, "num_plays": 3},
-            "bgg_metadata": {
-                "cover_url": None,
-                "categories": ["Fantasy", "Adventure"],
-                "mechanics": ["Deck Building", "Hand Management"],
-            },
-            "gameplay_summary": (
-                "A turno si selezionano carte azione per costruire una squadra efficace, "
-                "combinando abilità e tempismo per mettere sotto pressione l'avversario "
-                "e raggiungere l'obiettivo dello scontro."
-            ),
+            "bgg_metadata": {"cover_url": None},
+            "gameplay_summary": "A turno si selezionano carte azione per costruire una squadra efficace.",
         }
-        titles = {
-            "overall": "Migliori in assoluto",
-            "outside_top": "Fuori dalla Top 500",
-            "personal_favorites": "Preferiti personali",
-        }
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
+        items = [{"game": game, "score": 88.4, "reason": "Motivo deterministico",
+                  "factors": ["ideale in 3", "peso 2.2", "età 10+"]}]
+        if source != "library":
+            items += [
                 {
-                    "mode": mode,
-                    "title": titles.get(mode, mode.replace("_", " ").title()),
-                    "description": f"Descrizione {mode}",
-                    "items": [
-                        {
-                            "game": game,
-                            "score": 88.4,
-                            "reason": "Motivo deterministico",
-                            "factors": ["ideale in 3", "peso 2.2", "età 10+"],
-                        }
-                    ],
-                    "total": 1,
-                    "filters": {},
+                    "game": {
+                        "source": "catalog", "bgg_id": 910000 + index, "name": f"Catalog {index + 1}",
+                        "rank": 100 + index, "average": 7.5, "users_rated": 900,
+                        "players": {"min": 1, "max": 4}, "play_time": {"playing": 45}, "owned": False,
+                    },
+                    "score": 80.0 - index, "reason": "Catalogo", "factors": ["peso 2.0"],
                 }
-            ),
-        )
+                for index in range(4)
+            ]
+    return {
+        "mode": mode,
+        "source": source,
+        "title": mode,
+        "description": f"Descrizione {mode}",
+        "items": items,
+        "total": len(items),
+        "category_groups": [
+            {"key": "fantastic", "label": "Fantasy e fantascienza", "count": 1, "selected": "fantastic" in groups},
+            {"key": "history", "label": "Storia ed epoche", "count": 0, "selected": False},
+        ],
+        "mechanic_groups": [{"key": "cards", "label": "Carte e draft", "count": 1, "selected": False}],
+        "categories": [
+            {"name": "Fantasy", "group": "fantastic", "count": 1, "selected": category == "Fantasy"},
+            {"name": "Science Fiction", "group": "fantastic", "count": 1, "selected": False},
+        ],
+        "mechanics": [{"name": "Deck Building", "group": "cards", "count": 1, "selected": False}],
+        "options": {
+            "ideal_players": [{"value": 2, "label": "2", "count": 1,
+                               "selected": query.get("ideal_players") == ["2"]}],
+            "max_minutes": [{"value": 60, "label": "≤60", "count": 1, "selected": False}],
+            "weight": [{"value": "light", "label": "Semplice", "count": 1, "selected": False}],
+            "max_language": [{"value": 1, "label": "Nessuna", "count": 1,
+                              "selected": query.get("max_language") == ["1"]}],
+        },
+        "filters": {},
+    }
 
-    page.route(
-        "**/api/catalog/facets?**",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(facets_payload),
-        ),
-    )
+
+def test_rankings_have_mode_tiles_sources_group_filters_and_mobile_layout(browser, live_server):
+    context, page = new_page(browser)
+    ranking_requests = []
+
+    def ranking_route(route):
+        query = parse_qs(urlsplit(route.request.url).query)
+        ranking_requests.append(query)
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(_ranking_payload(query)))
+
     page.route("**/api/catalog/rankings?**", ranking_route)
-
     try:
         page.goto(f"{live_server}/rankings")
         expect(page.get_by_role("heading", name="Classifiche")).to_be_visible()
-        expect(page.locator("#rankingCurrentHeading")).to_have_text(
-            "Migliori in assoluto"
+        expect(page.locator("#rankingCurrentDescription")).to_have_text("Descrizione overall")
+        expect(page.locator(".ranking-podium-card")).to_have_count(1)
+        expect(page.locator(".ranking-podium-card .ranking-score")).to_have_text("88,4")
+        expect(page.locator(".ranking-podium-card .ranking-score")).to_have_attribute(
+            "title", "Motivo deterministico"
         )
-        expect(page.locator(".ranking-result-row")).to_have_count(1)
-        expect(page.locator(".ranking-result-score")).to_contain_text("88,4")
-        expect(page.locator(".ranking-result-score")).to_contain_text("indice")
-        expect(page.locator(".ranking-result-title small")).to_contain_text("BGG 7,8")
-        expect(page.locator(".ranking-result-summary")).to_contain_text(
-            "A turno si selezionano carte azione"
-        )
-        expect(page.locator(".ranking-result-factors")).to_contain_text("ideale in 3")
-        expect(page.locator(".ranking-result-factors")).to_contain_text("età 10+")
-        expect(page.locator(".ranking-result-factors")).not_to_contain_text("60 min")
-        expect(page.locator(".ranking-result-factors")).not_to_contain_text("qualità")
-        assert page.locator(".ranking-result-summary").evaluate(
-            "(el) => getComputedStyle(el).webkitLineClamp === 'none'"
-        )
-        expect(page.locator(".ranking-result-row")).not_to_contain_text("Motivo deterministico")
-        expect(page.locator(".ranking-result-score")).to_have_attribute("title", "Motivo deterministico")
-        expect(page.locator("#rankingFilters")).to_be_visible()
+        assert ranking_requests[-1]["source"] == ["library"]
+        assert ranking_requests[-1]["limit"] == ["20"]
+        expect(page.get_by_role("heading", name="Dipendenza dalla lingua")).to_be_visible()
 
-        expect(page.locator(".ranking-result-row.is-podium")).to_have_count(1)
+        page.locator('[data-ranking-mode="outside_top"]').click()
+        expect(page.locator('[data-ranking-mode="outside_top"]')).to_have_attribute("aria-checked", "true")
+        expect(page.locator("#rankingCurrentDescription")).to_have_text("Descrizione outside_top")
 
-        page.get_by_role("button", name="Fuori dalla Top 500").click()
-        expect(page.locator("#rankingCurrentHeading")).to_have_text("Fuori dalla Top 500")
-        assert ranking_requests[-1]["mode"] == ["outside_top"]
-
-        page.get_by_role("button", name="Personali").click()
-        expect(page.get_by_role("button", name="Preferiti personali")).to_be_visible()
-        expect(page.locator("#rankingCurrentHeading")).to_have_text(
-            "Preferiti personali"
-        )
-        assert ranking_requests[-1]["mode"] == ["personal_favorites"]
-
-        page.locator(
-            '[data-ranking-filter="idealPlayers"][data-ranking-value="2"]'
-        ).click()
-        expect(page.locator("#rankingCurrentHeading")).to_have_text(
-            "Preferiti personali"
+        page.locator('[data-ranking-filter="idealPlayers"][data-ranking-value="2"]').click()
+        expect(page.locator('[data-ranking-filter="idealPlayers"][data-ranking-value="2"]')).to_have_attribute(
+            "aria-pressed", "true"
         )
         assert ranking_requests[-1]["ideal_players"] == ["2"]
 
-        with page.expect_request(
-            lambda request: (
-                "/api/catalog/rankings?" in request.url
-                and "category=Fantasy" in request.url
-            )
-        ) as category_request:
-            page.locator("#rankingCategory").select_option("Fantasy")
-        category_query = parse_qs(urlsplit(category_request.value.url).query)
-        assert category_query["category"] == ["Fantasy"]
+        # A genre group filters on any of its entries and reveals them to narrow to one.
+        expect(page.locator('[data-ranking-group-key="history"]')).to_have_count(0)
+        page.locator('[data-ranking-group-key="fantastic"]').click()
+        expect(page.locator('[data-ranking-facet="Fantasy"]')).to_be_visible()
+        assert ranking_requests[-1]["category_group"] == ["fantastic"]
+        page.locator('[data-ranking-facet="Fantasy"]').click()
+        expect(page.locator('[data-ranking-facet="Fantasy"]')).to_have_attribute("aria-pressed", "true")
+        assert ranking_requests[-1]["category"] == ["Fantasy"]
+        page.locator('[data-ranking-group-key="fantastic"]').click()
+        expect(page.locator('[data-ranking-facet="Fantasy"]')).to_have_count(0)
+        assert "category" not in ranking_requests[-1]
+
+        # Catalog titles join the list; personal favorites need the library.
+        page.locator('[data-ranking-source="catalog"]').click()
+        expect(page.locator(".ranking-result-row")).to_have_count(2)
+        expect(page.locator(".ranking-source-tag").first).to_have_text("Catalogo")
+        assert ranking_requests[-1]["source"] == ["both"]
+        page.locator('[data-ranking-source="library"]').click()
+        expect(page.locator('[data-ranking-mode="personal_favorites"]')).to_be_disabled()
+        assert ranking_requests[-1]["source"] == ["catalog"]
     finally:
         context.close()
 
     mobile_context, mobile_page = new_page(browser, mobile=True)
-    mobile_page.route(
-        "**/api/catalog/facets?**",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(facets_payload),
-        ),
-    )
     mobile_page.route("**/api/catalog/rankings?**", ranking_route)
     try:
         mobile_page.goto(f"{live_server}/rankings")
-        expect(mobile_page.locator(".ranking-filter-panel")).to_be_visible()
+        expect(mobile_page.locator(".ranking-podium-card").first).to_be_visible()
+        expect(mobile_page.locator("#rankingFilterPanel")).to_be_hidden()
+        mobile_page.locator("#rankingFilterToggle").click()
+        expect(mobile_page.locator("#rankingFilterPanel")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"
         )
@@ -775,85 +750,45 @@ def test_rankings_have_algorithm_tabs_context_filters_and_mobile_layout(browser,
         mobile_context.close()
 
 
-
-def test_ranking_covers_are_uniform_and_use_left_space(browser, live_server):
+def test_ranking_podium_and_list_covers_stay_uniform(browser, live_server):
     context, page = new_page(browser)
-
-    page.route(
-        "**/api/catalog/facets?**",
-        lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps({"categories": [], "mechanics": []}),
-        ),
-    )
-
-    games = []
-    for index in range(4):
-        games.append(
-            {
-                "game": {
-                    "bgg_id": 910100 + index,
-                    "parent_bgg_id": None,
-                    "title": f"Ranked Game {index + 1}",
-                    "year_published": 2020,
-                    "item_type": "standalone",
-                    "players": {"min": 1, "max": 4},
-                    "play_time": {"playing": 60, "min": 45, "max": 90},
-                    "bgg": {
-                        "average": 8.0,
-                        "average_weight": 2.5,
-                        "rank": index + 1,
-                        "best_players": "2",
-                        "recommended_age": "12+",
-                        "min_age": "12+",
-                    },
-                    "collection": {"own": True},
-                    "bgg_metadata": {"cover_url": None},
-                    "gameplay_summary": "A turno si scelgono azioni e si sviluppa la propria strategia.",
-                },
-                "score": 90.0 - index,
-                "reason": "Synthetic ranking reason",
-                "factors": ["ideale in 2", "peso 2.5", "età 12+"],
-            }
-        )
-
+    items = []
+    for index in range(6):
+        items.append({
+            "game": {
+                "source": "library",
+                "bgg_id": 910100 + index,
+                "parent_bgg_id": None,
+                "title": f"Ranked Game {index + 1}",
+                "item_type": "standalone",
+                "players": {"min": 1, "max": 4},
+                "play_time": {"playing": 60},
+                "bgg": {"average": 8.0, "rank": index + 1},
+                "collection": {"own": True},
+                "bgg_metadata": {"cover_url": None},
+            },
+            "score": 90.0 - index,
+            "reason": "Synthetic",
+            "factors": ["peso 2.5"],
+        })
     page.route(
         "**/api/catalog/rankings?**",
         lambda route: route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "mode": "overall",
-                    "title": "Migliori in assoluto",
-                    "description": "Synthetic",
-                    "items": games,
-                    "total": 4,
-                    "filters": {},
-                }
-            ),
+            status=200, content_type="application/json",
+            body=json.dumps(_ranking_payload({}, items=items)),
         ),
     )
-
     try:
         page.goto(f"{live_server}/rankings")
-        expect(page.locator(".ranking-result-row")).to_have_count(4)
-        expect(page.locator(".ranking-result-row.is-podium")).to_have_count(3)
-
-        first_cover = page.locator(".ranking-result-cover").nth(0).bounding_box()
-        fourth_cover = page.locator(".ranking-result-cover").nth(3).bounding_box()
-        assert first_cover is not None and fourth_cover is not None
-        assert abs(first_cover["width"] - fourth_cover["width"]) < 0.5
-        assert abs(first_cover["height"] - fourth_cover["height"]) < 0.5
-        assert first_cover["width"] >= 78
-
-        assert page.locator(".ranking-result-position").first.evaluate(
-            "(el) => getComputedStyle(el).position === 'absolute'"
-        )
-        assert page.locator(".ranking-result-row").first.evaluate(
-            "(el) => getComputedStyle(el).gridTemplateColumns.split(' ').length === 3"
-        )
+        expect(page.locator(".ranking-podium-card")).to_have_count(3)
+        expect(page.locator(".ranking-result-row")).to_have_count(3)
+        expect(page.locator(".ranking-result-row .ranking-position").first).to_have_text("4")
+        first = page.locator(".ranking-result-cover").nth(0).bounding_box()
+        last = page.locator(".ranking-result-cover").nth(2).bounding_box()
+        assert first is not None and last is not None
+        assert abs(first["width"] - last["width"]) < 0.5
+        assert abs(first["height"] - last["height"]) < 0.5
+        expect(page.locator("#rankingMore")).to_be_hidden()
     finally:
         context.close()
 
