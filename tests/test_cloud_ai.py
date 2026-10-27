@@ -233,6 +233,20 @@ def test_price_search_prefers_italian_alternate_title():
     assert all('Fate of the Fellowship' not in query for query in queries)
 
 
+def test_price_quote_matches_markdown_formatted_page_text():
+    def handler(request):
+        path = request.url.path
+        if path.endswith('/search'):
+            return httpx.Response(200, json={'results': [{'url': 'https://dragonstore.it/fellowship', 'title': 'Fellowship'}]})
+        if path.endswith('/fetch'):
+            return httpx.Response(200, json={'title': 'Fellowship', 'content': 'Prezzo: **€ 55,99**\n'})
+        return response(json.dumps({'offers': [
+            {'url': 'https://dragonstore.it/fellowship', 'price_eur': 55.99, 'availability': 'in_stock', 'quote': '€55,99'},
+        ]}))
+    offers = DeepSeekPriceProvider(make_client(handler)).search(title='Fate of the Fellowship')
+    assert [offer['price_eur'] for offer in offers] == [55.99]
+
+
 def test_price_rejects_hallucinated_price_even_on_known_shop():
     def handler(request):
         if request.url.path.endswith('/search'):

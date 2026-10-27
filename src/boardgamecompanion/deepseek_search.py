@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ipaddress
-import logging
 import re
 from urllib.parse import urlsplit
 
@@ -16,7 +15,8 @@ from boardgamecompanion.price_search import (
     ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host, shop_search_title,
 )
 
-logger = logging.getLogger(__name__)
+def _compact(text: str) -> str:
+    return re.sub(r"[\s*_`]+", "", text).lower()
 
 
 def matching_title(query: RulebookQuery, page: dict) -> bool:
@@ -150,7 +150,6 @@ class DeepSeekPriceProvider:
             seen = set()
             for shop in sorted(ITALIAN_SHOP_HOSTS):
                 found = self.web.search(f'"{query_title[:85]}" prezzo site:{shop}', count=2)
-                logger.warning("price search shop=%s results=%d", shop, len(found))
                 for result in found:
                     if shop_host(result["url"]) is None or result["url"] in seen:
                         continue
@@ -164,7 +163,6 @@ class DeepSeekPriceProvider:
                         break
                 if len(pages) == 4:
                     break
-            logger.warning("price search title=%r pages=%d read_failures=%d", query_title, len(pages), read_failures)
             if not pages:
                 if read_failures:
                     raise CloudAIError("DeepSeek: impossibile verificare le pagine dei negozi; prezzi precedenti conservati")
@@ -179,7 +177,6 @@ class DeepSeekPriceProvider:
                 {"titles": list(dict.fromkeys([title, query_title])), "year": year, "pages": pages},
             )
             items = structured.get("offers")
-            logger.warning("price structured raw=%r", structured)
             if not isinstance(items, list):
                 raise CloudAIError("DeepSeek: offerte non valide")
             by_url = {page["url"]: page for page in pages}
@@ -189,19 +186,15 @@ class DeepSeekPriceProvider:
                     continue
                 url, quote = item.get("url"), item.get("quote")
                 if not isinstance(url, str) or url not in by_url or url in seen or not isinstance(quote, str) or not quote.strip():
-                    logger.warning("price reject url-or-quote-missing url=%r", url)
                     continue
-                if quote not in by_url[url]["content"]:
-                    logger.warning("price reject quote-not-verbatim url=%r quote=%r", url, quote[:200])
+                if _compact(quote) not in _compact(by_url[url]["content"]):
                     continue
                 price = item.get("price_eur")
                 if isinstance(price, bool) or not isinstance(price, (int, float)) or not 0 < price < MAX_PRICE_EUR:
-                    logger.warning("price reject bad-price url=%r price=%r", url, price)
                     continue
                 # Price must occur in the exact quoted source, with a euro currency marker.
                 money = re.findall(r'(?:€\s*([0-9]+[.,][0-9]{2})|([0-9]+[.,][0-9]{2})\s*(?:€|EUR))', quote, re.I)
                 if not any(abs(float((a or b).replace(",", ".")) - price) < 0.005 for a, b in money):
-                    logger.warning("price reject price-not-in-quote url=%r price=%r", url, price)
                     continue
                 availability = item.get("availability")
                 offers.append({"url": url, "shop": shop_host(url), "price_eur": round(price, 2),
