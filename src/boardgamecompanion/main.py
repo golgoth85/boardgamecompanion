@@ -53,7 +53,11 @@ from boardgamecompanion.bgg_rulebook_search import (
     GeminiBggFileProvider,
 )
 from boardgamecompanion.catalog import SORT_SQL, Catalog
-from boardgamecompanion.suggestions import SuggestionsError, SuggestionsService
+from boardgamecompanion.suggestions import (
+    SUGGESTION_CATEGORIES,
+    SuggestionsError,
+    SuggestionsService,
+)
 from boardgamecompanion.suggestion_editorial import SuggestionEditorialService
 from boardgamecompanion.catalog_assistant import (
     CatalogAssistantError,
@@ -1152,20 +1156,46 @@ def explore_catalog(
     )
 
 
+SUGGESTION_SORT_PATTERN = "^(" + "|".join(SUGGESTION_CATEGORIES) + ")$"
+
+
+class SuggestionProposedPayload(BaseModel):
+    bgg_ids: list[int] = Field(min_length=1, max_length=50)
+    sort: str = Field(default="for_you", pattern=SUGGESTION_SORT_PATTERN)
+
+
+class SuggestionRestorePayload(BaseModel):
+    bgg_ids: list[int] | None = Field(default=None, max_length=1000)
+
+
 @app.get("/api/catalog/suggestions", tags=["catalog"])
 def get_catalog_suggestions(
-    limit: int = Query(default=10, ge=1, le=25),
+    limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0, le=5000),
     refresh: bool = Query(default=False),
-    sort: str = Query(default="for_you", pattern="^(for_you|novelty|bgg)$"),
+    sort: str = Query(default="for_you", pattern=SUGGESTION_SORT_PATTERN),
+    view: str = Query(default="new", pattern="^(new|proposed)$"),
 ) -> dict[str, object]:
     try:
         return get_suggestions_service().list_suggestions(
             limit=limit,
+            offset=offset,
             refresh=refresh,
             sort=sort,
+            view=view,
         )
     except SuggestionsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/catalog/suggestions/proposed", tags=["catalog"])
+def set_suggestions_aside(payload: SuggestionProposedPayload) -> dict[str, object]:
+    return get_suggestions_service().mark_proposed(payload.bgg_ids, sort=payload.sort)
+
+
+@app.post("/api/catalog/suggestions/proposed/restore", tags=["catalog"])
+def restore_suggestions(payload: SuggestionRestorePayload) -> dict[str, object]:
+    return get_suggestions_service().restore_proposed(payload.bgg_ids)
 
 
 @app.get("/api/catalog/facets", tags=["catalog"])

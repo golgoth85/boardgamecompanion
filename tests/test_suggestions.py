@@ -300,7 +300,7 @@ def test_suggestions_pool_retains_previous_hot_candidates(tmp_path: Path) -> Non
     )
 
     first = service.list_suggestions(limit=10, refresh=True)
-    assert first["source"] == "bgg_xml_api2_hot_history"
+    assert first["source"] == "bgg_xml_api2_hot_history_catalog"
     assert first["candidate_count"] == 2
     assert first["history_retained_count"] == 0
 
@@ -367,3 +367,162 @@ def test_suggestions_history_pool_is_bounded(tmp_path: Path) -> None:
     # bounded pool contains at most 20 entries here.
     assert payload["candidate_pool_limit"] == 20
     assert payload["candidate_count"] <= 20
+
+
+def _reference_game(connection, bgg_id: int, name: str, details: dict, **columns) -> None:
+    now = datetime.now(UTC).isoformat()
+    connection.execute(
+        """
+        INSERT INTO bgg_reference_games
+        (bgg_id,name,year_published,rank,bayes_average,average,users_rated,
+         image_url,description,details_json,source,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'api',?,?)
+        """,
+        (
+            bgg_id,
+            name,
+            columns.get("year", 2015),
+            columns.get("rank", 500),
+            columns.get("bayes", 6.8),
+            columns.get("average", 7.4),
+            columns.get("users_rated", 2000),
+            f"https://cf.geekdo-images.com/{bgg_id}.jpg",
+            columns.get("description", f"Catalog description {bgg_id}"),
+            json.dumps(details),
+            now,
+            now,
+        ),
+    )
+
+
+def test_suggestions_categories_offset_and_catalog_pool(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    with database.transaction(immediate=True) as connection:
+        _reference_game(
+            connection, 700, "Catalog Duel",
+            {"min_players": 2, "max_players": 2, "playing_time": 30,
+             "bgg_average_weight": 1.8, "categories": ["Fantasy"],
+             "mechanics": ["Deck Building"], "bgg_best_players": "2"},
+            users_rated=900, average=7.9,
+        )
+        _reference_game(
+            connection, 800, "Catalog Brick",
+            {"min_players": 1, "max_players": 4, "playing_time": 180,
+             "bgg_average_weight": 4.1, "categories": ["Economic"],
+             "mechanics": ["Worker Placement"]},
+            users_rated=30000,
+        )
+        # Never fetched from the API: no categories or mechanics, never a candidate.
+        _reference_game(connection, 900, "Bare Title", {})
+        # Owned games are excluded even when they come from the catalog.
+        _reference_game(connection, 100, "Owned Game", {"mechanics": ["Deck Building"]})
+    service = SuggestionsService(
+        database,
+        FakeBggClient(),
+        cache_path=tmp_path / "suggestions.json",
+        cache_ttl_seconds=3600,
+    )
+
+    payload = service.list_suggestions(limit=10, refresh=True)
+    ids = [item["bgg_id"] for item in payload["items"]]
+    assert set(ids) == {200, 300, 700, 800}
+    assert payload["catalog_candidate_count"] == 2
+    catalog = next(item for item in payload["items"] if item["bgg_id"] == 700)
+    assert catalog["origin"] == "catalog"
+    assert catalog["overview"]["source_description_available"] is True
+    assert catalog["cover_url"] == "https://cf.geekdo-images.com/700.jpg"
+
+    assert [item["bgg_id"] for item in service.list_suggestions(sort="trending")["items"]] == [200, 300]
+    assert [item["bgg_id"] for item in service.list_suggestions(sort="duo")["items"]] == [200, 700]
+    assert [item["bgg_id"] for item in service.list_suggestions(sort="light")["items"]] == [700]
+    assert {item["bgg_id"] for item in service.list_suggestions(sort="heavy")["items"]} == {300, 800}
+    assert [item["bgg_id"] for item in service.list_suggestions(sort="gems")["items"]] == [700]
+    assert payload["category_counts"]["trending"] == 2
+
+    first = service.list_suggestions(limit=2)
+    second = service.list_suggestions(limit=2, offset=2)
+    assert first["total_available"] == 4
+    assert [item["bgg_id"] for item in first["items"] + second["items"]] == ids
+
+
+def test_suggestions_set_aside_proposes_alternatives_and_restores(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    service = SuggestionsService(
+        database,
+        FakeBggClient(),
+        cache_path=tmp_path / "suggestions.json",
+        cache_ttl_seconds=3600,
+    )
+    first = service.list_suggestions(limit=1, refresh=True)
+    assert first["items"][0]["bgg_id"] == 200
+    assert first["proposed_count"] == 0
+
+    assert service.mark_proposed([200])["proposed_count"] == 1
+    alternative = service.list_suggestions(limit=1)
+    assert alternative["items"][0]["bgg_id"] == 300
+    assert alternative["proposed_count"] == 1
+    assert alternative["category_counts"]["for_you"] == 1
+
+    # Nothing is lost: the set-aside title is listed and can come back.
+    proposed = service.list_suggestions(view="proposed")
+    assert [item["bgg_id"] for item in proposed["items"]] == [200]
+    assert proposed["items"][0]["proposed"]["round"] == 1
+
+    service.mark_proposed([300])
+    assert service.list_suggestions()["items"] == []
+    assert [item["bgg_id"] for item in service.list_suggestions(view="proposed")["items"]] == [300, 200]
+
+    assert service.restore_proposed([300]) == {"restored": 1, "proposed_count": 1}
+    assert [item["bgg_id"] for item in service.list_suggestions()["items"]] == [300]
+    assert service.restore_proposed()["proposed_count"] == 0
+    assert [item["bgg_id"] for item in service.list_suggestions()["items"]] == [200, 300]
+
+
+def test_suggestions_editorial_is_requested_in_small_batches(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    with database.transaction(immediate=True) as connection:
+        for offset in range(25):
+            _reference_game(
+                connection, 2000 + offset, f"Catalog {offset}",
+                {"categories": ["Fantasy"], "mechanics": ["Deck Building"]},
+            )
+
+    class CountingEditorial(FakeEditorialService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batches: list[int] = []
+
+        def enrich(self, items):
+            self.batches.append(len(items))
+            return super().enrich(items)
+
+    editorial = CountingEditorial()
+    service = SuggestionsService(
+        database,
+        FakeBggClient(),
+        cache_path=tmp_path / "suggestions.json",
+        editorial_service=editorial,
+        cache_ttl_seconds=3600,
+    )
+    payload = service.list_suggestions(limit=25, refresh=True)
+    assert len(payload["items"]) == 25
+    assert editorial.batches == [10, 10, 5]
+
+
+def test_suggestions_old_cache_schema_is_rebuilt(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    cache_path = tmp_path / "suggestions.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "items": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeBggClient()
+    service = SuggestionsService(database, client, cache_path=cache_path, cache_ttl_seconds=3600)
+    assert service.list_suggestions()["cache_state"] == "refreshed"
+    assert client.hot_calls == 1

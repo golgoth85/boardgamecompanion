@@ -650,7 +650,7 @@ async function performGlobalSearch(query, target) {
                  ${internal ? "data-nav" : 'target="_blank" rel="noopener noreferrer"'}>
                 <span class="global-search-cover">
                   ${item.cover_url
-                    ? `<img src="${escapeHtml(item.cover_url)}" alt="" referrerpolicy="no-referrer">`
+                    ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="" referrerpolicy="no-referrer">`
                     : `<span>${icon("heart")}</span>`}
                 </span>
                 <span><strong>${escapeHtml(item.title)}</strong><small>${item.source_kind === "crowdfunding" ? "Crowdfunding" : "Wishlist BGG"}</small></span>
@@ -760,7 +760,7 @@ function referenceSearchResult(item) {
     <div class="global-search-result reference-result">
       <span class="global-search-cover">
         ${item.thumbnail_url
-          ? `<img src="${coverSrc(item.bgg_id, "thumb")}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${coverSrc(item.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
           : `<span>${escapeHtml(initials(item.name))}</span>`}
       </span>
       <a class="reference-open" href="/bgg/${Number(item.bgg_id)}" data-nav>
@@ -3809,7 +3809,7 @@ function relevantExpansionCard(item) {
       <a class="relevant-expansion-cover" href="${escapeHtml(item.url)}"
          target="_blank" rel="noopener noreferrer">
         ${item.cover_url
-          ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
+          ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
           : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
       </a>
       <div class="relevant-expansion-copy">
@@ -4870,7 +4870,7 @@ function assistantRecommendationCard(item) {
   return `
     <article class="assistant-game">
       <${open.tag} class="assistant-game-open" ${open.attrs} aria-label="Apri ${escapeHtml(item.title)}">
-        <span class="assistant-game-cover"><img src="${coverSrc(item.bgg_id, "thumb")}" alt="" loading="lazy" referrerpolicy="no-referrer"><span>${escapeHtml(initials(item.title))}</span></span>
+        <span class="assistant-game-cover"><img src="${coverSrc(item.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer"><span>${escapeHtml(initials(item.title))}</span></span>
         <span class="assistant-game-copy">
           <strong>${escapeHtml(item.title)}</strong>
           ${facts ? `<small>${escapeHtml(facts)}</small>` : ""}
@@ -6138,6 +6138,10 @@ async function renderExplore(initialTab = null) {
 
 const suggestionsState = {
   sort: "for_you",
+  view: "new",
+  count: ["5", "10", "20", "50"].includes(window.localStorage.getItem("bgc.suggestionsCount"))
+    ? window.localStorage.getItem("bgc.suggestionsCount")
+    : "10",
 };
 
 const crowdfundingState = {
@@ -6250,157 +6254,178 @@ function crowdfundingProviderNotice(payload) {
 }
 
 
-function suggestionCard(item, index) {
+const SUGGESTION_CATEGORIES = [
+  ["for_you", "Per te", "I candidati più vicini ai gusti della tua ludoteca"],
+  ["novelty", "Fuori dagli schemi", "Meccaniche che nella tua ludoteca mancano"],
+  ["trending", "Di tendenza", "I titoli più seguiti in questo momento su BGG"],
+  ["bgg", "I più amati", "Le valutazioni BGG più alte"],
+  ["gems", "Gemme nascoste", "Votati molto bene, ma ancora poco conosciuti"],
+  ["recent", "Novità", "Usciti negli ultimi anni"],
+  ["light", "Partite veloci", "Leggeri e entro l'ora di gioco"],
+  ["heavy", "Sfide impegnative", "Complessità BGG elevata"],
+  ["duo", "In due", "Ideali in due giocatori"],
+];
+const SUGGESTION_COUNTS = ["5", "10", "20", "50"];
+const SUGGESTION_PAGE = 10;
+
+function suggestionSkeletons(count) {
+  return Array.from({length: Math.max(1, Math.min(3, count))}, () => '<div class="skeleton suggestion-skeleton"></div>').join("");
+}
+
+// "1, 2, 3, 4" -> "1–4"; non-consecutive counts stay listed.
+function compactPlayerCounts(value) {
+  const counts = [...new Set(String(value || "").match(/\d+/g)?.map(Number) || [])].sort((x, y) => x - y);
+  if (!counts.length) return "—";
+  const consecutive = counts.every((count, index) => !index || count === counts[index - 1] + 1);
+  return consecutive && counts.length > 2 ? `${counts[0]}–${counts.at(-1)}` : counts.join(", ");
+}
+
+function suggestionCard(item, index, {proposedView = false} = {}) {
   const players = item.players || {};
-  const suggestionSourceKey = String(item.bgg_id || "");
-  const wishlist = wishlistEntry("bgg", suggestionSourceKey);
   const playTime = item.play_time || {};
   const bgg = item.bgg || {};
   const overview = item.overview || {};
-  const playerText = players.min && players.max
-    ? (players.min === players.max ? `${players.min} giocatori` : `${players.min}–${players.max} giocatori`)
-    : "—";
-  const recommendedPlayers = String(players.recommended || "").trim() || "—";
-  const bestPlayers = String(players.best || "").trim() || "—";
-  const timeText = playTime.playing
-    ? `${playTime.playing} min`
-    : playTime.max
-      ? `≤ ${playTime.max} min`
-      : "—";
-  const ratingText = Number.isFinite(Number(bgg.average))
-    ? Number(bgg.average).toFixed(1)
-    : "—";
-  const weightText = Number.isFinite(Number(bgg.average_weight))
-    ? Number(bgg.average_weight).toFixed(1)
-    : "—";
-  const mechanics = Array.isArray(overview.mechanics) && overview.mechanics.length
-    ? overview.mechanics
-    : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : []);
-  const setting = Array.isArray(overview.setting) ? overview.setting : [];
   const title = item.title || `BGG #${item.bgg_id}`;
-  const cover = item.cover_url
-    ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
-    : '<span aria-hidden="true">BGC</span>';
-  const overviewText = item.game_summary_it
-    || overview.summary
-    || "Descrizione non disponibile.";
-  const whyText = item.why_it_fits
-    || item.reason
-    || "È un candidato verificato BGG non presente nella tua ludoteca.";
-  const wishlistMeta = {
-    players: {min: players.min || null, max: players.max || null},
-    playing_time: playTime.playing || playTime.max || null,
-    weight: Number.isFinite(Number(bgg.average_weight)) ? Number(bgg.average_weight) : null,
-    bgg_rating: Number.isFinite(Number(bgg.average)) ? Number(bgg.average) : null,
+  const game = {
+    players: {min: players.min, max: players.max},
+    play_time: {playing: playTime.playing, min: playTime.min, max: playTime.max},
   };
-
+  const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 2) : "—";
+  const best = compactPlayerCounts(players.best);
+  const recommended = compactPlayerCounts(players.recommended);
+  const tags = [
+    ...(Array.isArray(overview.setting) ? overview.setting : []),
+    ...(Array.isArray(overview.mechanics) && overview.mechanics.length
+      ? overview.mechanics
+      : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : [])),
+  ];
+  const overviewText = item.game_summary_it || overview.summary || "Descrizione non disponibile.";
+  const whyText = item.why_it_fits || item.reason || "È un candidato verificato BGG non presente nella tua ludoteca.";
+  const subtitle = [
+    item.year_published || "",
+    Number(bgg.rank) > 0 ? `#${formatNumber(bgg.rank, 0)} BGG` : "",
+    item.hot_rank ? `Hotness BGG #${formatNumber(item.hot_rank, 0)}` : "",
+  ].filter(Boolean).join(" · ");
+  const actions = referenceActionButtons({
+    bgg_id: item.bgg_id,
+    name: title,
+    year_published: item.year_published,
+    image_url: item.cover_url || "",
+    owned: false,
+    in_catalog: false,
+  });
   return `
-    <article class="suggestion-card">
-      <div class="suggestion-rank">#${index + 1}</div>
-
-      <div class="suggestion-hero">
-        <div class="suggestion-cover">${cover}</div>
-
-        <div class="suggestion-hero-content">
-          <div class="suggestion-heading">
-            <div class="suggestion-title">
-              <h2>${escapeHtml(title)}</h2>
-              <span class="muted">${escapeHtml(String(item.year_published || "Anno —"))}</span>
-            </div>
-            <div class="suggestion-heading-actions">
-              <a class="suggestion-bgg-link"
-                 href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
-                 target="_blank" rel="noopener noreferrer"
-                 aria-label="Apri ${escapeHtml(title)} su BoardGameGeek">
-                <span class="suggestion-bgg-mark">BGG</span><span aria-hidden="true">${icon("external")}</span>
-              </a>
-              <button class="wishlist-heart ${wishlist ? "is-active" : ""}"
-                      type="button"
-                      aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
-                      title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
-                      data-wishlist-source-kind="bgg"
-                      data-wishlist-source-key="${escapeHtml(suggestionSourceKey)}"
-                      data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
-                      data-wishlist-bgg-id="${Number(item.bgg_id)}"
-                      data-wishlist-title="${escapeHtml(title)}"
-                      data-wishlist-year="${escapeHtml(String(item.year_published || ""))}"
-                      data-wishlist-cover="${escapeHtml(item.cover_url || "")}"
-                      data-wishlist-meta="${escapeHtml(JSON.stringify(wishlistMeta))}"
-                      data-wishlist-target="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}">
-                <span aria-hidden="true">${wishlist ? icon("heart-fill") : icon("heart")}</span>
-              </button>
-            </div>
+    <article class="suggestion-card" data-suggestion-id="${Number(item.bgg_id)}">
+      <a class="suggestion-cover" href="/bgg/${Number(item.bgg_id)}" data-nav aria-label="Apri ${escapeHtml(title)}">
+        <span class="card-corner"><span class="card-rank">#${index + 1}</span></span>
+        ${item.cover_url
+          ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
+          : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
+        ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
+      </a>
+      <div class="suggestion-body">
+        <header class="suggestion-heading">
+          <div class="suggestion-title">
+            <h2><a href="/bgg/${Number(item.bgg_id)}" data-nav>${escapeHtml(title)}</a></h2>
+            ${subtitle ? `<span class="muted">${escapeHtml(subtitle)}</span>` : ""}
           </div>
-
-          <dl class="suggestion-quick-facts" aria-label="Dati BGG di ${escapeHtml(title)}">
-            <div><dt>Giocatori</dt><dd>${escapeHtml(playerText)}</dd></div>
-            <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
-            <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
-            <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
-            <div class="suggestion-player-poll">
-              <dt>Raccomandato per</dt><dd>${escapeHtml(recommendedPlayers)}</dd>
-            </div>
-            <div class="suggestion-player-poll suggestion-player-best">
-              <dt>Ideale in</dt><dd>${escapeHtml(bestPlayers)}</dd>
-            </div>
-          </dl>
+          <div class="suggestion-heading-actions">
+            ${proposedView ? `
+              <button class="button button-ghost suggestion-restore" type="button" data-suggestion-restore="${Number(item.bgg_id)}">
+                ${icon("refresh")}<span>Ripristina</span>
+              </button>
+            ` : ""}
+            <a class="suggestion-bgg-link" href="https://boardgamegeek.com/boardgame/${Number(item.bgg_id)}"
+               target="_blank" rel="noopener noreferrer" aria-label="Apri ${escapeHtml(title)} su BoardGameGeek" title="Apri su BoardGameGeek">
+              <span class="suggestion-bgg-mark">BGG</span><span aria-hidden="true">${icon("external")}</span>
+            </a>
+            ${actions}
+          </div>
+        </header>
+        <div class="catalog-metrics suggestion-metrics">
+          ${catalogMetric("Giocatori", playerText(game))}
+          ${catalogMetric("Consigliato", recommended)}
+          ${catalogMetric("Ideale in", best)}
+          ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
+          ${catalogMetric("Peso", weight)}
         </div>
-      </div>
-
-      <div class="suggestion-editorial">
-        <section class="suggestion-copy-block">
-          <h3>Il gioco</h3>
-          <p>${escapeHtml(overviewText)}</p>
-          ${setting.length ? `
-            <div class="suggestion-mini-row">
-              <strong>Ambientazione / temi</strong>
-              <div class="suggestion-tags">
-                ${setting.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-              </div>
-            </div>
-          ` : ""}
-          ${mechanics.length ? `
-            <div class="suggestion-mini-row">
-              <strong>Meccaniche</strong>
-              <div class="suggestion-tags">
-                ${mechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-              </div>
-            </div>
-          ` : ""}
-        </section>
-
-        <section class="suggestion-copy-block suggestion-why">
-          <h3>Potrebbe piacerti perché</h3>
-          <p>${escapeHtml(whyText)}</p>
-        </section>
+        <div class="suggestion-editorial">
+          <section class="suggestion-copy-block">
+            <h3>Il gioco</h3>
+            <p>${escapeHtml(overviewText)}</p>
+            ${tags.length ? `<div class="suggestion-tags">${tags.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+          </section>
+          <section class="suggestion-copy-block suggestion-why">
+            <h3>Potrebbe piacerti perché</h3>
+            <p>${escapeHtml(whyText)}</p>
+          </section>
+        </div>
       </div>
     </article>
   `;
 }
 
+function suggestionsSummaryText(payload) {
+  const parts = [];
+  const candidates = Number(payload.candidate_count) || 0;
+  if (candidates) parts.push(`${formatNumber(candidates, 0)} candidati non posseduti`);
+  if (payload.generated_at) {
+    const date = new Date(payload.generated_at);
+    if (!Number.isNaN(date.getTime())) {
+      parts.push(`analisi del ${date.toLocaleDateString("it-IT", {day: "numeric", month: "short"})}`);
+    }
+  }
+  if (payload.cache_state === "stale") parts.push("BGG non raggiungibile: ultimi dati disponibili");
+  return parts.join(" · ");
+}
+
+let suggestionsLoadToken = 0;
+
 async function renderSuggestions({forceRefresh = false} = {}) {
   document.title = "Suggerimenti · BoardGameCompanion";
-  const sortOptions = [
-    ["for_you", "Per te"],
-    ["novelty", "Più diversi"],
-    ["bgg", "BGG"],
-  ];
+  const proposedView = suggestionsState.view === "proposed";
+  const category = SUGGESTION_CATEGORIES.find(([key]) => key === suggestionsState.sort) || SUGGESTION_CATEGORIES[0];
   app.innerHTML = `
-    <section class="suggestions-page">
-      <header class="page-header browse-header suggestions-header">
-        <div class="page-header-copy">
-          <h1>Suggerimenti</h1>
-        </div>
-        <button class="button button-ghost" id="suggestionsRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
-      </header>
-      <div class="suggestions-toolbar" aria-label="Ordina suggerimenti">
-        ${sortOptions.map(([value, label]) => `<button type="button" data-suggestions-sort="${value}" class="${suggestionsState.sort === value ? "is-active" : ""}">${label}</button>`).join("")}
+    <section class="page-header catalog-page-header suggestions-header">
+      <div class="page-header-copy">
+        <h1>Suggerimenti</h1>
+        <p class="muted catalog-page-summary" id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</p>
       </div>
-      <div id="suggestionsSummary" class="suggestions-summary">
-        <span class="muted">Analisi del profilo e dei candidati BGG…</span>
+      <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Suggerimenti da mostrare">
+        <button type="button" class="stat ${proposedView ? "" : "is-active"}" data-suggestions-view="new" aria-pressed="${!proposedView}">
+          <strong id="suggestionsNewCount">—</strong><span>Da scoprire</span>
+        </button>
+        <button type="button" class="stat ${proposedView ? "is-active" : ""}" data-suggestions-view="proposed" aria-pressed="${proposedView}">
+          <strong id="suggestionsProposedCount">—</strong><span>Già proposti</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="catalog-workspace suggestions-workspace" aria-label="Suggerimenti">
+      <div class="suggestion-categories" role="group" aria-label="Categoria">
+        ${SUGGESTION_CATEGORIES.map(([key, label, hint]) => `
+          <button type="button" class="suggestion-category ${key === category[0] ? "is-active" : ""}" data-suggestions-sort="${key}"
+                  aria-pressed="${key === category[0]}" title="${escapeHtml(hint)}">
+            <span>${escapeHtml(label)}</span><small data-suggestions-category-count="${key}"></small>
+          </button>
+        `).join("")}
+      </div>
+      <div class="toolbar suggestions-toolbar">
+        <div class="suggestions-profile" id="suggestionsProfile"></div>
+        <label class="catalog-density-field">
+          <span class="catalog-density-label">Mostra</span>
+          <select id="suggestionsCount" aria-label="Numero di suggerimenti">
+            ${SUGGESTION_COUNTS.map((value) => `<option value="${value}" ${suggestionsState.count === value ? "selected" : ""}>${value}</option>`).join("")}
+          </select>
+        </label>
+        ${proposedView
+          ? `<button class="button button-ghost" id="suggestionsRestoreAll" type="button">${icon("refresh")}<span>Ripristina tutti</span></button>`
+          : `<button class="button button-primary" id="suggestionsAlternatives" type="button" title="Metti da parte questi titoli e proponine altri">${icon("sparkle")}<span>Proponi altri</span></button>`}
+        <button class="button button-ghost icon-only" id="suggestionsRefresh" type="button"
+                aria-label="Aggiorna i candidati da BGG" title="Aggiorna i candidati da BGG">${icon("refresh")}</button>
       </div>
       <div id="suggestionsGrid" class="suggestions-grid" aria-live="polite">
-        ${skeletons()}
+        ${suggestionSkeletons(Number(suggestionsState.count) || 10)}
       </div>
     </section>
   `;
@@ -6414,45 +6439,140 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       void renderSuggestions();
     });
   });
+  document.querySelectorAll("[data-suggestions-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      suggestionsState.view = button.dataset.suggestionsView === "proposed" ? "proposed" : "new";
+      void renderSuggestions();
+    });
+  });
+  document.querySelector("#suggestionsCount")?.addEventListener("change", (event) => {
+    suggestionsState.count = SUGGESTION_COUNTS.includes(event.target.value) ? event.target.value : "10";
+    window.localStorage.setItem("bgc.suggestionsCount", suggestionsState.count);
+    void renderSuggestions();
+  });
+  document.querySelector("#suggestionsAlternatives")?.addEventListener("click", async (event) => {
+    const ids = [...document.querySelectorAll("#suggestionsGrid [data-suggestion-id]")]
+      .map((card) => Number(card.dataset.suggestionId))
+      .filter(Boolean);
+    if (!ids.length) return;
+    event.currentTarget.disabled = true;
+    try {
+      await api("/api/catalog/suggestions/proposed", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({bgg_ids: ids, sort: suggestionsState.sort}),
+      });
+      showToast(`${ids.length} titoli spostati in “Già proposti”: puoi ripristinarli quando vuoi.`);
+      await renderSuggestions();
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      showToast(error.message, true);
+    }
+  });
+  document.querySelector("#suggestionsRestoreAll")?.addEventListener("click", async () => {
+    try {
+      const result = await api("/api/catalog/suggestions/proposed/restore", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({}),
+      });
+      showToast(`${formatNumber(result.restored || 0, 0)} titoli ripristinati.`);
+      suggestionsState.view = "new";
+      await renderSuggestions();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
 
+  const token = ++suggestionsLoadToken;
   const grid = document.querySelector("#suggestionsGrid");
   const summary = document.querySelector("#suggestionsSummary");
-  try {
+  const wanted = Number(suggestionsState.count) || 10;
+  const fetchPage = (offset, refresh) => {
     const params = new URLSearchParams({
-      limit: "10",
-      sort: suggestionsState.sort,
+      limit: String(Math.min(SUGGESTION_PAGE, wanted - offset)),
+      offset: String(offset),
+      sort: category[0],
+      view: suggestionsState.view,
     });
-    if (forceRefresh) params.set("refresh", "true");
+    if (refresh) params.set("refresh", "true");
+    return api(`/api/catalog/suggestions?${params.toString()}`);
+  };
+  const bindCards = (root) => {
+    bindWishlistActions(root);
+    bindReferenceActions(root);
+    root.querySelectorAll("[data-suggestion-restore]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api("/api/catalog/suggestions/proposed/restore", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({bgg_ids: [Number(button.dataset.suggestionRestore)]}),
+          });
+          showToast("Titolo ripristinato tra i suggerimenti.");
+          await renderSuggestions();
+        } catch (error) {
+          button.disabled = false;
+          showToast(error.message, true);
+        }
+      });
+    });
+  };
+
+  try {
     const [payload] = await Promise.all([
-      api(`/api/catalog/suggestions?${params.toString()}`),
+      fetchPage(0, forceRefresh),
       refreshWishlistIndex().catch(() => null),
     ]);
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    const profile = payload.profile || {};
-    const topMechanics = Array.isArray(profile.top_mechanics)
-      ? profile.top_mechanics.slice(0, 4).map((entry) => entry?.[0]).filter(Boolean)
+    if (token !== suggestionsLoadToken) return;
+    const counts = payload.category_counts || {};
+    document.querySelector("#suggestionsNewCount").textContent = formatNumber(counts.for_you || 0, 0);
+    document.querySelector("#suggestionsProposedCount").textContent = formatNumber(payload.proposed_count || 0, 0);
+    document.querySelectorAll("[data-suggestions-category-count]").forEach((node) => {
+      node.textContent = formatNumber(counts[node.dataset.suggestionsCategoryCount] || 0, 0);
+    });
+    summary.textContent = suggestionsSummaryText(payload);
+    const topMechanics = Array.isArray(payload.profile?.top_mechanics)
+      ? payload.profile.top_mechanics.slice(0, 3).map((entry) => entry?.[0]).filter(Boolean)
       : [];
-    const sortLabel = {
-      for_you: "selezionati per te",
-      novelty: "ordinati per varietà rispetto alla tua ludoteca",
-      bgg: "ordinati per valutazione BGG",
-    }[payload.sort || suggestionsState.sort] || "selezionati per te";
-    summary.innerHTML = `
-      <div>
-        <strong>${formatNumber(items.length, 0)} suggerimenti</strong>
-        <span class="muted">${escapeHtml(sortLabel)}</span>
-      </div>
-      <div class="suggestions-profile">
-        ${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}
-      </div>
-    `;
+    const profile = document.querySelector("#suggestionsProfile");
+    profile.innerHTML = topMechanics.length
+      ? `<span class="suggestions-profile-label">Il tuo profilo</span>${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}`
+      : "";
+
+    const total = Math.min(wanted, Number(payload.total_available) || 0);
+    let items = Array.isArray(payload.items) ? payload.items : [];
     if (!items.length) {
-      grid.innerHTML = '<div class="empty-state"><strong>Nessun candidato disponibile</strong><p class="muted">Riprova con Aggiorna o verifica il token BGG nelle Impostazioni.</p></div>';
+      grid.innerHTML = proposedView
+        ? '<div class="empty-state"><strong>Nessun titolo messo da parte</strong><p class="muted">Con “Proponi altri” i suggerimenti mostrati finiscono qui e si possono ripristinare.</p></div>'
+        : (payload.proposed_count
+          ? '<div class="empty-state"><strong>Hai visto tutti i candidati di questa categoria</strong><p class="muted">Ripristina i titoli in “Già proposti” o scegli un’altra categoria.</p></div>'
+          : '<div class="empty-state"><strong>Nessun candidato disponibile</strong><p class="muted">Riprova con Aggiorna o verifica il token BGG nelle Impostazioni.</p></div>');
+      const button = document.querySelector("#suggestionsAlternatives");
+      if (button) button.disabled = true;
       return;
     }
-    grid.innerHTML = items.map(suggestionCard).join("");
-    bindWishlistActions(grid);
+    grid.innerHTML = items.map((item, index) => suggestionCard(item, index, {proposedView})).join("")
+      + (total > items.length ? suggestionSkeletons(total - items.length) : "");
+    bindCards(grid);
+    // Further pages arrive in small batches, so long lists show up progressively.
+    for (let offset = items.length; offset < total; offset += SUGGESTION_PAGE) {
+      const page = await fetchPage(offset, false);
+      if (token !== suggestionsLoadToken) return;
+      const pageItems = Array.isArray(page.items) ? page.items : [];
+      if (!pageItems.length) break;
+      const fragment = document.createElement("div");
+      fragment.innerHTML = pageItems.map((item, index) => suggestionCard(item, items.length + index, {proposedView})).join("");
+      bindCards(fragment);
+      grid.querySelectorAll(".skeleton").forEach((node) => node.remove());
+      grid.append(...fragment.children);
+      items = items.concat(pageItems);
+      if (offset + SUGGESTION_PAGE < total) grid.insertAdjacentHTML("beforeend", suggestionSkeletons(total - offset - SUGGESTION_PAGE));
+    }
+    grid.querySelectorAll(".skeleton").forEach((node) => node.remove());
   } catch (error) {
+    if (token !== suggestionsLoadToken) return;
     grid.innerHTML = `<div class="empty-state"><strong>Impossibile generare i suggerimenti</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
 }
@@ -6918,7 +7038,7 @@ async function renderWishlist() {
             <article class="wishlist-card">
               <a class="wishlist-cover" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">
                 ${item.cover_url
-                  ? `<img src="${escapeHtml(item.cover_url)}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
+                  ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
                   : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
               </a>
               <div class="wishlist-card-body">

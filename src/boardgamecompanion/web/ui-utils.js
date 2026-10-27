@@ -35,7 +35,10 @@ export function icon(name, className = "icon") {
   return `<svg class="${className}" aria-hidden="true"><use href="/static/icons.svg#i-${name}"/></svg>`;
 }
 
-export function coverSrc(bggId, variant = "full") {
+// One cover per game across the app: the server picks the canonical image.
+// `fallback` is only used by the server when it knows no image for the game.
+export function coverSrc(bggId, fallback = "") {
+  if (!Number(bggId)) return fallback || "";
   const base = `/api/covers/${encodeURIComponent(bggId)}`;
-  return variant === "full" ? base : `${base}?variant=${variant}`;
+  return fallback && /^https:\/\//.test(fallback) ? `${base}?src=${encodeURIComponent(fallback)}` : base;
 }

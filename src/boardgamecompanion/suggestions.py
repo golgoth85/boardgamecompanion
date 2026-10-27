@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,8 +71,107 @@ def _game_overview(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+CACHE_SCHEMA_VERSION = 4
+EDITORIAL_BATCH_SIZE = 10
+CATALOG_PER_CATEGORY = 120
+
+
+def _number(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _player_counts(value: Any) -> set[int]:
+    return {int(token) for token in re.findall(r"\d+", str(value or ""))}
+
+
+def _is_recent(item: dict[str, Any]) -> bool:
+    year = item.get("year_published")
+    return isinstance(year, int) and year >= datetime.now(UTC).year - 2
+
+
+def _is_light(item: dict[str, Any]) -> bool:
+    weight = _number((item.get("bgg") or {}).get("average_weight"))
+    playing = _number((item.get("play_time") or {}).get("playing"))
+    return weight is not None and weight <= 2.2 and (playing is None or playing <= 60)
+
+
+def _is_heavy(item: dict[str, Any]) -> bool:
+    weight = _number((item.get("bgg") or {}).get("average_weight"))
+    return weight is not None and weight >= 3.2
+
+
+def _is_duo(item: dict[str, Any]) -> bool:
+    players = item.get("players") or {}
+    return 2 in _player_counts(players.get("best")) or (
+        players.get("min") == 2 and players.get("max") == 2
+    )
+
+
+def _is_gem(item: dict[str, Any]) -> bool:
+    bgg = item.get("bgg") or {}
+    average = _number(bgg.get("average"))
+    voters = bgg.get("users_rated")
+    return (
+        average is not None
+        and average >= 7.3
+        and isinstance(voters, int)
+        and 0 < voters <= 4000
+    )
+
+
+def _score_key(item: dict[str, Any]) -> tuple[float, int]:
+    return (-float(item.get("suggestion_score") or 0), int(item.get("hot_rank") or 10_000))
+
+
+def _novelty_key(item: dict[str, Any]) -> tuple[float, float]:
+    return (
+        -float((item.get("score_parts") or {}).get("novelty") or 0),
+        -float(item.get("suggestion_score") or 0),
+    )
+
+
+def _bgg_key(item: dict[str, Any]) -> tuple[float, float]:
+    bgg = item.get("bgg") or {}
+    return (-float(bgg.get("bayes_average") or 0), -float(bgg.get("average") or 0))
+
+
+def _trending_key(item: dict[str, Any]) -> tuple[int, float]:
+    return (int(item.get("hot_rank") or 10_000), -float(item.get("suggestion_score") or 0))
+
+
+def _gem_key(item: dict[str, Any]) -> tuple[float, float]:
+    parts = item.get("score_parts") or {}
+    return (
+        -(float(parts.get("quality") or 0) + float(parts.get("taste_fit") or 0)),
+        -float(item.get("suggestion_score") or 0),
+    )
+
+
+# key -> (filter, ordering). Filters only narrow the same candidate pool.
+SUGGESTION_CATEGORIES: dict[str, tuple[Any, Any]] = {
+    "for_you": (None, _score_key),
+    "novelty": (None, _novelty_key),
+    "trending": (lambda item: bool(item.get("hot_rank")), _trending_key),
+    "bgg": (None, _bgg_key),
+    "gems": (_is_gem, _gem_key),
+    "recent": (_is_recent, _score_key),
+    "light": (_is_light, _score_key),
+    "heavy": (_is_heavy, _score_key),
+    "duo": (_is_duo, _score_key),
+}
+
+
+def category_items(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    accept, order = SUGGESTION_CATEGORIES.get(key) or SUGGESTION_CATEGORIES["for_you"]
+    values = [item for item in items if accept is None or accept(item)]
+    values.sort(key=order)
+    return values
+
+
 class SuggestionsService:
     """Grounded suggestions for games that are not already owned."""
+
+    _proposed_lock = threading.Lock()
 
     def __init__(
         self,
@@ -93,6 +193,10 @@ class SuggestionsService:
         self.candidate_pool_limit = max(
             self.candidate_limit,
             min(int(candidate_pool_limit), 1000),
+        )
+        # Titles already shown and set aside by "proponi alternative"; restorable.
+        self.proposed_path = self.cache_path.with_name(
+            self.cache_path.stem + "-proposed.json"
         )
 
     def _owned_ids(self) -> set[int]:
@@ -389,12 +493,15 @@ class SuggestionsService:
         return (
             payload
             if isinstance(payload, dict)
-            and payload.get("schema_version") in {2, 3}
+            and payload.get("schema_version") in {2, 3, CACHE_SCHEMA_VERSION}
             and isinstance(payload.get("items"), list)
             else None
         )
 
     def _fresh(self, payload: dict[str, Any]) -> bool:
+        # Older caches lack the catalog candidates: rebuild them once.
+        if payload.get("schema_version") != CACHE_SCHEMA_VERSION:
+            return False
         generated = payload.get("generated_at")
         if not isinstance(generated, str):
             return False
@@ -447,6 +554,7 @@ class SuggestionsService:
             "bgg_bayes_average": bgg.get("bayes_average"),
             "bgg_average_weight": bgg.get("average_weight"),
             "bgg_rank": bgg.get("rank"),
+            "bgg_users_rated": bgg.get("users_rated"),
             "bgg_best_players": players.get("best"),
             "bgg_recommended_players": players.get("recommended"),
             "categories": list(item.get("categories") or []),
@@ -496,6 +604,9 @@ class SuggestionsService:
         history_order: list[int] = []
         historical_metadata: dict[int, dict[str, Any]] = {}
         for item in previous_items:
+            # Catalog candidates are recomputed at every refresh, not retained.
+            if item.get("origin") == "catalog":
+                continue
             metadata = self._cached_item_to_metadata(item)
             if metadata is None:
                 continue
@@ -518,68 +629,24 @@ class SuggestionsService:
                 continue
             if metadata.get("parent_bgg_id") is not None:
                 continue
-
-            score, parts, matched_categories, matched_mechanics, novel_mechanics = self._score(
-                metadata,
-                hot_rank=hot_by_id.get(bgg_id, {}).get("hot_rank"),
-                profile=profile,
-            )
+            hot_rank = hot_by_id.get(bgg_id, {}).get("hot_rank")
             ranked.append(
-                {
-                    "bgg_id": bgg_id,
-                    "title": metadata.get("title"),
-                    "year_published": metadata.get("year_published"),
-                    "cover_url": metadata.get("cover_url"),
-                    "players": {
-                        "min": metadata.get("min_players"),
-                        "max": metadata.get("max_players"),
-                        "best": metadata.get("bgg_best_players"),
-                        "recommended": metadata.get(
-                            "bgg_recommended_players"
-                        ),
-                    },
-                    "play_time": {
-                        "playing": metadata.get("playing_time"),
-                        "min": metadata.get("min_play_time"),
-                        "max": metadata.get("max_play_time"),
-                    },
-                    "bgg": {
-                        "average": metadata.get("bgg_average"),
-                        "bayes_average": metadata.get(
-                            "bgg_bayes_average"
-                        ),
-                        "average_weight": metadata.get(
-                            "bgg_average_weight"
-                        ),
-                        "rank": metadata.get("bgg_rank"),
-                    },
-                    "categories": list(
-                        metadata.get("categories") or []
-                    ),
-                    "mechanics": list(
-                        metadata.get("mechanics") or []
-                    ),
-                    "source_description": _plain_description(
-                        metadata.get("description")
-                    )[:5000],
-                    "comparison_anchors": self._comparison_anchors(
-                        metadata,
-                        owned_games,
-                    ),
-                    "overview": _game_overview(metadata),
-                    "hot_rank": hot_by_id.get(
-                        bgg_id, {}
-                    ).get("hot_rank"),
-                    "suggestion_score": score,
-                    "score_parts": parts,
-                    "reason": self._reason(
-                        metadata,
-                        matched_categories=matched_categories,
-                        matched_mechanics=matched_mechanics,
-                        novel_mechanics=novel_mechanics,
-                    ),
-                }
+                self._ranked_item(
+                    metadata,
+                    hot_rank=hot_rank,
+                    profile=profile,
+                    owned_games=owned_games,
+                    origin="hot" if hot_rank else "history",
+                )
             )
+
+        catalog_items = self._catalog_candidates(
+            owned_ids=owned_ids,
+            excluded={int(item["bgg_id"]) for item in ranked},
+            profile=profile,
+            owned_games=owned_games,
+        )
+        ranked.extend(catalog_items)
 
         ranked.sort(
             key=lambda item: (
@@ -589,24 +656,19 @@ class SuggestionsService:
             )
         )
         payload = {
-            "schema_version": 3,
+            "schema_version": CACHE_SCHEMA_VERSION,
             "generated_at": (
                 datetime.now(UTC)
                 .isoformat()
                 .replace("+00:00", "Z")
             ),
-            "source": "bgg_xml_api2_hot_history",
+            "source": "bgg_xml_api2_hot_history_catalog",
             "candidate_count": len(ranked),
             "current_hot_count": len(hot),
+            "catalog_candidate_count": len(catalog_items),
             "candidate_pool_limit": self.candidate_pool_limit,
-            "history_retained_count": max(
-                0,
-                len(ranked)
-                - sum(
-                    1
-                    for item in ranked
-                    if int(item["bgg_id"]) in hot_by_id
-                ),
+            "history_retained_count": sum(
+                1 for item in ranked if item.get("origin") == "history"
             ),
             "owned_excluded_count": sum(
                 1
@@ -619,82 +681,275 @@ class SuggestionsService:
         self._write_cache(payload)
         return payload
 
+    def _ranked_item(
+        self,
+        metadata: dict[str, Any],
+        *,
+        hot_rank: int | None,
+        profile: dict[str, Any],
+        owned_games: list[dict[str, Any]] | None,
+        origin: str,
+    ) -> dict[str, Any]:
+        """Candidate in cache shape; anchors only when owned games are given."""
+        score, parts, matched_categories, matched_mechanics, novel_mechanics = self._score(
+            metadata,
+            hot_rank=hot_rank,
+            profile=profile,
+        )
+        item = {
+            "bgg_id": int(metadata["bgg_id"]),
+            "title": metadata.get("title"),
+            "year_published": metadata.get("year_published"),
+            "cover_url": metadata.get("cover_url"),
+            "origin": origin,
+            "players": {
+                "min": metadata.get("min_players"),
+                "max": metadata.get("max_players"),
+                "best": metadata.get("bgg_best_players"),
+                "recommended": metadata.get("bgg_recommended_players"),
+            },
+            "play_time": {
+                "playing": metadata.get("playing_time"),
+                "min": metadata.get("min_play_time"),
+                "max": metadata.get("max_play_time"),
+            },
+            "bgg": {
+                "average": metadata.get("bgg_average"),
+                "bayes_average": metadata.get("bgg_bayes_average"),
+                "average_weight": metadata.get("bgg_average_weight"),
+                "rank": metadata.get("bgg_rank"),
+                "users_rated": metadata.get("bgg_users_rated"),
+            },
+            "categories": list(metadata.get("categories") or []),
+            "mechanics": list(metadata.get("mechanics") or []),
+            "source_description": _plain_description(
+                metadata.get("description")
+            )[:5000],
+            "comparison_anchors": (
+                self._comparison_anchors(metadata, owned_games)
+                if owned_games is not None
+                else []
+            ),
+            "overview": _game_overview(metadata),
+            "hot_rank": hot_rank,
+            "suggestion_score": score,
+            "score_parts": parts,
+            "reason": self._reason(
+                metadata,
+                matched_categories=matched_categories,
+                matched_mechanics=matched_mechanics,
+                novel_mechanics=novel_mechanics,
+            ),
+        }
+        return item
+
+    def _catalog_candidates(
+        self,
+        *,
+        owned_ids: set[int],
+        excluded: set[int],
+        profile: dict[str, Any],
+        owned_games: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Best catalog titles for every category, so alternatives never run dry.
+
+        Uses the local BGG reference catalog already scanned for Esplora; only
+        titles with stored /thing details (categories or mechanics) qualify.
+        """
+        from boardgamecompanion.bgg_reference import BggReferenceCatalog
+
+        try:
+            rows = BggReferenceCatalog(self.database).explore_rows()
+        except Exception:  # catalog unavailable: hot candidates still work
+            return []
+
+        scored: list[dict[str, Any]] = []
+        for row in rows:
+            bgg_id = int(row["bgg_id"])
+            if bgg_id in owned_ids or bgg_id in excluded:
+                continue
+            if not row.get("categories") and not row.get("mechanics"):
+                continue
+            metadata = {
+                **row,
+                "title": row.get("name"),
+                "parent_bgg_id": None,
+                "bgg_users_rated": row.get("users_rated"),
+                "description": None,
+            }
+            scored.append(
+                self._ranked_item(
+                    metadata,
+                    hot_rank=None,
+                    profile=profile,
+                    owned_games=None,
+                    origin="catalog",
+                )
+            )
+
+        selected: dict[int, dict[str, Any]] = {}
+        for key in SUGGESTION_CATEGORIES:
+            if key == "trending":
+                continue
+            for item in category_items(scored, key)[:CATALOG_PER_CATEGORY]:
+                selected.setdefault(int(item["bgg_id"]), item)
+        if not selected:
+            return []
+
+        ids = list(selected)
+        descriptions: dict[int, str] = {}
+        with self.database.connect() as connection:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                for row in connection.execute(
+                    "SELECT bgg_id, description FROM bgg_reference_games "
+                    f"WHERE bgg_id IN ({','.join('?' * len(chunk))})",
+                    chunk,
+                ).fetchall():
+                    descriptions[int(row["bgg_id"])] = row["description"] or ""
+
+        result = []
+        for bgg_id, item in selected.items():
+            metadata = self._cached_item_to_metadata(item) or {}
+            item["source_description"] = _plain_description(
+                descriptions.get(bgg_id)
+            )[:5000]
+            item["overview"]["source_description_available"] = bool(
+                item["source_description"]
+            )
+            item["comparison_anchors"] = self._comparison_anchors(metadata, owned_games)
+            result.append(item)
+        return result
+
+    def _read_proposed(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.proposed_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            payload = None
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), dict):
+            return {"version": 1, "round": 0, "items": {}}
+        return payload
+
+    def _write_proposed(self, payload: dict[str, Any]) -> None:
+        self.proposed_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.proposed_path.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(self.proposed_path)
+
+    def mark_proposed(self, bgg_ids: list[int], *, sort: str = "for_you") -> dict[str, Any]:
+        """Set shown titles aside so the next request proposes alternatives."""
+        with self._proposed_lock:
+            payload = self._read_proposed()
+            payload["round"] = int(payload.get("round") or 0) + 1
+            now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            for bgg_id in dict.fromkeys(int(value) for value in bgg_ids):
+                payload["items"].setdefault(
+                    str(bgg_id),
+                    {"round": payload["round"], "sort": sort, "at": now},
+                )
+            self._write_proposed(payload)
+        return {"proposed_count": len(payload["items"]), "round": payload["round"]}
+
+    def restore_proposed(self, bgg_ids: list[int] | None = None) -> dict[str, Any]:
+        """Bring set-aside titles back; all of them when no ids are given."""
+        with self._proposed_lock:
+            payload = self._read_proposed()
+            if bgg_ids is None:
+                restored = len(payload["items"])
+                payload["items"] = {}
+            else:
+                keys = {str(int(value)) for value in bgg_ids}
+                restored = sum(1 for key in keys if key in payload["items"])
+                payload["items"] = {
+                    key: value
+                    for key, value in payload["items"].items()
+                    if key not in keys
+                }
+            self._write_proposed(payload)
+        return {"restored": restored, "proposed_count": len(payload["items"])}
+
+    def _enrich(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        selected = [dict(item) for item in items]
+        if self.editorial_service is not None:
+            # Same generation, requested in small batches so long lists stay responsive.
+            enriched: list[dict[str, Any]] = []
+            for start in range(0, len(selected), EDITORIAL_BATCH_SIZE):
+                enriched.extend(
+                    self.editorial_service.enrich(
+                        selected[start : start + EDITORIAL_BATCH_SIZE]
+                    )
+                )
+            selected = enriched
+        for item in selected:
+            item.pop("source_description", None)
+            item.pop("comparison_anchors", None)
+        return selected
+
     def list_suggestions(
         self,
         *,
         limit: int = 10,
+        offset: int = 0,
         refresh: bool = False,
         sort: str = "for_you",
+        view: str = "new",
     ) -> dict[str, Any]:
-        cap = max(1, min(int(limit), 25))
-        sort_mode = sort if sort in {"for_you", "novelty", "bgg"} else "for_you"
-
-        def ordered(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            values = list(items)
-            if sort_mode == "novelty":
-                values.sort(
-                    key=lambda item: (
-                        -float((item.get("score_parts") or {}).get("novelty") or 0),
-                        -float(item.get("suggestion_score") or 0),
-                    )
-                )
-            elif sort_mode == "bgg":
-                values.sort(
-                    key=lambda item: (
-                        -float((item.get("bgg") or {}).get("bayes_average") or 0),
-                        -float((item.get("bgg") or {}).get("average") or 0),
-                    )
-                )
-            else:
-                values.sort(
-                    key=lambda item: (
-                        -float(item.get("suggestion_score") or 0),
-                        int(item.get("hot_rank") or 10_000),
-                    )
-                )
-            return values
+        cap = max(1, min(int(limit), 50))
+        start = max(0, int(offset))
+        sort_mode = sort if sort in SUGGESTION_CATEGORIES else "for_you"
+        view_mode = view if view in {"new", "proposed"} else "new"
 
         cached = self._read_cache()
-        if (
-            cached is not None
-            and not refresh
-            and self._fresh(cached)
-        ):
-            selected = ordered(cached["items"])[:cap]
-            if self.editorial_service is not None:
-                selected = self.editorial_service.enrich(selected)
+        if cached is not None and not refresh and self._fresh(cached):
+            payload, state = cached, "fresh"
+        else:
+            try:
+                payload = self._refresh()
+                state = "refreshed"
+            except SuggestionsError:
+                if cached is None:
+                    raise
+                payload, state = cached, "stale"
+
+        proposed = self._read_proposed()["items"]
+        items = [item for item in payload["items"] if isinstance(item, dict)]
+        fresh_items = [item for item in items if str(item.get("bgg_id")) not in proposed]
+        category_counts = {
+            key: len(category_items(fresh_items, key)) for key in SUGGESTION_CATEGORIES
+        }
+        if view_mode == "proposed":
+            pool = [item for item in items if str(item.get("bgg_id")) in proposed]
+            # Most recently set aside first; the category ordering within a round.
+            ordered = category_items(pool, sort_mode)
+            position = {id(item): index for index, item in enumerate(ordered)}
+            ordered.sort(
+                key=lambda item: (
+                    -int(proposed[str(item["bgg_id"])].get("round") or 0),
+                    position[id(item)],
+                )
+            )
+        else:
+            ordered = category_items(fresh_items, sort_mode)
+
+        selected = self._enrich(ordered[start : start + cap])
+        if view_mode == "proposed":
             for item in selected:
-                item.pop("source_description", None)
-                item.pop("comparison_anchors", None)
-            return {
-                **cached,
-                "cache_state": "fresh",
-                "cache_ttl_seconds": self.cache_ttl_seconds,
-                "items": selected,
-                "sort": sort_mode,
-                "total_available": len(cached["items"]),
-            }
-
-        try:
-            payload = self._refresh()
-            state = "refreshed"
-        except SuggestionsError:
-            if cached is None:
-                raise
-            payload = cached
-            state = "stale"
-
-        selected = ordered(payload["items"])[:cap]
-        if self.editorial_service is not None:
-            selected = self.editorial_service.enrich(selected)
-        for item in selected:
-            item.pop("source_description", None)
-            item.pop("comparison_anchors", None)
+                item["proposed"] = proposed.get(str(item["bgg_id"]))
         return {
-            **payload,
+            **{key: value for key, value in payload.items() if key != "items"},
             "cache_state": state,
             "cache_ttl_seconds": self.cache_ttl_seconds,
             "items": selected,
             "sort": sort_mode,
-            "total_available": len(payload["items"]),
+            "view": view_mode,
+            "offset": start,
+            "limit": cap,
+            "total_available": len(ordered),
+            "category_counts": category_counts,
+            "proposed_count": sum(
+                1 for item in items if str(item.get("bgg_id")) in proposed
+            ),
         }

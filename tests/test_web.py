@@ -117,7 +117,8 @@ def test_static_assets_are_served(tmp_path: Path) -> None:
     assert "why_it_fits" in js.text
     assert "data-suggestions-sort" in js.text
     assert "object-fit:contain" in extra_css.text
-    assert "Più diversi" in js.text
+    assert "Fuori dagli schemi" in js.text
+    assert "/api/catalog/suggestions/proposed" in js.text
     assert 'openSettingsDialog("crowdfunding")' in js.text
     assert "Configura Kickstarter" in js.text
     assert "tutorialDiscoveryAction" in js.text
