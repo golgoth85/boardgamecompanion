@@ -4095,7 +4095,7 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   font: inherit;
   font-size: .75rem;
-  font-weight: 850;
+  font-weight: 400;
 }
 
 .crowdfunding-segment button:hover {

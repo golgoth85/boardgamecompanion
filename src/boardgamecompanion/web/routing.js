@@ -4,7 +4,7 @@ export const shellSectionLabels = Object.freeze({
   rankings: "Classifiche",
   suggestions: "Suggerimenti",
   crowdfunding: "Crowdfunding",
-  lists: "Liste",
+  lists: "Raccolte",
   wishlist: "Wishlist",
   explore: "Esplora",
   plays: "Partite",
