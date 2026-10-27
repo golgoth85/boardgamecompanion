@@ -239,7 +239,7 @@ def test_price_quote_matches_markdown_formatted_page_text():
         if path.endswith('/search'):
             return httpx.Response(200, json={'results': [{'url': 'https://dragonstore.it/fellowship', 'title': 'Fellowship'}]})
         if path.endswith('/fetch'):
-            return httpx.Response(200, json={'title': 'Fellowship', 'content': 'Prezzo: **€ 55,99**\n'})
+            return httpx.Response(200, json={'title': 'Fellowship', 'content': 'Prezzo: **€ 55\\,99**\n'})
         return response(json.dumps({'offers': [
             {'url': 'https://dragonstore.it/fellowship', 'price_eur': 55.99, 'availability': 'in_stock', 'quote': '€55,99'},
         ]}))

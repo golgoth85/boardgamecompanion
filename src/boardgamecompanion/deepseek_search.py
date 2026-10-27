@@ -15,8 +15,9 @@ from boardgamecompanion.price_search import (
     ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host, shop_search_title,
 )
 
+
 def _compact(text: str) -> str:
-    return re.sub(r"[\s*_`]+", "", text).lower()
+    return re.sub(r"[\s*_`\\]+", "", text).lower()
 
 
 def matching_title(query: RulebookQuery, page: dict) -> bool:
