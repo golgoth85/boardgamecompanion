@@ -7502,11 +7502,11 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
         <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
       <div class="crowdfunding-toolbar">
-        <div class="crowdfunding-segment" aria-label="Classifica">
-          ${sortOptions.map(([value, label]) => `<button type="button" data-crowdfunding-sort="${value}" class="${crowdfundingState.sort === value ? "is-active" : ""}">${label}</button>`).join("")}
+        <div class="suggestion-categories" role="group" aria-label="Classifica">
+          ${sortOptions.map(([value, label]) => `<button type="button" class="suggestion-category ${crowdfundingState.sort === value ? "is-active" : ""}" data-crowdfunding-sort="${value}">${label}</button>`).join("")}
         </div>
-        <div class="crowdfunding-segment crowdfunding-platform-filter" aria-label="Piattaforma">
-          ${platformOptions.map(([value, label]) => `<button type="button" data-crowdfunding-platform="${value}" class="${crowdfundingState.platform === value ? "is-active" : ""}">${label}</button>`).join("")}
+        <div class="suggestion-categories crowdfunding-platform-filter" role="group" aria-label="Piattaforma">
+          ${platformOptions.map(([value, label]) => `<button type="button" class="suggestion-category ${crowdfundingState.platform === value ? "is-active" : ""}" data-crowdfunding-platform="${value}">${label}</button>`).join("")}
         </div>
       </div>
       <div id="crowdfundingSummary" class="crowdfunding-summary"></div>

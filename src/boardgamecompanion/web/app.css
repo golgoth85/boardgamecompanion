@@ -4075,39 +4075,6 @@ a { color: inherit; text-decoration: none; }
   gap: .7rem;
 }
 
-.crowdfunding-segment {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: .35rem;
-  padding: .3rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(10, 14, 22, .72);
-}
-
-.crowdfunding-segment button {
-  min-height: 2.45rem;
-  padding: .48rem .72rem;
-  border: 0;
-  border-radius: 9px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  font-size: .75rem;
-  font-weight: 400;
-}
-
-.crowdfunding-segment button:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, .04);
-}
-
-.crowdfunding-segment button.is-active {
-  color: #07140e;
-  background: var(--accent);
-}
-
 .crowdfunding-summary {
   display: flex;
   flex-wrap: wrap;
@@ -4304,17 +4271,6 @@ a { color: inherit; text-decoration: none; }
   .crowdfunding-toolbar {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .crowdfunding-segment {
-    width: 100%;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    border-radius: 12px;
-  }
-
-  .crowdfunding-segment button {
-    flex: 0 0 auto;
   }
 
   .crowdfunding-grid {
