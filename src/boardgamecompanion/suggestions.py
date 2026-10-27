@@ -74,6 +74,9 @@ def _game_overview(metadata: dict[str, Any]) -> dict[str, Any]:
 CACHE_SCHEMA_VERSION = 4
 EDITORIAL_BATCH_SIZE = 10
 CATALOG_PER_CATEGORY = 120
+# Catalog titles admitted early (crowdfunding, upcoming) have a handful of
+# votes and inflated averages: only ranked titles with real votes qualify.
+CATALOG_MIN_VOTERS = 200
 
 
 def _number(value: Any) -> float | None:
@@ -769,6 +772,8 @@ class SuggestionsService:
             if bgg_id in owned_ids or bgg_id in excluded:
                 continue
             if not row.get("categories") and not row.get("mechanics"):
+                continue
+            if not row.get("rank") or int(row.get("users_rated") or 0) < CATALOG_MIN_VOTERS:
                 continue
             metadata = {
                 **row,

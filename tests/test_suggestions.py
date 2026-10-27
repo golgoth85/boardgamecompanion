@@ -414,6 +414,9 @@ def test_suggestions_categories_offset_and_catalog_pool(tmp_path: Path) -> None:
         )
         # Never fetched from the API: no categories or mechanics, never a candidate.
         _reference_game(connection, 900, "Bare Title", {})
+        # Early crowdfunding titles: unranked or with a handful of votes.
+        _reference_game(connection, 910, "Unranked Campaign", {"mechanics": ["Deck Building"]}, rank=None, users_rated=150, average=9.8)
+        _reference_game(connection, 920, "Few Voters", {"mechanics": ["Deck Building"]}, users_rated=120, average=9.5)
         # Owned games are excluded even when they come from the catalog.
         _reference_game(connection, 100, "Owned Game", {"mechanics": ["Deck Building"]})
     service = SuggestionsService(
