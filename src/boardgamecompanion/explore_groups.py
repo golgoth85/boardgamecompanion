@@ -71,7 +71,9 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Commodity Speculation", "Increase Value of Unchosen Resources",
         "Delayed Purchase", "Victory Points as a Resource",
         "Automatic Resource Growth", "Ownership", "Resource to Move",
-        "End Game Bonuses", "Mancala", "Upgrades",
+        "End Game Bonuses", "Mancala", "Upgrades", "Tech Trees / Tech Tracks",
+        "Tags", "Hidden Victory Points", "Resource Queue", "Highest-Lowest Scoring",
+        "Neighbor Scope", "Finale Ending",
     )),
     ("actions", "Azioni e turni", (
         "Worker Placement", "Worker Placement with Dice Workers",
@@ -96,13 +98,15 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Relative Movement", "Measurement Movement", "Three Dimensional Movement",
         "Track Movement", "Moving Multiple Units", "Pattern Movement", "Race",
         "Crayon Rail System", "Pieces as Map", "Hidden Movement", "Slide/Push",
+        "Slide / Push", "Facing",
     )),
     ("conflict", "Conflitto e territorio", (
         "Area Majority / Influence", "Take That", "Player Elimination",
         "Area-Impulse", "King of the Hill", "Kill Steal", "Zone of Control",
         "Line of Sight", "Ratio / Combat Results Table", "Simulation",
         "Minimap Resolution", "Force Commitment", "Siege", "Catch the Leader",
-        "Secret Unit Deployment",
+        "Secret Unit Deployment", "Tug of War", "Lane Battler",
+        "Algorithmic Resolution",
     )),
     ("social", "Aste, bluff e trattative", (
         "Auction / Bidding", "Auction: Dutch", "Auction: English",
@@ -114,11 +118,13 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Bribery", "Alliances", "Deduction", "Voting", "Communication Limits",
         "Targeted Clues", "Player Judge", "Prisoner's Dilemma",
         "Traitor Game", "Questions and Answers",
+        "Roles with Asymmetric Information", "I Cut, You Choose",
     )),
     ("spatial", "Tessere e schemi", (
         "Tile Placement", "Pattern Building", "Pattern Recognition",
         "Grid Coverage", "Enclosure", "Line Drawing", "Connections",
         "Paper-and-Pencil", "Matching", "Memory", "Drawing", "Square Grid Coverage",
+        "Spelling", "Ordering",
     )),
     ("dexterity", "Abilità e tempo reale", (
         "Real-Time", "Speed Matching", "Stacking and Balancing", "Flicking",
@@ -132,7 +138,7 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Scenario / Mission / Campaign Game", "Narrative Choice / Paragraph",
         "Storytelling", "Role Playing", "Variable Player Powers",
         "Variable Set-up", "Events", "Score-and-Reset Game", "Single Loser Game",
-        "Advantage Token", "Induction", "Sudden Death Ending",
+        "Advantage Token", "Induction", "Sudden Death Ending", "Single Play",
     )),
 )
 
