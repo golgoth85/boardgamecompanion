@@ -2735,6 +2735,7 @@ async function renderCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <h1>Ludoteca</h1>
+        <p class="muted catalog-page-summary">La tua collezione, le partite giocate e i regolamenti raccolti.</p>
         ${activeFacet ? `
           <div class="catalog-hero-actions">
             <button class="active-facet-chip" id="clearFacet" type="button">
@@ -4327,7 +4328,7 @@ async function renderDiscovery() {
     app.innerHTML = `
       <section class="admin-page review-page">
         <div class="review-page-head admin-page-head">
-          <div><h1>Ricerca regolamenti</h1></div>
+          <div><h1>Ricerca regolamenti</h1><p class="muted catalog-page-summary">Cerca fonti per i giochi del catalogo e segui gli esiti delle acquisizioni.</p></div>
           <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
@@ -4485,6 +4486,7 @@ async function renderReviews({reset = false} = {}) {
         <div class="review-page-head admin-page-head">
           <div>
             <h1>Fonti da verificare</h1>
+            <p class="muted catalog-page-summary">Esamina i candidati ai regolamenti e conferma quali fonti sono affidabili.</p>
           </div>
           <span class="review-counter">${pendingData.total} da verificare</span>
         </div>
@@ -4768,6 +4770,7 @@ async function renderUpdates({reset = false} = {}) {
         <div class="review-page-head admin-page-head">
           <div>
             <h1>Aggiornamenti regolamenti</h1>
+            <p class="muted catalog-page-summary">Monitora le fonti approvate e controlla quando sono disponibili nuove versioni.</p>
           </div>
           <span class="review-counter">${data.total} monitorati</span>
         </div>
@@ -5522,6 +5525,7 @@ async function renderRankings() {
     <section class="page-header catalog-page-header rankings-header">
       <div class="page-header-copy">
         <h1>Classifiche</h1>
+        <p class="muted catalog-page-summary">Confronta i giochi per voto, popolarità e altri criteri, nella ludoteca o su BGG.</p>
         <p class="muted catalog-page-summary" id="rankingResultCount" aria-live="polite">Caricamento…</p>
       </div>
       <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("ranking", rankingState.source)}</div>
@@ -7478,6 +7482,7 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       <header class="page-header browse-header crowdfunding-header">
         <div class="page-header-copy">
           <h1>Crowdfunding</h1>
+          <p class="muted catalog-page-summary">Scopri i giochi da tavolo in campagna su Kickstarter e Gamefound.</p>
         </div>
         <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
@@ -7673,6 +7678,7 @@ async function renderWishlist() {
     <section class="page-header browse-header">
       <div>
         <h1>Wishlist</h1>
+        <p class="muted catalog-page-summary">Ritrova i giochi che hai salvato per valutarli o acquistarli in seguito.</p>
       </div>
     </section>
     <section class="wishlist-grid" id="wishlistGrid">${skeletons()}</section>
@@ -7757,6 +7763,7 @@ async function renderLists() {
     <section class="page-header browse-header lists-header">
       <div>
         <h1>Liste</h1>
+        <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri.</p>
       </div>
     </section>
     <section class="list-builder-card">
