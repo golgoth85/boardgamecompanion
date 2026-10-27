@@ -723,7 +723,7 @@ async function performGlobalSearch(query, target) {
 
 function referenceActionButtons(item) {
   if (item.owned) {
-    return `<span class="owned-pill">${icon("check")}<span>In ludoteca</span></span>`;
+    return `<span class="collection-icon-button is-active" role="img" aria-label="In ludoteca" title="In ludoteca">${icon("check")}</span>`;
   }
   const key = String(item.bgg_id);
   const wishlist = wishlistEntry("bgg", key);
