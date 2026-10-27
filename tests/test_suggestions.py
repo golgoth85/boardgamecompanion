@@ -529,3 +529,23 @@ def test_suggestions_old_cache_schema_is_rebuilt(tmp_path: Path) -> None:
     service = SuggestionsService(database, client, cache_path=cache_path, cache_ttl_seconds=3600)
     assert service.list_suggestions()["cache_state"] == "refreshed"
     assert client.hot_calls == 1
+
+
+def test_suggestions_carry_age_language_and_player_poll(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    client = FakeBggClient()
+    original = client.things
+
+    def things(ids):
+        data = original(ids)
+        for item in data.values():
+            item.update(bgg_recommended_age=10, bgg_language_dependence="No necessary in-game text",
+                        player_poll=[{"players": "2", "best": 5, "recommended": 1, "not_recommended": 0}])
+        return data
+
+    client.things = things
+    service = SuggestionsService(database, client, cache_path=tmp_path / "s.json", cache_ttl_seconds=3600)
+    item = service.list_suggestions(limit=1, refresh=True)["items"][0]
+    assert item["age"] == 10
+    assert item["language_dependence"] == "No necessary in-game text"
+    assert item["players"]["poll"][0]["players"] == "2"

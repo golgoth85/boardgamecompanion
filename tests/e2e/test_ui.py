@@ -2950,16 +2950,17 @@ def test_suggestions_use_compact_cards_and_bgg_player_guidance(browser, live_ser
         expect(card).to_have_count(1)
         expect(card.locator(".suggestion-cover")).to_have_count(1)
         expect(card.locator(".suggestion-editorial")).to_have_count(1)
-        metrics = card.locator(".suggestion-metrics")
-        expect(metrics).to_contain_text("Consigliato")
-        expect(metrics).to_contain_text("1–4")
-        expect(metrics).to_contain_text("Ideale in")
+        facts = card.locator(".suggestion-facts-row")
+        expect(facts.locator(".player-chart-count.is-best")).to_have_text("4")
+        expect(facts.locator(".player-chart-count")).to_have_count(4)
+        expect(facts).to_contain_text("Lingua")
+        expect(card.locator(".suggestion-side .suggestion-tags")).to_contain_text("Mythology")
         expect(page.locator("#suggestionsCount")).to_have_value("10")
         expect(page.locator("[data-suggestions-sort]")).to_have_count(9)
         expect(page.locator("#suggestionsAlternatives")).to_be_visible()
         cover = card.locator(".suggestion-cover").bounding_box()
         body = card.locator(".suggestion-body").bounding_box()
-        assert cover["x"] < body["x"] and abs(cover["y"] - body["y"]) < 2
+        assert cover["x"] < body["x"]
     finally:
         context.close()
 

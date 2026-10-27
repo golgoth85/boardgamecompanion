@@ -422,7 +422,7 @@
   border:1px solid var(--line);border-radius:16px;background:var(--surface)
 }
 .suggestion-card:hover{border-color:#3e4c68}
-.suggestion-cover{position:relative;display:grid;align-self:start;aspect-ratio:1/1;margin:.75rem 0 .75rem .75rem;place-items:center;overflow:hidden;border-radius:12px;background:var(--surface-2);color:var(--muted);text-decoration:none}
+.suggestion-cover{position:relative;display:grid;aspect-ratio:1/1;place-items:center;overflow:hidden;border-radius:12px;background:var(--surface-2);color:var(--muted);text-decoration:none}
 .suggestion-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
 .suggestion-cover:hover img{transform:scale(1.035)}
 .suggestion-cover::after{content:"";position:absolute;inset:auto 0 0;height:40%;background:linear-gradient(to top,rgba(11,15,23,.62),transparent);pointer-events:none}
@@ -1231,3 +1231,25 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .game-state-icon.completion-button{min-width:0;width:2.65rem}
 .game-primary-actions .completion-date-editor{min-height:2.65rem}
 .game-primary-actions .completion-date-save{min-height:2.65rem}
+
+/* Suggerimenti: colonna con cover e tag, riga dati come nella scheda gioco */
+.suggestion-side{display:grid;align-content:start;gap:.6rem;padding:.75rem 0 .75rem .75rem;min-width:0}
+.suggestion-side .suggestion-cover{margin:0;width:100%}
+.suggestion-side .suggestion-tags{gap:.25rem}
+.suggestion-side .suggestion-tags span{font-size:.58rem}
+.suggestion-facts-row{display:grid;grid-template-columns:minmax(9rem,1.6fr) repeat(4,minmax(0,1fr));gap:.4rem;margin:0}
+.suggestion-facts-row>div{display:grid;align-content:center;gap:.22rem;min-width:0;padding:.45rem .55rem;border:1px solid var(--line);border-radius:10px;background:rgba(7,11,18,.3)}
+.suggestion-facts-row dt{color:var(--muted);font-size:.56rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.suggestion-facts-row dd{margin:0;overflow:hidden;color:var(--text);font-size:.8rem;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
+.suggestion-facts-row .player-chart-counts{flex-wrap:wrap}
+.suggestion-facts-row .player-chart-count{flex:0 0 1.55rem;height:1.45rem;font-size:.7rem}
+@media(max-width:1080px){
+  .suggestion-facts-row{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .suggestion-facts-row .suggestion-players{grid-column:1/-1}
+}
+@media(max-width:620px){
+  .suggestion-side{display:contents}
+  .suggestion-side .suggestion-tags{order:2;padding:0 .9rem .85rem}
+  .suggestion-facts-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .suggestion-facts-row .suggestion-players{grid-column:1/-1}
+}

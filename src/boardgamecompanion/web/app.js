@@ -6910,12 +6910,24 @@ function suggestionSkeletons(count) {
   return Array.from({length: Math.max(1, Math.min(3, count))}, () => '<div class="skeleton suggestion-skeleton"></div>').join("");
 }
 
-// "1, 2, 3, 4" -> "1–4"; non-consecutive counts stay listed.
-function compactPlayerCounts(value) {
-  const counts = [...new Set(String(value || "").match(/\d+/g)?.map(Number) || [])].sort((x, y) => x - y);
-  if (!counts.length) return "—";
-  const consecutive = counts.every((count, index) => !index || count === counts[index - 1] + 1);
-  return consecutive && counts.length > 2 ? `${counts[0]}–${counts.at(-1)}` : counts.join(", ");
+// Player counts as in the game page: ideal, recommended and not recommended chips.
+function suggestionPlayersMarkup(game, poll) {
+  const rows = playerChartRows(game, poll);
+  if (!rows.length || !rows.some((row) => row.verdict)) {
+    return `<div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>`;
+  }
+  return `
+    <div class="suggestion-players">
+      <dt>Giocatori</dt>
+      <dd>
+        <ol class="player-chart-counts">
+          ${rows.map((row) => `
+            <li class="player-chart-count is-${row.verdict || "unknown"}" title="${escapeHtml(`${row.label} giocatori: ${PLAYER_VERDICTS[row.verdict] || "nessun dato"}`)}">${escapeHtml(row.label)}</li>
+          `).join("")}
+        </ol>
+      </dd>
+    </div>
+  `;
 }
 
 function suggestionCard(item, index, {proposedView = false} = {}) {
@@ -6929,8 +6941,10 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
     play_time: {playing: playTime.playing, min: playTime.min, max: playTime.max},
   };
   const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 2) : "—";
-  const best = compactPlayerCounts(players.best);
-  const recommended = compactPlayerCounts(players.recommended);
+  const playerGame = {
+    players: {min: players.min, max: players.max},
+    bgg: {best_players: players.best, recommended_players: players.recommended},
+  };
   const tags = [
     ...(Array.isArray(overview.setting) ? overview.setting : []),
     ...(Array.isArray(overview.mechanics) && overview.mechanics.length
@@ -6954,13 +6968,16 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
   });
   return `
     <article class="suggestion-card" data-suggestion-id="${Number(item.bgg_id)}">
-      <a class="suggestion-cover" href="/bgg/${Number(item.bgg_id)}" data-nav aria-label="Apri ${escapeHtml(title)}">
-        <span class="card-corner"><span class="card-rank">#${index + 1}</span></span>
-        ${item.cover_url
-          ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
-          : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
-        ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
-      </a>
+      <div class="suggestion-side">
+        <a class="suggestion-cover" href="/bgg/${Number(item.bgg_id)}" data-nav aria-label="Apri ${escapeHtml(title)}">
+          <span class="card-corner"><span class="card-rank">#${index + 1}</span></span>
+          ${item.cover_url
+            ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
+          ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
+        </a>
+        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+      </div>
       <div class="suggestion-body">
         <header class="suggestion-heading">
           <div class="suggestion-title">
@@ -6980,18 +6997,17 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
             ${actions}
           </div>
         </header>
-        <div class="catalog-metrics suggestion-metrics">
-          ${catalogMetric("Giocatori", playerText(game))}
-          ${catalogMetric("Consigliato", recommended)}
-          ${catalogMetric("Ideale in", best)}
-          ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
-          ${catalogMetric("Peso", weight)}
-        </div>
+        <dl class="suggestion-facts-row">
+          ${suggestionPlayersMarkup(playerGame, players.poll)}
+          <div><dt>Età</dt><dd>${escapeHtml(ageText({bgg: {recommended_age: item.age}}))}</dd></div>
+          <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
+          <div><dt>Complessità</dt><dd>${weight === "—" ? "—" : `${weight} / 5`}</dd></div>
+          <div><dt>Lingua</dt><dd title="${escapeHtml(item.language_dependence || "")}">${escapeHtml(languageDependenceText(item.language_dependence))}</dd></div>
+        </dl>
         <div class="suggestion-editorial">
           <section class="suggestion-copy-block">
             <h3>Il gioco</h3>
             <p>${escapeHtml(overviewText)}</p>
-            ${tags.length ? `<div class="suggestion-tags">${tags.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
           </section>
           <section class="suggestion-copy-block suggestion-why">
             <h3>Potrebbe piacerti perché</h3>
