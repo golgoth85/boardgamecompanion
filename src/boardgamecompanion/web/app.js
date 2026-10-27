@@ -5525,8 +5525,11 @@ async function renderRankings() {
     <section class="page-header catalog-page-header rankings-header">
       <div class="page-header-copy">
         <h1>Classifiche</h1>
-        <p class="muted catalog-page-summary">Confronta i giochi per voto, popolarità e altri criteri, nella ludoteca o su BGG.</p>
-        <p class="muted catalog-page-summary" id="rankingResultCount" aria-live="polite">Caricamento…</p>
+        <p class="muted catalog-page-summary rankings-page-summary">
+          <span>Confronta i giochi per voto, popolarità e altri criteri, nella ludoteca o su BGG.</span>
+          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span id="rankingResultCount" aria-live="polite">Caricamento…</span>
+        </p>
       </div>
       <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("ranking", rankingState.source)}</div>
     </section>
