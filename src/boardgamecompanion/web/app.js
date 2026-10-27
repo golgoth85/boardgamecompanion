@@ -6729,8 +6729,11 @@ async function renderExplore(initialTab = null) {
     <section class="page-header catalog-page-header explore-page-header">
       <div class="page-header-copy">
         <h1>Esplora</h1>
-        <p class="muted catalog-page-summary">Trova giochi per genere, meccaniche e caratteristiche che ti interessano.</p>
-        <p class="muted catalog-page-summary" id="exploreResultCount" aria-live="polite">Caricamento…</p>
+        <p class="muted catalog-page-summary rankings-page-summary">
+          <span>Trova giochi per genere, meccaniche e caratteristiche che ti interessano.</span>
+          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span id="exploreResultCount" aria-live="polite">Caricamento…</span>
+        </p>
       </div>
       <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("explore", exploreState.source)}</div>
     </section>
@@ -7051,8 +7054,11 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     <section class="page-header catalog-page-header suggestions-header">
       <div class="page-header-copy">
         <h1>Suggerimenti</h1>
-        <p class="muted catalog-page-summary">Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca.</p>
-        <p class="muted catalog-page-summary" id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</p>
+        <p class="muted catalog-page-summary rankings-page-summary">
+          <span>Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca.</span>
+          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</span>
+        </p>
       </div>
       <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Suggerimenti da mostrare">
         <button type="button" class="stat ${proposedView ? "" : "is-active"}" data-suggestions-view="new" aria-pressed="${!proposedView}">
@@ -7361,8 +7367,11 @@ async function renderBggCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <h1>Catalogo</h1>
-        <p class="muted catalog-page-summary">Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca.</p>
-        <p class="muted catalog-page-summary" id="bggCatalogSummary" aria-live="polite">Caricamento…</p>
+        <p class="muted catalog-page-summary rankings-page-summary">
+          <span>Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca.</span>
+          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span id="bggCatalogSummary" aria-live="polite">Caricamento…</span>
+        </p>
       </div>
       <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Ordina catalogo">
         ${bggCatalogSorts.map(([value, label]) => `<button type="button" class="stat ${bggCatalogState.sort === value ? "is-active" : ""}" data-bgg-catalog-sort="${value}" aria-pressed="${bggCatalogState.sort === value}"><span>${label}</span></button>`).join("")}
