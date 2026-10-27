@@ -5526,7 +5526,7 @@ async function renderRankings() {
       <div class="page-header-copy">
         <h1>Classifiche</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
-          <span>Confronta i giochi per voto, popolarità e altri criteri, nella ludoteca o su BGG.</span>
+          <span>Confronta i giochi per voto, popolarità e altri criteri.</span>
           <span class="rankings-summary-separator" aria-hidden="true">·</span>
           <span id="rankingResultCount" aria-live="polite">Caricamento…</span>
         </p>
@@ -6729,6 +6729,7 @@ async function renderExplore(initialTab = null) {
     <section class="page-header catalog-page-header explore-page-header">
       <div class="page-header-copy">
         <h1>Esplora</h1>
+        <p class="muted catalog-page-summary">Trova giochi per genere, meccaniche e caratteristiche che ti interessano.</p>
         <p class="muted catalog-page-summary" id="exploreResultCount" aria-live="polite">Caricamento…</p>
       </div>
       <div class="explore-sources" role="group" aria-label="Dove cercare">${sourceBoxes("explore", exploreState.source)}</div>
@@ -7050,6 +7051,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     <section class="page-header catalog-page-header suggestions-header">
       <div class="page-header-copy">
         <h1>Suggerimenti</h1>
+        <p class="muted catalog-page-summary">Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca.</p>
         <p class="muted catalog-page-summary" id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</p>
       </div>
       <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Suggerimenti da mostrare">
@@ -7359,6 +7361,7 @@ async function renderBggCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <h1>Catalogo</h1>
+        <p class="muted catalog-page-summary">Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca.</p>
         <p class="muted catalog-page-summary" id="bggCatalogSummary" aria-live="polite">Caricamento…</p>
       </div>
       <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Ordina catalogo">
