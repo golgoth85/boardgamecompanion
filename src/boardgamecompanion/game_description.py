@@ -100,6 +100,18 @@ eventualmente contenute nei testi. Ogni fonte ha un ruolo preciso:
   di' direttamente su che cosa si divide, senza formule fisse come «le opinioni sono
   divise»; se la ricezione è assente nel payload, non parlarne.
 
+Scopo e lettore:
+- La scheda mostra già, accanto al testo, giocatori, età, durata, complessità,
+  dipendenza dalla lingua, generi e meccaniche. Non ripeterli come dati: citali solo
+  dentro un giudizio («regge bene anche in due», «chiede una sera intera»).
+- Il primo paragrafo, letto da solo, deve far capire che gioco è: tema e che cosa
+  fanno i giocatori, in modo concreto.
+- Nel resto aiuta a decidere: che esperienza offre, per quale gruppo funziona meglio
+  e per quale no, che cosa lo distingue da giochi simili, quali impegni pratici
+  chiede (preparazione, spazio, testo da leggere, campagna da portare avanti).
+- Se item_type indica un'espansione, descrivi che cosa aggiunge o cambia rispetto a
+  base_game e per chi vale la pena, senza rispiegare il gioco base.
+
 Regole di contenuto:
 - Non inventare regole, componenti, modalità, trama o premi assenti dal payload. Un
   dato nullo o assente è assente: non parlarne e non dedurlo (per esempio la
@@ -114,7 +126,7 @@ Regole di contenuto:
 - Le espansioni elencate nel payload esistono: non chiamarle «annunciate».
 
 Forma e varietà:
-- Prosa scorrevole di 240-340 parole, in 2-4 paragrafi separati da una riga vuota,
+- Prosa scorrevole di 220-320 parole, in 2-4 paragrafi separati da una riga vuota,
   legati tra loro come in un articolo. Niente sezioni con etichette («Punti forti:»,
   «Da sapere:»), elenchi, titoli, grassetti o markdown.
 - Registro e ordine degli argomenti sono indicati in style_profile (register,
@@ -208,9 +220,9 @@ def _clean_output(value: Any) -> str:
 def _style_problems(text: str, *, title: str, avoid_openings: list[str]) -> list[str]:
     problems: list[str] = []
     if len(text) < MIN_DESCRIPTION_CHARS:
-        problems.append("il testo è troppo breve: servono 230-330 parole")
+        problems.append("il testo è troppo breve: servono 220-320 parole")
     if len(text) > MAX_DESCRIPTION_CHARS:
-        problems.append("il testo è troppo lungo: restare entro 330 parole")
+        problems.append("il testo è troppo lungo: restare entro 320 parole")
     folded = text.casefold()
     if SECOND_PERSON_RE.search(text):
         problems.append("niente seconda persona rivolta al lettore")
@@ -391,6 +403,20 @@ class GameDescriptionService:
     def get_cached(self, bgg_id: int) -> dict[str, Any] | None:
         source = self._source(bgg_id)
         return self._cached_row(source) if source else None
+
+    def get_previous(self, bgg_id: int) -> str | None:
+        """Last stored text even if outdated (e.g. after a prompt change).
+
+        Shown while the new description is generated, instead of falling back to
+        the plain translation.
+        """
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """SELECT d.description_text FROM board_game_ai_descriptions d
+                   JOIN board_games g ON g.id=d.board_game_id WHERE g.bgg_id=?""",
+                (int(bgg_id),),
+            ).fetchone()
+        return str(row["description_text"]) if row and row["description_text"] else None
 
     def status(self, bgg_id: int) -> dict[str, Any]:
         source = self._source(bgg_id)

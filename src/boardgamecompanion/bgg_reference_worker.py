@@ -111,12 +111,14 @@ class BggReferenceWorker:
         return summary
 
     # -- requests -----------------------------------------------------------
-    def _fetch(self, ids: list[int]) -> dict[int, tuple[dict[str, Any], str]]:
+    def _fetch(
+        self, ids: list[int], skipped: set[int] | None = None
+    ) -> dict[int, tuple[dict[str, Any], str]]:
         if self._remaining_budget(self._reference.daily_budget) <= 0:
             raise _BudgetExhausted
         self._spend()
         self._summary["requests"] += 1
-        return self._client.things_with_xml(ids)
+        return self._client.things_with_xml(ids, skipped=skipped)
 
     # -- signals ------------------------------------------------------------
     def _admit(self, connection: Any, bgg_id: int, reason: str, until: datetime) -> bool:
@@ -199,9 +201,15 @@ class BggReferenceWorker:
         empty = 0
         while empty < EMPTY_BATCHES_BEFORE_STOP:
             ids = list(range(next_id, next_id + MAX_THING_IDS))
-            items = self._fetch(ids)
+            skipped: set[int] = set()
+            items = self._fetch(ids, skipped)
             next_id += MAX_THING_IDS
-            if not items:
+            if skipped:
+                # Unreadable new entries still prove the IDs exist: move past them.
+                LOGGER.info("BGG reference: skipped unreadable new IDs %s", sorted(skipped))
+                cursor = max(cursor, *skipped)
+                set_sync_state(self.database, NEW_ID_CURSOR_KEY, str(cursor))
+            if not items and not skipped:
                 empty += 1
                 continue
             empty = 0
@@ -282,11 +290,15 @@ class BggReferenceWorker:
             ids = select(MAX_THING_IDS)
             if not ids:
                 return
-            items = self._fetch(ids)
+            skipped: set[int] = set()
+            items = self._fetch(ids, skipped)
             for bgg_id in ids:
                 if bgg_id in items:
                     metadata, raw_xml = items[bgg_id]
                     self._store(bgg_id, metadata, raw_xml, recheck_days=recheck_days)
+                elif bgg_id in skipped:
+                    # Present on BGG but unreadable right now: try again later, never remove.
+                    self._postpone(bgg_id)
                 elif items:
                     self._mark_removed(bgg_id)
                 else:

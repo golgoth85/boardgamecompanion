@@ -7,6 +7,10 @@ const art = {
     <circle cx="22" cy="26" r="10"/>
     <ellipse cx="22" cy="26" rx="18" ry="5.5" transform="rotate(-18 22 26)"/>
     <path d="M38 6l1.6 3.4L43 11l-3.4 1.6L38 16l-1.6-3.4L33 11l3.4-1.6z"/>`],
+  scifi: [232, `
+    <path d="M24 6c6 5 8 12 8 20l-4 6h-8l-4-6c0-8 2-15 8-20z"/>
+    <circle cx="24" cy="19" r="3"/>
+    <path d="M16 26l-5 7 6-1M32 26l5 7-6-1M21 36l3 6 3-6"/>`],
   adventure: [168, `
     <circle cx="24" cy="24" r="17"/>
     <path d="M30.5 17.5l-4 9-9 4 4-9z"/>
@@ -24,6 +28,9 @@ const art = {
     <path d="M6 40V22l9 6v-6l9 6v-6l9 6V10h7v30z"/>
     <path d="M12 34h4M21 34h4M30 34h4"/>
     <path d="M6 40h36"/>`],
+  nature: [108, `
+    <path d="M10 38C10 20 22 9 40 8c-1 18-12 30-30 30z"/>
+    <path d="M10 38l18-18M20 28h-6M26 22v-6"/>`],
   mystery: [220, `
     <circle cx="20" cy="20" r="11"/>
     <path d="M28 28l12 12"/>
@@ -49,6 +56,11 @@ const art = {
     <rect x="9" y="12" width="16" height="24" rx="3" transform="rotate(-16 17 24)"/>
     <rect x="16" y="10" width="16" height="24" rx="3"/>
     <rect x="23" y="12" width="16" height="24" rx="3" transform="rotate(16 31 24)"/>`],
+  drafting: [56, `
+    <rect x="8" y="22" width="14" height="19" rx="2.5"/>
+    <rect x="17" y="15" width="14" height="19" rx="2.5"/>
+    <rect x="26" y="8" width="14" height="19" rx="2.5"/>
+    <path d="M33 31v8l-3-3M33 39l3-3"/>`],
   engine: [150, `
     <circle cx="18" cy="20" r="5"/>
     <path d="M18 9v3M18 28v3M7 20h3M26 20h3M10.2 12.2l2.2 2.2M23.6 25.6l2.2 2.2M10.2 27.8l2.2-2.2M23.6 14.4l2.2-2.2"/>
@@ -84,6 +96,10 @@ const art = {
   modes: [102, `
     <path d="M24 13c-5-4-11-4-17-2v26c6-2 12-2 17 2 5-4 11-4 17-2V11c-6-2-12-2-17 2z"/>
     <path d="M24 13v26"/>`],
+  story: [300, `
+    <path d="M12 8h20a4 4 0 014 4v28H16a4 4 0 01-4-4z"/>
+    <path d="M12 36a4 4 0 014-4h20"/>
+    <path d="M18 15h12M18 21h9"/>`],
   // Classifiche
   "mode-overall": [42, `
     <path d="M15 8h18v9a9 9 0 01-18 0z"/>

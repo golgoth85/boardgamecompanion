@@ -12,9 +12,11 @@ from typing import Any
 
 # (key, label, members)
 CATEGORY_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("fantastic", "Fantasy e fantascienza", (
-        "Fantasy", "Science Fiction", "Space Exploration", "Horror", "Zombies",
-        "Mythology",
+    ("fantastic", "Fantasy, horror e mitologia", (
+        "Fantasy", "Horror", "Zombies", "Mythology",
+    )),
+    ("scifi", "Fantascienza e spazio", (
+        "Science Fiction", "Space Exploration",
     )),
     ("adventure", "Avventura ed esplorazione", (
         "Adventure", "Exploration", "Travel", "Nautical", "Pirates",
@@ -32,8 +34,10 @@ CATEGORY_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     )),
     ("economy", "Economia e costruzione", (
         "Economic", "City Building", "Civilization", "Industry / Manufacturing",
-        "Farming", "Territory Building", "Trains", "Transportation", "Political",
-        "Environmental",
+        "Territory Building", "Trains", "Transportation", "Political",
+    )),
+    ("nature", "Animali e natura", (
+        "Animals", "Environmental", "Farming",
     )),
     ("mystery", "Deduzione e inganno", (
         "Deduction", "Bluffing", "Negotiation", "Murder / Mystery",
@@ -53,17 +57,20 @@ CATEGORY_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     )),
     ("theme", "Temi e cultura pop", (
         "Movies / TV / Radio theme", "Novel-based", "Comic Book / Strip",
-        "Video Game Theme", "Animals", "Sports", "Racing", "Religious", "Medical",
+        "Video Game Theme", "Sports", "Racing", "Religious", "Medical",
     )),
 )
 
 MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("cards", "Carte e draft", (
-        "Hand Management", "Card Drafting", "Open Drafting", "Closed Drafting",
-        "Deck, Bag, and Pool Building", "Deck Construction", "Trick-taking",
+    ("cards", "Carte e prese", (
+        "Hand Management", "Trick-taking",
         "Ladder Climbing", "Melding and Splaying", "Multi-Use Cards",
         "Card Play Conflict Resolution", "Command Cards",
         "Campaign / Battle Card Driven", "Layering", "Hidden Card Placement",
+    )),
+    ("drafting", "Draft e deck building", (
+        "Card Drafting", "Open Drafting", "Closed Drafting",
+        "Deck, Bag, and Pool Building", "Deck Construction",
     )),
     ("engine", "Motore ed economia", (
         "Engine Building", "Tableau Building", "Set Collection", "Contracts",
@@ -132,13 +139,15 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Elapsed Real Time Ending", "Hot Potato", "Chaining", "Static Capture",
         "Bias",
     )),
-    ("modes", "Cooperazione e narrazione", (
+    ("modes", "Cooperazione e modalità", (
         "Cooperative Game", "Solo / Solitaire Game", "Semi-Cooperative Game",
-        "Team-Based Game", "One vs. All", "Legacy Game",
-        "Scenario / Mission / Campaign Game", "Narrative Choice / Paragraph",
-        "Storytelling", "Role Playing", "Variable Player Powers",
+        "Team-Based Game", "One vs. All", "Variable Player Powers",
         "Variable Set-up", "Events", "Score-and-Reset Game", "Single Loser Game",
         "Advantage Token", "Induction", "Sudden Death Ending", "Single Play",
+    )),
+    ("story", "Narrazione e campagne", (
+        "Legacy Game", "Scenario / Mission / Campaign Game",
+        "Narrative Choice / Paragraph", "Storytelling", "Role Playing",
     )),
 )
 
@@ -146,14 +155,17 @@ MECHANIC_GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 _MECHANIC_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("social", ("auction", "bid", "bluff", "negotiat", "vot")),
     ("actions", ("turn order", "worker", "action")),
-    ("cards", ("card", "draft", "deck")),
+    ("drafting", ("draft", "deck")),
+    ("cards", ("card",)),
     ("dice", ("dice", "die ", "roll", "luck")),
     ("map", ("movement", "grid", "map", "route", "board")),
     ("spatial", ("tile", "pattern", "placement")),
-    ("modes", ("cooperative", "solo", "campaign", "narrative", "team")),
+    ("story", ("campaign", "narrative", "legacy", "story")),
+    ("modes", ("cooperative", "solo", "team")),
 )
 _CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("war", ("war",)),
+    ("scifi", ("space", "science")),
     ("format", ("expansion", "card", "dice")),
     ("theme", ("theme",)),
 )

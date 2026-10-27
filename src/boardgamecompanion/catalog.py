@@ -233,7 +233,23 @@ def language_dependence_level(value: Any) -> int | None:
     return None
 
 
-def _explore_facts(row, title: str) -> dict[str, Any]:
+# Filter bands shown in the UI: BGG levels 4 (extensive) and 5 (unplayable) are both "Alta".
+LANGUAGE_BANDS: tuple[tuple[int, str], ...] = ((1, "Nessuna"), (2, "Poca"), (3, "Moderata"), (4, "Alta"))
+
+
+_LANGUAGE_BAND_PREFIXES: dict[int, tuple[str, ...]] = {
+    1: ("no necessary",),
+    2: ("some necessary",),
+    3: ("moderate",),
+    4: ("extensive", "unplayable"),
+}
+
+
+def language_band(level: int | None) -> int | None:
+    return None if level is None else min(int(level), 4)
+
+
+def explore_facts(row, title: str) -> dict[str, Any]:
     """Values the Esplora parameters compare, derived once per row."""
 
     def number(key: str) -> float | None:
@@ -280,6 +296,40 @@ def _explore_facts(row, title: str) -> dict[str, Any]:
     }
 
 
+def explore_fact_match(facts: dict[str, Any], key: str, value: Any) -> bool:
+    """One Esplora parameter against the facts of a game (see ``explore_facts``)."""
+    if key == "supports_players":
+        count = int(value)
+        minimum, maximum = facts["min_players"], facts["max_players"]
+        if minimum is None or maximum is None:
+            return False
+        return maximum >= 6 if count >= 6 else minimum <= count <= maximum
+    if key == "ideal_players":
+        return min(int(value), 6) in facts["ideal"]
+    if key == "player_age":
+        return facts["age"] is not None and facts["age"] <= int(value)
+    if key == "weight":
+        numeric = facts["weight"]
+        if numeric is None:
+            return False
+        if value == "light":
+            return numeric <= 2.30
+        if value == "medium":
+            return 2.30 < numeric <= 3.50
+        if value == "heavy":
+            return numeric > 3.50
+        return True
+    if key == "max_minutes":
+        return facts["minutes"] is not None and facts["minutes"] <= int(value)
+    if key == "min_rating":
+        return facts["rating"] is not None and facts["rating"] >= float(value)
+    if key == "max_language":
+        return facts["language"] is not None and facts["language"] <= int(value)
+    if key == "language":
+        return language_band(facts["language"]) == int(value)
+    return True
+
+
 def _entry_payload(entry, metadata_by_id: dict[int, dict[str, Any]]) -> dict[str, Any]:
     """Library game payload, or a catalog card payload shaped like /api/reference items."""
     row = entry[0]
@@ -314,6 +364,8 @@ def _entry_payload(entry, metadata_by_id: dict[int, dict[str, Any]]) -> dict[str
         "best_players": row["bgg_best_players"],
         "recommended_players": row["bgg_recommended_players"],
         "language_dependence": row["bgg_language_dependence"],
+        "categories": list(row.get("categories") or [])[:8],
+        "mechanics": list(row.get("mechanics") or [])[:8],
     }
 
 
@@ -416,6 +468,7 @@ class Catalog:
         weight: str | None = None,
         max_minutes: int | None = None,
         min_rating: float | None = None,
+        language: int | None = None,
         category: str | None = None,
         mechanic: str | None = None,
         completed: bool | None = None,
@@ -466,6 +519,15 @@ class Catalog:
         if min_rating is not None:
             where.append("g.bgg_average IS NOT NULL AND g.bgg_average >= ?")
             params.append(min_rating)
+        if language is not None and int(language) in _LANGUAGE_BAND_PREFIXES:
+            # Older rows keep the poll answer only in the enrichment metadata.
+            column = (
+                "lower(COALESCE(NULLIF(g.bgg_language_dependence, ''), "
+                "json_extract(e.metadata_json, '$.bgg_language_dependence'), ''))"
+            )
+            prefixes = _LANGUAGE_BAND_PREFIXES[int(language)]
+            where.append("(" + " OR ".join(f"{column} LIKE ?" for _ in prefixes) + ")")
+            params.extend(f"{prefix}%" for prefix in prefixes)
         if completed is not None:
             where.append("p.completed_at IS NOT NULL" if completed else "p.completed_at IS NULL")
         if played is not None:
@@ -658,7 +720,7 @@ class Catalog:
                 mechanic_names,
                 {group_key("category", name) for name in category_names.values()},
                 {group_key("mechanic", name) for name in mechanic_names.values()},
-                _explore_facts(row, title),
+                explore_facts(row, title),
             )
 
         def add_entry(row, derived: tuple[Any, ...], origin: str) -> None:
@@ -713,6 +775,7 @@ class Catalog:
         max_minutes: int | None = None,
         min_rating: float | None = None,
         max_language: int | None = None,
+        language: int | None = None,
         limit: int = 250,
         reference_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -751,35 +814,7 @@ class Catalog:
             and all(key in entry[4] for key in selected_mechanic_groups)
         ]
 
-        def optional_match(facts: dict[str, Any], key: str, value: Any) -> bool:
-            if key == "supports_players":
-                count = int(value)
-                minimum, maximum = facts["min_players"], facts["max_players"]
-                if minimum is None or maximum is None:
-                    return False
-                return maximum >= 6 if count >= 6 else minimum <= count <= maximum
-            if key == "ideal_players":
-                return min(int(value), 6) in facts["ideal"]
-            if key == "player_age":
-                return facts["age"] is not None and facts["age"] <= int(value)
-            if key == "weight":
-                numeric = facts["weight"]
-                if numeric is None:
-                    return False
-                if value == "light":
-                    return numeric <= 2.30
-                if value == "medium":
-                    return 2.30 < numeric <= 3.50
-                if value == "heavy":
-                    return numeric > 3.50
-                return True
-            if key == "max_minutes":
-                return facts["minutes"] is not None and facts["minutes"] <= int(value)
-            if key == "min_rating":
-                return facts["rating"] is not None and facts["rating"] >= float(value)
-            if key == "max_language":
-                return facts["language"] is not None and facts["language"] <= int(value)
-            return True
+        optional_match = explore_fact_match
 
         active_optional: dict[str, Any] = {
             "supports_players": supports_players,
@@ -789,6 +824,7 @@ class Catalog:
             "max_minutes": max_minutes,
             "min_rating": min_rating,
             "max_language": max_language,
+            "language": language,
         }
 
         active_items = [
@@ -880,11 +916,7 @@ class Catalog:
                 (6.0, "6+"), (6.5, "6,5+"), (7.0, "7+"),
                 (7.5, "7,5+"), (8.0, "8+"), (8.5, "8,5+"),
             ],
-            "max_language": [
-                (1, "Nessuna"),
-                (2, "Poca"),
-                (3, "Moderata"),
-            ],
+            "language": list(LANGUAGE_BANDS),
         }
 
         def contextual_options(key: str) -> list[dict[str, Any]]:
@@ -979,6 +1011,7 @@ class Catalog:
         max_minutes: int | None = None,
         weight: str | None = None,
         max_language: int | None = None,
+        language: int | None = None,
         limit: int = 50,
         reference_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -1203,6 +1236,10 @@ class Catalog:
                 max_language,
                 lambda e, v: e[6]["language"] is not None and e[6]["language"] <= int(v),
             ),
+            "language": (
+                language,
+                lambda e, v: language_band(e[6]["language"]) == int(v),
+            ),
         }
         active = [
             (key, value, check)
@@ -1217,7 +1254,7 @@ class Catalog:
             "ideal_players": [(1, "1"), (2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6+")],
             "max_minutes": [(30, "≤30"), (60, "≤60"), (90, "≤90"), (120, "≤120"), (180, "≤180")],
             "weight": [("light", "Semplice"), ("medium", "Media"), ("heavy", "Impegnativa")],
-            "max_language": [(1, "Nessuna"), (2, "Poca"), (3, "Moderata")],
+            "language": list(LANGUAGE_BANDS),
         }
 
         def options(key: str) -> list[dict[str, Any]]:
@@ -1303,6 +1340,7 @@ class Catalog:
                 "max_minutes": max_minutes,
                 "weight": weight,
                 "max_language": max_language,
+                "language": language,
             },
         }
 

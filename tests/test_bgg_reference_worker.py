@@ -36,11 +36,15 @@ class FakeClient:
         self.overrides = overrides or {}
         self.requests: list[list[int]] = []
 
-    def things_with_xml(self, ids):
+    def things_with_xml(self, ids, skipped=None):
         self.requests.append(list(ids))
         result = {}
         for bgg_id in ids:
             if bgg_id > self.last_id or bgg_id in self.overrides and self.overrides[bgg_id] is None:
+                continue
+            if self.overrides.get(bgg_id) == "unreadable":
+                if skipped is not None:
+                    skipped.add(bgg_id)
                 continue
             metadata = {
                 "bgg_id": bgg_id,
@@ -161,12 +165,27 @@ def test_missing_id_in_non_empty_batch_is_marked_removed_not_deleted(database: D
     assert row(database, 10)["removed_at"] is None
 
 
+def test_unreadable_item_does_not_block_the_scan_or_the_queues(database: Database) -> None:
+    # Regression: a new BGG entry without a primary title used to fail the whole
+    # batch, so every run stopped at the same IDs before the refresh queues.
+    client = FakeClient(25, {15: "unreadable", 13: "unreadable"})
+    summary = worker(database, client).run_once()
+    assert summary["status"] == "ok"
+    assert get_sync_state(database, "worker_last_error") == ""
+    assert row(database, 14) is not None and row(database, 16) is not None
+    assert row(database, 15) is None
+    assert get_sync_state(database, "new_id_cursor") == "25"
+    # An existing title BGG cannot describe right now is postponed, never removed.
+    assert row(database, 13)["removed_at"] is None
+    assert row(database, 13)["next_check_at"] is not None
+
+
 def test_provider_error_is_recorded_without_raising(database: Database) -> None:
     class Broken:
         def hot(self, *, limit=50):
             return []
 
-        def things_with_xml(self, ids):
+        def things_with_xml(self, ids, skipped=None):
             raise RuntimeError("down")
 
     summary = worker(database, Broken()).run_once()

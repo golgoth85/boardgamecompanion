@@ -90,53 +90,81 @@ class DeepSeekRulebookProvider:
 
     def discover(self, query: RulebookQuery):
         try:
-            # Two searches, at most three page reads. No model invents download links.
-            results = self.web.search(f'"{query.title[:65]}" regolamento filetype:pdf')
+            # Italian title (when BGG lists one) for the Italian rulebook, the BGG file
+            # pages for community uploads, then an English search only if nothing
+            # was found. At most four page reads. No model invents download links.
+            italian_title = shop_search_title(query.title, query.verified_titles)
             bgg_title = query.original_title or query.title
+            candidates: list[RulebookCandidate] = []
+            state = {"seen": set(), "fetched": 0}
+            results = self.web.search(f'"{italian_title[:65]}" regolamento filetype:pdf')
             results += self.web.search(f'"{bgg_title[:55]}" site:boardgamegeek.com/filepage/')
-            candidates, seen, fetched = [], set(), 0
-            for result in results:
-                source = result["url"]
-                if source in seen:
-                    continue
-                seen.add(source)
-                page = result
-                if not source.lower().split("?")[0].endswith(".pdf") and fetched < 3:
-                    try:
-                        page = self.web.fetch(result)
-                    except CloudAIError:
-                        continue
-                    finally:
-                        fetched += 1
-                # A title-only match is deliberately review-only: no inferred BGG ID.
-                if not matching_title(query, page):
-                    continue
-                urls = [source]
-                urls += re.findall(r'https://[^\s<>"\)\]]+', page.get("content", ""))[:100]
-                for raw in urls:
-                    try:
-                        url = public_url(raw)
-                    except ValueError:
-                        continue
-                    if not (urlsplit(url).path.lower().endswith(".pdf") or _is_allowed_download(url)):
-                        continue
-                    if any(candidate.url == url for candidate in candidates):
-                        continue
-                    community = _is_bgg_filepage(source) and _is_allowed_download(url)
-                    candidates.append(RulebookCandidate(
-                        provider=self.name,
-                        source_kind=RulebookSource.COMMUNITY if community else RulebookSource.GENERIC,
-                        url=url, language=_language_from(None, page.get("title", "")),
-                        document_type="rulebook", official=False, confidence=70 if community else 40,
-                        title=page["title"][:500], game_title=query.title,
-                        metadata={"source_url": source, "identity_evidence": ["exact_title_only"],
-                                  "search_provider": "deepseek", "requested_bgg_id": query.bgg_id},
-                    ))
-                    if len(candidates) == 6:
-                        return tuple(candidates)
+            if self._collect(query, results, candidates, state):
+                return tuple(candidates)
+            if not candidates:
+                english = self.web.search(f'"{bgg_title[:65]}" rulebook rules pdf')
+                self._collect(query, english, candidates, state)
             return tuple(candidates)
         except CloudAIError as exc:
             raise RulebookProviderError(str(exc)) from exc
+
+    def _collect(self, query: RulebookQuery, results: list[dict], candidates: list, state: dict) -> bool:
+        """Add PDF candidates from search results; True once the cap is reached."""
+        for result in results:
+            source = result["url"]
+            if source in state["seen"]:
+                continue
+            state["seen"].add(source)
+            page = result
+            if not source.lower().split("?")[0].endswith(".pdf") and state["fetched"] < 4:
+                try:
+                    page = self.web.fetch(result)
+                except CloudAIError:
+                    continue
+                finally:
+                    state["fetched"] += 1
+            # A title-only match is deliberately review-only: no inferred BGG ID.
+            if not matching_title(query, page):
+                continue
+            urls = [source]
+            urls += re.findall(r'https://[^\s<>"\)\]]+', page.get("content", ""))[:100]
+            for raw in urls:
+                try:
+                    url = public_url(raw)
+                except ValueError:
+                    continue
+                if not (urlsplit(url).path.lower().endswith(".pdf") or _is_allowed_download(url)):
+                    continue
+                if any(candidate.url == url for candidate in candidates):
+                    continue
+                community = _is_bgg_filepage(source) and _is_allowed_download(url)
+                candidates.append(RulebookCandidate(
+                    provider=self.name,
+                    source_kind=RulebookSource.COMMUNITY if community else RulebookSource.GENERIC,
+                    url=url, language=_language_from(None, page.get("title", "")),
+                    document_type="rulebook", official=False, confidence=70 if community else 40,
+                    title=page["title"][:500], game_title=query.title,
+                    metadata={"source_url": source, "identity_evidence": ["exact_title_only"],
+                              "search_provider": "deepseek", "requested_bgg_id": query.bgg_id},
+                ))
+                if len(candidates) == 6:
+                    return True
+        return False
+
+
+# Board game specialists first, then general stores; every shop stays on the allowlist.
+_PREFERRED_SHOPS = (
+    "dungeondice.it", "egyp.it", "magicmerchant.it", "fantasiastore.it", "getyourfun.it",
+    "player1.it", "dragonstore.it", "giochistarter.it", "bottegaludica.it", "eroidiarcadia.it",
+    "boardgameuniverse.it", "ilcovodelnerd.com", "comicscorner.it", "baselunaitaly.it",
+    "amazon.it", "libreriasemola.it", "lafeltrinelli.it", "ibs.it", "toyscenter.it", "ebay.it",
+)
+PRICE_SHOP_ORDER = tuple(
+    [host for host in _PREFERRED_SHOPS if host in ITALIAN_SHOP_HOSTS]
+    + sorted(ITALIAN_SHOP_HOSTS - set(_PREFERRED_SHOPS))
+)
+MAX_PRICE_PAGES = 5
+MAX_PRICE_SEARCHES = 14
 
 
 class DeepSeekPriceProvider:
@@ -145,24 +173,36 @@ class DeepSeekPriceProvider:
 
     def search(self, *, title: str, year: int | None = None, alternate_titles: tuple[str, ...] = ()) -> list[dict]:
         query_title = shop_search_title(title, alternate_titles)
+        # Italian title first; shops often list imports under the original name too.
+        titles = list(dict.fromkeys([query_title, title]))
         try:
             pages = []
             read_failures = 0
             seen = set()
-            for shop in sorted(ITALIAN_SHOP_HOSTS):
-                found = self.web.search(f'"{query_title[:85]}" prezzo site:{shop}', count=2)
-                for result in found:
-                    if shop_host(result["url"]) is None or result["url"] in seen:
-                        continue
-                    seen.add(result["url"])
-                    try:
-                        pages.append(self.web.fetch(result))
-                    except CloudAIError:
-                        read_failures += 1
-                        continue
-                    if len(pages) == 4:
+            shops_with_page: set[str] = set()
+            searches = 0
+            for search_title in titles:
+                for shop in PRICE_SHOP_ORDER:
+                    if len(pages) >= MAX_PRICE_PAGES or searches >= MAX_PRICE_SEARCHES:
                         break
-                if len(pages) == 4:
+                    if shop in shops_with_page:
+                        continue
+                    searches += 1
+                    found = self.web.search(f'"{search_title[:85]}" prezzo site:{shop}', count=2)
+                    for result in found:
+                        host = shop_host(result["url"])
+                        # One page per shop: comparing shops matters more than variants of one listing.
+                        if host is None or host in shops_with_page or result["url"] in seen:
+                            continue
+                        seen.add(result["url"])
+                        try:
+                            pages.append(self.web.fetch(result))
+                        except CloudAIError:
+                            read_failures += 1
+                            continue
+                        shops_with_page.add(host)
+                        break
+                if pages:
                     break
             if not pages:
                 if read_failures:
@@ -195,7 +235,7 @@ class DeepSeekPriceProvider:
                 if isinstance(price, bool) or not isinstance(price, (int, float)) or not 0 < price < MAX_PRICE_EUR:
                     continue
                 # Price must occur in the exact quoted source, with a euro currency marker.
-                money = re.findall(r'(?:€\s*([0-9]+[.,][0-9]{2})|([0-9]+[.,][0-9]{2})\s*(?:€|EUR))', quote, re.I)
+                money = re.findall(r'(?:€\s*([0-9]{1,3}(?:[.,][0-9]{1,2})?)(?![0-9])|(?<![0-9.,])([0-9]{1,3}(?:[.,][0-9]{1,2})?)\s*(?:€|EUR))', quote, re.I)
                 if not any(abs(float((a or b).replace(",", ".")) - price) < 0.005 for a, b in money):
                     continue
                 availability = item.get("availability")

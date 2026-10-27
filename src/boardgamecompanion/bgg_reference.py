@@ -579,8 +579,13 @@ class BggReferenceCatalog:
         offset: int = 0,
         item_type: str | None = None,
         reference_settings: ReferenceSettings | None = None,
+        allowed_ids: set[int] | None = None,
     ) -> dict[str, Any]:
-        """Paginated listing of the visible reference titles, optionally filtered by title and type."""
+        """Paginated listing of the visible reference titles, optionally filtered by title and type.
+
+        ``allowed_ids`` restricts the listing to the titles matched by the
+        advanced filters (computed from ``explore_rows``).
+        """
         value = reference_settings or load_reference_settings(self.database)
         sort = sort if sort in BROWSE_SORT_SQL else "rank"
         expansion = {"standalone": 0, "expansion": 1}.get(item_type or "")
@@ -588,6 +593,8 @@ class BggReferenceCatalog:
         text = (query or "").strip()
         if not text:
             ordered = self._browse_order(value, sort, expansion)
+            if allowed_ids is not None:
+                ordered = [bgg_id for bgg_id in ordered if bgg_id in allowed_ids]
             ids = ordered[offset : offset + limit]
             return {"items": self._items_by_id(ids), "total": len(ordered), **page}
         match = _fts_query(text)
@@ -605,6 +612,18 @@ class BggReferenceCatalog:
             f"bgg_reference_games_fts MATCH :match AND {_VISIBLE_SQL}"
             " AND (:expansion IS NULL OR g.is_expansion = :expansion)"
         )
+        if allowed_ids is not None:
+            with self.database.connect() as connection:
+                matched = [
+                    int(row[0])
+                    for row in connection.execute(
+                        f"SELECT g.bgg_id FROM {source} WHERE {where} ORDER BY {BROWSE_SORT_SQL[sort]}",
+                        params,
+                    ).fetchall()
+                    if int(row[0]) in allowed_ids
+                ]
+            ids = matched[offset : offset + limit]
+            return {"items": self._items_by_id(ids), "total": len(matched), **page}
         with self.database.connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM {source} WHERE {where}", params

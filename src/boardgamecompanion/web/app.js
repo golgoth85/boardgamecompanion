@@ -15,6 +15,7 @@ import {
 import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {exploreGroupArt} from "./explore-art.js";
+import {bggTermChips, bggTermLabel} from "./bgg-terms.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
 const app = document.querySelector("#app");
@@ -292,13 +293,14 @@ export function googleRulebookSearchUrl(title) {
   return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
-function formatCampaignMoney(value, currency) {
+function formatCampaignMoney(value, currency, {compact = false} = {}) {
   const amount = Number(value);
   const code = String(currency || "").toUpperCase();
   if (!Number.isFinite(amount)) return "—";
   try {
     return new Intl.NumberFormat("it-IT", {
-      style: "currency", currency: code, maximumFractionDigits: 0,
+      style: "currency", currency: code, maximumFractionDigits: compact && amount >= 10000 ? 1 : 0,
+      ...(compact && amount >= 10000 ? {notation: "compact"} : {}),
     }).format(amount);
   } catch (_) {
     return `${formatNumber(amount, 0)} ${code}`.trim();
@@ -465,9 +467,9 @@ function languageDependenceText(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return "—";
   if (text.startsWith("no necessary")) return "Nessuna";
-  if (text.startsWith("some necessary")) return "Leggera";
+  if (text.startsWith("some necessary")) return "Poca";
   if (text.startsWith("moderate")) return "Moderata";
-  if (text.startsWith("extensive") || text.startsWith("unplayable")) return "Estesa";
+  if (text.startsWith("extensive") || text.startsWith("unplayable")) return "Alta";
   return String(value);
 }
 
@@ -1103,7 +1105,87 @@ function setSettingsTab(name = "general") {
     saveSettings,
     saveTestSettings,
     onDiagnostics: () => void refreshDiagnostics(),
+    onRulebooks: () => void refreshRulebookCoverage(),
   });
+}
+
+function rulebookSearchText(item) {
+  if (!item.last_search_at) return "Mai cercato";
+  const date = new Date(item.last_search_at).toLocaleDateString("it-IT", {day: "numeric", month: "short"});
+  return `Ultima ricerca ${date}`;
+}
+
+async function refreshRulebookCoverage() {
+  const list = document.querySelector("#rulebookMissingList");
+  const stats = document.querySelector("#rulebookCoverageStats");
+  const bulk = document.querySelector("#rulebookSearchMissing");
+  if (!list || !stats) return;
+  try {
+    const data = await api("/api/rulebooks/missing");
+    const missing = data.missing || [];
+    stats.innerHTML = `
+      <span><strong>${formatNumber(data.with_rulebook, 0)}</strong> su ${formatNumber(data.owned, 0)} con regolamento</span>
+      <span><strong>${formatNumber(missing.length, 0)}</strong> da cercare</span>
+      <span><strong>${formatNumber((data.resolved_elsewhere || []).length, 0)}</strong> con regole nei componenti</span>
+      <a href="/reviews" data-nav class="${data.pending_reviews ? "has-pending" : ""}"><strong>${formatNumber(data.pending_reviews, 0)}</strong> fonti da verificare ${icon("arrow-right")}</a>
+    `;
+    list.innerHTML = missing.length
+      ? missing.map((item) => `
+          <li class="rulebook-missing-item" data-rulebook-missing="${item.bgg_id}">
+            <img src="${coverSrc(item.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">
+            <span class="rulebook-missing-copy">
+              <a href="/games/${item.bgg_id}" data-nav>${escapeHtml(item.title)}</a>
+              <small>${escapeHtml([item.expansion ? "Espansione" : "", rulebookSearchText(item), item.pending_reviews ? `${item.pending_reviews} da verificare` : ""].filter(Boolean).join(" · "))}</small>
+            </span>
+            <button class="button button-ghost" type="button" data-rulebook-search="${item.bgg_id}">${icon("search")}<span>Cerca</span></button>
+          </li>`).join("")
+      : '<li class="muted">Tutti i giochi posseduti hanno un regolamento.</li>';
+    if (bulk) {
+      bulk.disabled = !missing.length;
+      bulk.textContent = `Cerca ora (${Math.min(5, missing.length)} ${Math.min(5, missing.length) === 1 ? "gioco" : "giochi"})`;
+      bulk.onclick = () => void searchMissingRulebooks(
+        // Never searched first, then the oldest searches.
+        [...missing].sort((a, b) => String(a.last_search_at || "").localeCompare(String(b.last_search_at || ""))).slice(0, 5),
+      );
+    }
+    // Opening a game or the review queue leaves the settings dialog.
+    document.querySelectorAll("#rulebookCoverage a[data-nav]").forEach((link) => {
+      link.addEventListener("click", () => closeSettingsDialog());
+    });
+    list.querySelectorAll("[data-rulebook-search]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const item = missing.find((entry) => String(entry.bgg_id) === button.dataset.rulebookSearch);
+        if (item) void searchMissingRulebooks([item]);
+      });
+    });
+  } catch (error) {
+    list.innerHTML = `<li class="integration-error">${escapeHtml(error.message)}</li>`;
+  }
+}
+
+async function searchMissingRulebooks(items) {
+  const bulk = document.querySelector("#rulebookSearchMissing");
+  if (bulk) bulk.disabled = true;
+  let found = 0;
+  for (const [index, item] of items.entries()) {
+    const row = document.querySelector(`[data-rulebook-missing="${item.bgg_id}"]`);
+    const button = row?.querySelector("[data-rulebook-search]");
+    if (button) {
+      button.disabled = true;
+      button.querySelector("span").textContent = "Cerco…";
+    }
+    if (bulk) bulk.textContent = `Ricerca ${index + 1} di ${items.length}…`;
+    try {
+      const result = await api(`/api/games/${item.bgg_id}/rulebook-discovery/run`, {method: "POST"});
+      found += Number(result.candidates_found || 0) > 0 ? 1 : 0;
+    } catch (error) {
+      showToast(`${item.title}: ${error.message}`, true);
+    }
+  }
+  showToast(found
+    ? `Fonti trovate per ${found} ${found === 1 ? "gioco" : "giochi"}: le ufficiali verificate si scaricano da sole, le altre sono in Fonti da verificare.`
+    : "Nessuna nuova fonte trovata.");
+  await refreshRulebookCoverage();
 }
 
 function applyBggSettingsToForm(data) {
@@ -1336,7 +1418,7 @@ function renderReferenceStatus(status) {
   const when = last?.imported_at ? formatBggSyncTime(last.imported_at) : "mai";
   const worker = status.worker || {};
   const sync = worker.last_error
-    ? `ultimo errore API: ${String(worker.last_error).slice(0, 120)}`
+    ? `aggiornamento API interrotto${worker.last_run ? ` (${formatBggSyncTime(worker.last_run)}, ${formatNumber(worker.budget_used || 0, 0)}/${formatNumber(worker.daily_budget || 0, 0)} richieste oggi)` : ""}: ${String(worker.last_error).slice(0, 120)}`
     : worker.last_run
       ? `aggiornamento API: ${formatBggSyncTime(worker.last_run)} · ${formatNumber(worker.budget_used || 0, 0)}/${formatNumber(worker.daily_budget || 0, 0)} richieste oggi`
       : "aggiornamento API: mai eseguito (richiede il token BGG)";
@@ -2556,8 +2638,13 @@ function referenceAsGame(item) {
       best_players: item.best_players,
       recommended_players: item.recommended_players,
       rank: item.rank,
+      language_dependence: item.language_dependence,
     },
-    bgg_metadata: {cover_url: item.image_url || item.thumbnail_url || ""},
+    bgg_metadata: {
+      cover_url: item.image_url || item.thumbnail_url || "",
+      categories: Array.isArray(item.categories) ? item.categories : [],
+      mechanics: Array.isArray(item.mechanics) ? item.mechanics : [],
+    },
     has_description: Boolean(item.has_description),
     collection: {own: Boolean(item.owned)},
     progress: {},
@@ -2724,6 +2811,110 @@ function rerenderCurrentCatalog() {
   renderCatalogData(currentCatalogData);
 }
 
+// Advanced search shared by Ludoteca and Catalogo: same fields, same API parameters.
+const ADVANCED_FIELDS = [
+  {key: "supportsPlayers", param: "supports_players", label: "Giocabile in", type: "number", min: 1, max: 30, placeholder: "giocatori"},
+  {key: "idealPlayers", param: "ideal_players", label: "Ideale in", type: "number", min: 1, max: 30, placeholder: "giocatori"},
+  {key: "playerAge", param: "player_age", label: "Età del giocatore", type: "number", min: 3, max: 99, placeholder: "anni"},
+  {key: "maxMinutes", param: "max_minutes", label: "Durata massima", type: "number", min: 1, max: 1440, placeholder: "minuti"},
+  {key: "weight", param: "weight", label: "Complessità", options: [
+    ["", "Qualsiasi"], ["light", "Semplice (≤ 2,3)"], ["medium", "Media (2,3–3,5)"], ["heavy", "Impegnativa (> 3,5)"],
+  ]},
+  {key: "minRating", param: "min_rating", label: "Voto BGG minimo", type: "number", min: 0, max: 10, step: 0.1, placeholder: "es. 7"},
+  {key: "language", param: "language", label: "Dipendenza dalla lingua", options: [
+    ["", "Qualsiasi"], ["1", "Nessuna"], ["2", "Poca"], ["3", "Moderata"], ["4", "Alta"],
+  ]},
+  {key: "played", param: "played", label: "Partite", library: true, options: [
+    ["", "Tutti"], ["false", "Mai giocati"], ["true", "Già giocati"],
+  ]},
+];
+
+function advancedFields(library) {
+  return ADVANCED_FIELDS.filter((field) => library || !field.library);
+}
+
+function advancedActiveCount(target, {library = true} = {}) {
+  return advancedFields(library).filter((field) => String(target[field.key] || "")).length;
+}
+
+function advancedSearchToggleMarkup(target, {library = true} = {}) {
+  const active = advancedActiveCount(target, {library});
+  return `
+    <button class="advanced-search-toggle ${active ? "has-filters" : ""}" id="advancedSearchToggle" type="button"
+            aria-controls="advancedSearch" aria-expanded="${active ? "true" : "false"}"
+            title="Ricerca avanzata">
+      <span>Ricerca avanzata</span><span class="advanced-search-count" ${active ? "" : "hidden"}>${active}</span>
+    </button>`;
+}
+
+function advancedSearchMarkup(target, {library = true} = {}) {
+  const fields = advancedFields(library);
+  const control = (field) => {
+    const value = String(target[field.key] || "");
+    if (field.options) {
+      return `<select data-advanced-key="${field.key}">
+        ${field.options.map(([optionValue, label]) => `<option value="${optionValue}" ${value === optionValue ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+      </select>`;
+    }
+    return `<input data-advanced-key="${field.key}" type="number" inputmode="${field.step ? "decimal" : "numeric"}"
+      min="${field.min}" max="${field.max}" ${field.step ? `step="${field.step}"` : ""}
+      placeholder="${escapeHtml(field.placeholder || "")}" value="${escapeHtml(value)}">`;
+  };
+  return `
+    <details class="advanced-search" id="advancedSearch" ${advancedActiveCount(target, {library}) ? "open" : ""}>
+      <summary>Ricerca avanzata</summary>
+      <div class="advanced-search-grid">
+        ${fields.map((field) => `<label><span>${escapeHtml(field.label)}</span>${control(field)}</label>`).join("")}
+        <div class="advanced-search-actions">
+          <button class="button button-ghost" id="resetAdvancedSearch" type="button">Azzera filtri</button>
+        </div>
+      </div>
+    </details>`;
+}
+
+function applyAdvancedParams(target, params, {library = true} = {}) {
+  for (const field of advancedFields(library)) {
+    const value = String(target[field.key] || "").trim();
+    if (value) params.set(field.param, value);
+  }
+}
+
+function bindAdvancedSearch(target, onChange, {library = true} = {}) {
+  const panel = document.querySelector("#advancedSearch");
+  const toggle = document.querySelector("#advancedSearchToggle");
+  const syncToggle = () => {
+    const active = advancedActiveCount(target, {library});
+    const badge = toggle?.querySelector(".advanced-search-count");
+    toggle?.classList.toggle("has-filters", active > 0);
+    if (badge) {
+      badge.textContent = String(active);
+      badge.hidden = !active;
+    }
+  };
+  toggle?.addEventListener("click", () => {
+    panel.open = !panel.open;
+  });
+  panel?.addEventListener("toggle", () => {
+    toggle?.setAttribute("aria-expanded", panel.open ? "true" : "false");
+  });
+  panel?.querySelectorAll("[data-advanced-key]").forEach((control) => {
+    control.addEventListener("change", () => {
+      target[control.dataset.advancedKey] = String(control.value ?? "").trim();
+      syncToggle();
+      onChange();
+    });
+  });
+  document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
+    if (!advancedActiveCount(target, {library})) return;
+    for (const field of advancedFields(library)) target[field.key] = "";
+    panel?.querySelectorAll("[data-advanced-key]").forEach((control) => {
+      control.value = "";
+    });
+    syncToggle();
+    onChange();
+  });
+}
+
 async function renderCatalog() {
   currentCatalogData = null;
   const activeFacet = state.category
@@ -2790,8 +2981,7 @@ async function renderCatalog() {
           <button class="view-switch-button ${state.catalogView === "list" ? "is-active" : ""}" id="listViewButton"
                   type="button" aria-label="Lista" title="Lista" aria-pressed="${state.catalogView === "list" ? "true" : "false"}">${icon("list")}</button>
         </div>
-        <button class="button button-ghost advanced-search-toggle" id="advancedSearchToggle" type="button"
-                aria-controls="advancedSearch" aria-expanded="${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "true" : "false"}">Ricerca avanzata</button>
+        ${advancedSearchToggleMarkup(state)}
         <div class="catalog-density-fields">
           <label class="catalog-density-field" id="cardsPerRowField" ${state.catalogView === "cards" ? "" : "hidden"}>
             <span class="catalog-density-label">Righe</span>
@@ -2811,28 +3001,7 @@ async function renderCatalog() {
           <span aria-hidden="true">+</span>
         </button>
       </section>
-      <details class="advanced-search" id="advancedSearch" ${state.supportsPlayers || state.idealPlayers || state.playerAge || state.weight || state.maxMinutes || state.minRating ? "open" : ""}>
-        <summary>Ricerca avanzata</summary>
-        <div class="advanced-search-grid">
-          <label><span>Giocabile in</span><input id="supportsPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.supportsPlayers)}"></label>
-          <label><span>Ideale in</span><input id="idealPlayers" type="number" min="1" max="30" placeholder="es. 2" value="${escapeHtml(state.idealPlayers)}"></label>
-          <label><span>Età del giocatore</span><input id="playerAge" type="number" min="3" max="99" placeholder="es. 8" value="${escapeHtml(state.playerAge)}"></label>
-          <label><span>Complessità</span>
-            <select id="weightFilter">
-              <option value="">Qualsiasi</option>
-              <option value="light" ${state.weight === "light" ? "selected" : ""}>Semplice (≤ 2,3)</option>
-              <option value="medium" ${state.weight === "medium" ? "selected" : ""}>Media (2,3–3,5)</option>
-              <option value="heavy" ${state.weight === "heavy" ? "selected" : ""}>Impegnativa (&gt; 3,5)</option>
-            </select>
-          </label>
-          <label><span>Durata massima</span><input id="maxMinutes" type="number" min="1" max="1440" placeholder="minuti" value="${escapeHtml(state.maxMinutes)}"></label>
-          <label><span>Rating BGG minimo</span><input id="minRating" type="number" min="0" max="10" step="0.1" placeholder="es. 7" value="${escapeHtml(state.minRating)}"></label>
-        </div>
-        <div class="advanced-search-actions">
-          <p>“Età del giocatore” usa l'età minima ufficiale indicata su BGG.</p>
-          <button class="button button-ghost" id="resetAdvancedSearch" type="button">Azzera filtri avanzati</button>
-        </div>
-      </details>
+      ${advancedSearchMarkup(state, {library: true})}
 
       <section class="catalog-results ${state.catalogView === "list" ? "catalog-results-list" : `catalog-results-cards catalog-columns-${state.cardsPerRow}`}"
                id="catalogGrid">${skeletons()}</section>
@@ -2882,15 +3051,6 @@ function bindCatalogControls() {
     openScannerDialog();
   });
 
-  const advancedSearch = document.querySelector("#advancedSearch");
-  const advancedSearchToggle = document.querySelector("#advancedSearchToggle");
-  advancedSearchToggle?.addEventListener("click", () => {
-    advancedSearch.open = !advancedSearch.open;
-  });
-  advancedSearch?.addEventListener("toggle", () => {
-    advancedSearchToggle?.setAttribute("aria-expanded", advancedSearch.open ? "true" : "false");
-  });
-
   const refreshFrom = (key, value) => {
     state[key] = String(value ?? "").trim();
     state.offset = 0;
@@ -2934,30 +3094,7 @@ function bindCatalogControls() {
     rerenderCurrentCatalog();
   });
 
-  for (const [id, key] of [
-    ["supportsPlayers", "supportsPlayers"],
-    ["idealPlayers", "idealPlayers"],
-    ["playerAge", "playerAge"],
-    ["weightFilter", "weight"],
-    ["maxMinutes", "maxMinutes"],
-    ["minRating", "minRating"],
-  ]) {
-    document.querySelector(`#${id}`)?.addEventListener("change", (event) => refreshFrom(key, event.target.value));
-  }
-
-  document.querySelector("#resetAdvancedSearch")?.addEventListener("click", () => {
-    for (const [id, key] of [
-      ["supportsPlayers", "supportsPlayers"],
-      ["idealPlayers", "idealPlayers"],
-      ["playerAge", "playerAge"],
-      ["weightFilter", "weight"],
-      ["maxMinutes", "maxMinutes"],
-      ["minRating", "minRating"],
-    ]) {
-      state[key] = "";
-      const control = document.querySelector(`#${id}`);
-      if (control) control.value = "";
-    }
+  bindAdvancedSearch(state, () => {
     state.offset = 0;
     refreshCatalog();
   });
@@ -3093,12 +3230,7 @@ async function loadCatalogData(signal) {
   if (state.q) params.set("q", state.q);
   if (state.itemType) params.set("item_type", state.itemType);
   if (state.owned) params.set("owned", state.owned);
-  if (state.supportsPlayers) params.set("supports_players", state.supportsPlayers);
-  if (state.idealPlayers) params.set("ideal_players", state.idealPlayers);
-  if (state.playerAge) params.set("player_age", state.playerAge);
-  if (state.weight) params.set("weight", state.weight);
-  if (state.maxMinutes) params.set("max_minutes", state.maxMinutes);
-  if (state.minRating) params.set("min_rating", state.minRating);
+  applyAdvancedParams(state, params, {library: true});
   if (state.category) params.set("category", state.category);
   if (state.mechanic) params.set("mechanic", state.mechanic);
   return api(`/api/games?${params}`, signal ? {signal} : undefined);
@@ -3789,7 +3921,7 @@ async function ensureGameDescription(bggId) {
   } catch (_) {
     try {
       const text = await loadItalianTranslation(bggId);
-      if (text && node.isConnected && node.dataset.source !== "ai") {
+      if (text && node.isConnected && !["ai", "previous"].includes(node.dataset.source)) {
         node.textContent = text;
         node.dataset.source = "translation";
       }
@@ -3883,11 +4015,16 @@ async function renderDetail(bggId) {
     const rulebooks = documentItems.filter((item) => item.document_type === "rulebook");
     const italianDescription = String(game.description_it || "").trim();
     const aiDescription = String(game.description_ai?.text || "").trim();
-    const descriptionSource = aiDescription ? "ai" : italianDescription ? "translation" : "";
-    const description = aiDescription || italianDescription
-      ? escapeHtml(aiDescription || italianDescription)
+    // An outdated AI text (e.g. after a prompt change) stays visible while the new one is written.
+    const previousDescription = aiDescription ? "" : String(game.description_ai_previous || "").trim();
+    const descriptionSource = aiDescription ? "ai" : previousDescription ? "previous" : italianDescription ? "translation" : "";
+    const description = aiDescription || previousDescription || italianDescription
+      ? escapeHtml(aiDescription || previousDescription || italianDescription)
       : "Descrizione in preparazione…";
     const firstRulebook = rulebooks[0] || null;
+    const categories = [metadata.categories, metadata.metadata?.categories].find((value) => Array.isArray(value) && value.length) || [];
+    const mechanics = Array.isArray(metadata.metadata?.mechanics) ? metadata.metadata.mechanics : [];
+    const importedPlays = Number(game.progress?.imported_num_plays || 0);
 
     app.innerHTML = `
       <a class="detail-back" href="/" data-nav>← Torna alla ludoteca</a>
@@ -3919,6 +4056,8 @@ async function renderDetail(bggId) {
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Dipendenza lingua</dt><dd ${bgg.language_dependence ? `title="${escapeHtml(bgg.language_dependence)}"` : ""}>${escapeHtml(languageDependenceText(bgg.language_dependence))}</dd></div>
+              ${categories.length ? `<div class="game-term-row"><dt>Generi</dt><dd class="bgg-term-list">${bggTermChips(categories)}</dd></div>` : ""}
+              ${mechanics.length ? `<div class="game-term-row"><dt>Meccaniche</dt><dd class="bgg-term-list">${bggTermChips(mechanics, {limit: 8})}</dd></div>` : ""}
             </dl>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
@@ -3933,13 +4072,14 @@ async function renderDetail(bggId) {
               <span class="game-title-meta">BGG #${game.bgg_id}</span>
             </div>
             <div class="game-primary-actions">
-              <button class="game-state-icon ${game.progress?.played ? "played-button is-played" : "played-button"}"
-                      id="togglePlayed" type="button"
-                      aria-pressed="${game.progress?.played ? "true" : "false"}"
-                      aria-label="${game.progress?.played ? "Rimuovi stato giocato" : "Segna come giocato"}"
-                      title="${game.progress?.played ? "Giocato" : "Segna come giocato"}">
-                <span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg></span>
-              </button>
+              <div class="game-play-log-group ${game.progress?.played ? "is-played" : ""}">
+                <button class="game-play-log" id="gameAddPlay" type="button"
+                        title="Registra una partita: il gioco risulterà giocato">
+                  ${icon("plus")}<span>Registra partita</span>
+                </button>
+                <a class="game-play-count" id="gamePlaysCount" href="/plays?game=${game.bgg_id}" data-nav hidden
+                   title="Apri il diario delle partite di questo gioco"></a>
+              </div>
               <button class="game-state-icon ${game.progress?.completed ? "completion-button is-completed" : "completion-button"}"
                       id="toggleCompleted" type="button"
                       aria-pressed="${game.progress?.completed ? "true" : "false"}"
@@ -3966,14 +4106,6 @@ async function renderDetail(bggId) {
               <button class="button button-ghost" id="regenerateDescription" type="button"
                       title="Riscrive la descrizione con il prompt e i provider attuali">${icon("refresh")}<span>Rigenera descrizione</span></button>
             </div>
-          </section>
-
-          <section class="game-section game-plays-section" aria-labelledby="gamePlaysTitle">
-            <div class="simple-rulebook-head">
-              <h2 class="eyebrow section-eyebrow" id="gamePlaysTitle">Partite <small id="gamePlaysCount"></small></h2>
-              <button class="button button-primary" id="gameAddPlay" type="button">${icon("plus")}<span>Registra partita</span></button>
-            </div>
-            <div class="game-plays-list" id="gamePlaysList"><div class="skeleton"></div></div>
           </section>
 
           <section class="game-section relevant-expansions-section" id="relevantExpansionsSection" aria-labelledby="relevantExpansionsTitle">
@@ -4050,23 +4182,6 @@ async function renderDetail(bggId) {
       </section>
     `;
 
-    document.querySelector("#togglePlayed")?.addEventListener("click", async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      try {
-        const next = !Boolean(game.progress?.played);
-        await api(`/api/games/${game.bgg_id}/personal-state`, {
-          method: "PATCH",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({played: next}),
-        });
-        showToast(next ? "Gioco segnato come giocato." : "Stato giocato rimosso.");
-        await renderDetail(game.bgg_id);
-      } catch (error) {
-        showToast(error.message, true);
-        button.disabled = false;
-      }
-    });
     document.querySelectorAll(".cover-rating-overlay .personal-stars").forEach((group) => {
       const preview = (value) => {
         group.classList.toggle("is-previewing", value !== null);
@@ -4153,7 +4268,7 @@ async function renderDetail(bggId) {
     });
     ensureGameDescription(game.bgg_id);
     void loadRelevantExpansions(game.bgg_id);
-    void refreshGamePlays(game);
+    void refreshGamePlayCount(game, importedPlays);
     document.querySelector("#gameAddPlay")?.addEventListener("click", () => {
       void openPlayDialog({
         bggId: game.bgg_id,
@@ -4825,22 +4940,68 @@ async function renderUpdates({reset = false} = {}) {
 
 // Assistente AI: conversation kept for the browser session, never on the server.
 const ASSISTANT_STORAGE_KEY = "bgc.assistant";
-const assistantExamples = [
+const ASSISTANT_CONVERSATIONS_KEY = "bgc.assistant.conversations";
+const ASSISTANT_MAX_CONVERSATIONS = 30;
+// Example pool: four are drawn each time the page opens. The scope is the one the question needs.
+const assistantExamplePool = [
   ["Un gioco semplice per 2 persone, massimo 45 minuti.", "library"],
   ["Suggeriscimi un cooperativo per 3-4 persone, non troppo impegnativo.", "library"],
   ["Crea una lista di giochi adatti a una serata con amici che non giocano spesso.", "library"],
+  ["Cosa posso giocare stasera in 5, in meno di un'ora?", "library"],
+  ["Quali giochi della mia ludoteca sono adatti a un bambino di 8 anni?", "library"],
+  ["Un gioco impegnativo da solitario per un pomeriggio libero.", "library"],
+  ["Prepara una lista di party game per gruppi numerosi.", "library"],
+  ["Quale gioco non ho ancora giocato e vale la pena provare per primo?", "library"],
+  ["Un gioco con poco testo da giocare con amici che non parlano italiano.", "library"],
   ["Che differenze ci sono tra Brass: Birmingham e Ark Nova? Quale mi consigli?", "all"],
+  ["Cosa somiglia ai miei giochi preferiti ma non è ancora nella ludoteca?", "all"],
+  ["Un gioco di piazzamento lavoratori da comprare che manca nella mia collezione.", "catalog"],
+  ["Quale gioco cooperativo per 2 comprare come regalo?", "catalog"],
+  ["Un gioco da 2 giocatori molto apprezzato su BGG che non possiedo.", "catalog"],
+  ["Mi consigli un gioco leggero ma profondo da portare in vacanza?", "all"],
+  ["Spiegami in breve come funziona Spirit Island e a chi piace.", "all"],
 ];
+
+function assistantScopeFromSources(library, catalog) {
+  if (library && catalog) return "all";
+  return catalog ? "catalog" : "library";
+}
+
+function assistantRandomExamples(count = 4) {
+  const pool = [...assistantExamplePool];
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[other]] = [pool[other], pool[index]];
+  }
+  // Keep the mix: mostly library questions, at least one about titles not owned.
+  const notOwned = pool.find(([, scope]) => scope !== "library");
+  const picked = pool.filter((item) => item !== notOwned).slice(0, count - 1);
+  return [...picked, notOwned].filter(Boolean);
+}
+
+function loadAssistantConversations() {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(ASSISTANT_CONVERSATIONS_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter((item) => item && item.id && Array.isArray(item.turns)) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 const assistantState = (() => {
+  const conversations = loadAssistantConversations();
   try {
     const stored = JSON.parse(window.sessionStorage.getItem(ASSISTANT_STORAGE_KEY) || "{}");
+    const current = conversations.find((item) => item.id === stored.conversationId);
     return {
-      scope: stored.scope === "all" ? "all" : "library",
-      turns: Array.isArray(stored.turns) ? stored.turns.slice(-20) : [],
+      scope: ["all", "catalog"].includes(stored.scope) ? stored.scope : "library",
+      conversationId: current ? current.id : "",
+      turns: current ? current.turns.slice(-20) : (Array.isArray(stored.turns) ? stored.turns.slice(-20) : []),
       busy: false,
+      examples: assistantRandomExamples(),
     };
   } catch (_) {
-    return {scope: "library", turns: [], busy: false};
+    return {scope: "library", conversationId: "", turns: [], busy: false, examples: assistantRandomExamples()};
   }
 })();
 
@@ -4848,11 +5009,91 @@ function saveAssistantState() {
   try {
     window.sessionStorage.setItem(
       ASSISTANT_STORAGE_KEY,
-      JSON.stringify({scope: assistantState.scope, turns: assistantState.turns}),
+      JSON.stringify({scope: assistantState.scope, conversationId: assistantState.conversationId}),
     );
+    const turns = assistantState.turns.filter((turn) => !turn.pending);
+    if (!turns.some((turn) => turn.role === "user")) return;
+    const conversations = loadAssistantConversations();
+    if (!assistantState.conversationId) {
+      assistantState.conversationId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      window.sessionStorage.setItem(
+        ASSISTANT_STORAGE_KEY,
+        JSON.stringify({scope: assistantState.scope, conversationId: assistantState.conversationId}),
+      );
+    }
+    const firstQuestion = turns.find((turn) => turn.role === "user")?.text || "Conversazione";
+    const entry = {
+      id: assistantState.conversationId,
+      title: firstQuestion.slice(0, 90),
+      scope: assistantState.scope,
+      updatedAt: new Date().toISOString(),
+      turns: turns.slice(-20),
+    };
+    const existing = conversations.find((item) => item.id === entry.id);
+    // Opening an old conversation or changing scope must not move it to the top.
+    const next = existing && JSON.stringify(existing.turns) === JSON.stringify(entry.turns)
+      ? conversations.map((item) => (item.id === entry.id ? {...existing, scope: entry.scope} : item))
+      : [entry, ...conversations.filter((item) => item.id !== entry.id)].slice(0, ASSISTANT_MAX_CONVERSATIONS);
+    window.localStorage.setItem(ASSISTANT_CONVERSATIONS_KEY, JSON.stringify(next));
   } catch (_) {
     // Storage full or disabled: the conversation just won't survive a reload.
   }
+}
+
+function renderAssistantConversations() {
+  const target = document.querySelector("#assistantConversations");
+  if (!target) return;
+  const conversations = loadAssistantConversations();
+  const count = document.querySelector("#assistantConversationCount");
+  if (count) count.textContent = conversations.length ? String(conversations.length) : "";
+  target.innerHTML = conversations.length
+    ? conversations.map((item) => {
+        const when = new Date(item.updatedAt);
+        const date = Number.isNaN(when.getTime()) ? "" : when.toLocaleDateString("it-IT", {day: "numeric", month: "short"});
+        const answers = item.turns.filter((turn) => turn.role === "user").length;
+        return `
+          <li class="assistant-conversation ${item.id === assistantState.conversationId ? "is-active" : ""}">
+            <button class="assistant-conversation-open" type="button" data-assistant-conversation="${escapeHtml(item.id)}"
+                    aria-current="${item.id === assistantState.conversationId ? "true" : "false"}">
+              <strong>${escapeHtml(item.title)}</strong>
+              <small>${escapeHtml([date, `${answers} ${answers === 1 ? "domanda" : "domande"}`].filter(Boolean).join(" · "))}</small>
+            </button>
+            <button class="assistant-conversation-delete" type="button" data-assistant-conversation-delete="${escapeHtml(item.id)}"
+                    aria-label="Elimina la conversazione «${escapeHtml(item.title)}»" title="Elimina">${icon("close")}</button>
+          </li>`;
+      }).join("")
+    : '<li class="assistant-conversations-empty">Le conversazioni si salvano qui automaticamente.</li>';
+  target.querySelectorAll("[data-assistant-conversation]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (assistantState.busy) return;
+      const conversation = loadAssistantConversations().find((item) => item.id === button.dataset.assistantConversation);
+      if (!conversation) return;
+      assistantState.conversationId = conversation.id;
+      assistantState.turns = conversation.turns.slice(-20);
+      setAssistantScope(conversation.scope || "library");
+      if (assistantState.turns.some((turn) => turn.payload?.recommendations?.length)) {
+        await refreshWishlistIndex().catch(() => null);
+      }
+      renderAssistantThread();
+      renderAssistantConversations();
+      document.querySelector("#assistantQuestion")?.focus();
+    });
+  });
+  target.querySelectorAll("[data-assistant-conversation-delete]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.assistantConversationDelete;
+      const next = loadAssistantConversations().filter((item) => item.id !== id);
+      window.localStorage.setItem(ASSISTANT_CONVERSATIONS_KEY, JSON.stringify(next));
+      if (id === assistantState.conversationId && !assistantState.busy) {
+        assistantState.conversationId = "";
+        assistantState.turns = [];
+        saveAssistantState();
+        renderAssistantThread();
+      }
+      renderAssistantConversations();
+      showToast("Conversazione eliminata.");
+    });
+  });
 }
 
 function assistantHistoryPayload() {
@@ -4930,7 +5171,7 @@ function assistantTurnMarkup(turn, index) {
       <p class="assistant-answer">${escapeHtml(payload.answer || "")}</p>
       ${items.length ? `<div class="assistant-games">${items.map(assistantRecommendationCard).join("")}</div>` : ""}
       ${listBar}
-      ${payload.provider ? `<small class="assistant-provider">${escapeHtml(payload.scope === "all" ? "Ludoteca + catalogo BGG" : "Solo ludoteca")} · ${escapeHtml(payload.provider)}${payload.model ? ` · ${escapeHtml(payload.model)}` : ""}</small>` : ""}
+      ${payload.provider ? `<small class="assistant-provider">${escapeHtml({all: "Ludoteca + catalogo BGG", catalog: "Solo catalogo BGG"}[payload.scope] || "Solo ludoteca")} · ${escapeHtml(payload.provider)}${payload.model ? ` · ${escapeHtml(payload.model)}` : ""}</small>` : ""}
     </div>
   `;
 }
@@ -4943,7 +5184,7 @@ function renderAssistantThread() {
       <div class="assistant-empty">
         <p>Chiedi un consiglio per la prossima partita, fai domande su un gioco, posseduto o no, o fatti preparare una lista.</p>
         <div class="assistant-examples" aria-label="Esempi">
-          ${assistantExamples.map(([text, scope]) => `<button type="button" data-assistant-example="${escapeHtml(text)}" data-assistant-example-scope="${scope}">${escapeHtml(text)}</button>`).join("")}
+          ${assistantState.examples.map(([text, scope]) => `<button type="button" data-assistant-example="${escapeHtml(text)}" data-assistant-example-scope="${scope}">${escapeHtml(text)}</button>`).join("")}
         </div>
       </div>
     `;
@@ -4973,13 +5214,17 @@ function renderAssistantThread() {
 }
 
 function setAssistantScope(scope) {
-  assistantState.scope = scope === "all" ? "all" : "library";
+  assistantState.scope = ["all", "catalog"].includes(scope) ? scope : "library";
   saveAssistantState();
-  const catalogBox = document.querySelector('[data-assistant-source="catalog"]');
-  if (!catalogBox) return;
-  const active = assistantState.scope === "all";
-  catalogBox.classList.toggle("is-active", active);
-  catalogBox.setAttribute("aria-checked", String(active));
+  const active = {
+    library: assistantState.scope !== "catalog",
+    catalog: assistantState.scope !== "library",
+  };
+  document.querySelectorAll("[data-assistant-source]").forEach((box) => {
+    const on = active[box.dataset.assistantSource];
+    box.classList.toggle("is-active", on);
+    box.setAttribute("aria-checked", String(on));
+  });
 }
 
 async function createAssistantList(index, button) {
@@ -5065,6 +5310,7 @@ async function submitAssistantQuestion() {
     saveAssistantState();
     if (ask) ask.disabled = false;
     renderAssistantThread();
+    renderAssistantConversations();
     if (input?.isConnected) input.focus();
   }
 }
@@ -5079,7 +5325,7 @@ async function renderAssistant() {
       </div>
       <div class="explore-sources" role="group" aria-label="Dove cercare">
         <button class="explore-source-box is-active" type="button" role="checkbox" aria-checked="true"
-                data-assistant-source="library" title="Giochi base posseduti">
+                data-assistant-source="library" title="Giochi base posseduti: deselezionalo per cercare solo nel catalogo">
           <span class="explore-source-icon" aria-hidden="true">${icon("shelf")}</span>
           <strong>Ludoteca</strong>
           <span class="explore-source-check" aria-hidden="true">${icon("check")}</span>
@@ -5092,23 +5338,44 @@ async function renderAssistant() {
         </button>
       </div>
     </section>
-    <section class="catalog-workspace assistant-workspace" aria-label="Conversazione con l'assistente">
-      <div class="assistant-thread" id="assistantThread" aria-live="polite"></div>
-      <form class="assistant-composer" id="assistantForm">
-        <label class="field assistant-question-field">
-          <textarea id="assistantQuestion" rows="2" maxlength="2000" required aria-label="La tua domanda"
-                    placeholder="Es. Un cooperativo per 2–3 persone, con deckbuilding e non troppo impegnativo."></textarea>
-        </label>
-        <div class="assistant-composer-actions">
-          <button class="button button-ghost" id="assistantReset" type="button">Nuova conversazione</button>
-          <button class="button button-primary" id="assistantAsk" type="submit">Chiedi</button>
-        </div>
-      </form>
-    </section>
+    <div class="assistant-layout">
+      <section class="catalog-workspace assistant-workspace" aria-label="Conversazione con l'assistente">
+        <div class="assistant-thread" id="assistantThread" aria-live="polite"></div>
+        <form class="assistant-composer" id="assistantForm">
+          <label class="field assistant-question-field">
+            <textarea id="assistantQuestion" rows="4" maxlength="2000" required aria-label="La tua domanda"
+                      placeholder="Es. Un cooperativo per 2–3 persone, con deckbuilding e non troppo impegnativo. Invio per chiedere, Maiusc+Invio per andare a capo."></textarea>
+          </label>
+          <div class="assistant-composer-actions">
+            <button class="button button-ghost" id="assistantReset" type="button">${icon("plus")}<span>Nuova conversazione</span></button>
+            <button class="button button-primary" id="assistantAsk" type="submit">Chiedi</button>
+          </div>
+        </form>
+      </section>
+      <aside class="assistant-history" aria-labelledby="assistantHistoryTitle">
+        <details class="assistant-history-details" open>
+          <summary><h2 id="assistantHistoryTitle">Conversazioni</h2><span class="assistant-history-count" id="assistantConversationCount"></span></summary>
+          <ul class="assistant-conversations" id="assistantConversations"></ul>
+        </details>
+      </aside>
+    </div>
   `;
+  assistantState.examples = assistantRandomExamples();
   setAssistantScope(assistantState.scope);
-  document.querySelector('[data-assistant-source="catalog"]')?.addEventListener("click", () => {
-    setAssistantScope(assistantState.scope === "all" ? "library" : "all");
+  // Each box can be switched off as long as the other stays on.
+  document.querySelectorAll("[data-assistant-source]").forEach((box) => {
+    box.addEventListener("click", () => {
+      const library = assistantState.scope !== "catalog";
+      const catalog = assistantState.scope !== "library";
+      const isLibrary = box.dataset.assistantSource === "library";
+      const nextLibrary = isLibrary ? !library : library;
+      const nextCatalog = isLibrary ? catalog : !catalog;
+      if (!nextLibrary && !nextCatalog) {
+        showToast("Lascia attiva almeno una fonte tra Ludoteca e Catalogo.");
+        return;
+      }
+      setAssistantScope(assistantScopeFromSources(nextLibrary, nextCatalog));
+    });
   });
   const input = document.querySelector("#assistantQuestion");
   document.querySelector("#assistantForm")?.addEventListener("submit", (event) => {
@@ -5124,14 +5391,21 @@ async function renderAssistant() {
   document.querySelector("#assistantReset")?.addEventListener("click", () => {
     if (assistantState.busy) return;
     assistantState.turns = [];
+    assistantState.conversationId = "";
+    assistantState.examples = assistantRandomExamples();
     saveAssistantState();
     renderAssistantThread();
+    renderAssistantConversations();
     input?.focus();
   });
   if (assistantState.turns.some((turn) => turn.payload?.recommendations?.length)) {
     await refreshWishlistIndex().catch(() => null);
   }
   renderAssistantThread();
+  renderAssistantConversations();
+  if (window.matchMedia("(max-width: 900px)").matches) {
+    document.querySelector(".assistant-history-details")?.removeAttribute("open");
+  }
 }
 
 function browseGameRow(game, index) {
@@ -5178,7 +5452,7 @@ function rankingParams() {
     ["ideal_players", rankingState.idealPlayers],
     ["max_minutes", rankingState.maxMinutes],
     ["weight", rankingState.weight],
-    ["max_language", rankingState.maxLanguage],
+    ["language", rankingState.language],
   ]) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
@@ -5272,9 +5546,38 @@ function rankingCover(view) {
     : `<span>${escapeHtml(initials(view.game.title))}</span>`;
 }
 
-function rankingMeta(game) {
-  const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
-  return `${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · <span class="ranking-rating">★ ${escapeHtml(rating)}</span>`;
+// One uniform tag row at the bottom of every ranking entry: label + value.
+function rankingTags(game, factors = [], {compact = false} = {}) {
+  const bgg = game.bgg || {};
+  const tag = (label, value, className = "") => value && value !== "—"
+    ? `<span class="ranking-tag ${className}"><small>${escapeHtml(label)}</small>${escapeHtml(value)}</span>`
+    : "";
+  const factorText = (prefix) => (factors || []).find((factor) => String(factor).startsWith(prefix));
+  const ideal = factorText("ideale in ")?.slice("ideale in ".length);
+  const special = (factors || []).filter((factor) => !/^(ideale in|peso|età) /.test(String(factor)));
+  const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 1) : "";
+  const age = ageText(game);
+  const rating = Number(bgg.average) > 0
+    ? `★ ${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0 ? ` · ${compactCount(bgg.users_rated)}` : ""}`
+    : "";
+  const genres = compact ? [] : (game.bgg_metadata?.categories || []).slice(0, 2);
+  return `
+    <span class="ranking-tags">
+      ${special.map((factor) => {
+        const [label, ...rest] = String(factor).split(" ");
+        return tag(label, rest.join(" "), "is-mode");
+      }).join("")}
+      ${tag("Voto", rating, "is-rating")}
+      ${tag("Giocatori", playerText(game))}
+      ${compact ? "" : tag("Ideale", ideal || "")}
+      ${tag("Durata", timeText(game))}
+      ${tag("Peso", weight ? `${weight}/5` : "")}
+      ${compact ? "" : tag("Età", age)}
+      ${tag("Lingua", bgg.language_dependence ? languageDependenceText(bgg.language_dependence) : "")}
+      ${compact ? "" : tag("BGG", Number(bgg.rank) > 0 ? `#${formatNumber(bgg.rank, 0)}` : "")}
+      ${compact ? "" : tag("Anno", game.year_published ? String(game.year_published) : "")}
+      ${genres.map((name) => tag("Genere", bggTermLabel(name))).join("")}
+    </span>`;
 }
 
 function rankingPodiumCard(item, index) {
@@ -5284,9 +5587,9 @@ function rankingPodiumCard(item, index) {
       <span class="ranking-podium-cover">${rankingCover(view)}</span>
       <span class="ranking-position">${index}</span>
       <span class="ranking-podium-body">
-        <strong>${escapeHtml(view.game.title)}</strong>
-        <small>${rankingMeta(view.game)}${view.catalog ? ' · <em>Catalogo</em>' : ""}</small>
+        <strong>${escapeHtml(view.game.title)}${view.catalog ? ' <span class="ranking-source-tag">Catalogo</span>' : ""}</strong>
         ${view.summary ? `<span class="ranking-podium-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
+        ${rankingTags(view.game, item.factors, {compact: true})}
       </span>
     </a>
   `;
@@ -5294,9 +5597,6 @@ function rankingPodiumCard(item, index) {
 
 function rankingGameRow(item, index) {
   const view = rankingGameView(item.game);
-  const factors = (item.factors || []).map(
-    (factor) => `<span>${escapeHtml(factor)}</span>`
-  ).join("");
   return `
     <a class="ranking-result-row" href="${view.href}" data-nav>
       <span class="ranking-result-cover">
@@ -5308,9 +5608,8 @@ function rankingGameRow(item, index) {
           <strong>${escapeHtml(view.game.title)}</strong>
           ${view.catalog ? '<span class="ranking-source-tag">Catalogo</span>' : ""}
         </span>
-        <small>${rankingMeta(view.game)}</small>
         ${view.summary ? `<span class="ranking-result-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
-        <span class="ranking-result-factors">${factors}</span>
+        ${rankingTags(view.game, item.factors)}
       </span>
     </a>
   `;
@@ -5320,7 +5619,7 @@ const rankingOptionGroups = [
   {apiKey: "ideal_players", stateKey: "idealPlayers", title: "Ideale in"},
   {apiKey: "max_minutes", stateKey: "maxMinutes", title: "Durata (min)"},
   {apiKey: "weight", stateKey: "weight", title: "Complessità"},
-  {apiKey: "max_language", stateKey: "maxLanguage", title: "Dipendenza dalla lingua"},
+  {apiKey: "language", stateKey: "language", title: "Dipendenza dalla lingua"},
 ];
 
 function rankingOptionGroup(group, options) {
@@ -5369,7 +5668,7 @@ function rankingFacetSection(kind, payload) {
             <button class="explore-facet-chip ${item.name === selectedFacet ? "is-selected" : ""}" type="button"
                     data-ranking-facet-kind="${kind}" data-ranking-facet="${escapeHtml(item.name)}"
                     aria-pressed="${item.name === selectedFacet}">
-              <span>${escapeHtml(item.name)}</span><small>${formatNumber(item.count, 0)}</small>
+              <span title="${escapeHtml(item.name)}">${escapeHtml(bggTermLabel(item.name))}</span><small>${formatNumber(item.count, 0)}</small>
             </button>
           `).join("")}
         </div>
@@ -5381,7 +5680,7 @@ function rankingFacetSection(kind, payload) {
 function rankingActiveFilterCount() {
   return [
     rankingState.category, rankingState.mechanic, rankingState.idealPlayers,
-    rankingState.maxMinutes, rankingState.weight, rankingState.maxLanguage,
+    rankingState.maxMinutes, rankingState.weight, rankingState.language,
   ].filter(Boolean).length + rankingState.categoryGroups.size + rankingState.mechanicGroups.size;
 }
 
@@ -5527,7 +5826,7 @@ function bindRankingControls() {
     event.currentTarget.setAttribute("aria-expanded", String(open));
   });
   document.querySelector("#rankingResetFilters")?.addEventListener("click", () => {
-    for (const key of ["category", "mechanic", "idealPlayers", "maxMinutes", "weight", "maxLanguage"]) {
+    for (const key of ["category", "mechanic", "idealPlayers", "maxMinutes", "weight", "language"]) {
       rankingState[key] = "";
     }
     rankingState.categoryGroups.clear();
@@ -6040,26 +6339,27 @@ async function deletePlay() {
 }
 
 // Section of the Ludoteca game page: last plays and quick logging.
-async function refreshGamePlays(game) {
-  const target = document.querySelector("#gamePlaysList");
-  const count = document.querySelector("#gamePlaysCount");
-  if (!target) return;
+// The play diary lives in Partite: the game page only shows how many plays exist.
+async function refreshGamePlayCount(game, imported = 0) {
+  const link = document.querySelector("#gamePlaysCount");
+  if (!link) return;
   try {
-    const payload = await api(`/api/plays?bgg_id=${game.bgg_id}&limit=5`);
-    if (!target.isConnected) return;
-    const imported = Number(game.progress?.imported_num_plays || 0);
-    count.textContent = payload.total
-      ? `${formatNumber(payload.total, 0)} ${payload.total === 1 ? "partita" : "partite"}`
-      : (imported ? `${formatNumber(imported, 0)} su BGG` : "");
-    target.innerHTML = payload.items.length
-      ? payload.items.map((play) => playRow(play, {showGame: false})).join("")
-        + (payload.total > payload.items.length
-          ? `<a class="play-more" href="/plays?game=${game.bgg_id}" data-nav>Tutte le ${formatNumber(payload.total, 0)} partite ${icon("arrow-right")}</a>`
-          : "")
-      : `<p class="play-empty">Nessuna partita registrata${imported ? ` qui (BGG ne riporta ${formatNumber(imported, 0)})` : ""}. Registra la prossima per tenere traccia di giocatori, scenari ed esiti.</p>`;
-    bindPlayRows(target, payload.items, () => refreshGamePlays(game));
-  } catch (error) {
-    target.innerHTML = `<p class="play-empty">${escapeHtml(error.message)}</p>`;
+    const payload = await api(`/api/plays?bgg_id=${game.bgg_id}&limit=1`);
+    if (!link.isConnected) return;
+    const total = Number(payload.total || 0);
+    const last = payload.items?.[0]?.played_on;
+    if (total) {
+      link.innerHTML = `${icon("check")}<span>${formatNumber(total, 0)} ${total === 1 ? "partita" : "partite"}</span>`;
+      if (last) link.title = `Ultima partita: ${playDate(last)}. Apri il diario delle partite.`;
+    } else if (imported) {
+      link.innerHTML = `<span>${formatNumber(imported, 0)} su BGG</span>`;
+      link.title = "Partite riportate da BoardGameGeek; apri il diario per registrarne qui.";
+    } else {
+      return;
+    }
+    link.hidden = false;
+  } catch (_) {
+    // The counter is a convenience; the button keeps working without it.
   }
 }
 
@@ -6351,7 +6651,7 @@ function exploreParams() {
     ["weight", exploreState.weight],
     ["max_minutes", exploreState.maxMinutes],
     ["min_rating", exploreState.minRating],
-    ["max_language", exploreState.maxLanguage],
+    ["language", exploreState.language],
   ]) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
@@ -6370,9 +6670,9 @@ function exploreSelectionChips(payload) {
   const labels = exploreGroupLabels(payload);
   const chips = [
     ...[...exploreState.categoryGroups].map((name) => ({kind: "category-group", name, label: labels[name] || name})),
-    ...[...exploreState.categories].map((name) => ({kind: "category", name, label: name})),
+    ...[...exploreState.categories].map((name) => ({kind: "category", name, label: bggTermLabel(name)})),
     ...[...exploreState.mechanicGroups].map((name) => ({kind: "mechanic-group", name, label: labels[name] || name})),
-    ...[...exploreState.mechanics].map((name) => ({kind: "mechanic", name, label: name})),
+    ...[...exploreState.mechanics].map((name) => ({kind: "mechanic", name, label: bggTermLabel(name)})),
   ];
   return chips.map((item) => `
     <button class="explore-selection-chip ${item.kind.endsWith("group") ? "is-group" : ""}" type="button"
@@ -6414,8 +6714,8 @@ function exploreFacetChip(item, kind) {
   return `
     <button class="explore-facet-chip ${item.selected ? "is-selected" : ""}" type="button"
             data-explore-kind="${kind}" data-explore-name="${escapeHtml(item.name)}"
-            aria-pressed="${item.selected ? "true" : "false"}">
-      <span>${escapeHtml(item.name)}</span><small>${formatNumber(item.count, 0)}</small>
+            aria-pressed="${item.selected ? "true" : "false"}" title="${escapeHtml(item.name)}">
+      <span>${escapeHtml(bggTermLabel(item.name))}</span><small>${formatNumber(item.count, 0)}</small>
     </button>
   `;
 }
@@ -6455,7 +6755,7 @@ function renderExploreFacets(payload) {
   const query = exploreState.facetQuery.trim().toLocaleLowerCase("it");
 
   if (query) {
-    const matches = facets.filter((item) => item.name.toLocaleLowerCase("it").includes(query));
+    const matches = facets.filter((item) => `${item.name} ${bggTermLabel(item.name)}`.toLocaleLowerCase("it").includes(query));
     container.innerHTML = `
       <div class="explore-group-drawer is-search">
         <div class="explore-facet-chips">
@@ -6517,7 +6817,7 @@ const exploreOptionalGroups = [
   {apiKey: "max_minutes", stateKey: "maxMinutes", title: "Durata (min)"},
   {apiKey: "weight", stateKey: "weight", title: "Complessità"},
   {apiKey: "min_rating", stateKey: "minRating", title: "Voto BGG"},
-  {apiKey: "max_language", stateKey: "maxLanguage", title: "Dipendenza dalla lingua"},
+  {apiKey: "language", stateKey: "language", title: "Dipendenza dalla lingua"},
 ];
 
 function exploreOptionalGroup(group, options) {
@@ -6830,64 +7130,102 @@ function crowdfundingStatusLabel(item) {
   return "Attiva";
 }
 
+function crowdfundingDaysLabel(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "";
+  if (value < 86400) return `${crowdfundingTimeLabel(value)} rimaste`;
+  const days = Math.ceil(value / 86400);
+  return `${days} ${days === 1 ? "giorno" : "giorni"}`;
+}
+
 function crowdfundingCard(item) {
-  const funds = formatCampaignMoney(item.funds, item.currency);
+  const funds = formatCampaignMoney(item.funds, item.currency, {compact: true});
   const platform = String(item.platform || "gamefound").toLowerCase();
+  const platformLabel = platform === "kickstarter" ? "Kickstarter" : "Gamefound";
   const sourceKey = String(item.project_url || item.id || item.title || "");
   const wishlist = wishlistEntry("crowdfunding", sourceKey);
-  const goal = Number(item.goal) > 0 ? formatCampaignMoney(item.goal, item.currency) : "—";
-  const percent = item.funding_percent === null || item.funding_percent === undefined
-    ? "—"
-    : `${formatNumber(item.funding_percent, 0)}%`;
-  const remaining = crowdfundingTimeLabel(item.remaining_seconds);
+  const percentValue = Number(item.funding_percent);
+  const hasPercent = item.funding_percent !== null && item.funding_percent !== undefined && Number.isFinite(percentValue);
+  const remaining = crowdfundingDaysLabel(item.remaining_seconds);
   const status = crowdfundingStatusLabel(item);
-  const score = item.top_score === null || item.top_score === undefined
-    ? ""
-    : ` · Top ${formatNumber(Number(item.top_score) * 100, 0)}`;
+  const href = escapeHtml(safeExternalHref(item.project_url, "#"));
+  const italian = String(item.description_it || "").trim();
+  const original = String(item.description || "").trim();
   return `
-    <article class="crowdfunding-card">
-      <a class="crowdfunding-cover" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
-        ${item.image_url
-          ? `<img src="${escapeHtml(item.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-          : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
-        <span class="crowdfunding-platform">${escapeHtml(platform === "kickstarter" ? "Kickstarter" : "Gamefound")}</span>
-        <span class="crowdfunding-status ${item.status === "ending_soon" ? "is-ending" : ""}">${escapeHtml(status)}</span>
-      </a>
+    <article class="crowdfunding-card" data-crowdfunding-id="${escapeHtml(item.id || "")}">
+      <div class="crowdfunding-cover">
+        <a class="crowdfunding-cover-link" href="${href}" target="_blank" rel="noopener noreferrer"
+           aria-label="Apri la campagna di ${escapeHtml(item.title)} su ${platformLabel}">
+          ${item.image_url
+            ? `<img src="${escapeHtml(item.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+            : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
+        </a>
+        <span class="crowdfunding-status ${item.status === "ending_soon" ? "is-ending" : item.status === "upcoming" ? "is-upcoming" : ""}">${escapeHtml(status)}</span>
+        <button class="wishlist-heart crowdfunding-wishlist ${wishlist ? "is-active" : ""}" type="button"
+                aria-label="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+                title="${wishlist ? "Rimuovi dalla wishlist" : "Aggiungi alla wishlist"}"
+                data-wishlist-source-kind="crowdfunding"
+                data-wishlist-source-key="${escapeHtml(sourceKey)}"
+                data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
+                data-wishlist-title="${escapeHtml(item.title || "")}"
+                data-wishlist-cover="${escapeHtml(item.image_url || "")}"
+                data-wishlist-target="${escapeHtml(item.project_url || "")}"
+                ${item.bgg_id ? `data-wishlist-bgg-id="${Number(item.bgg_id)}"` : ""}
+                data-wishlist-platform="${escapeHtml(platform)}">
+          <span aria-hidden="true">${icon(wishlist ? "heart-fill" : "heart")}</span>
+        </button>
+      </div>
       <div class="crowdfunding-card-body">
-        <div>
-          <p class="crowdfunding-creator">${escapeHtml(item.creator || "Creator non indicato")}</p>
-          <h3>${escapeHtml(item.title)}</h3>
+        <div class="crowdfunding-heading">
+          <p class="crowdfunding-creator">${escapeHtml(item.creator || "Autore non indicato")} · ${platformLabel}</p>
+          ${remaining ? `<span class="crowdfunding-days ${item.status === "ending_soon" ? "is-ending" : ""}" title="Tempo rimasto">${icon("hourglass")}${escapeHtml(remaining)}</span>` : ""}
         </div>
-        <p class="crowdfunding-description">${escapeHtml(item.description || "Nessuna descrizione disponibile.")}</p>
-        <div class="crowdfunding-money-row">
-          <div><span>Raccolto</span><strong>${escapeHtml(funds)}</strong></div>
-          <div><span>Goal</span><strong>${escapeHtml(goal)}</strong></div>
-          <div><span>Finanziato</span><strong>${escapeHtml(percent)}</strong></div>
+        <h3><a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a></h3>
+        <div class="crowdfunding-description-block">
+          <p class="crowdfunding-description ${italian ? "is-italian" : ""}" data-crowdfunding-description>${escapeHtml(italian || original || "Nessuna descrizione disponibile.")}</p>
+          ${italian ? "" : `<button class="crowdfunding-ai-description" type="button" data-crowdfunding-describe="${escapeHtml(item.id || "")}"
+                  title="L'AI legge la pagina della campagna e scrive una presentazione in italiano">${icon("sparkle")}<span>Descrizione in italiano</span></button>`}
         </div>
-        <div class="crowdfunding-meta-row">
-          <span><strong>${formatNumber(item.backer_count, 0)}</strong> backer</span>
-          ${remaining ? `<span><strong>${escapeHtml(remaining)}</strong> rimasti</span>` : ""}
-          <span class="crowdfunding-score">${escapeHtml(score.replace(/^ · /, ""))}</span>
+        <div class="crowdfunding-progress" ${hasPercent ? "" : "hidden"}>
+          <span class="crowdfunding-progress-bar"><span style="width:${Math.max(2, Math.min(100, percentValue || 0))}%"></span></span>
         </div>
-        <div class="crowdfunding-card-actions">
-          <a class="button button-primary crowdfunding-open" href="${escapeHtml(item.project_url || "#")}" target="_blank" rel="noopener noreferrer">
-            Apri campagna ${icon("external")}
-          </a>
-          <button class="button button-ghost wishlist-action ${wishlist ? "is-active" : ""}"
-                  type="button"
-                  data-wishlist-source-kind="crowdfunding"
-                  data-wishlist-source-key="${escapeHtml(sourceKey)}"
-                  data-wishlist-item-id="${escapeHtml(wishlist?.id || "")}"
-                  data-wishlist-title="${escapeHtml(item.title || "")}"
-                  data-wishlist-cover="${escapeHtml(item.image_url || "")}"
-                  data-wishlist-target="${escapeHtml(item.project_url || "")}"
-                  data-wishlist-platform="${escapeHtml(platform)}">
-            ${wishlist ? `${icon("heart-fill")}<span>In Wishlist</span>` : `${icon("heart")}<span>Wishlist</span>`}
-          </button>
-        </div>
+        <dl class="crowdfunding-stats">
+          <div><dt>Raccolto</dt><dd>${escapeHtml(funds)}</dd></div>
+          <div><dt>Finanziato</dt><dd class="${percentValue >= 100 ? "is-funded" : ""}">${hasPercent ? `${formatNumber(percentValue, 0)}%` : "—"}</dd></div>
+          <div><dt>Backer</dt><dd>${formatNumber(item.backer_count, 0)}</dd></div>
+        </dl>
+        ${item.bgg_id ? `<a class="crowdfunding-bgg-link" href="/bgg/${Number(item.bgg_id)}" data-nav>${icon("globe")}<span>Nel catalogo BGG</span></a>` : ""}
       </div>
     </article>
   `;
+}
+
+function bindCrowdfundingDescriptions(root) {
+  root.querySelectorAll("[data-crowdfunding-describe]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const card = button.closest(".crowdfunding-card");
+      const target = card?.querySelector("[data-crowdfunding-description]");
+      button.disabled = true;
+      button.querySelector("span").textContent = "Analisi della pagina…";
+      try {
+        const payload = await api("/api/crowdfunding/description", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id: button.dataset.crowdfundingDescribe}),
+        });
+        if (target) {
+          target.textContent = payload.description_it;
+          target.classList.add("is-italian");
+          if (payload.sources?.length) target.title = `Scritta dall'AI da: ${payload.sources.join(", ")}`;
+        }
+        button.remove();
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+        button.querySelector("span").textContent = "Descrizione in italiano";
+      }
+    });
+  });
 }
 
 function crowdfundingProviderNotice(payload) {
@@ -7004,7 +7342,7 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
             : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
           ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
         </a>
-        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>` : ""}
+        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map((value) => `<span>${escapeHtml(bggTermLabel(value))}</span>`).join("")}</div>` : ""}
       </div>
       <div class="suggestion-body">
         <header class="suggestion-heading">
@@ -7219,12 +7557,22 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       node.textContent = formatNumber(counts[node.dataset.suggestionsCategoryCount] || 0, 0);
     });
     summary.textContent = suggestionsSummaryText(payload);
-    const topMechanics = Array.isArray(payload.profile?.top_mechanics)
-      ? payload.profile.top_mechanics.slice(0, 3).map((entry) => entry?.[0]).filter(Boolean)
-      : [];
+    // What the scores are computed from: the owned base games' most common traits.
+    const profileData = payload.profile || {};
+    const topNames = (key, count) => (Array.isArray(profileData[key]) ? profileData[key] : [])
+      .slice(0, count).map((entry) => entry?.[0]).filter(Boolean);
+    const profileGenres = topNames("top_categories", 2);
+    const profileMechanics = topNames("top_mechanics", 3);
+    const profileFacts = [
+      Number(profileData.owned_standalone_count) > 0 ? `${formatNumber(profileData.owned_standalone_count, 0)} giochi base` : "",
+      Number(profileData.average_weight) > 0 ? `complessità media ${formatNumber(profileData.average_weight, 1)}/5` : "",
+      Number(profileData.average_playing_time) > 0 ? `partite di circa ${formatNumber(Math.round(profileData.average_playing_time / 5) * 5, 0)} min` : "",
+    ].filter(Boolean);
     const profile = document.querySelector("#suggestionsProfile");
-    profile.innerHTML = topMechanics.length
-      ? `<span class="suggestions-profile-label">Il tuo profilo</span>${topMechanics.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}`
+    profile.innerHTML = profileGenres.length || profileMechanics.length
+      ? `<span class="suggestions-profile-label" title="I punteggi “Per te” premiano i titoli simili a questi tratti della tua ludoteca">Calcolati sulla tua ludoteca</span>
+         ${profileFacts.length ? `<span class="suggestions-profile-fact">${escapeHtml(profileFacts.join(" · "))}</span>` : ""}
+         ${[...profileGenres, ...profileMechanics].map((value) => `<span title="${escapeHtml(value)}">${escapeHtml(bggTermLabel(value))}</span>`).join("")}`
       : "";
 
     const total = Math.min(wanted, Number(payload.total_available) || 0);
@@ -7279,6 +7627,13 @@ const bggCatalogState = {
   offset: 0,
   total: 0,
   pageSize: bggCatalogPageSizes.includes(storedBggCatalogPageSize) ? storedBggCatalogPageSize : "50",
+  supportsPlayers: "",
+  idealPlayers: "",
+  playerAge: "",
+  weight: "",
+  maxMinutes: "",
+  minRating: "",
+  language: "",
 };
 let bggCatalogRequestController;
 let bggCatalogSearchTimer;
@@ -7354,6 +7709,7 @@ async function loadBggCatalog() {
     });
     if (bggCatalogState.q) params.set("q", bggCatalogState.q);
     if (bggCatalogState.itemType) params.set("item_type", bggCatalogState.itemType);
+    applyAdvancedParams(bggCatalogState, params, {library: false});
     const [payload] = await Promise.all([
       api(`/api/reference/browse?${params}`, {signal: controller.signal}),
       refreshWishlistIndex().catch(() => null),
@@ -7362,8 +7718,11 @@ async function loadBggCatalog() {
     currentBggCatalogItems = Array.isArray(payload.items) ? payload.items : [];
     bggCatalogState.total = Number(payload.total) || 0;
     const totalText = `${formatNumber(bggCatalogState.total, 0)} ${bggCatalogState.total === 1 ? "gioco" : "giochi"}`;
+    const filtered = advancedActiveCount(bggCatalogState, {library: false});
     summary.textContent = bggCatalogState.q
       ? `${totalText} per “${bggCatalogState.q}”`
+      : filtered
+      ? `${totalText} con i filtri avanzati`
       : `${totalText} nel catalogo BGG`;
     renderBggCatalogItems();
     renderBggCatalogPagination();
@@ -7415,6 +7774,7 @@ async function renderBggCatalog() {
           <button class="view-switch-button ${cardsView ? "" : "is-active"}" id="bggListViewButton" type="button"
                   aria-label="Lista" title="Lista" aria-pressed="${!cardsView}">${icon("list")}</button>
         </div>
+        ${advancedSearchToggleMarkup(bggCatalogState, {library: false})}
         <div class="catalog-density-fields">
           <label class="catalog-density-field" id="bggCardsPerRowField" ${cardsView ? "" : "hidden"}>
             <span class="catalog-density-label">Righe</span>
@@ -7430,6 +7790,7 @@ async function renderBggCatalog() {
           </label>
         </div>
       </section>
+      ${advancedSearchMarkup(bggCatalogState, {library: false})}
       <section class="catalog-results catalog-results-cards catalog-columns-${state.cardsPerRow}" id="bggCatalogGrid"></section>
       <nav class="pagination" id="bggCatalogPagination" aria-label="Paginazione" hidden></nav>
     </section>
@@ -7452,6 +7813,7 @@ async function renderBggCatalog() {
     bggCatalogState.itemType = event.target.value;
     reload();
   });
+  bindAdvancedSearch(bggCatalogState, reload, {library: false});
   document.querySelectorAll("[data-bgg-catalog-sort]").forEach((button) => {
     button.addEventListener("click", () => {
       bggCatalogState.sort = button.dataset.bggCatalogSort || "rank";
@@ -7498,7 +7860,7 @@ async function renderBggCatalog() {
 async function renderCrowdfunding({forceRefresh = false} = {}) {
   document.title = "Crowdfunding · BoardGameCompanion";
   const sortOptions = [
-    ["top", "Top"],
+    ["top", "In evidenza"],
     ["funds", "Più finanziati"],
     ["backers", "Più backer"],
     ["ending", "In scadenza"],
@@ -7514,9 +7876,9 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       <header class="page-header browse-header crowdfunding-header">
         <div class="page-header-copy">
           <h1>Crowdfunding</h1>
-          <p class="muted catalog-page-summary">Scopri i giochi da tavolo in campagna su Kickstarter e Gamefound</p>
+          <p class="muted catalog-page-summary">Campagne di giochi da tavolo attive su Kickstarter e Gamefound: tocca la copertina per aprire la campagna, il cuore per seguirla in Wishlist</p>
         </div>
-        <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
+        <button class="crowdfunding-refresh" id="crowdfundingRefresh" type="button" title="Aggiorna le campagne dalle piattaforme">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
       <div class="crowdfunding-toolbar">
         <div class="suggestion-categories" role="group" aria-label="Classifica">
@@ -7565,7 +7927,13 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       refreshWishlistIndex().catch(() => null),
     ]);
     const items = Array.isArray(payload.items) ? payload.items : [];
-    const rankingText = payload.ranking?.[crowdfundingState.sort];
+    const rankingText = {
+      top: "Ordinati per fondi raccolti e backer, con una spinta alle campagne che chiudono entro due settimane.",
+      funds: "Ordinati per fondi raccolti, convertiti in euro.",
+      backers: "Ordinati per numero di sostenitori.",
+      ending: "Prima le campagne che chiudono prima.",
+      upcoming: "Campagne annunciate e non ancora partite.",
+    }[crowdfundingState.sort] || payload.ranking?.[crowdfundingState.sort];
     summary.innerHTML = `
       <div>
         <strong>${formatNumber(payload.total_matching || 0, 0)} progetti</strong>
@@ -7608,30 +7976,10 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
     }
     grid.innerHTML = items.map(crowdfundingCard).join("");
     bindWishlistActions(grid);
+    bindCrowdfundingDescriptions(grid);
   } catch (error) {
     grid.innerHTML = `<div class="empty-state crowdfunding-empty"><strong>Impossibile caricare il crowdfunding</strong><p class="muted">${escapeHtml(error.message)}</p></div>`;
   }
-}
-
-function wishlistFactsMarkup(item) {
-  const meta = item.metadata || {};
-  if (item.source_kind !== "bgg") {
-    return meta.platform ? `<p class="muted">Piattaforma: ${escapeHtml(meta.platform)}</p>` : "";
-  }
-  const players = meta.players || {};
-  const playersText = players.min && players.max
-    ? (players.min === players.max ? `${players.min}` : `${players.min}–${players.max}`)
-    : "—";
-  const timeText = meta.playing_time ? `${meta.playing_time} min` : "—";
-  const weightText = Number.isFinite(Number(meta.weight)) ? Number(meta.weight).toFixed(1) : "—";
-  const ratingText = Number.isFinite(Number(meta.bgg_rating)) ? Number(meta.bgg_rating).toFixed(1) : "—";
-  return `
-    <dl class="wishlist-facts">
-      <div><dt>Giocatori</dt><dd>${escapeHtml(playersText)}</dd></div>
-      <div><dt>Durata</dt><dd>${escapeHtml(timeText)}</dd></div>
-      <div><dt>Peso</dt><dd>${escapeHtml(weightText)}</dd></div>
-      <div><dt>BGG</dt><dd>${escapeHtml(ratingText)}</dd></div>
-    </dl>`;
 }
 
 const euroFormat = new Intl.NumberFormat("it-IT", {style: "currency", currency: "EUR"});
@@ -7641,35 +7989,37 @@ function wishlistPriceMarkup(item) {
   const checked = prices?.checked_at
     ? new Date(prices.checked_at).toLocaleDateString("it-IT")
     : "";
-  let summary = "";
+  const offers = prices?.offers || [];
+  let summary = `<span class="wishlist-price-empty">Prezzo non ancora cercato</span>`;
   if (prices?.best) {
     const best = prices.best;
-    const others = (prices.offers || []).map((offer) => `
-      <li>
-        <a href="${escapeHtml(safeExternalHref(offer.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(offer.shop)}</a>
-        <span>${escapeHtml(euroFormat.format(offer.price_eur))}${offer.availability === "out_of_stock" ? " · esaurito" : ""}</span>
-      </li>`).join("");
     summary = `
-      <div class="wishlist-price-best">
-        <span class="wishlist-price-label">Miglior prezzo in Italia</span>
-        <a class="wishlist-price-value" href="${escapeHtml(safeExternalHref(best.url))}" target="_blank" rel="noopener noreferrer">
-          ${escapeHtml(euroFormat.format(best.price_eur))} <small>${escapeHtml(best.shop)}</small>
-        </a>
-      </div>
-      <details class="wishlist-offers">
-        <summary>Tutte le offerte (${(prices.offers || []).length})</summary>
-        <ul>${others}</ul>
-      </details>
-      <small class="muted">Prezzo indicativo da ricerca web, aggiornato il ${escapeHtml(checked)}. Verifica sul sito.</small>`;
+      <a class="wishlist-price-value" href="${escapeHtml(safeExternalHref(best.url))}" target="_blank" rel="noopener noreferrer"
+         title="Prezzo indicativo da ricerca web del ${escapeHtml(checked)}: verifica sul sito">
+        <small>Miglior prezzo</small><strong>${escapeHtml(euroFormat.format(best.price_eur))}</strong><span>${escapeHtml(best.shop)} ${icon("external")}</span>
+      </a>`;
   } else if (prices) {
-    summary = `<small class="muted">Nessun prezzo verificato trovato il ${escapeHtml(checked)}.</small>`;
+    summary = `<span class="wishlist-price-empty">Nessun prezzo verificato (${escapeHtml(checked)})</span>`;
   }
   return `
     <div class="wishlist-price">
-      ${summary}
-      <button class="button button-ghost" type="button" data-wishlist-price-refresh="${escapeHtml(item.id)}">
-        ${icon("refresh")}<span>${prices ? "Aggiorna prezzi" : "Cerca prezzi"}</span>
-      </button>
+      <div class="wishlist-price-row">
+        ${summary}
+        <button class="wishlist-price-refresh" type="button" data-wishlist-price-refresh="${escapeHtml(item.id)}"
+                title="${prices ? "Aggiorna i prezzi nei negozi italiani" : "Cerca il prezzo nei negozi italiani"}">
+          ${icon("refresh")}<span>${prices ? "Aggiorna" : "Cerca prezzo"}</span>
+        </button>
+      </div>
+      ${offers.length > 1 ? `
+        <details class="wishlist-offers">
+          <summary>${offers.length} offerte trovate${checked ? ` il ${escapeHtml(checked)}` : ""}</summary>
+          <ul>${offers.map((offer) => `
+            <li>
+              <a href="${escapeHtml(safeExternalHref(offer.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(offer.shop)}</a>
+              <span>${escapeHtml(euroFormat.format(offer.price_eur))}${offer.availability === "out_of_stock" ? " · esaurito" : ""}</span>
+            </li>`).join("")}</ul>
+        </details>` : ""}
+      ${shopLinksMarkup(item.title)}
     </div>`;
 }
 
@@ -7677,7 +8027,7 @@ function bindWishlistPriceActions(root) {
   root.querySelectorAll("[data-wishlist-price-refresh]").forEach((button) => {
     button.addEventListener("click", async () => {
       button.disabled = true;
-      button.querySelector("span").textContent = "Cerco…";
+      button.querySelector("span").textContent = "Cerco nei negozi…";
       try {
         await api(`/api/wishlist/${encodeURIComponent(button.dataset.wishlistPriceRefresh)}/prices`, {method: "POST"});
         await renderWishlist();
@@ -7699,19 +8049,89 @@ function shopLinksMarkup(title) {
   ];
   return `
     <nav class="wishlist-shops" aria-label="Cerca prezzi in Italia per ${escapeHtml(title)}">
-      <span class="wishlist-shops-label">Cerca manualmente</span>
+      <span class="wishlist-shops-label">Cerca su</span>
       ${shops.map(([label, href]) => `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`).join("")}
     </nav>`;
+}
+
+function wishlistCard(item) {
+  const isCrowdfunding = item.source_kind === "crowdfunding";
+  const game = item.game || null;
+  const campaign = item.campaign || null;
+  const title = game?.title || item.title;
+  const inApp = !isCrowdfunding && item.bgg_id ? `/bgg/${Number(item.bgg_id)}` : "";
+  const external = safeExternalHref(item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : ""));
+  const href = inApp || external;
+  const linkAttributes = inApp ? "data-nav" : 'target="_blank" rel="noopener noreferrer"';
+  const bgg = game?.bgg || {};
+  const subtitle = isCrowdfunding
+    ? [campaign?.creator, campaign?.platform === "kickstarter" ? "Kickstarter" : "Gamefound"].filter(Boolean).join(" · ")
+    : [game?.year_published || item.year_published || "", Number(bgg.rank) > 0 ? `#${formatNumber(bgg.rank, 0)} BGG` : "", game?.owned ? "già nella ludoteca" : ""].filter(Boolean).join(" · ");
+  const weight = Number(bgg.average_weight) > 0 ? `${formatNumber(bgg.average_weight, 1)} / 5` : "—";
+  const facts = game ? `
+    <dl class="wishlist-facts-row">
+      <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
+      <div><dt>Età</dt><dd>${escapeHtml(ageText(game))}</dd></div>
+      <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
+      <div><dt>Complessità</dt><dd>${escapeHtml(weight)}</dd></div>
+      <div><dt>Lingua</dt><dd>${escapeHtml(languageDependenceText(bgg.language_dependence))}</dd></div>
+    </dl>` : "";
+  const percent = Number(campaign?.funding_percent);
+  const campaignFacts = campaign ? `
+    <dl class="wishlist-facts-row">
+      <div><dt>Stato</dt><dd>${escapeHtml(crowdfundingStatusLabel(campaign))}</dd></div>
+      <div><dt>Tempo</dt><dd>${escapeHtml(crowdfundingDaysLabel(campaign.remaining_seconds) || "—")}</dd></div>
+      <div><dt>Raccolto</dt><dd>${escapeHtml(formatCampaignMoney(campaign.funds, campaign.currency, {compact: true}))}</dd></div>
+      <div><dt>Finanziato</dt><dd>${Number.isFinite(percent) ? `${formatNumber(percent, 0)}%` : "—"}</dd></div>
+      <div><dt>Backer</dt><dd>${formatNumber(campaign.backer_count, 0)}</dd></div>
+    </dl>` : "";
+  const summary = isCrowdfunding
+    ? String(campaign?.description || "").trim()
+    : String(game?.gameplay_summary || "").trim() || (game?.has_description ? "Riassunto in preparazione…" : "");
+  return `
+    <article class="wishlist-card" data-wishlist-card="${escapeHtml(item.id)}">
+      <div class="wishlist-side">
+        <div class="wishlist-cover">
+          <a href="${escapeHtml(href)}" ${linkAttributes} aria-label="Apri ${escapeHtml(title)}">
+            ${item.cover_url || item.bgg_id
+              ? `<img src="${escapeHtml(item.bgg_id ? coverSrc(item.bgg_id, item.cover_url || "") : item.cover_url)}" alt="Cover di ${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
+              : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
+          </a>
+          <button class="wishlist-heart wishlist-remove is-active" type="button"
+                  aria-label="Rimuovi ${escapeHtml(title)} dalla wishlist" title="Rimuovi dalla wishlist"
+                  data-wishlist-source-kind="${escapeHtml(item.source_kind)}"
+                  data-wishlist-source-key="${escapeHtml(item.source_key)}"
+                  data-wishlist-item-id="${escapeHtml(item.id)}"
+                  data-wishlist-title="${escapeHtml(item.title)}">
+            <span aria-hidden="true">${icon("heart-fill")}</span>
+          </button>
+          ${game ? bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated}) : ""}
+        </div>
+        ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag"})}</div>` : ""}
+      </div>
+      <div class="wishlist-card-body">
+        <header class="wishlist-heading">
+          <p class="eyebrow">${isCrowdfunding ? "Crowdfunding" : "BoardGameGeek"}</p>
+          <h2><a href="${escapeHtml(href)}" ${linkAttributes}>${escapeHtml(title)}</a></h2>
+          ${subtitle ? `<span class="muted">${escapeHtml(subtitle)}</span>` : ""}
+        </header>
+        ${facts}${campaignFacts}
+        ${summary ? `<p class="wishlist-summary" ${game ? `data-ranking-summary-bgg="${escapeHtml(game.bgg_id)}"` : ""}>${escapeHtml(summary)}</p>` : ""}
+        ${isCrowdfunding ? "" : wishlistPriceMarkup(item)}
+      </div>
+    </article>
+  `;
 }
 
 async function renderWishlist() {
   document.title = "Wishlist · BoardGameCompanion";
   app.innerHTML = `
     <section class="page-header browse-header">
-      <div>
+      <div class="page-header-copy">
         <h1>Wishlist</h1>
-        <p class="muted catalog-page-summary">Ritrova i giochi che hai salvato per valutarli o acquistarli in seguito</p>
+        <p class="muted catalog-page-summary">I giochi che vuoi valutare o comprare, con i dati BGG aggiornati e il miglior prezzo trovato nei negozi italiani</p>
       </div>
+      <section class="catalog-stats" id="wishlistStats" aria-label="Riepilogo wishlist"></section>
     </section>
     <section class="wishlist-grid" id="wishlistGrid">${skeletons()}</section>
   `;
@@ -7719,51 +8139,23 @@ async function renderWishlist() {
   try {
     const payload = await refreshWishlistIndex();
     const items = payload.items || [];
+    const priced = items.filter((item) => item.metadata?.prices?.best);
+    document.querySelector("#wishlistStats").innerHTML = `
+      <div class="stat"><strong>${formatNumber(items.filter((item) => item.source_kind !== "crowdfunding").length, 0)}</strong><span>Giochi</span></div>
+      <div class="stat"><strong>${formatNumber(items.filter((item) => item.source_kind === "crowdfunding").length, 0)}</strong><span>Campagne</span></div>
+      <div class="stat"><strong>${formatNumber(priced.length, 0)}</strong><span>Con prezzo</span></div>
+    `;
     grid.innerHTML = items.length
-      ? items.map((item) => {
-          const isCrowdfunding = item.source_kind === "crowdfunding";
-          const sourceLabel = isCrowdfunding ? "Crowdfunding" : "BoardGameGeek";
-          const target = safeExternalHref(
-            item.target_url || (item.bgg_id ? `https://boardgamegeek.com/boardgame/${item.bgg_id}` : ""),
-          );
-          return `
-            <article class="wishlist-card">
-              <a class="wishlist-cover" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">
-                ${item.cover_url
-                  ? `<img src="${escapeHtml(coverSrc(item.bgg_id, item.cover_url))}" alt="Cover di ${escapeHtml(item.title)}" loading="lazy" referrerpolicy="no-referrer">`
-                  : `<span class="cover-initials">${escapeHtml(initials(item.title))}</span>`}
-              </a>
-              <div class="wishlist-card-body">
-                <p class="eyebrow">${escapeHtml(sourceLabel)}</p>
-                <h2>${escapeHtml(item.title)}</h2>
-                <p class="muted">${item.year_published || "Anno non disponibile"}</p>
-                ${wishlistFactsMarkup(item)}
-                ${wishlistPriceMarkup(item)}
-                ${shopLinksMarkup(item.title)}
-                <div class="wishlist-card-actions">
-                  <a class="button button-primary" href="${escapeHtml(target)}" target="_blank" rel="noopener noreferrer">${isCrowdfunding ? "Apri progetto" : "Scheda BGG"} ${icon("external")}</a>
-                  <button class="button button-ghost wishlist-action is-active"
-                          type="button"
-                          data-wishlist-source-kind="${escapeHtml(item.source_kind)}"
-                          data-wishlist-source-key="${escapeHtml(item.source_key)}"
-                          data-wishlist-item-id="${escapeHtml(item.id)}"
-                          data-wishlist-title="${escapeHtml(item.title)}">
-                    ${icon("heart-fill")}<span>In Wishlist</span>
-                  </button>
-                </div>
-              </div>
-            </article>
-          `;
-        }).join("")
-      : '<div class="empty"><strong>Wishlist vuota.</strong><span>Aggiungi titoli da Suggerimenti o Crowdfunding.</span></div>';
+      ? items.map(wishlistCard).join("")
+      : '<div class="empty"><strong>Wishlist vuota.</strong><span>Aggiungi titoli con il cuore da Catalogo, Suggerimenti o Crowdfunding.</span></div>';
     bindWishlistActions(grid);
     bindWishlistPriceActions(grid);
+    void ensureRankingGameplaySummaries(items
+      .filter((item) => item.game)
+      .map((item) => ({game: {...item.game, source: "catalog"}})));
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (focus) {
-      const card = Array.from(grid.querySelectorAll(".wishlist-card")).find((item) => {
-        const button = item.querySelector("[data-wishlist-item-id]");
-        return button?.dataset.wishlistItemId === focus;
-      });
+      const card = grid.querySelector(`[data-wishlist-card="${CSS.escape(focus)}"]`);
       if (card) {
         card.classList.add("is-highlighted");
         card.scrollIntoView({behavior: "smooth", block: "center"});
@@ -7774,19 +8166,89 @@ async function renderWishlist() {
   }
 }
 
+// Smart-list filters, grouped as in the builder. `parse` turns the control value into the API value.
+const LIST_FILTER_GROUPS = [
+  {title: "Al tavolo", fields: [
+    {key: "supports_players", label: "Giocabile in", type: "number", min: 1, max: 30, placeholder: "giocatori", parse: "int"},
+    {key: "ideal_players", label: "Ideale in", type: "number", min: 1, max: 30, placeholder: "giocatori", parse: "int"},
+    {key: "player_age", label: "Età del giocatore", type: "number", min: 3, max: 99, placeholder: "anni", parse: "int"},
+    {key: "max_minutes", label: "Durata massima", type: "number", min: 1, max: 1440, placeholder: "minuti", parse: "int"},
+  ]},
+  {title: "Il gioco", fields: [
+    {key: "weight", label: "Complessità", options: [["", "Qualsiasi"], ["light", "Semplice"], ["medium", "Media"], ["heavy", "Impegnativa"]]},
+    {key: "min_rating", label: "Voto BGG minimo", type: "number", min: 0, max: 10, step: 0.1, placeholder: "es. 7", parse: "float"},
+    {key: "language", label: "Dipendenza dalla lingua", options: [["", "Qualsiasi"], ["1", "Nessuna"], ["2", "Poca"], ["3", "Moderata"], ["4", "Alta"]], parse: "int"},
+    {key: "item_type", label: "Tipo", options: [["", "Giochi ed espansioni"], ["standalone", "Solo giochi base"], ["expansion", "Solo espansioni"]]},
+  ]},
+  {title: "La tua esperienza", fields: [
+    {key: "played", label: "Partite", options: [["", "Qualsiasi"], ["false", "Mai giocati"], ["true", "Già giocati"]], parse: "bool"},
+    {key: "completed", label: "Completati", options: [["", "Qualsiasi"], ["true", "Completati"], ["false", "Non completati"]], parse: "bool"},
+    {key: "personal_rating_min", label: "Tuo voto minimo", options: [["", "Qualsiasi"], ...[1, 2, 3, 3.5, 4, 4.5, 5].map((value) => [String(value), `${String(value).replace(".", ",")}★`])], parse: "float"},
+    {key: "sort", label: "Ordina per", options: [["", "Titolo"], ["rating_desc", "Voto BGG"], ["year_desc", "Più recenti"], ["duration_asc", "Più brevi"], ["players_desc", "Più giocatori"], ["age_asc", "Età più bassa"]]},
+  ]},
+  {title: "Temi", fields: [
+    {key: "category", label: "Genere", type: "text", list: "listCategoryOptions", placeholder: "es. Fantasy"},
+    {key: "mechanic", label: "Meccanica", type: "text", list: "listMechanicOptions", placeholder: "es. Deck building"},
+  ]},
+];
+const LIST_FIELDS = LIST_FILTER_GROUPS.flatMap((group) => group.fields);
+
 function smartListFilterSummary(filters = {}) {
+  const option = (key, value) => LIST_FIELDS.find((field) => field.key === key)?.options
+    ?.find(([optionValue]) => optionValue === String(value))?.[1];
   const labels = [];
-  if (filters.supports_players) labels.push(`${filters.supports_players} giocatori`);
+  if (filters.supports_players) labels.push(`in ${filters.supports_players}`);
   if (filters.ideal_players) labels.push(`ideale in ${filters.ideal_players}`);
   if (filters.recommended_players) labels.push(`raccomandato in ${filters.recommended_players}`);
+  if (filters.player_age) labels.push(`dai ${filters.player_age} anni`);
   if (filters.max_minutes) labels.push(`≤ ${filters.max_minutes} min`);
-  if (filters.weight) labels.push(String(filters.weight));
-  if (filters.personal_rating_min) labels.push(`tu ≥ ${filters.personal_rating_min}★`);
+  if (filters.weight) labels.push(`complessità ${String(option("weight", filters.weight) || filters.weight).toLowerCase()}`);
+  if (filters.min_rating) labels.push(`BGG ≥ ${formatNumber(filters.min_rating, 1)}`);
+  if (filters.language) labels.push(`lingua ${String(option("language", filters.language) || "").toLowerCase()}`);
+  if (filters.item_type) labels.push(filters.item_type === "expansion" ? "espansioni" : "giochi base");
+  if (filters.personal_rating_min) labels.push(`tu ≥ ${String(filters.personal_rating_min).replace(".", ",")}★`);
   if (filters.played === true) labels.push("giocati");
   if (filters.played === false) labels.push("mai giocati");
-  if (filters.category) labels.push(String(filters.category));
-  if (filters.mechanic) labels.push(String(filters.mechanic));
+  if (filters.completed === true) labels.push("completati");
+  if (filters.completed === false) labels.push("non completati");
+  if (filters.category) labels.push(bggTermLabel(filters.category));
+  if (filters.mechanic) labels.push(bggTermLabel(filters.mechanic));
   return labels.length ? labels.join(" · ") : "Tutta la ludoteca";
+}
+
+function listFieldControl(field) {
+  const id = `listFilter-${field.key}`;
+  if (field.options) {
+    return `<select id="${id}" data-list-filter="${field.key}">
+      ${field.options.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join("")}
+    </select>`;
+  }
+  return `<input id="${id}" data-list-filter="${field.key}" type="${field.type}"
+    ${field.min !== undefined ? `min="${field.min}" max="${field.max}"` : 'maxlength="500"'}
+    ${field.step ? `step="${field.step}"` : ""} ${field.list ? `list="${field.list}"` : ""}
+    placeholder="${escapeHtml(field.placeholder || "")}" autocomplete="off">`;
+}
+
+function readListFilters(root) {
+  const filters = {owned: true};
+  root.querySelectorAll("[data-list-filter]").forEach((control) => {
+    const field = LIST_FIELDS.find((item) => item.key === control.dataset.listFilter);
+    const raw = String(control.value || "").trim();
+    if (!field || !raw) return;
+    if (field.parse === "int") filters[field.key] = Number.parseInt(raw, 10);
+    else if (field.parse === "float") filters[field.key] = Number(raw);
+    else if (field.parse === "bool") filters[field.key] = raw === "true";
+    else if (field.list) filters[field.key] = listTermValue(field.list, raw);
+    else filters[field.key] = raw;
+  });
+  return filters;
+}
+
+// The datalists show Italian labels; filters store the BGG name.
+function listTermValue(listId, raw) {
+  const match = [...document.querySelectorAll(`#${listId} option`)]
+    .find((option) => option.value.toLocaleLowerCase("it") === raw.toLocaleLowerCase("it"));
+  return match?.dataset.bggName || raw;
 }
 
 async function renderLists() {
@@ -7801,69 +8263,145 @@ async function renderLists() {
     <section class="list-builder-card">
       <form id="createGameListForm">
         <div class="list-builder-head">
-          <label><span>Nome lista</span><input id="gameListName" type="text" maxlength="200" required placeholder="Es. Brevi in 2"></label>
-          <label><span>Tipo</span>
-            <select id="gameListKind">
-              <option value="smart">Dinamica</option>
-              <option value="manual">Manuale</option>
-            </select>
-          </label>
-          <button class="button button-primary" type="submit">Crea lista</button>
+          <label class="list-builder-name"><span>Nome della raccolta</span><input id="gameListName" type="text" maxlength="200" required placeholder="Es. Brevi in due"></label>
+          <div class="list-kind-switch" role="radiogroup" aria-label="Tipo di raccolta">
+            <button type="button" class="list-kind-option is-active" data-list-kind="smart" role="radio" aria-checked="true">
+              ${icon("bolt")}<span><strong>Dinamica</strong><small>si aggiorna da sola con i filtri</small></span>
+            </button>
+            <button type="button" class="list-kind-option" data-list-kind="manual" role="radio" aria-checked="false">
+              ${icon("list")}<span><strong>Manuale</strong><small>scegli tu i titoli</small></span>
+            </button>
+          </div>
         </div>
         <div class="list-builder-filters" id="smartListFields">
-          <label><span>Giocatori</span><input id="listSupportsPlayers" type="number" min="1" max="30"></label>
-          <label><span>Ideale in</span><input id="listIdealPlayers" type="number" min="1" max="30"></label>
-          <label><span>Raccomandato in</span><input id="listRecommendedPlayers" type="number" min="1" max="30"></label>
-          <label><span>Max minuti</span><input id="listMaxMinutes" type="number" min="1" max="1440"></label>
-          <label><span>Complessità</span>
-            <select id="listWeight"><option value="">Qualsiasi</option><option value="light">Leggera</option><option value="medium">Media</option><option value="heavy">Impegnativa</option></select>
-          </label>
-          <label><span>Voto personale minimo</span>
-            <select id="listPersonalRating"><option value="">Qualsiasi</option><option value="0.5">0,5★</option><option value="1">1★</option><option value="1.5">1,5★</option><option value="2">2★</option><option value="2.5">2,5★</option><option value="3">3★</option><option value="3.5">3,5★</option><option value="4">4★</option><option value="4.5">4,5★</option><option value="5">5★</option></select>
-          </label>
-          <label><span>Stato</span>
-            <select id="listPlayed"><option value="">Qualsiasi</option><option value="true">Giocati</option><option value="false">Mai giocati</option></select>
-          </label>
-          <label><span>Rating BGG minimo</span><input id="listBggRating" type="number" min="0" max="10" step="0.1"></label>
-          <label><span>Categoria</span><input id="listCategory" type="text" maxlength="500"></label>
-          <label><span>Meccanica</span><input id="listMechanic" type="text" maxlength="500"></label>
+          ${LIST_FILTER_GROUPS.map((group) => `
+            <fieldset class="list-filter-group">
+              <legend>${escapeHtml(group.title)}</legend>
+              ${group.fields.map((field) => `<label><span>${escapeHtml(field.label)}</span>${listFieldControl(field)}</label>`).join("")}
+            </fieldset>
+          `).join("")}
+          <datalist id="listCategoryOptions"></datalist>
+          <datalist id="listMechanicOptions"></datalist>
+        </div>
+        <div class="list-builder-footer">
+          <span class="list-builder-preview" id="listBuilderPreview" aria-live="polite"></span>
+          <button class="button button-ghost" id="cancelListEdit" type="button" hidden>Annulla modifica</button>
+          <button class="button button-ghost" id="resetListFilters" type="button">Azzera filtri</button>
+          <button class="button button-primary" id="submitGameList" type="submit">${icon("plus")}<span>Crea raccolta</span></button>
         </div>
       </form>
     </section>
     <section class="saved-lists-layout">
       <aside class="saved-lists-panel">
-        <div class="section-heading"><h2>Le tue liste</h2><span id="savedListCount" class="muted"></span></div>
+        <div class="section-heading"><h2>Le tue raccolte</h2><span id="savedListCount" class="muted"></span></div>
         <div id="savedLists">${skeletons()}</div>
       </aside>
       <div class="saved-list-results" id="savedListResults">
-        <div class="empty"><strong>Seleziona una lista.</strong><span>I risultati verranno calcolati sui dati attuali.</span></div>
+        <div class="empty"><strong>Seleziona una raccolta</strong><span>I giochi vengono calcolati sui dati attuali della ludoteca.</span></div>
       </div>
     </section>
   `;
 
-  const kind = document.querySelector("#gameListKind");
+  const form = document.querySelector("#createGameListForm");
   const fields = document.querySelector("#smartListFields");
-  kind?.addEventListener("change", () => {
-    fields.hidden = kind.value !== "smart";
+  const preview = document.querySelector("#listBuilderPreview");
+  const submitButton = document.querySelector("#submitGameList");
+  const cancelEdit = document.querySelector("#cancelListEdit");
+  let listKind = "smart";
+  let editingList = null;
+  let previewTimer;
+  const setKind = (value) => {
+    listKind = value;
+    document.querySelectorAll("[data-list-kind]").forEach((button) => {
+      const active = button.dataset.listKind === value;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-checked", String(active));
+    });
+    fields.hidden = value !== "smart";
+    document.querySelector("#resetListFilters").hidden = value !== "smart";
+    void updatePreview();
+  };
+  const updatePreview = async () => {
+    if (listKind !== "smart") {
+      preview.textContent = "Dopo averla creata, aggiungi i giochi dalla raccolta.";
+      return;
+    }
+    const filters = readListFilters(fields);
+    const params = new URLSearchParams({limit: "1"});
+    Object.entries(filters).forEach(([key, value]) => params.set(key, String(value)));
+    try {
+      const result = await api(`/api/games?${params}`);
+      preview.innerHTML = `<strong>${formatNumber(result.total || 0, 0)}</strong> giochi della ludoteca corrispondono · ${escapeHtml(smartListFilterSummary(filters))}`;
+    } catch (_) {
+      preview.textContent = smartListFilterSummary(filters);
+    }
+  };
+  const stopEditing = () => {
+    editingList = null;
+    form.reset();
+    cancelEdit.hidden = true;
+    submitButton.innerHTML = `${icon("plus")}<span>Crea raccolta</span>`;
+    document.querySelectorAll("[data-list-kind]").forEach((button) => { button.disabled = false; });
+    setKind("smart");
+  };
+  const startEditing = (list) => {
+    editingList = list;
+    form.reset();
+    document.querySelector("#gameListName").value = list.name;
+    setKind(list.kind);
+    document.querySelectorAll("[data-list-kind]").forEach((button) => { button.disabled = true; });
+    fields.querySelectorAll("[data-list-filter]").forEach((control) => {
+      const value = list.filters?.[control.dataset.listFilter];
+      if (value === undefined || value === null) return;
+      const term = control.list && [...control.list.options].find((option) => option.dataset.bggName === value);
+      control.value = term ? term.value : String(value);
+    });
+    cancelEdit.hidden = false;
+    submitButton.innerHTML = `${icon("check")}<span>Salva modifiche</span>`;
+    void updatePreview();
+    form.scrollIntoView({behavior: "smooth", block: "start"});
+  };
+  document.querySelectorAll("[data-list-kind]").forEach((button) => {
+    button.addEventListener("click", () => setKind(button.dataset.listKind));
   });
+  fields.querySelectorAll("[data-list-filter]").forEach((control) => {
+    control.addEventListener(control.tagName === "SELECT" ? "change" : "input", () => {
+      window.clearTimeout(previewTimer);
+      previewTimer = window.setTimeout(() => void updatePreview(), 250);
+    });
+  });
+  document.querySelector("#resetListFilters")?.addEventListener("click", () => {
+    fields.querySelectorAll("[data-list-filter]").forEach((control) => { control.value = ""; });
+    void updatePreview();
+  });
+  cancelEdit?.addEventListener("click", stopEditing);
+  api("/api/catalog/facets?limit=100").then((facets) => {
+    for (const [id, items] of [["#listCategoryOptions", facets.categories], ["#listMechanicOptions", facets.mechanics]]) {
+      const target = document.querySelector(id);
+      if (target) {
+        target.innerHTML = (items || []).map((item) => `<option value="${escapeHtml(bggTermLabel(item.name))}" data-bgg-name="${escapeHtml(item.name)}"></option>`).join("");
+      }
+    }
+  }).catch(() => null);
+  void updatePreview();
 
   const refreshListIndex = async () => {
     const payload = await api("/api/lists");
     const target = document.querySelector("#savedLists");
     const count = document.querySelector("#savedListCount");
     const items = payload.items || [];
-    count.textContent = `${items.length} liste`;
+    count.textContent = `${items.length} ${items.length === 1 ? "raccolta" : "raccolte"}`;
     target.innerHTML = items.length
       ? items.map((item) => `
           <article class="saved-list-card" data-list-id="${escapeHtml(item.id)}">
             <button class="saved-list-open" type="button" data-open-list="${escapeHtml(item.id)}">
               <span class="saved-list-icon" aria-hidden="true">${icon(item.kind === "smart" ? "bolt" : "list")}</span>
-              <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? escapeHtml(smartListFilterSummary(item.filters)) : "Lista manuale"}</small></span>
+              <span><strong>${escapeHtml(item.name)}</strong><small>${item.kind === "smart" ? escapeHtml(smartListFilterSummary(item.filters)) : "Raccolta manuale"}</small></span>
             </button>
             <button class="icon-button saved-list-delete" type="button" data-delete-list="${escapeHtml(item.id)}" aria-label="Elimina ${escapeHtml(item.name)}">×</button>
           </article>
         `).join("")
-      : '<div class="empty"><span>Nessuna lista salvata.</span></div>';
+      : '<div class="empty"><span>Nessuna raccolta salvata: creane una qui sopra.</span></div>';
 
     const openList = async (listId) => {
       const result = document.querySelector("#savedListResults");
@@ -7874,8 +8412,11 @@ async function renderLists() {
         const games = resolved.items || [];
         result.innerHTML = `
           <header class="saved-list-result-head">
-            <div><p class="eyebrow">${list.kind === "smart" ? "Lista dinamica" : "Lista manuale"}</p><h2>${escapeHtml(list.name)}</h2><p class="muted">${list.kind === "smart" ? escapeHtml(smartListFilterSummary(list.filters)) : "Titoli scelti manualmente"}</p></div>
-            <strong>${formatNumber(resolved.total || 0, 0)} giochi</strong>
+            <div><p class="eyebrow">${list.kind === "smart" ? "Raccolta dinamica" : "Raccolta manuale"}</p><h2>${escapeHtml(list.name)}</h2><p class="muted">${list.kind === "smart" ? escapeHtml(smartListFilterSummary(list.filters)) : "Titoli scelti manualmente"}</p></div>
+            <div class="saved-list-result-actions">
+              <strong>${formatNumber(resolved.total || 0, 0)} giochi</strong>
+              <button class="button button-ghost" type="button" id="editOpenList">${icon("settings")}<span>${list.kind === "smart" ? "Modifica filtri" : "Rinomina"}</span></button>
+            </div>
           </header>
           ${list.kind === "manual" ? `
             <div class="manual-list-add">
@@ -7885,6 +8426,10 @@ async function renderLists() {
           ` : ""}
           <div class="catalog-grid saved-list-game-grid">${games.length ? games.map((game) => gameCard(game)).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
         `;
+        document.querySelector("#editOpenList")?.addEventListener("click", () => startEditing(list));
+        document.querySelectorAll("[data-open-list]").forEach((button) => {
+          button.closest(".saved-list-card")?.classList.toggle("is-open", button.dataset.openList === listId);
+        });
         if (list.kind === "manual") {
           const input = document.querySelector("#manualListSearch");
           const searchTarget = document.querySelector("#manualListSearchResults");
@@ -7953,43 +8498,31 @@ async function renderLists() {
     });
   };
 
-  document.querySelector("#createGameListForm")?.addEventListener("submit", async (event) => {
+  form?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const form = event.currentTarget;
-    const listKind = document.querySelector("#gameListKind").value;
-    const numberOrNull = (id) => {
-      const value = String(document.querySelector(id)?.value || "").trim();
-      return value ? Number(value) : null;
-    };
-    const filters = listKind === "smart" ? {
-      owned: true,
-      supports_players: numberOrNull("#listSupportsPlayers"),
-      ideal_players: numberOrNull("#listIdealPlayers"),
-      recommended_players: numberOrNull("#listRecommendedPlayers"),
-      max_minutes: numberOrNull("#listMaxMinutes"),
-      weight: document.querySelector("#listWeight").value || null,
-      personal_rating_min: numberOrNull("#listPersonalRating"),
-      played: document.querySelector("#listPlayed").value === ""
-        ? null
-        : document.querySelector("#listPlayed").value === "true",
-      min_rating: numberOrNull("#listBggRating"),
-      category: document.querySelector("#listCategory").value.trim() || null,
-      mechanic: document.querySelector("#listMechanic").value.trim() || null,
-    } : {};
-    Object.keys(filters).forEach((key) => filters[key] === null && delete filters[key]);
+    const name = document.querySelector("#gameListName").value.trim();
+    const filters = listKind === "smart" ? readListFilters(fields) : {};
     try {
-      await api("/api/lists", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          name: document.querySelector("#gameListName").value.trim(),
-          kind: listKind,
-          filters,
-        }),
-      });
-      showToast("Lista creata.");
-      form.reset();
-      fields.hidden = false;
+      if (editingList) {
+        const listId = editingList.id;
+        await api(`/api/lists/${encodeURIComponent(listId)}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(editingList.kind === "smart" ? {name, filters} : {name}),
+        });
+        showToast("Raccolta aggiornata.");
+        stopEditing();
+        history.replaceState({}, "", `/lists?focus=${encodeURIComponent(listId)}`);
+      } else {
+        const created = await api("/api/lists", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({name, kind: listKind, filters}),
+        });
+        showToast("Raccolta creata.");
+        stopEditing();
+        if (created?.id) history.replaceState({}, "", `/lists?focus=${encodeURIComponent(created.id)}`);
+      }
       await refreshListIndex();
     } catch (error) {
       showToast(error.message, true);

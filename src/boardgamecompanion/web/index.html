@@ -285,6 +285,18 @@
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="rulebooks" hidden>
+        <section class="settings-card" id="rulebookCoverage" aria-labelledby="rulebookCoverageTitle">
+          <div class="settings-section-head">
+            <div>
+              <p class="eyebrow">Regolamenti</p>
+              <h3 id="rulebookCoverageTitle">Giochi senza regolamento</h3>
+            </div>
+            <button class="button button-primary" id="rulebookSearchMissing" type="button" disabled>Cerca ora (5 giochi)</button>
+          </div>
+          <p class="settings-help">La ricerca automatica gira in background su pochi giochi alla volta: provider ufficiali degli editori, poi la ricerca web (DeepSeek o Gemini) se manca un regolamento italiano ufficiale. Le fonti non ufficiali finiscono in <strong>Fonti da verificare</strong>.</p>
+          <div class="rulebook-coverage-stats" id="rulebookCoverageStats"></div>
+          <ul class="rulebook-missing-list" id="rulebookMissingList"><li class="muted">Caricamento…</li></ul>
+        </section>
         <section class="settings-card">
           <div class="settings-section-head">
             <div>

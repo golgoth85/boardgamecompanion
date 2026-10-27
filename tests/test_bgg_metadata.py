@@ -247,3 +247,17 @@ def test_bgg_hot_list_is_bearer_authenticated_and_bounded() -> None:
         "authorization": "Bearer secret",
         "url": "https://boardgamegeek.com/xmlapi2/hot?type=boardgame",
     }
+
+
+def test_thing_batch_skips_items_without_primary_title() -> None:
+    from boardgamecompanion.bgg_metadata import BggMetadataError, _parse_things
+
+    content = (
+        b'<items><item type="boardgame" id="1"><name type="primary" value="Good"/></item>'
+        b'<item type="boardgame" id="2"><name type="alternate" value="No primary"/></item></items>'
+    )
+    invalid: set[int] = set()
+    parsed = _parse_things(content, expected_bgg_ids={1, 2}, invalid=invalid)
+    assert set(parsed) == {1} and invalid == {2}
+    with pytest.raises(BggMetadataError):
+        _parse_things(content, expected_bgg_ids={1, 2})

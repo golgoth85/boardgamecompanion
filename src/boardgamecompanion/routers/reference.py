@@ -23,6 +23,7 @@ from boardgamecompanion.bgg_reference import (
     save_reference_settings,
 )
 from boardgamecompanion.bgg_reference_worker import worker_status
+from boardgamecompanion.catalog import explore_fact_match, explore_facts
 from boardgamecompanion.description_translation import (
     DescriptionTranslationError,
     ReferenceDescriptionTranslationService,
@@ -82,12 +83,54 @@ def reference_browse(
     limit: int = Query(default=48, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     item_type: Literal["standalone", "expansion"] | None = Query(default=None),
+    supports_players: int | None = Query(default=None, ge=1, le=30),
+    ideal_players: int | None = Query(default=None, ge=1, le=30),
+    player_age: int | None = Query(default=None, ge=3, le=99),
+    weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
+    max_minutes: int | None = Query(default=None, ge=1, le=1440),
+    min_rating: float | None = Query(default=None, ge=0, le=10),
+    language: int | None = Query(default=None, ge=1, le=4),
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
-    return BggReferenceCatalog(database).browse(
-        query=q, sort=sort, limit=limit, offset=offset, item_type=item_type
+    reference = BggReferenceCatalog(database)
+    # Same parameters as the Ludoteca advanced search, evaluated like Esplora.
+    filters = {
+        key: value
+        for key, value in {
+            "supports_players": supports_players,
+            "ideal_players": ideal_players,
+            "player_age": player_age,
+            "weight": weight,
+            "max_minutes": max_minutes,
+            "min_rating": min_rating,
+            "language": language,
+        }.items()
+        if value is not None
+    }
+    allowed_ids = None
+    if filters:
+        allowed_ids = {
+            int(row["bgg_id"])
+            for row, facts in reference_row_facts(reference.explore_rows())
+            if all(explore_fact_match(facts, key, value) for key, value in filters.items())
+        }
+    payload = reference.browse(
+        query=q, sort=sort, limit=limit, offset=offset, item_type=item_type,
+        allowed_ids=allowed_ids,
     )
+    return {**payload, "filters": filters}
+
+
+_facts_cache: dict[str, object] = {}
+
+
+def reference_row_facts(rows: list[dict[str, object]]) -> list[tuple[dict[str, object], dict[str, object]]]:
+    """Facts of the cached explore rows, computed once per scan."""
+    if _facts_cache.get("rows") is not rows:
+        _facts_cache["facts"] = [(row, explore_facts(row, str(row["name"]))) for row in rows]
+        _facts_cache["rows"] = rows
+    return _facts_cache["facts"]  # type: ignore[return-value]
 
 
 @router.get("/api/reference/{bgg_id:int}")
