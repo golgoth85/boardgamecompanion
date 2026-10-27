@@ -7041,7 +7041,7 @@ function suggestionsSummaryText(payload) {
     }
   }
   if (payload.cache_state === "stale") parts.push("BGG non raggiungibile: ultimi dati disponibili");
-  return parts.join(" ");
+  return parts.join(" · ");
 }
 
 let suggestionsLoadToken = 0;
@@ -7773,11 +7773,11 @@ function smartListFilterSummary(filters = {}) {
 }
 
 async function renderLists() {
-  document.title = "Liste · BoardGameCompanion";
+  document.title = "Raccolte · BoardGameCompanion";
   app.innerHTML = `
     <section class="page-header browse-header lists-header">
       <div>
-        <h1>Liste</h1>
+        <h1>Raccolte</h1>
         <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri</p>
       </div>
     </section>
