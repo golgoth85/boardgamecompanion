@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import re
 from urllib.parse import urlsplit
 
@@ -14,6 +15,8 @@ from boardgamecompanion.rulebooks import (
 from boardgamecompanion.price_search import (
     ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host, shop_search_title,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def matching_title(query: RulebookQuery, page: dict) -> bool:
@@ -146,7 +149,9 @@ class DeepSeekPriceProvider:
             read_failures = 0
             seen = set()
             for shop in sorted(ITALIAN_SHOP_HOSTS):
-                for result in self.web.search(f'"{query_title[:85]}" prezzo site:{shop}', count=2):
+                found = self.web.search(f'"{query_title[:85]}" prezzo site:{shop}', count=2)
+                logger.warning("price search shop=%s results=%d", shop, len(found))
+                for result in found:
                     if shop_host(result["url"]) is None or result["url"] in seen:
                         continue
                     seen.add(result["url"])
@@ -159,6 +164,7 @@ class DeepSeekPriceProvider:
                         break
                 if len(pages) == 4:
                     break
+            logger.warning("price search title=%r pages=%d read_failures=%d", query_title, len(pages), read_failures)
             if not pages:
                 if read_failures:
                     raise CloudAIError("DeepSeek: impossibile verificare le pagine dei negozi; prezzi precedenti conservati")
