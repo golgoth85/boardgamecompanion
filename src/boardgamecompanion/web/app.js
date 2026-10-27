@@ -2735,7 +2735,7 @@ async function renderCatalog() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <h1>Ludoteca</h1>
-        <p class="muted catalog-page-summary">La tua collezione, le partite giocate e i regolamenti raccolti.</p>
+        <p class="muted catalog-page-summary">La tua collezione, le partite giocate e i regolamenti raccolti</p>
         ${activeFacet ? `
           <div class="catalog-hero-actions">
             <button class="active-facet-chip" id="clearFacet" type="button">
@@ -4328,7 +4328,7 @@ async function renderDiscovery() {
     app.innerHTML = `
       <section class="admin-page review-page">
         <div class="review-page-head admin-page-head">
-          <div><h1>Ricerca regolamenti</h1><p class="muted catalog-page-summary">Cerca fonti per i giochi del catalogo e segui gli esiti delle acquisizioni.</p></div>
+          <div><h1>Ricerca regolamenti</h1><p class="muted catalog-page-summary">Cerca fonti per i giochi del catalogo e segui gli esiti delle acquisizioni</p></div>
           <button class="button button-primary" id="runDiscoveryBatch" type="button">Cerca su 5 giochi</button>
         </div>
         <div class="update-list">
@@ -4486,7 +4486,7 @@ async function renderReviews({reset = false} = {}) {
         <div class="review-page-head admin-page-head">
           <div>
             <h1>Fonti da verificare</h1>
-            <p class="muted catalog-page-summary">Esamina i candidati ai regolamenti e conferma quali fonti sono affidabili.</p>
+            <p class="muted catalog-page-summary">Esamina i candidati ai regolamenti e conferma quali fonti sono affidabili</p>
           </div>
           <span class="review-counter">${pendingData.total} da verificare</span>
         </div>
@@ -4770,7 +4770,7 @@ async function renderUpdates({reset = false} = {}) {
         <div class="review-page-head admin-page-head">
           <div>
             <h1>Aggiornamenti regolamenti</h1>
-            <p class="muted catalog-page-summary">Monitora le fonti approvate e controlla quando sono disponibili nuove versioni.</p>
+            <p class="muted catalog-page-summary">Monitora le fonti approvate e controlla quando sono disponibili nuove versioni</p>
           </div>
           <span class="review-counter">${data.total} monitorati</span>
         </div>
@@ -5074,7 +5074,7 @@ async function renderAssistant() {
     <section class="page-header catalog-page-header">
       <div class="page-header-copy">
         <h1>Assistente AI</h1>
-        <p class="muted catalog-page-summary">Consigli, domande e liste sui giochi da tavolo.</p>
+        <p class="muted catalog-page-summary">Consigli, domande e liste sui giochi da tavolo</p>
       </div>
       <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Giochi considerati">
         <button type="button" class="stat" data-assistant-scope="library"><span>Solo ludoteca</span></button>
@@ -5526,8 +5526,7 @@ async function renderRankings() {
       <div class="page-header-copy">
         <h1>Classifiche</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
-          <span>Confronta i giochi per voto, popolarità e altri criteri.</span>
-          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span>Confronta i giochi per voto, popolarità e altri criteri</span>
           <span id="rankingResultCount" aria-live="polite">Caricamento…</span>
         </p>
       </div>
@@ -6109,8 +6108,8 @@ async function refreshPlaysPage() {
     document.querySelector("#playsStatCompleted").textContent = formatNumber(completed.length, 0);
     document.querySelector("#playsStatYear").textContent = formatNumber(summary.this_year, 0);
     document.querySelector("#playsSummary").textContent = summary.last_played_on
-      ? `Ultima partita il ${playDate(summary.last_played_on)}${summary.minutes ? ` · ${playDuration(summary.minutes)} di gioco registrate` : ""}`
-      : "Registra le partite per costruire il tuo diario di gioco.";
+      ? `Ultima partita il ${playDate(summary.last_played_on)}${summary.minutes ? ` ${playDuration(summary.minutes)} di gioco registrate` : ""}`
+      : "Registra le partite per costruire il tuo diario di gioco";
     const playerSelect = document.querySelector("#playsPlayer");
     playerSelect.innerHTML = `<option value="">Tutti i giocatori</option>${summary.players
       .map((player) => `<option value="${escapeHtml(player.name)}" ${player.name === playsState.player ? "selected" : ""}>${escapeHtml(player.name)}</option>`).join("")}`;
@@ -6730,8 +6729,7 @@ async function renderExplore(initialTab = null) {
       <div class="page-header-copy">
         <h1>Esplora</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
-          <span>Trova giochi per genere, meccaniche e caratteristiche che ti interessano.</span>
-          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span>Trova giochi per genere, meccaniche e caratteristiche che ti interessano</span>
           <span id="exploreResultCount" aria-live="polite">Caricamento…</span>
         </p>
       </div>
@@ -7041,7 +7039,7 @@ function suggestionsSummaryText(payload) {
     }
   }
   if (payload.cache_state === "stale") parts.push("BGG non raggiungibile: ultimi dati disponibili");
-  return parts.join(" · ");
+  return parts.join(" ");
 }
 
 let suggestionsLoadToken = 0;
@@ -7055,8 +7053,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       <div class="page-header-copy">
         <h1>Suggerimenti</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
-          <span>Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca.</span>
-          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span>Scopri giochi in linea con i tuoi gusti e amplia la tua ludoteca</span>
           <span id="suggestionsSummary" aria-live="polite">Analisi del profilo e dei candidati BGG…</span>
         </p>
       </div>
@@ -7368,8 +7365,7 @@ async function renderBggCatalog() {
       <div class="page-header-copy">
         <h1>Catalogo</h1>
         <p class="muted catalog-page-summary rankings-page-summary">
-          <span>Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca.</span>
-          <span class="rankings-summary-separator" aria-hidden="true">·</span>
+          <span>Sfoglia i giochi su BoardGameGeek e trova il prossimo da aggiungere alla tua ludoteca</span>
           <span id="bggCatalogSummary" aria-live="polite">Caricamento…</span>
         </p>
       </div>
@@ -7497,7 +7493,7 @@ async function renderCrowdfunding({forceRefresh = false} = {}) {
       <header class="page-header browse-header crowdfunding-header">
         <div class="page-header-copy">
           <h1>Crowdfunding</h1>
-          <p class="muted catalog-page-summary">Scopri i giochi da tavolo in campagna su Kickstarter e Gamefound.</p>
+          <p class="muted catalog-page-summary">Scopri i giochi da tavolo in campagna su Kickstarter e Gamefound</p>
         </div>
         <button class="button button-ghost" id="crowdfundingRefresh" type="button">${icon("refresh")}<span>Aggiorna</span></button>
       </header>
@@ -7693,7 +7689,7 @@ async function renderWishlist() {
     <section class="page-header browse-header">
       <div>
         <h1>Wishlist</h1>
-        <p class="muted catalog-page-summary">Ritrova i giochi che hai salvato per valutarli o acquistarli in seguito.</p>
+        <p class="muted catalog-page-summary">Ritrova i giochi che hai salvato per valutarli o acquistarli in seguito</p>
       </div>
     </section>
     <section class="wishlist-grid" id="wishlistGrid">${skeletons()}</section>
@@ -7778,7 +7774,7 @@ async function renderLists() {
     <section class="page-header browse-header lists-header">
       <div>
         <h1>Liste</h1>
-        <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri.</p>
+        <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri</p>
       </div>
     </section>
     <section class="list-builder-card">

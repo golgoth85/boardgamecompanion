@@ -937,7 +937,6 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .list-actions .button{min-height:2.1rem;padding:.3rem .65rem;font-size:.68rem}
 .list-actions .wishlist-heart{width:2.1rem;height:2.1rem;font-size:1rem}
 .catalog-page-summary{margin:.2rem 0 0;font-size:.8rem}
-.rankings-summary-separator{padding:0 .38rem}
 .catalog-sort-pills .stat{cursor:pointer;color:var(--muted);font:inherit}
 .catalog-sort-pills .stat span{font-size:.72rem;font-weight:750}
 .catalog-sort-pills .stat:hover{color:var(--text);border-color:#3e4c68}
