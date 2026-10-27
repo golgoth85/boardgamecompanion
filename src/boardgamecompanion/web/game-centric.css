@@ -197,7 +197,7 @@
 .ranking-result-factors{display:flex;gap:.28rem;flex-wrap:wrap}.ranking-result-factors span{padding:.12rem .38rem;border-radius:999px;color:#aeb9ca;background:rgba(255,255,255,.045);font-size:.56rem}
 .ranking-more{justify-self:center;min-height:2.3rem;padding:.35rem .9rem;font-size:.74rem}
 .ranking-group-chips{display:grid;gap:.3rem}
-.ranking-group-chip{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.5rem;min-height:2.3rem;padding:.2rem .55rem .2rem .25rem;border:1px solid var(--line);border-radius:999px;color:var(--text);background:rgba(18,24,38,.62);cursor:pointer;font:inherit;font-size:.72rem;font-weight:750;text-align:left}
+.ranking-group-chip{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:.5rem;min-height:2.3rem;padding:.2rem .55rem .2rem .25rem;border:1px solid var(--line);border-radius:999px;color:var(--text);background:rgba(18,24,38,.62);cursor:pointer;font:inherit;font-size:.72rem;font-weight:400;text-align:left}
 .ranking-group-chip .explore-group-art{width:1.8rem;height:1.8rem;padding:.26rem;border-radius:999px}
 .ranking-group-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ranking-group-chip small{color:var(--muted);font-size:.6rem;font-weight:700}
