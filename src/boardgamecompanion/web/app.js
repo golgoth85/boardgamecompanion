@@ -781,19 +781,21 @@ function referenceDetailGame(item) {
     play_time: {playing: details.playing_time, min: details.min_play_time, max: details.max_play_time},
     average_weight: details.bgg_average_weight,
     recommended_age: details.bgg_recommended_age,
+    best_players: details.bgg_best_players,
+    recommended_players: details.bgg_recommended_players,
   });
 }
 
 function referenceDescriptionMarkup(item) {
   if (item.description) {
-    return '<p class="game-description-text" id="referenceDescriptionText" aria-busy="true">Sto traducendo la descrizione…</p>';
+    return '<div class="game-description-text reference-description-text" id="referenceDescriptionText" aria-busy="true">Sto traducendo la descrizione…</div>';
   }
   const note = item.detail_error === "no_token"
     ? "Descrizione non disponibile: configura il token BGG nelle impostazioni."
     : item.detail_error
       ? "Descrizione non disponibile: BGG non ha risposto, riprova più tardi."
       : "Descrizione non disponibile.";
-  return `<p class="game-description-text" id="referenceDescriptionText">${escapeHtml(note)}</p>`;
+  return `<div class="game-description-text" id="referenceDescriptionText">${escapeHtml(note)}</div>`;
 }
 
 async function loadReferenceDescription(bggId) {
@@ -2552,6 +2554,8 @@ function referenceAsGame(item) {
       users_rated: item.users_rated,
       average_weight: item.average_weight,
       recommended_age: item.recommended_age,
+      best_players: item.best_players,
+      recommended_players: item.recommended_players,
       rank: item.rank,
     },
     bgg_metadata: {cover_url: item.image_url || item.thumbnail_url || ""},

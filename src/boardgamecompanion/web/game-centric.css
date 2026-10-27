@@ -913,6 +913,7 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .player-chart .player-chart-tip{left:auto;right:0}
 
 .game-description-text{max-width:none}
+.reference-description-text{white-space:pre-line}
 
 .section-eyebrow{margin:0;font-family:inherit}
 .relevant-expansions-section .simple-rulebook-head:has(> .section-eyebrow:only-child){margin-bottom:-.1rem}
