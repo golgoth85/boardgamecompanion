@@ -5283,8 +5283,10 @@ function rankingGameRow(item, index) {
   ).join("");
   return `
     <a class="ranking-result-row" href="${view.href}" data-nav>
-      <span class="ranking-position">${index}</span>
-      <span class="ranking-result-cover">${rankingCover(view)}</span>
+      <span class="ranking-result-cover">
+        ${rankingCover(view)}
+        <span class="ranking-position">${index}</span>
+      </span>
       <span class="ranking-result-body">
         <span class="ranking-result-title">
           <strong>${escapeHtml(view.game.title)}</strong>

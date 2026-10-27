@@ -185,10 +185,11 @@
 .ranking-score{display:inline-grid;min-width:2.8rem;padding:.24rem .5rem;place-items:center;border:1px solid rgba(251,191,36,.45);border-radius:999px;color:var(--accent-2);background:rgba(245,158,11,.12);font-size:.78rem;font-weight:850}
 .ranking-podium-card .ranking-score{position:absolute;top:.6rem;right:.6rem;background:rgba(8,12,19,.82);backdrop-filter:blur(6px)}
 .ranking-list{display:grid;gap:.4rem}
-.ranking-result-row{display:grid;grid-template-columns:2.2rem 3.6rem minmax(0,1fr) auto;align-items:center;gap:.7rem;padding:.5rem .7rem .5rem .4rem;border:1px solid var(--line);border-radius:12px;color:var(--text);background:rgba(18,24,38,.5)}
+.ranking-result-row{display:grid;grid-template-columns:5rem minmax(0,1fr) auto;align-items:center;gap:.7rem;padding:.5rem .7rem;border:1px solid var(--line);border-radius:12px;color:var(--text);background:rgba(18,24,38,.5)}
 .ranking-result-row:hover{border-color:#3e4c68;background:rgba(18,24,38,.75)}
-.ranking-result-cover{display:grid;width:3.6rem;height:3.6rem;place-items:center;overflow:hidden;border-radius:9px;color:var(--muted);background:rgba(8,12,19,.7);font-size:.7rem;font-weight:900}
+.ranking-result-cover{position:relative;display:grid;width:5rem;height:5rem;place-items:center;overflow:hidden;border-radius:9px;color:var(--muted);background:rgba(8,12,19,.7);font-size:.7rem;font-weight:900}
 .ranking-result-cover img{width:100%;height:100%;object-fit:cover}
+.ranking-result-cover .ranking-position{position:absolute;top:.25rem;left:.25rem;z-index:1;width:1.6rem;min-width:1.6rem;height:1.6rem;padding:0;border:1px solid rgba(15,23,42,.12);color:#172033;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.28);font-size:.72rem}
 .ranking-result-body{display:grid;gap:.16rem;min-width:0}
 .ranking-result-title{display:flex;align-items:baseline;gap:.45rem;min-width:0}
 .ranking-result-title strong{overflow:hidden;font-size:.84rem;text-overflow:ellipsis;white-space:nowrap}
@@ -224,8 +225,8 @@
   .ranking-podium-body{align-content:center;padding:.6rem 3.6rem .6rem .7rem}
   .ranking-podium-card .ranking-position{top:.4rem;left:.4rem;min-width:1.6rem;height:1.6rem;font-size:.7rem}
   .ranking-podium-card .ranking-score{top:50%;transform:translateY(-50%)}
-  .ranking-result-row{grid-template-columns:1.5rem 3rem minmax(0,1fr) auto;gap:.5rem;padding:.45rem .5rem .45rem .2rem}
-  .ranking-result-cover{width:3rem;height:3rem}
+  .ranking-result-row{grid-template-columns:4rem minmax(0,1fr) auto;gap:.5rem;padding:.45rem .5rem}
+  .ranking-result-cover{width:4rem;height:4rem}
   .ranking-score{min-width:2.4rem;font-size:.7rem}
   .new-game-row{grid-template-columns:3.2rem minmax(0,1fr)}.new-game-date{grid-column:2;justify-items:start;min-width:0}
 }
