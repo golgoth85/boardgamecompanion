@@ -4045,13 +4045,11 @@ a { color: inherit; text-decoration: none; }
 
 /* Rendering performance: skip layout/paint work for off-screen catalog items. */
 .game-card-wrap,
-.catalog-list-row,
-.explore-facet-card {
+.catalog-list-row {
   content-visibility: auto;
 }
 .game-card-wrap { contain-intrinsic-size: 360px 420px; }
 .catalog-list-row { contain-intrinsic-size: 900px 80px; }
-.explore-facet-card { contain-intrinsic-size: 190px 210px; }
 
 .catalog-results,
 .explore-layout {

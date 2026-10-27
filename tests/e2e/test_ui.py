@@ -901,16 +901,20 @@ def test_completed_trophy_room_and_home_showcase(browser, live_server):
     finally:
         mobile_context.close()
 
-def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_server):
+def test_explore_combines_sources_groups_facets_and_parameters(browser, live_server):
     context, page = new_page(browser)
+    requests = []
 
     def explore_payload(route):
         query = parse_qs(urlsplit(route.request.url).query)
+        requests.append(query)
         categories = query.get("category", [])
-        mechanics = query.get("mechanic", [])
-        filtered = bool(categories or mechanics or query.get("ideal_players"))
+        category_groups = query.get("category_group", [])
+        source = query.get("source", ["library"])[0]
+        filtered = bool(categories or category_groups or query.get("max_language"))
         total = 1 if filtered else 2
-        game = {
+        games = [{
+            "source": "library",
             "bgg_id": 900001,
             "parent_bgg_id": None,
             "title": "Synthetic Alpha",
@@ -918,151 +922,118 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
             "item_type": "standalone",
             "players": {"min": 2, "max": 4},
             "play_time": {"playing": 60, "min": 45, "max": 90},
-            "bgg": {
-                "average": 7.8,
-                "average_weight": 2.2,
-                "rank": 42,
-                "recommended_age": "10+",
-            },
+            "bgg": {"average": 7.8, "average_weight": 2.2, "rank": 42, "recommended_age": "10+"},
             "collection": {"own": True},
             "bgg_metadata": {"cover_url": None},
-        }
+        }]
+        if source != "library":
+            games.append({
+                "source": "catalog",
+                "bgg_id": 900002,
+                "name": "Catalog Beta",
+                "year_published": 2021,
+                "rank": 7,
+                "average": 8.1,
+                "users_rated": 1200,
+                "players": {"min": 1, "max": 4},
+                "play_time": {"playing": 90},
+                "owned": False,
+            })
         payload = {
-            "total": total,
+            "source": source,
+            "total": total + (1 if source != "library" else 0),
+            "category_groups": [
+                {"key": "fantastic", "label": "Fantasy e fantascienza", "count": total,
+                 "selected": "fantastic" in category_groups},
+                {"key": "history", "label": "Storia ed epoche", "count": 0, "selected": False},
+                {"key": "other", "label": "Altro", "count": 0, "selected": False},
+            ],
+            "mechanic_groups": [
+                {"key": "dice", "label": "Dadi e fortuna", "count": total, "selected": False},
+            ],
             "categories": [
-                {
-                    "name": "Fantasy",
-                    "count": total,
-                    "covers": ["https://example.test/fantasy.jpg"],
-                    "selected": "Fantasy" in categories,
-                },
-                {
-                    "name": "Adventure",
-                    "count": 1,
-                    "covers": [],
-                    "selected": "Adventure" in categories,
-                },
+                {"name": "Fantasy", "group": "fantastic", "count": total, "covers": [],
+                 "selected": "Fantasy" in categories},
+                {"name": "Science Fiction", "group": "fantastic", "count": 1, "covers": [],
+                 "selected": "Science Fiction" in categories},
             ],
             "mechanics": [
-                {
-                    "name": "Dice Rolling",
-                    "count": total,
-                    "covers": ["https://example.test/dice.jpg"],
-                    "selected": "Dice Rolling" in mechanics,
-                },
-                {
-                    "name": "Hand Management",
-                    "count": 1,
-                    "covers": [],
-                    "selected": "Hand Management" in mechanics,
-                },
+                {"name": "Dice Rolling", "group": "dice", "count": total, "covers": [], "selected": False},
             ],
-            "games": [game],
+            "games": games,
             "limit": 250,
             "filters": {},
             "options": {
                 "supports_players": [
                     {"value": 2, "label": "2", "count": total, "selected": False},
-                    {"value": 4, "label": "4", "count": total, "selected": False},
-                    *(
-                        []
-                        if categories or mechanics
-                        else [{"value": 6, "label": "6+", "count": 1, "selected": False}]
-                    ),
+                    *([] if filtered else [{"value": 6, "label": "6+", "count": 1, "selected": False}]),
                 ],
-                "ideal_players": [
-                    {
-                        "value": 2,
-                        "label": "2",
-                        "count": total,
-                        "selected": "2" in query.get("ideal_players", []),
-                    }
-                ],
-                "player_age": [
-                    {"value": 10, "label": "10", "count": total, "selected": False},
-                    {"value": 12, "label": "12", "count": total, "selected": False},
-                ],
-                "max_minutes": [
-                    {"value": 60, "label": "≤60", "count": total, "selected": False},
-                    {"value": 90, "label": "≤90", "count": total, "selected": False},
-                ],
-                "weight": [
-                    {"value": "light", "label": "Semplice", "count": total, "selected": False}
-                ],
-                "min_rating": [
-                    {"value": 7.0, "label": "7+", "count": total, "selected": False}
+                "max_language": [
+                    {"value": 1, "label": "Nessuna", "count": 1,
+                     "selected": "1" in query.get("max_language", [])},
+                    {"value": 3, "label": "Moderata", "count": total, "selected": False},
                 ],
             },
         }
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(payload),
-        )
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
     page.route("**/api/catalog/explore?**", explore_payload)
 
     try:
         page.goto(f"{live_server}/explore")
         expect(page.get_by_role("heading", name="Esplora")).to_be_visible()
-        expect(page.get_by_role("tab", name="Generi")).to_have_attribute(
-            "aria-selected", "true"
-        )
-        expect(page.locator("#exploreFilterOptions")).to_be_visible()
-        expect(page.locator("#exploreResultCount")).to_have_text(
-            "2 giochi corrispondenti"
-        )
+        expect(page.get_by_role("tab", name="Generi")).to_have_attribute("aria-selected", "true")
+        expect(page.locator("#exploreResultCount")).to_have_text("2 giochi corrispondenti")
+        assert requests[-1]["source"] == ["library"]
+        expect(page.get_by_role("heading", name="Dipendenza dalla lingua")).to_be_visible()
+        expect(page.locator(".explore-option-group small:not(button small)")).to_have_count(0)
 
-        expect(
-            page.locator('[data-explore-option-key="supports_players"][data-explore-option-value="6"]')
-        ).to_be_visible()
-
+        # Macro groups: empty ones are disabled, "Altro" is hidden without members.
+        fantastic = page.locator('[data-explore-group="fantastic"]')
+        expect(fantastic).to_contain_text("2 giochi · 2 voci")
+        expect(page.locator('[data-explore-group="history"]')).to_be_disabled()
+        expect(page.locator('[data-explore-group="other"]')).to_have_count(0)
         fantasy = page.locator('[data-explore-kind="category"][data-explore-name="Fantasy"]')
-        adventure = page.locator('[data-explore-kind="category"][data-explore-name="Adventure"]')
-        expect(fantasy).to_contain_text("2 giochi")
-        expect(adventure).to_have_count(0)
-        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+1)")
-        page.locator("#exploreRareToggle").click()
-        expect(adventure).to_be_visible()
-        expect(page.locator("#exploreRareToggle")).to_contain_text("Nascondi rari")
-        page.locator("#exploreRareToggle").click()
-        expect(adventure).to_have_count(0)
+        expect(fantasy).to_have_count(0)
 
+        fantastic.click()
+        expect(fantastic).to_have_attribute("aria-expanded", "true")
+        expect(fantasy).to_be_visible()
         fantasy.click()
         expect(page.locator(".explore-selection-chip")).to_contain_text("Fantasy")
-        expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 gioco corrispondente"
-        )
+        expect(page.locator("#exploreResultCount")).to_have_text("1 gioco corrispondente")
         expect(
             page.locator('[data-explore-option-key="supports_players"][data-explore-option-value="6"]')
         ).to_have_count(0)
 
-        page.get_by_role("tab", name="Meccaniche").click()
-        dice = page.locator('[data-explore-kind="mechanic"][data-explore-name="Dice Rolling"]')
-        hand_management = page.locator(
-            '[data-explore-kind="mechanic"][data-explore-name="Hand Management"]'
-        )
-        expect(hand_management).to_have_count(0)
-        expect(dice).to_have_count(0)
-        expect(page.locator("#exploreRareToggle")).to_contain_text("Mostra tutti (+2)")
-        page.locator("#exploreRareToggle").click()
-        expect(dice).to_be_visible()
-        expect(hand_management).to_be_visible()
-        dice.click()
-        expect(page.locator(".explore-selection-chip")).to_have_count(2)
-        expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 gioco corrispondente"
-        )
+        page.locator("[data-explore-group-select]").click()
+        expect(page.locator(".explore-selection-chip.is-group")).to_contain_text("Fantasy e fantascienza")
+        assert requests[-1]["category_group"] == ["fantastic"]
 
-        ideal_two = page.locator(
-            '[data-explore-option-key="ideal_players"][data-explore-option-value="2"]'
-        )
-        expect(ideal_two).to_be_visible()
-        ideal_two.click()
-        expect(ideal_two).to_have_attribute("aria-pressed", "true")
-        expect(page.locator("#exploreResultCount")).to_have_text(
-            "1 gioco corrispondente"
-        )
+        page.locator("#exploreFacetQuery").fill("scien")
+        expect(page.locator('[data-explore-kind="category"][data-explore-name="Science Fiction"]')).to_be_visible()
+        expect(fantasy).to_have_count(0)
+        page.locator("#exploreFacetQuery").fill("")
+
+        language = page.locator('[data-explore-option-key="max_language"][data-explore-option-value="1"]')
+        language.click()
+        expect(language).to_have_attribute("aria-pressed", "true")
+        assert requests[-1]["max_language"] == ["1"]
+
+        page.locator("#exploreClearSelections").click()
+        expect(page.locator(".explore-selection-chip")).to_have_count(0)
+
+        # Source boxes: both, then catalog only; the last checked box cannot be unchecked.
+        page.locator('[data-explore-source="catalog"]').click()
+        expect(page.locator('[data-explore-source="catalog"]')).to_have_attribute("aria-checked", "true")
+        expect(page.locator(".explore-result-grid")).to_contain_text("Catalog Beta")
+        assert requests[-1]["source"] == ["both"]
+        page.locator('[data-explore-source="library"]').click()
+        expect(page.locator('[data-explore-source="library"]')).to_have_attribute("aria-checked", "false")
+        page.locator('[data-explore-source="catalog"]').click()
+        expect(page.locator('[data-explore-source="library"]')).to_have_attribute("aria-checked", "true")
+        expect(page.locator('[data-explore-source="catalog"]')).to_have_attribute("aria-checked", "false")
+        assert [query["source"][0] for query in requests[-2:]] == ["catalog", "library"]
     finally:
         context.close()
 
@@ -1070,6 +1041,9 @@ def test_explore_combines_genres_mechanics_and_optional_filters(browser, live_se
     mobile_page.route("**/api/catalog/explore?**", explore_payload)
     try:
         mobile_page.goto(f"{live_server}/explore")
+        expect(mobile_page.locator(".explore-group-tile").first).to_be_visible()
+        expect(mobile_page.locator(".explore-filter-panel")).to_be_hidden()
+        mobile_page.locator("#exploreFilterToggle").click()
         expect(mobile_page.locator(".explore-filter-panel")).to_be_visible()
         assert mobile_page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth + 1"

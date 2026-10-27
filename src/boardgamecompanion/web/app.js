@@ -15,6 +15,7 @@ import {
 } from "./state.js";
 import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
+import {exploreGroupArt} from "./explore-art.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
 const app = document.querySelector("#app");
@@ -5542,44 +5543,39 @@ async function renderCompleted() {
   }
 }
 
-function exploreFacetMosaic(item, kind) {
-  const covers = Array.isArray(item.covers) ? item.covers.slice(0, 4) : [];
-  const facetIcon = kind === "category" ? icon("layers") : icon("settings");
-  if (!covers.length) {
-    return `<div class="explore-facet-mosaic is-empty" aria-hidden="true">
-      <span>${facetIcon}</span>
-    </div>`;
-  }
-  return `<div class="explore-facet-mosaic has-${covers.length}" aria-hidden="true">
-    ${covers.map((url) =>
-      `<img src="${escapeHtml(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    ).join("")}
-  </div>`;
+const exploreSources = [
+  ["library", "Ludoteca", "shelf", "Giochi base posseduti"],
+  ["catalog", "Catalogo", "globe", "Catalogo BGG non posseduto"],
+];
+
+function exploreSourceFlags() {
+  return {
+    library: exploreState.source !== "catalog",
+    catalog: exploreState.source !== "library",
+  };
 }
 
-function exploreFacetCard(item, kind) {
-  const selected = Boolean(item.selected);
-  return `
-    <button class="explore-facet-card ${selected ? "is-selected" : ""}" type="button"
-            data-explore-kind="${kind}" data-explore-name="${escapeHtml(item.name)}"
-            aria-pressed="${selected ? "true" : "false"}">
-      <span class="explore-facet-count">${formatNumber(item.count, 0)} giochi</span>
-      ${exploreFacetMosaic(item, kind)}
-      <span class="explore-facet-label">
-        <strong>${escapeHtml(item.name)}</strong>
-        <small>${kind === "category" ? "Genere" : "Meccanica"}${selected ? " · selezionata" : ""}</small>
-      </span>
-      <span class="explore-facet-check" aria-hidden="true">${selected ? icon("check") : icon("plus")}</span>
+function exploreSourceBoxes() {
+  const flags = exploreSourceFlags();
+  return exploreSources.map(([key, label, iconName, hint]) => `
+    <button class="explore-source-box ${flags[key] ? "is-active" : ""}" type="button"
+            role="checkbox" aria-checked="${flags[key]}" data-explore-source="${key}" title="${hint}">
+      <span class="explore-source-icon" aria-hidden="true">${icon(iconName)}</span>
+      <strong>${label}</strong>
+      <span class="explore-source-check" aria-hidden="true">${icon("check")}</span>
     </button>
-  `;
+  `).join("");
 }
 
 function exploreParams() {
   const params = new URLSearchParams({
+    source: exploreState.source,
     limit: exploreState.expandedResults ? "250" : "12",
   });
   [...exploreState.categories].forEach((value) => params.append("category", value));
   [...exploreState.mechanics].forEach((value) => params.append("mechanic", value));
+  [...exploreState.categoryGroups].forEach((value) => params.append("category_group", value));
+  [...exploreState.mechanicGroups].forEach((value) => params.append("mechanic_group", value));
   for (const [key, value] of [
     ["supports_players", exploreState.supportsPlayers],
     ["ideal_players", exploreState.idealPlayers],
@@ -5587,88 +5583,183 @@ function exploreParams() {
     ["weight", exploreState.weight],
     ["max_minutes", exploreState.maxMinutes],
     ["min_rating", exploreState.minRating],
+    ["max_language", exploreState.maxLanguage],
   ]) {
     if (String(value || "").trim()) params.set(key, String(value).trim());
   }
   return params;
 }
 
-function exploreSelectionChips() {
-  const chips = [
-    ...[...exploreState.categories].map((name) => ({kind: "category", name, label: "Genere"})),
-    ...[...exploreState.mechanics].map((name) => ({kind: "mechanic", name, label: "Meccanica"})),
-  ];
-  if (!chips.length) {
-    return '<span class="explore-selection-empty">Nessun genere o meccanica selezionati.</span>';
+function exploreGroupLabels(payload) {
+  const labels = {};
+  for (const group of [...(payload?.category_groups || []), ...(payload?.mechanic_groups || [])]) {
+    labels[group.key] = group.label;
   }
+  return labels;
+}
+
+function exploreSelectionChips(payload) {
+  const labels = exploreGroupLabels(payload);
+  const chips = [
+    ...[...exploreState.categoryGroups].map((name) => ({kind: "category-group", name, label: labels[name] || name})),
+    ...[...exploreState.categories].map((name) => ({kind: "category", name, label: name})),
+    ...[...exploreState.mechanicGroups].map((name) => ({kind: "mechanic-group", name, label: labels[name] || name})),
+    ...[...exploreState.mechanics].map((name) => ({kind: "mechanic", name, label: name})),
+  ];
   return chips.map((item) => `
-    <button class="explore-selection-chip" type="button"
-            data-explore-remove-kind="${item.kind}" data-explore-remove-name="${escapeHtml(item.name)}">
-      <small>${item.label}</small><strong>${escapeHtml(item.name)}</strong><span aria-hidden="true">×</span>
+    <button class="explore-selection-chip ${item.kind.endsWith("group") ? "is-group" : ""}" type="button"
+            data-explore-remove-kind="${item.kind}" data-explore-remove-name="${escapeHtml(item.name)}"
+            aria-label="Rimuovi ${escapeHtml(item.label)}">
+      ${item.kind.endsWith("group") ? exploreGroupArt(item.name) : ""}
+      <strong>${escapeHtml(item.label)}</strong><span aria-hidden="true">×</span>
     </button>
   `).join("");
 }
 
+function exploreSelectionSets(kind) {
+  return kind === "category"
+    ? {items: exploreState.categories, groups: exploreState.categoryGroups}
+    : {items: exploreState.mechanics, groups: exploreState.mechanicGroups};
+}
+
+function exploreGroupTile(group, kind, facets) {
+  const {groups} = exploreSelectionSets(kind);
+  const selected = groups.has(group.key);
+  const open = exploreState.openGroup[kind] === group.key;
+  const members = facets.filter((item) => item.group === group.key);
+  const chosen = members.filter((item) => item.selected).length;
+  const empty = !group.count && !selected && !chosen;
+  return `
+    <button class="explore-group-tile ${selected ? "is-selected" : ""} ${open ? "is-open" : ""}" type="button"
+            data-explore-group="${group.key}" aria-expanded="${open}" ${empty ? "disabled" : ""}>
+      ${exploreGroupArt(group.key)}
+      <span class="explore-group-text">
+        <strong>${escapeHtml(group.label)}</strong>
+        <small>${formatNumber(group.count, 0)} giochi · ${formatNumber(members.length, 0)} voci${chosen ? ` · ${chosen} scelte` : ""}</small>
+      </span>
+      <span class="explore-group-caret" aria-hidden="true">${icon(open ? "caret-up" : "caret-down")}</span>
+    </button>
+  `;
+}
+
+function exploreFacetChip(item, kind) {
+  return `
+    <button class="explore-facet-chip ${item.selected ? "is-selected" : ""}" type="button"
+            data-explore-kind="${kind}" data-explore-name="${escapeHtml(item.name)}"
+            aria-pressed="${item.selected ? "true" : "false"}">
+      <span>${escapeHtml(item.name)}</span><small>${formatNumber(item.count, 0)}</small>
+    </button>
+  `;
+}
+
+const EXPLORE_MEMBER_PREVIEW = 12;
+
+function exploreGroupDrawer(group, kind, facets) {
+  const {groups} = exploreSelectionSets(kind);
+  const members = facets.filter((item) => item.group === group.key);
+  const visible = exploreState.showAllMembers ? members : members.slice(0, EXPLORE_MEMBER_PREVIEW);
+  const hidden = members.length - visible.length;
+  const selected = groups.has(group.key);
+  return `
+    <div class="explore-group-drawer" id="exploreGroupDrawer">
+      <div class="explore-group-drawer-head">
+        <strong>${escapeHtml(group.label)}</strong>
+        <button class="explore-group-select ${selected ? "is-selected" : ""}" type="button"
+                data-explore-group-select="${group.key}" aria-pressed="${selected}">
+          ${icon(selected ? "check" : "plus")}<span>${selected ? "Gruppo selezionato" : "Qualsiasi voce del gruppo"}</span>
+        </button>
+      </div>
+      <div class="explore-facet-chips">
+        ${visible.map((item) => exploreFacetChip(item, kind)).join("") || '<span class="muted">Nessuna voce compatibile con la selezione.</span>'}
+        ${hidden > 0 ? `<button class="explore-more-chip" type="button" data-explore-show-all>+ altre ${formatNumber(hidden, 0)}</button>` : ""}
+        ${exploreState.showAllMembers && members.length > EXPLORE_MEMBER_PREVIEW ? '<button class="explore-more-chip" type="button" data-explore-show-all>Mostra meno</button>' : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderExploreFacets(payload) {
+  const container = document.querySelector("#exploreGroups");
+  if (!container) return;
+  const kind = exploreState.activeTab;
+  const facets = (kind === "category" ? payload.categories : payload.mechanics) || [];
+  const groups = (kind === "category" ? payload.category_groups : payload.mechanic_groups) || [];
+  const query = exploreState.facetQuery.trim().toLocaleLowerCase("it");
+
+  if (query) {
+    const matches = facets.filter((item) => item.name.toLocaleLowerCase("it").includes(query));
+    container.innerHTML = `
+      <div class="explore-group-drawer is-search">
+        <div class="explore-facet-chips">
+          ${matches.map((item) => exploreFacetChip(item, kind)).join("") || '<span class="muted">Nessuna voce trovata.</span>'}
+        </div>
+      </div>
+    `;
+  } else {
+    const visibleGroups = groups.filter((group) =>
+      group.key !== "other" || facets.some((item) => item.group === "other"));
+    const openKey = exploreState.openGroup[kind];
+    const openGroup = visibleGroups.find((group) => group.key === openKey);
+    container.innerHTML = `
+      <div class="explore-group-grid">
+        ${visibleGroups.map((group) => exploreGroupTile(group, kind, facets)).join("")}
+      </div>
+      ${openGroup ? exploreGroupDrawer(openGroup, kind, facets) : ""}
+    `;
+  }
+
+  container.querySelectorAll("[data-explore-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.exploreGroup;
+      exploreState.openGroup[kind] = exploreState.openGroup[kind] === key ? "" : key;
+      exploreState.showAllMembers = false;
+      renderExploreFacets(payload);
+    });
+  });
+  container.querySelector("[data-explore-group-select]")?.addEventListener("click", (event) => {
+    const {groups: selected} = exploreSelectionSets(kind);
+    const key = event.currentTarget.dataset.exploreGroupSelect;
+    if (selected.has(key)) selected.delete(key);
+    else selected.add(key);
+    exploreState.expandedResults = false;
+    refreshExplore();
+  });
+  container.querySelectorAll("[data-explore-show-all]").forEach((button) => {
+    button.addEventListener("click", () => {
+      exploreState.showAllMembers = !exploreState.showAllMembers;
+      renderExploreFacets(payload);
+    });
+  });
+  container.querySelectorAll("[data-explore-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const {items} = exploreSelectionSets(button.dataset.exploreKind);
+      const name = button.dataset.exploreName;
+      if (items.has(name)) items.delete(name);
+      else items.add(name);
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  });
+}
+
 const exploreOptionalGroups = [
-  {
-    apiKey: "supports_players",
-    stateKey: "supportsPlayers",
-    title: "Giocatori",
-    hint: "Il gioco supporta questo numero di giocatori.",
-  },
-  {
-    apiKey: "ideal_players",
-    stateKey: "idealPlayers",
-    title: "Ideale in",
-    hint: "Valore “best/recommended players” BGG.",
-  },
-  {
-    apiKey: "player_age",
-    stateKey: "playerAge",
-    title: "Età giocatore",
-    hint: "Età minima consigliata BGG compatibile.",
-  },
-  {
-    apiKey: "max_minutes",
-    stateKey: "maxMinutes",
-    title: "Durata",
-    hint: "Durata massima della partita in minuti.",
-  },
-  {
-    apiKey: "weight",
-    stateKey: "weight",
-    title: "Complessità",
-    hint: "Peso medio BGG.",
-  },
-  {
-    apiKey: "min_rating",
-    stateKey: "minRating",
-    title: "Rating BGG",
-    hint: "Valutazione media minima.",
-  },
+  {apiKey: "supports_players", stateKey: "supportsPlayers", title: "Giocatori"},
+  {apiKey: "ideal_players", stateKey: "idealPlayers", title: "Ideale in"},
+  {apiKey: "player_age", stateKey: "playerAge", title: "Età minima"},
+  {apiKey: "max_minutes", stateKey: "maxMinutes", title: "Durata (min)"},
+  {apiKey: "weight", stateKey: "weight", title: "Complessità"},
+  {apiKey: "min_rating", stateKey: "minRating", title: "Voto BGG"},
+  {apiKey: "max_language", stateKey: "maxLanguage", title: "Dipendenza dalla lingua"},
 ];
 
 function exploreOptionalGroup(group, options) {
   const current = String(exploreState[group.stateKey] || "");
-  if (!Array.isArray(options) || !options.length) {
-    return `
-      <section class="explore-option-group is-empty">
-        <div class="explore-option-heading">
-          <strong>${escapeHtml(group.title)}</strong>
-          <small>${escapeHtml(group.hint)}</small>
-        </div>
-        <span class="explore-option-none">Nessuna opzione compatibile</span>
-      </section>
-    `;
-  }
+  const buttons = Array.isArray(options) ? options : [];
   return `
-    <section class="explore-option-group">
-      <div class="explore-option-heading">
-        <strong>${escapeHtml(group.title)}</strong>
-        <small>${escapeHtml(group.hint)}</small>
-      </div>
+    <section class="explore-option-group ${buttons.length ? "" : "is-empty"}">
+      <h3>${escapeHtml(group.title)}</h3>
       <div class="explore-option-buttons">
-        ${options.map((option) => {
+        ${buttons.map((option) => {
           const selected = Boolean(option.selected) || current === String(option.value);
           return `
             <button class="explore-option-button ${selected ? "is-selected" : ""}"
@@ -5682,10 +5773,14 @@ function exploreOptionalGroup(group, options) {
               <small>${formatNumber(option.count, 0)}</small>
             </button>
           `;
-        }).join("")}
+        }).join("") || '<span class="explore-option-none">Nessun dato compatibile</span>'}
       </div>
     </section>
   `;
+}
+
+function exploreActiveOptionalCount() {
+  return exploreOptionalGroups.filter((group) => String(exploreState[group.stateKey] || "")).length;
 }
 
 function renderExploreOptionalFilters(payload) {
@@ -5695,6 +5790,11 @@ function renderExploreOptionalFilters(payload) {
   container.innerHTML = exploreOptionalGroups
     .map((group) => exploreOptionalGroup(group, options[group.apiKey] || []))
     .join("");
+  const active = exploreActiveOptionalCount();
+  const toggleCount = document.querySelector("#exploreFilterToggleCount");
+  if (toggleCount) toggleCount.textContent = active ? String(active) : "";
+  const reset = document.querySelector("#exploreResetOptional");
+  if (reset) reset.disabled = !active;
 
   container.querySelectorAll("[data-explore-option-key]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -5707,90 +5807,64 @@ function renderExploreOptionalFilters(payload) {
   });
 }
 
+function exploreResultCard(game) {
+  if (game.source === "catalog") {
+    return gameCard(referenceAsGame(game), [], {reference: game});
+  }
+  return gameCard(game, []);
+}
+
 function renderExplorePayload(payload) {
   currentExplorePayload = payload;
-  const allTabItems = exploreState.activeTab === "category"
-    ? payload.categories || []
-    : payload.mechanics || [];
-  const showRare = Boolean(exploreState.showRareFacets[exploreState.activeTab]);
-  const rareItems = allTabItems.filter(
-    (item) => Number(item.count) <= 1 && !item.selected
-  );
-  const tabItems = showRare
-    ? allTabItems
-    : allTabItems.filter((item) => Number(item.count) > 1 || item.selected);
-  const selectedCount = exploreState.categories.size + exploreState.mechanics.size;
   const visibleGames = exploreState.expandedResults
     ? (payload.games || [])
     : (payload.games || []).slice(0, 12);
 
   const selections = document.querySelector("#exploreSelections");
-  const facets = document.querySelector("#exploreFacetGrid");
-  const facetSummary = document.querySelector("#exploreFacetSummary");
-  const rareToggle = document.querySelector("#exploreRareToggle");
   const resultCount = document.querySelector("#exploreResultCount");
   const resultGrid = document.querySelector("#exploreResultGrid");
   const resultMore = document.querySelector("#exploreResultMore");
-  if (
-    !selections || !facets || !facetSummary || !rareToggle
-    || !resultCount || !resultGrid || !resultMore
-  ) return;
+  if (!selections || !resultCount || !resultGrid || !resultMore) return;
 
-  selections.innerHTML = `
-    <div class="explore-selection-chips">${exploreSelectionChips()}</div>
-    ${selectedCount ? '<button class="button button-ghost explore-clear-selections" id="exploreClearSelections" type="button">Azzera selezioni</button>' : ""}
-  `;
+  const chips = exploreSelectionChips(payload);
+  selections.hidden = !chips;
+  selections.innerHTML = chips
+    ? `
+      <div class="explore-selection-chips">${chips}</div>
+      <button class="button button-ghost explore-clear-selections" id="exploreClearSelections" type="button">Azzera</button>
+    `
+    : "";
 
-  facets.innerHTML = tabItems.length
-    ? tabItems.map((item) => exploreFacetCard(item, exploreState.activeTab)).join("")
-    : '<div class="empty explore-empty-facets">Nessun altro criterio compatibile con la selezione corrente.</div>';
-
-  const facetLabel = exploreState.activeTab === "category" ? "generi" : "meccaniche";
-  facetSummary.textContent = `${formatNumber(tabItems.length, 0)} ${facetLabel} mostrati`;
-  rareToggle.hidden = rareItems.length === 0;
-  rareToggle.textContent = showRare
-    ? "Nascondi rari"
-    : `Mostra tutti (+${formatNumber(rareItems.length, 0)})`;
-  rareToggle.setAttribute("aria-pressed", showRare ? "true" : "false");
-  rareToggle.onclick = () => {
-    exploreState.showRareFacets[exploreState.activeTab] = !showRare;
-    renderExplorePayload(payload);
-  };
+  for (const [kind, groups] of [["category", payload.category_groups], ["mechanic", payload.mechanic_groups]]) {
+    const counter = document.querySelector(`[data-explore-tab="${kind}"] small`);
+    if (counter) {
+      const count = (groups || []).filter((group) => group.count > 0).length;
+      counter.textContent = formatNumber(count, 0);
+    }
+  }
+  renderExploreFacets(payload);
 
   resultCount.textContent = Number(payload.total) === 1
     ? "1 gioco corrispondente"
     : `${formatNumber(payload.total, 0)} giochi corrispondenti`;
   resultGrid.innerHTML = visibleGames.length
-    ? visibleGames.map((game) => gameCard(game, [])).join("")
+    ? visibleGames.map(exploreResultCard).join("")
     : '<div class="empty catalog-empty">Nessun gioco soddisfa contemporaneamente tutti i criteri.</div>';
+  bindBggCatalogCards(resultGrid);
 
   const hiddenCount = Math.max(0, Number(payload.total || 0) - visibleGames.length);
   resultMore.hidden = hiddenCount === 0 && !exploreState.expandedResults;
   resultMore.textContent = exploreState.expandedResults
     ? "Mostra meno"
-    : `Mostra altri ${hiddenCount}`;
+    : `Mostra altri ${formatNumber(Math.min(hiddenCount, 238), 0)}`;
 
   renderExploreOptionalFilters(payload);
 
-  document.querySelectorAll("[data-explore-kind]").forEach((button) => {
+  selections.querySelectorAll("[data-explore-remove-kind]").forEach((button) => {
     button.addEventListener("click", () => {
-      const target = button.dataset.exploreKind === "category"
-        ? exploreState.categories
-        : exploreState.mechanics;
-      const name = button.dataset.exploreName;
-      if (target.has(name)) target.delete(name);
-      else target.add(name);
-      exploreState.expandedResults = false;
-      refreshExplore();
-    });
-  });
-
-  document.querySelectorAll("[data-explore-remove-kind]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const target = button.dataset.exploreRemoveKind === "category"
-        ? exploreState.categories
-        : exploreState.mechanics;
-      target.delete(button.dataset.exploreRemoveName);
+      const [kind, isGroup] = button.dataset.exploreRemoveKind.split("-");
+      const sets = exploreSelectionSets(kind);
+      (isGroup ? sets.groups : sets.items).delete(button.dataset.exploreRemoveName);
       exploreState.expandedResults = false;
       refreshExplore();
     });
@@ -5799,6 +5873,8 @@ function renderExplorePayload(payload) {
   document.querySelector("#exploreClearSelections")?.addEventListener("click", () => {
     exploreState.categories.clear();
     exploreState.mechanics.clear();
+    exploreState.categoryGroups.clear();
+    exploreState.mechanicGroups.clear();
     exploreState.expandedResults = false;
     refreshExplore();
   });
@@ -5815,9 +5891,9 @@ function renderExplorePayload(payload) {
 }
 
 async function refreshExplore() {
-  const facets = document.querySelector("#exploreFacetGrid");
+  const groups = document.querySelector("#exploreGroups");
   const resultGrid = document.querySelector("#exploreResultGrid");
-  if (!facets || !resultGrid) return;
+  if (!groups || !resultGrid) return;
 
   exploreRequestController?.abort();
   const controller = new AbortController();
@@ -5826,17 +5902,19 @@ async function refreshExplore() {
   layout?.classList.add("is-refreshing");
   layout?.setAttribute("aria-busy", "true");
   if (!currentExplorePayload) {
-    facets.innerHTML = skeletons();
     resultGrid.innerHTML = skeletons();
   }
 
   try {
-    const payload = await api(`/api/catalog/explore?${exploreParams()}`, {signal: controller.signal});
-    if (controller.signal.aborted || !document.querySelector("#exploreFacetGrid")) return;
+    const [payload] = await Promise.all([
+      api(`/api/catalog/explore?${exploreParams()}`, {signal: controller.signal}),
+      exploreState.source === "library" ? null : refreshWishlistIndex().catch(() => null),
+    ]);
+    if (controller.signal.aborted || !document.querySelector("#exploreGroups")) return;
     renderExplorePayload(payload);
   } catch (error) {
     if (error.name === "AbortError") return;
-    facets.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    groups.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
     resultGrid.innerHTML = "";
     showToast(error.message, true);
   } finally {
@@ -5850,24 +5928,57 @@ async function refreshExplore() {
 }
 
 function bindExploreControls() {
+  document.querySelectorAll("[data-explore-source]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const flags = exploreSourceFlags();
+      const key = button.dataset.exploreSource;
+      flags[key] = !flags[key];
+      // At least one box stays checked: unchecking the last one switches to the other.
+      if (!flags.library && !flags.catalog) flags[key === "library" ? "catalog" : "library"] = true;
+      exploreState.source = flags.library && flags.catalog ? "both" : (flags.library ? "library" : "catalog");
+      window.localStorage.setItem("bgc.exploreSource", exploreState.source);
+      document.querySelectorAll("[data-explore-source]").forEach((item) => {
+        const active = flags[item.dataset.exploreSource];
+        item.classList.toggle("is-active", active);
+        item.setAttribute("aria-checked", String(active));
+      });
+      exploreState.expandedResults = false;
+      refreshExplore();
+    });
+  });
+
   document.querySelectorAll("[data-explore-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       exploreState.activeTab = button.dataset.exploreTab;
+      exploreState.showAllMembers = false;
       document.querySelectorAll("[data-explore-tab]").forEach((item) => {
         const active = item.dataset.exploreTab === exploreState.activeTab;
         item.classList.toggle("is-active", active);
         item.setAttribute("aria-selected", active ? "true" : "false");
       });
-      if (currentExplorePayload) renderExplorePayload(currentExplorePayload);
+      const input = document.querySelector("#exploreFacetQuery");
+      if (input) input.placeholder = exploreState.activeTab === "category" ? "Cerca un genere…" : "Cerca una meccanica…";
+      if (currentExplorePayload) renderExploreFacets(currentExplorePayload);
     });
   });
 
+  const input = document.querySelector("#exploreFacetQuery");
+  input?.addEventListener("input", () => {
+    exploreState.facetQuery = String(input.value || "");
+    if (currentExplorePayload) renderExploreFacets(currentExplorePayload);
+  });
+
+  document.querySelector("#exploreFilterToggle")?.addEventListener("click", (event) => {
+    const panel = document.querySelector(".explore-filter-panel");
+    const open = !panel?.classList.contains("is-open");
+    panel?.classList.toggle("is-open", open);
+    event.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+
   document.querySelector("#exploreResetOptional")?.addEventListener("click", () => {
-    for (const key of ["supportsPlayers", "idealPlayers", "playerAge", "weight", "maxMinutes", "minRating"]) {
-      exploreState[key] = "";
-    }
+    for (const group of exploreOptionalGroups) exploreState[group.stateKey] = "";
     exploreState.expandedResults = false;
-    renderExplore();
+    refreshExplore();
   });
 }
 
@@ -5876,54 +5987,54 @@ async function renderExplore(initialTab = null) {
   if (initialTab === "category" || initialTab === "mechanic") {
     exploreState.activeTab = initialTab;
   }
+  const tab = exploreState.activeTab;
   app.innerHTML = `
-    <section class="page-header browse-header explore-page-header">
-      <div>
+    <section class="page-header catalog-page-header explore-page-header">
+      <div class="page-header-copy">
         <h1>Esplora</h1>
+        <p class="muted catalog-page-summary" id="exploreResultCount" aria-live="polite">Caricamento…</p>
       </div>
-      <div class="explore-header-result">
-        <strong id="exploreResultCount">— giochi corrispondenti</strong>
-        <small>Solo giochi base posseduti</small>
-      </div>
+      <div class="explore-sources" role="group" aria-label="Dove cercare">${exploreSourceBoxes()}</div>
     </section>
 
     <section class="explore-layout">
       <div class="explore-main">
-        <section class="explore-selection-bar" id="exploreSelections" aria-label="Criteri selezionati"></section>
+        <section class="explore-selection-bar" id="exploreSelections" aria-label="Criteri selezionati" hidden></section>
 
-        <div class="explore-tabs" role="tablist" aria-label="Tipo di criterio">
-          <button class="explore-tab ${exploreState.activeTab === "category" ? "is-active" : ""}"
-                  type="button" role="tab" data-explore-tab="category"
-                  aria-selected="${exploreState.activeTab === "category" ? "true" : "false"}">Generi</button>
-          <button class="explore-tab ${exploreState.activeTab === "mechanic" ? "is-active" : ""}"
-                  type="button" role="tab" data-explore-tab="mechanic"
-                  aria-selected="${exploreState.activeTab === "mechanic" ? "true" : "false"}">Meccaniche</button>
-        </div>
+        <section class="toolbar explore-facet-toolbar" aria-label="Generi e meccaniche">
+          <div class="catalog-stats catalog-sort-pills explore-tabs" role="tablist" aria-label="Tipo di criterio">
+            ${[["category", "Generi"], ["mechanic", "Meccaniche"]].map(([value, label]) => `
+              <button class="stat ${tab === value ? "is-active" : ""}" type="button" role="tab"
+                      data-explore-tab="${value}" aria-selected="${tab === value}">
+                <span>${label}</span><small></small>
+              </button>
+            `).join("")}
+          </div>
+          <label class="field search-field explore-facet-search">
+            <input id="exploreFacetQuery" type="search" autocomplete="off" maxlength="80"
+                   placeholder="${tab === "category" ? "Cerca un genere…" : "Cerca una meccanica…"}"
+                   aria-label="Cerca tra generi e meccaniche" value="${escapeHtml(exploreState.facetQuery)}">
+          </label>
+          <button class="button button-ghost explore-filter-toggle" id="exploreFilterToggle" type="button"
+                  aria-expanded="false" aria-controls="exploreFilterPanel">
+            Parametri <span class="explore-filter-toggle-count" id="exploreFilterToggleCount"></span>
+          </button>
+        </section>
 
-        <div class="explore-facet-toolbar">
-          <span id="exploreFacetSummary" class="muted"></span>
-          <button class="button button-ghost explore-rare-toggle" id="exploreRareToggle"
-                  type="button" aria-pressed="false" hidden>Mostra tutti</button>
-        </div>
-        <section class="explore-facet-grid" id="exploreFacetGrid" aria-live="polite">${skeletons()}</section>
+        <section class="explore-groups" id="exploreGroups" aria-live="polite"></section>
 
         <section class="explore-results-section" aria-labelledby="exploreGamesTitle">
           <div class="explore-results-head">
-            <div>
-              <p class="eyebrow">Intersezione</p>
-              <h2 id="exploreGamesTitle">Giochi corrispondenti</h2>
-            </div>
+            <h2 id="exploreGamesTitle">Giochi corrispondenti</h2>
             <button class="button button-ghost" id="exploreResultMore" type="button" hidden>Mostra altri</button>
           </div>
-          <div class="catalog-results catalog-results-cards explore-result-grid" id="exploreResultGrid">${skeletons()}</div>
+          <div class="catalog-results catalog-results-cards catalog-columns-4 explore-result-grid" id="exploreResultGrid">${skeletons()}</div>
         </section>
       </div>
 
-      <aside class="explore-filter-panel" aria-label="Parametri facoltativi">
-        <div class="explore-filter-options" id="exploreFilterOptions">
-          ${skeletons()}
-        </div>
-        <button class="button button-ghost explore-reset-optional" id="exploreResetOptional" type="button">Azzera parametri</button>
+      <aside class="explore-filter-panel" id="exploreFilterPanel" aria-label="Parametri">
+        <div class="explore-filter-options" id="exploreFilterOptions"></div>
+        <button class="button button-ghost explore-reset-optional" id="exploreResetOptional" type="button" disabled>Azzera parametri</button>
       </aside>
     </section>
   `;

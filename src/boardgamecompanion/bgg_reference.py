@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import io
 import json
+import logging
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -14,6 +17,8 @@ from typing import Any
 from boardgamecompanion.app_settings import AppSettingsStore
 from boardgamecompanion.database import Database
 from boardgamecompanion.title_search import normalize_title_text
+
+LOGGER = logging.getLogger(__name__)
 
 DUMP_SOURCE_TYPE = "bgg_ranks_dump"
 DUMP_DEFAULT_FILENAME = "boardgames_ranks.csv"
@@ -427,13 +432,53 @@ BROWSE_SORT_KEYS = {
     "title": lambda r: (str(r[1]).casefold(), r[0]),
 }
 BROWSE_CACHE_SECONDS = 300
+# Esplora reads every stored /thing (hundreds of MB): kept longer and
+# refreshed in the background rather than on a user request.
+EXPLORE_CACHE_SECONDS = 900
 _browse_cache_lock = threading.Lock()
 _browse_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
+
+
+_explore_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
 
 
 def clear_browse_cache() -> None:
     with _browse_cache_lock:
         _browse_cache.clear()
+        _explore_cache.clear()
+
+
+_POLL_RESULT_RE = re.compile(r'<result\b[^>]*?value="([^"]*)"[^>]*?numvotes="(\d+)"')
+
+
+def _language_from_poll_xml(snippet: str | None) -> str | None:
+    """Winner of the language dependence poll from a slice of the stored /thing XML.
+
+    Rows fetched before the poll was parsed only keep it inside ``raw_xml``.
+    """
+    if not snippet:
+        return None
+    body = snippet.split("</poll>", 1)[0]
+    best: tuple[int, str] | None = None
+    for value, votes in _POLL_RESULT_RE.findall(body):
+        if int(votes) > 0 and (best is None or int(votes) > best[0]):
+            best = (int(votes), html.unescape(value).strip())
+    return best[1] if best else None
+
+
+_EXPLORE_FIELDS = (
+    "min_players", "max_players", "playing_time", "min_play_time", "max_play_time",
+    "bgg_average_weight", "bgg_recommended_age", "bgg_best_players",
+    "bgg_recommended_players", "bgg_language_dependence", "categories", "mechanics",
+)
+# The poll inside raw_xml, as it appears in the JSON-escaped text.
+_LANGUAGE_POLL_MARK = 'name=\\"language_dependence\\"'
+
+
+def _names(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [text for item in value if (text := str(item).strip()) and len(text) <= 500]
 
 
 # Card facts: the local library row wins, then the stored /thing details.
@@ -626,6 +671,108 @@ class BggReferenceCatalog:
             ).fetchall()
         by_id = {int(row["bgg_id"]): _reference_item(row) for row in rows}
         return [by_id[bgg_id] for bgg_id in ids if bgg_id in by_id]
+
+    def explore_rows(
+        self,
+        reference_settings: ReferenceSettings | None = None,
+        *,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Visible base games with the facts Esplora filters on, cached briefly.
+
+        Rows are shaped like library rows (same column names) so the explore
+        filters can treat both sources alike. Titles never fetched from the
+        API have no categories or mechanics but still match plain filters.
+        """
+        value = reference_settings or load_reference_settings(self.database)
+        key = (str(self.database.path), value.min_votes, value.include_expansions)
+        with _browse_cache_lock:
+            entry = _explore_cache.get(key)
+            stale = entry is not None and time.monotonic() - entry["at"] > EXPLORE_CACHE_SECONDS
+            if stale and not entry.get("refreshing"):
+                entry["refreshing"] = True
+                threading.Thread(
+                    target=self._refresh_explore_rows, args=(value, key), daemon=True
+                ).start()
+        if entry is not None and not refresh:
+            # A stale scan is still served while the refresh runs in the background.
+            return entry["rows"]
+        return self._build_explore_rows(value, key)
+
+    def _refresh_explore_rows(self, value: ReferenceSettings, key: tuple[str, int, bool]) -> None:
+        try:
+            self._build_explore_rows(value, key)
+        except Exception:
+            LOGGER.exception("BGG reference explore scan failed")
+            with _browse_cache_lock:
+                entry = _explore_cache.get(key)
+                if entry is not None:
+                    entry["refreshing"] = False
+
+    def _build_explore_rows(
+        self, value: ReferenceSettings, key: tuple[str, int, bool]
+    ) -> list[dict[str, Any]]:
+        now = time.monotonic()
+        # One JSON parse per row: json_extract with several paths returns an
+        # array. Older rows keep the language poll only inside raw_xml, which
+        # is sliced from the stored text without parsing it.
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT g.bgg_id, g.name, g.year_published, g.rank,
+                       g.bayes_average, g.average, g.users_rated,
+                       g.thumbnail_url, g.image_url, g.admission_reason,
+                       json_extract(g.details_json, {", ".join(f"'$.{field}'" for field in _EXPLORE_FIELDS)}) AS facts,
+                       substr(g.details_json, NULLIF(instr(g.details_json, :poll_mark), 0), 3000)
+                           AS language_poll
+                FROM bgg_reference_games g
+                WHERE {_VISIBLE_SQL} AND g.is_expansion = 0
+                """,
+                {**_visibility_params(value), "poll_mark": _LANGUAGE_POLL_MARK},
+            ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                facts = dict(zip(_EXPLORE_FIELDS, json.loads(row["facts"] or "[]")))
+            except ValueError:
+                facts = {}
+            average = row["average"] if row["average"] and row["average"] > 0 else None
+            result.append(
+                {
+                    "bgg_id": int(row["bgg_id"]),
+                    "name": row["name"],
+                    "year_published": row["year_published"],
+                    "rank": row["rank"],
+                    "bgg_bayes_average": row["bayes_average"],
+                    "bgg_average": average,
+                    "average": row["average"],
+                    "users_rated": int(row["users_rated"] or 0),
+                    "thumbnail_url": row["thumbnail_url"],
+                    "image_url": row["image_url"],
+                    "cover_url": row["image_url"] or row["thumbnail_url"],
+                    "admission_reason": row["admission_reason"],
+                    "min_players": facts.get("min_players"),
+                    "max_players": facts.get("max_players"),
+                    "playing_time": facts.get("playing_time"),
+                    "min_play_time": facts.get("min_play_time"),
+                    "max_play_time": facts.get("max_play_time"),
+                    "bgg_average_weight": facts.get("bgg_average_weight"),
+                    "bgg_recommended_age": facts.get("bgg_recommended_age"),
+                    "bgg_best_players": facts.get("bgg_best_players"),
+                    "bgg_recommended_players": facts.get("bgg_recommended_players"),
+                    "bgg_language_dependence": (
+                        facts.get("bgg_language_dependence")
+                        or _language_from_poll_xml(
+                            (row["language_poll"] or "").replace('\\"', '"')
+                        )
+                    ),
+                    "categories": _names(facts.get("categories")),
+                    "mechanics": _names(facts.get("mechanics")),
+                }
+            )
+        with _browse_cache_lock:
+            _explore_cache[key] = {"at": now, "rows": result}
+        return result
 
     def assistant_candidates(
         self,

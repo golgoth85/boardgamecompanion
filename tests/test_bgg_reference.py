@@ -442,3 +442,80 @@ def test_detail_provider_failure_keeps_dump_data(database: Database) -> None:
     item = BggReferenceCatalog(database).detail(28720, Broken())
     assert item["name"] == "Brass" and "boom" in item["detail_error"]
     assert item["api_checked_at"] is None
+
+
+def test_explore_sources_groups_and_language(database: Database) -> None:
+    import json
+
+    from boardgamecompanion.catalog import Catalog
+
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    poll = (
+        '<poll name="language_dependence" title="Language Dependence" totalvotes="9">'
+        '<results><result level="1" value="No necessary in-game text" numvotes="2"/>'
+        '<result level="2" value="Some necessary text - easily memorized" numvotes="7"/>'
+        "</results></poll>"
+    )
+    details = {
+        224517: {
+            "min_players": 2, "max_players": 4, "bgg_average_weight": 3.9,
+            "categories": ["Economic", "Industry / Manufacturing"],
+            "mechanics": ["Hand Management", "Network and Route Building"],
+            "raw_xml": f"<items><item>{poll}</item></items>",
+        },
+        900200: {
+            "min_players": 1, "max_players": 6,
+            "categories": ["Party Game"], "mechanics": ["Some Brand New Auction"],
+            "bgg_language_dependence": "Extensive use of text",
+        },
+        28720: {"categories": ["Economic"], "mechanics": ["Hand Management"]},
+    }
+    with database.transaction() as connection:
+        for bgg_id, value in details.items():
+            connection.execute(
+                "UPDATE bgg_reference_games SET details_json=? WHERE bgg_id=?",
+                (json.dumps(value), bgg_id),
+            )
+    BggReferenceCatalog(database).add_to_collection(28720)
+    with database.transaction() as connection:
+        board_game_id = connection.execute(
+            "SELECT id FROM board_games WHERE bgg_id=28720"
+        ).fetchone()[0]
+        connection.execute(
+            """INSERT INTO board_game_enrichments(board_game_id,source,external_id,title,
+               metadata_json,next_refresh_at,created_at,updated_at)
+               VALUES(?,'test','28720','Brass',?,'2099-01-01','2026-01-01','2026-01-01')""",
+            (board_game_id, json.dumps(details[28720])),
+        )
+
+    rows = BggReferenceCatalog(database).explore_rows(ReferenceSettings(min_votes=10))
+    by_id = {row["bgg_id"]: row for row in rows}
+    assert 900100 not in by_id  # expansions are not explored
+    assert by_id[224517]["bgg_language_dependence"].startswith("Some necessary")
+    assert by_id[900200]["bgg_language_dependence"] == "Extensive use of text"
+
+    catalog = Catalog(database)
+    explore = lambda **kwargs: catalog.explore(reference_rows=rows, **kwargs)  # noqa: E731
+
+    library = explore()
+    assert [game["bgg_id"] for game in library["games"]] == [28720]
+    assert library["games"][0]["source"] == "library"
+
+    only_catalog = explore(source="catalog")
+    assert {game["bgg_id"] for game in only_catalog["games"]} == {224517, 900200}
+    assert all(game["source"] == "catalog" for game in only_catalog["games"])
+
+    both = explore(source="both", category_groups=["economy"])
+    assert {game["bgg_id"] for game in both["games"]} == {224517, 28720}
+    economy = next(group for group in both["category_groups"] if group["key"] == "economy")
+    assert economy == {"key": "economy", "label": "Economia e costruzione", "count": 2, "selected": True}
+    groups = {item["name"]: item["group"] for item in both["mechanics"]}
+    assert groups["Network and Route Building"] == "map"
+
+    auction = explore(source="catalog", mechanic_groups=["social"])
+    assert [game["bgg_id"] for game in auction["games"]] == [900200]
+
+    light_text = explore(source="both", max_language=2)
+    assert [game["bgg_id"] for game in light_text["games"]] == [224517]
+    labels = {item["label"]: item["count"] for item in light_text["options"]["max_language"]}
+    assert labels == {"Poca": 1, "Moderata": 1}

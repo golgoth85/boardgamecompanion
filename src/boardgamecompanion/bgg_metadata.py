@@ -300,6 +300,27 @@ def _suggested_players(
     )
 
 
+def _language_dependence(item: ET.Element) -> str | None:
+    """Most voted answer of the BGG language dependence poll, as BGG words it."""
+    poll = next(
+        (
+            node
+            for node in item.findall("poll")
+            if node.attrib.get("name") == "language_dependence"
+        ),
+        None,
+    )
+    if poll is None:
+        return None
+    best: tuple[int, str] | None = None
+    for node in poll.findall("results/result"):
+        votes = node.attrib.get("numvotes") or "0"
+        value = (node.attrib.get("value") or "").strip()
+        if votes.isdigit() and int(votes) > 0 and value and (best is None or int(votes) > best[0]):
+            best = (int(votes), value)
+    return best[1] if best else None
+
+
 def _official_min_age(item: ET.Element) -> str | None:
     """Return the publisher-declared BGG minimum age, never the community poll."""
     return _attribute(item.find("minage"))
@@ -396,6 +417,7 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
         "bgg_recommended_players": recommended_players,
         "player_poll": player_poll,
         "bgg_recommended_age": _official_min_age(item),
+        "bgg_language_dependence": _language_dependence(item),
         "parent_bgg_id": parent_bgg_id,
         "expansions": linked_expansions,
         "cover_url": image,

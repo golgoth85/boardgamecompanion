@@ -39,7 +39,7 @@ from boardgamecompanion.bgg_collection_sync import (
     BggCollectionSyncService,
 )
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
-from boardgamecompanion.bgg_reference import BggReferenceImporter
+from boardgamecompanion.bgg_reference import BggReferenceCatalog, BggReferenceImporter
 from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, crowdfunding_matches
 from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
@@ -702,6 +702,13 @@ async def _bgg_reference_dump_worker(stop_event: asyncio.Event) -> None:
         except Exception:
             LOGGER.exception("BGG reference dump import failed")
         try:
+            # Keeps the Esplora catalog scan warm so no page view pays for it.
+            await asyncio.to_thread(
+                BggReferenceCatalog(get_database()).explore_rows, refresh=True
+            )
+        except Exception:
+            LOGGER.exception("BGG reference explore scan failed")
+        try:
             await asyncio.wait_for(
                 stop_event.wait(),
                 timeout=settings.bgg_reference_dump_poll_seconds,
@@ -1101,21 +1108,29 @@ def ensure_gameplay_summaries(
 
 @app.get("/api/catalog/explore", tags=["catalog"])
 def explore_catalog(
+    source: Literal["library", "catalog", "both"] = Query(default="library"),
     category: list[str] | None = Query(default=None, max_length=500),
     mechanic: list[str] | None = Query(default=None, max_length=500),
+    category_group: list[str] | None = Query(default=None, max_length=40),
+    mechanic_group: list[str] | None = Query(default=None, max_length=40),
     supports_players: int | None = Query(default=None, ge=1, le=30),
     ideal_players: int | None = Query(default=None, ge=1, le=30),
     player_age: int | None = Query(default=None, ge=3, le=99),
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     min_rating: float | None = Query(default=None, ge=0, le=10),
+    max_language: int | None = Query(default=None, ge=1, le=5),
     limit: int = Query(default=250, ge=1, le=250),
 ) -> dict[str, object]:
     database = get_database()
     database.initialize()
     return Catalog(database).explore(
+        source=source,
         categories=category,
         mechanics=mechanic,
+        category_groups=category_group,
+        mechanic_groups=mechanic_group,
+        max_language=max_language,
         supports_players=supports_players,
         ideal_players=ideal_players,
         player_age=player_age,

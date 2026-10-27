@@ -40,21 +40,27 @@ export const state = {
   mechanic: "",
 };
 
+const storedExploreSource = window.localStorage.getItem("bgc.exploreSource");
+
 export const exploreState = {
   activeTab: "category",
+  // "library", "catalog" or "both": the two source boxes in the header.
+  source: ["library", "catalog", "both"].includes(storedExploreSource) ? storedExploreSource : "library",
   categories: new Set(),
   mechanics: new Set(),
+  categoryGroups: new Set(),
+  mechanicGroups: new Set(),
+  openGroup: {category: "", mechanic: ""},
+  showAllMembers: false,
+  facetQuery: "",
   supportsPlayers: "",
   idealPlayers: "",
   playerAge: "",
   weight: "",
   maxMinutes: "",
   minRating: "",
+  maxLanguage: "",
   expandedResults: false,
-  showRareFacets: {
-    category: false,
-    mechanic: false,
-  },
 };
 
 export const rankingState = {

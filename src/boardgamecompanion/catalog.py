@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 from boardgamecompanion.database import Database
+from boardgamecompanion.explore_groups import group_definitions, group_key, valid_group_keys
 from boardgamecompanion.title_search import game_title_terms, title_query_matches
 
 
@@ -215,6 +216,68 @@ def _player_text_matches(value: str | None, player_count: int) -> bool:
         if player_count >= int(match.group(1)):
             return True
     return any(int(match.group(1)) == player_count for match in _SINGLE_RE.finditer(text))
+
+
+def language_dependence_level(value: Any) -> int | None:
+    """BGG language dependence poll answer as level 1 (none) to 5 (unplayable)."""
+    text = str(value or "").strip().casefold()
+    for prefix, level in (
+        ("no necessary", 1),
+        ("some necessary", 2),
+        ("moderate", 3),
+        ("extensive", 4),
+        ("unplayable", 5),
+    ):
+        if text.startswith(prefix):
+            return level
+    return None
+
+
+def _explore_facts(row, title: str) -> dict[str, Any]:
+    """Values the Esplora parameters compare, derived once per row."""
+
+    def number(key: str) -> float | None:
+        try:
+            value = float(row[key]) if row[key] is not None else None
+        except (TypeError, ValueError):
+            return None
+        return value if value and value > 0 else None
+
+    def integer(raw: Any) -> int | None:
+        try:
+            return int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    age_match = re.search(r"\d{1,2}", str(row["bgg_recommended_age"] or ""))
+    age = int(age_match.group(0)) if age_match else 0
+    minutes = next(
+        (
+            value
+            for key in ("max_play_time", "playing_time", "min_play_time")
+            if (value := integer(row[key])) is not None
+        ),
+        None,
+    )
+    ideal = {count for count in range(1, 6) if _ideal_players_match(row, count)}
+    if any(_ideal_players_match(row, count) for count in range(6, 31)):
+        ideal.add(6)
+    bayes = number("bgg_bayes_average")
+    rating = number("bgg_average")
+    return {
+        "min_players": integer(row["min_players"]),
+        "max_players": integer(row["max_players"]),
+        "ideal": ideal,
+        "age": age or None,
+        "minutes": minutes if minutes and minutes > 0 else None,
+        "weight": number("bgg_average_weight"),
+        "rating": rating,
+        "language": language_dependence_level(row["bgg_language_dependence"]),
+        "sort": (
+            bayes is None, -(bayes or 0), rating is None, -(rating or 0),
+            str(title or "").casefold(), int(row["bgg_id"]),
+        ),
+    }
 
 
 def _ideal_players_match(row, player_count: int) -> bool:
@@ -525,25 +588,41 @@ class Catalog:
     def explore(
         self,
         *,
+        source: str = "library",
         categories: list[str] | None = None,
         mechanics: list[str] | None = None,
+        category_groups: list[str] | None = None,
+        mechanic_groups: list[str] | None = None,
         supports_players: int | None = None,
         ideal_players: int | None = None,
         player_age: int | None = None,
         weight: str | None = None,
         max_minutes: int | None = None,
         min_rating: float | None = None,
+        max_language: int | None = None,
         limit: int = 250,
+        reference_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        selected_categories = [
-            str(value).strip()
-            for value in (categories or [])
-            if str(value).strip()
+        """Intersect owned games and/or BGG catalog titles on facets and parameters.
+
+        ``source`` is ``library`` (owned base games), ``catalog`` (visible BGG
+        reference titles not owned) or ``both``. Selected macro groups match
+        a game having any member of the group; everything else is ANDed.
+        """
+        source = source if source in {"library", "catalog", "both"} else "library"
+
+        def clean(values: list[str] | None) -> list[str]:
+            return list(dict.fromkeys(
+                text for value in (values or []) if (text := str(value).strip())
+            ))
+
+        selected_categories = clean(categories)
+        selected_mechanics = clean(mechanics)
+        selected_category_groups = [
+            key for key in clean(category_groups) if key in valid_group_keys("category")
         ]
-        selected_mechanics = [
-            str(value).strip()
-            for value in (mechanics or [])
-            if str(value).strip()
+        selected_mechanic_groups = [
+            key for key in clean(mechanic_groups) if key in valid_group_keys("mechanic")
         ]
         wanted_categories = {value.casefold() for value in selected_categories}
         wanted_mechanics = {value.casefold() for value in selected_mechanics}
@@ -555,91 +634,88 @@ class Catalog:
                 {self._from_sql()}
                 WHERE COALESCE(c.own,0)=1
                   AND COALESCE(g.item_type,'standalone') != 'expansion'
-                ORDER BY
-                    g.bgg_average IS NULL,
-                    g.bgg_average DESC,
-                    g.title COLLATE NOCASE,
-                    g.bgg_id
+                ORDER BY g.title COLLATE NOCASE, g.bgg_id
                 """
             ).fetchall()
 
         # Multiple physical copies must not inflate either result or facet counts.
-        by_bgg_id: dict[int, Any] = {}
+        library: dict[int, Any] = {}
         for row in rows:
-            by_bgg_id.setdefault(int(row["bgg_id"]), row)
-        candidates = list(by_bgg_id.values())
+            library.setdefault(int(row["bgg_id"]), row)
 
-        row_metadata: dict[
-            int,
-            tuple[dict[str, str], dict[str, str], dict[str, Any]],
-        ] = {}
-        faceted: list[Any] = []
-        for row in candidates:
-            metadata = _metadata_from_row(row)
-            category_names = {
-                value.casefold(): value
-                for value in _metadata_list(metadata, "categories")
-            }
-            mechanic_names = {
-                value.casefold(): value
-                for value in _metadata_list(metadata, "mechanics")
-            }
-            if not wanted_categories.issubset(category_names):
-                continue
-            if not wanted_mechanics.issubset(mechanic_names):
-                continue
-            faceted.append(row)
-            row_metadata[int(row["bgg_id"])] = (
+        # entry: (row, categories, mechanics, category groups, mechanic groups, origin, facts)
+        entries: list[tuple[Any, ...]] = []
+
+        def derive(row, category_list, mechanic_list, title) -> tuple[Any, ...]:
+            category_names = {value.casefold(): value for value in category_list}
+            mechanic_names = {value.casefold(): value for value in mechanic_list}
+            return (
                 category_names,
                 mechanic_names,
-                metadata,
+                {group_key("category", name) for name in category_names.values()},
+                {group_key("mechanic", name) for name in mechanic_names.values()},
+                _explore_facts(row, title),
             )
 
-        def recommended_age(row) -> int | None:
-            raw = str(row["bgg_recommended_age"] or "").strip()
-            match = re.search(r"\d{1,2}", raw)
-            value = int(match.group(0)) if match else 0
-            return value if value > 0 else None
+        def add_entry(row, derived: tuple[Any, ...], origin: str) -> None:
+            entries.append((row, *derived[:4], origin, derived[4]))
 
-        def play_minutes(row) -> int | None:
-            raw = row["max_play_time"]
-            if raw is None:
-                raw = row["playing_time"]
-            if raw is None:
-                raw = row["min_play_time"]
-            try:
-                value = int(raw) if raw is not None else 0
-            except (TypeError, ValueError):
-                return None
-            return value if value > 0 else None
+        metadata_by_id: dict[int, dict[str, Any]] = {}
+        if source in {"library", "both"}:
+            for bgg_id, row in library.items():
+                metadata = _metadata_from_row(row)
+                metadata_by_id[bgg_id] = metadata
+                if not row["bgg_language_dependence"] and metadata.get("bgg_language_dependence"):
+                    row = {**dict(row), "bgg_language_dependence": metadata["bgg_language_dependence"]}
+                add_entry(
+                    row,
+                    derive(
+                        row,
+                        _metadata_list(metadata, "categories"),
+                        _metadata_list(metadata, "mechanics"),
+                        row["title"],
+                    ),
+                    "library",
+                )
+        if source in {"catalog", "both"}:
+            if reference_rows is None:
+                from boardgamecompanion.bgg_reference import BggReferenceCatalog
 
-        def supports_count(row, player_count: int) -> bool:
-            minimum = row["min_players"]
-            maximum = row["max_players"]
-            if minimum is None or maximum is None:
-                return False
-            if player_count >= 6:
-                return int(maximum) >= 6
-            return int(minimum) <= player_count <= int(maximum)
+                reference_rows = BggReferenceCatalog(self.database).explore_rows()
+            for row in reference_rows:
+                if int(row["bgg_id"]) in library:
+                    continue
+                # Derived values live on the cached scan row, computed once per scan.
+                derived = row.get("_explore")
+                if derived is None:
+                    derived = derive(row, row["categories"], row["mechanics"], row["name"])
+                    row["_explore"] = derived
+                add_entry(row, derived, "catalog")
 
-        def ideal_count(row, player_count: int) -> bool:
-            if player_count >= 6:
-                return any(_ideal_players_match(row, value) for value in range(6, 31))
-            return _ideal_players_match(row, player_count)
+        faceted = [
+            entry
+            for entry in entries
+            if wanted_categories.issubset(entry[1])
+            and wanted_mechanics.issubset(entry[2])
+            and all(key in entry[3] for key in selected_category_groups)
+            and all(key in entry[4] for key in selected_mechanic_groups)
+        ]
 
-        def optional_match(row, key: str, value: Any) -> bool:
+        def optional_match(facts: dict[str, Any], key: str, value: Any) -> bool:
             if key == "supports_players":
-                return supports_count(row, int(value))
-            if key == "ideal_players":
-                return ideal_count(row, int(value))
-            if key == "player_age":
-                age = recommended_age(row)
-                return age is not None and age <= int(value)
-            if key == "weight":
-                raw = row["bgg_average_weight"]
-                if raw is None:
+                count = int(value)
+                minimum, maximum = facts["min_players"], facts["max_players"]
+                if minimum is None or maximum is None:
                     return False
-                numeric = float(raw)
+                return maximum >= 6 if count >= 6 else minimum <= count <= maximum
+            if key == "ideal_players":
+                return min(int(value), 6) in facts["ideal"]
+            if key == "player_age":
+                return facts["age"] is not None and facts["age"] <= int(value)
+            if key == "weight":
+                numeric = facts["weight"]
+                if numeric is None:
+                    return False
                 if value == "light":
                     return numeric <= 2.30
                 if value == "medium":
@@ -648,11 +724,11 @@ class Catalog:
                     return numeric > 3.50
                 return True
             if key == "max_minutes":
-                minutes = play_minutes(row)
-                return minutes is not None and minutes <= int(value)
+                return facts["minutes"] is not None and facts["minutes"] <= int(value)
             if key == "min_rating":
-                raw = row["bgg_average"]
-                return raw is not None and float(raw) >= float(value)
+                return facts["rating"] is not None and facts["rating"] >= float(value)
+            if key == "max_language":
+                return facts["language"] is not None and facts["language"] <= int(value)
             return True
 
         active_optional: dict[str, Any] = {
@@ -662,44 +738,47 @@ class Catalog:
             "weight": weight,
             "max_minutes": max_minutes,
             "min_rating": min_rating,
+            "max_language": max_language,
         }
 
-        def matches_optional(row, *, skip: str | None = None) -> bool:
-            for key, value in active_optional.items():
-                if key == skip or value is None or value == "":
-                    continue
-                if not optional_match(row, key, value):
-                    return False
-            return True
+        active_items = [
+            (key, value) for key, value in active_optional.items()
+            if value is not None and value != ""
+        ]
 
-        matched = [row for row in faceted if matches_optional(row)]
+        def matches_optional(facts: dict[str, Any], *, skip: str | None = None) -> bool:
+            return all(
+                optional_match(facts, key, value)
+                for key, value in active_items
+                if key != skip
+            )
 
-        def build_facets(
-            key_index: int,
-            selected: list[str],
-        ) -> list[dict[str, Any]]:
+        matched = sorted(
+            (entry for entry in faceted if matches_optional(entry[6])),
+            key=lambda entry: entry[6]["sort"],
+        )
+
+        def build_facets(kind: str, key_index: int, selected: list[str]) -> list[dict[str, Any]]:
             counts: Counter[str] = Counter()
             display_names: dict[str, str] = {}
             covers: dict[str, list[str]] = {}
-            for row in matched:
-                names = row_metadata[int(row["bgg_id"])][key_index]
-                cover = str(row["cover_url"] or "").strip()
-                for folded, display in names.items():
+            for entry in matched:
+                cover = str(entry[0]["cover_url"] or "").strip()
+                for folded, display in entry[key_index].items():
                     counts[folded] += 1
                     display_names.setdefault(folded, display)
-                    if cover:
-                        bucket = covers.setdefault(folded, [])
-                        if cover not in bucket and len(bucket) < 4:
-                            bucket.append(cover)
+                    bucket = covers.setdefault(folded, [])
+                    if cover and cover not in bucket and len(bucket) < 4:
+                        bucket.append(cover)
 
             selected_map = {value.casefold(): value for value in selected}
-            all_keys = set(counts) | set(selected_map)
             items: list[dict[str, Any]] = []
-            for folded in all_keys:
+            for folded in set(counts) | set(selected_map):
                 name = display_names.get(folded, selected_map.get(folded, folded))
                 items.append(
                     {
                         "name": name,
+                        "group": group_key(kind, name),
                         "count": int(counts.get(folded, 0)),
                         "covers": covers.get(folded, []),
                         "selected": folded in selected_map,
@@ -713,6 +792,19 @@ class Catalog:
                 )
             )
             return items
+
+        def build_groups(kind: str, key_index: int, selected: list[str]) -> list[dict[str, Any]]:
+            counts: Counter[str] = Counter()
+            for entry in matched:
+                counts.update(entry[key_index])
+            return [
+                {
+                    **group,
+                    "count": int(counts.get(group["key"], 0)),
+                    "selected": group["key"] in selected,
+                }
+                for group in group_definitions(kind)
+            ]
 
         option_specs: dict[str, list[tuple[Any, str]]] = {
             "supports_players": [
@@ -738,17 +830,22 @@ class Catalog:
                 (6.0, "6+"), (6.5, "6,5+"), (7.0, "7+"),
                 (7.5, "7,5+"), (8.0, "8+"), (8.5, "8,5+"),
             ],
+            "max_language": [
+                (1, "Nessuna"),
+                (2, "Poca"),
+                (3, "Moderata"),
+            ],
         }
 
         def contextual_options(key: str) -> list[dict[str, Any]]:
             # Self-excluding facet calculation: other active filters stay in
             # force, while this group is temporarily removed so valid
             # alternatives remain visible.
-            source = [row for row in faceted if matches_optional(row, skip=key)]
+            source_rows = [entry[6] for entry in faceted if matches_optional(entry[6], skip=key)]
             current = active_optional[key]
             items: list[dict[str, Any]] = []
             for value, label in option_specs[key]:
-                count = sum(1 for row in source if optional_match(row, key, value))
+                count = sum(1 for row in source_rows if optional_match(row, key, value))
                 selected = (
                     str(current) == str(value)
                     if current is not None and current != ""
@@ -766,22 +863,55 @@ class Catalog:
                 )
             return items
 
+        def game_payload(entry) -> dict[str, Any]:
+            row = entry[0]
+            if entry[5] == "library":
+                return {
+                    **_game_dict(row, metadata=metadata_by_id.get(int(row["bgg_id"]))),
+                    "source": "library",
+                }
+            return {
+                "source": "catalog",
+                "bgg_id": int(row["bgg_id"]),
+                "name": row["name"],
+                "year_published": row["year_published"],
+                "is_expansion": False,
+                "rank": row["rank"],
+                "average": row["average"],
+                "users_rated": row["users_rated"],
+                "thumbnail_url": row["thumbnail_url"],
+                "image_url": row["image_url"],
+                "admission_reason": row["admission_reason"] or "votes",
+                "in_catalog": False,
+                "owned": False,
+                "players": {"min": row["min_players"], "max": row["max_players"]},
+                "play_time": {
+                    "playing": row["playing_time"],
+                    "min": row["min_play_time"],
+                    "max": row["max_play_time"],
+                },
+                "average_weight": row["bgg_average_weight"],
+                "recommended_age": row["bgg_recommended_age"],
+                "best_players": row["bgg_best_players"],
+                "recommended_players": row["bgg_recommended_players"],
+                "language_dependence": row["bgg_language_dependence"],
+            }
+
         capped = max(1, min(int(limit), 250))
         return {
+            "source": source,
             "total": len(matched),
-            "categories": build_facets(0, selected_categories),
-            "mechanics": build_facets(1, selected_mechanics),
-            "games": [
-                _game_dict(
-                    row,
-                    metadata=row_metadata[int(row["bgg_id"])][2],
-                )
-                for row in matched[:capped]
-            ],
+            "category_groups": build_groups("category", 3, selected_category_groups),
+            "mechanic_groups": build_groups("mechanic", 4, selected_mechanic_groups),
+            "categories": build_facets("category", 1, selected_categories),
+            "mechanics": build_facets("mechanic", 2, selected_mechanics),
+            "games": [game_payload(entry) for entry in matched[:capped]],
             "limit": capped,
             "filters": {
                 "categories": selected_categories,
                 "mechanics": selected_mechanics,
+                "category_groups": selected_category_groups,
+                "mechanic_groups": selected_mechanic_groups,
                 **active_optional,
             },
             "options": {

@@ -31,6 +31,12 @@ XML = b"""<?xml version='1.0'?>
      <result value='Not Recommended' numvotes='1'/>
    </results>
  </poll>
+ <poll name='language_dependence'>
+   <results>
+     <result level='1' value='No necessary in-game text' numvotes='40'/>
+     <result level='2' value='Some necessary text - easily memorized or small crib sheet' numvotes='3'/>
+   </results>
+ </poll>
  <poll name='suggested_playerage'>
    <results>
      <result value='10' numvotes='5'/>
@@ -100,6 +106,7 @@ def test_direct_bgg_api_uses_bearer_token_and_persists_cover_metadata(tmp_path: 
     ]
     # Official minage wins over the community suggested_playerage poll.
     assert item["metadata"]["bgg_recommended_age"] == "10"
+    assert item["metadata"]["bgg_language_dependence"] == "No necessary in-game text"
     with store.database.connect() as connection:
         game = connection.execute(
             "SELECT min_players,max_players,bgg_average_weight,bgg_rank,bgg_best_players,bgg_recommended_age FROM board_games WHERE bgg_id=173346"
