@@ -630,6 +630,13 @@
 .wishlist-heart:hover,.wishlist-heart:focus-visible{border-color:rgba(232,105,132,.42);color:#f0bdc8;background:rgba(232,105,132,.06)}
 .wishlist-heart.is-active{border-color:rgba(232,105,132,.42);background:rgba(232,105,132,.1);color:#f0bdc8}
 .wishlist-heart:disabled{opacity:.55;cursor:wait}
+.collection-icon-button{
+  display:grid;width:2.35rem;height:2.35rem;place-items:center;padding:0;border:1px solid var(--line);border-radius:10px;
+  background:rgba(255,255,255,.025);color:#c6cfdb;font:inherit;font-size:1rem;line-height:1;cursor:pointer
+}
+.collection-icon-button:hover,.collection-icon-button:focus-visible{border-color:rgba(73,190,132,.42);color:#e8f7ee;background:rgba(73,190,132,.06)}
+.collection-icon-button.is-active{border-color:rgba(73,190,132,.38);background:rgba(73,190,132,.12);color:#c8f1d8}
+.collection-icon-button:disabled{cursor:default}
 
 @media(max-width:1040px){
   .global-command-bar{display:none}
@@ -808,9 +815,7 @@
 .reference-result-actions .button{padding:.25rem .55rem;font-size:.6rem;white-space:nowrap}
 @media (max-width:480px){.global-search-result.reference-result{grid-template-columns:2.6rem minmax(0,1fr)}.reference-result-actions{grid-column:1 / -1;justify-content:flex-end}}
 .global-search-result.reference-result>.reference-open{display:grid;gap:.1rem;min-width:0;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
-.reference-detail{display:grid;gap:.75rem}
-.reference-detail-image{max-width:100%;max-height:14rem;object-fit:contain;border-radius:10px;justify-self:start}
-.reference-detail-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.reference-page-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 
 
 
@@ -838,14 +843,18 @@
 /* Catalogo: card con azioni sotto i dati */
 button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .game-card-wrap.has-actions{
-  overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);
+  position:relative;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);
   transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease
 }
 .game-card-wrap.has-actions:hover{transform:translateY(-3px);border-color:#3e4c68;box-shadow:0 18px 38px rgba(0,0,0,.24)}
 .game-card-wrap.has-actions .game-card{min-height:0;border:0;border-radius:0;background:none;transform:none;box-shadow:none}
-.card-actions{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;padding:0 .9rem .8rem}
-.card-actions .button,.list-actions .button{min-height:2.1rem;padding:.3rem .65rem;font-size:.68rem}
-.card-actions .wishlist-heart,.list-actions .wishlist-heart{width:2.1rem;height:2.1rem;font-size:1rem}
+.card-actions{position:absolute;z-index:3;top:.6rem;right:.6rem;display:flex;align-items:center;gap:.4rem}
+.card-actions .wishlist-heart,.card-actions .collection-icon-button{
+  width:2.1rem;height:2.1rem;font-size:.95rem;background:rgba(11,15,23,.78);backdrop-filter:blur(8px)
+}
+.game-card-wrap.has-actions .expansion-count-badge{right:5.4rem}
+.list-actions .button{min-height:2.1rem;padding:.3rem .65rem;font-size:.68rem}
+.list-actions .wishlist-heart{width:2.1rem;height:2.1rem;font-size:1rem}
 .owned-pill{
   display:inline-flex;align-items:center;gap:.25rem;min-height:2.1rem;padding:0 .65rem;border:1px solid rgba(52,211,153,.35);
   border-radius:999px;background:rgba(52,211,153,.1);color:var(--good);font-size:.68rem;font-weight:700

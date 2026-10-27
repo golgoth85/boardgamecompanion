@@ -837,6 +837,11 @@ def web_bgg_catalog() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/bgg/{bgg_id}", include_in_schema=False)
+def web_bgg_game(bgg_id: int) -> FileResponse:
+    return _web_page()
+
+
 @app.get("/lists", include_in_schema=False)
 def web_lists() -> FileResponse:
     return _web_page()

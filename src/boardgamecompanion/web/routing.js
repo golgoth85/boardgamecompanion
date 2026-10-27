@@ -15,7 +15,7 @@ export const shellSectionLabels = Object.freeze({
 });
 
 export function shellRouteKey(pathname = window.location.pathname) {
-  if (/^\/bgg\/?$/.test(pathname)) return "bgg";
+  if (/^\/bgg(?:\/\d+)?\/?$/.test(pathname)) return "bgg";
   if (/^\/rankings\/?$/.test(pathname)) return "rankings";
   if (/^\/suggestions\/?$/.test(pathname)) return "suggestions";
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";

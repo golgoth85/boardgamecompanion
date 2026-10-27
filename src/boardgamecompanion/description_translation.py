@@ -4,6 +4,7 @@ from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
 
 import hashlib
 import html
+import json
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import httpx
 
 from boardgamecompanion.app_settings import resolve_rag_settings
+from boardgamecompanion.bgg_reference import REFERENCE_TRANSLATION_KEY
 from boardgamecompanion.database import Database
 from boardgamecompanion.settings import settings
 
@@ -92,11 +94,11 @@ class DescriptionTranslationService:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    def _source(self, bgg_id: int) -> tuple[int, str] | None:
+    def _source(self, bgg_id: int) -> str | None:
         with self.database.connect() as connection:
             row = connection.execute(
                 """
-                SELECT g.id AS board_game_id, e.description
+                SELECT e.description
                 FROM board_games g
                 LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
                 WHERE g.bgg_id=?
@@ -105,34 +107,67 @@ class DescriptionTranslationService:
             ).fetchone()
         if row is None:
             raise DescriptionTranslationError(f"Board game BGG #{bgg_id} not found")
-        source = _clean_source(row["description"] or "")
-        if not source:
-            return None
-        return int(row["board_game_id"]), source
+        return _clean_source(row["description"] or "") or None
+
+    def _load(self, bgg_id: int) -> dict[str, Any] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT t.source_sha256,t.source_language,t.target_language,t.translated_text,
+                       t.provider,t.model,t.translated_at
+                FROM board_game_description_translations t
+                JOIN board_games g ON g.id=t.board_game_id
+                WHERE g.bgg_id=?
+                """,
+                (int(bgg_id),),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def _save(self, bgg_id: int, record: dict[str, Any]) -> None:
+        with self.database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT id FROM board_games WHERE bgg_id=?", (int(bgg_id),)
+            ).fetchone()
+            if row is None:
+                raise DescriptionTranslationError(f"Board game BGG #{bgg_id} not found")
+            connection.execute(
+                """
+                INSERT INTO board_game_description_translations
+                    (board_game_id,source_sha256,source_language,target_language,
+                     translated_text,provider,model,translated_at)
+                VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(board_game_id) DO UPDATE SET
+                    source_sha256=excluded.source_sha256,
+                    source_language=excluded.source_language,
+                    target_language=excluded.target_language,
+                    translated_text=excluded.translated_text,
+                    provider=excluded.provider,
+                    model=excluded.model,
+                    translated_at=excluded.translated_at
+                """,
+                (
+                    row["id"],
+                    record["source_sha256"],
+                    record["source_language"],
+                    record["target_language"],
+                    record["translated_text"],
+                    record["provider"],
+                    record["model"],
+                    record["translated_at"],
+                ),
+            )
 
     def get_cached(self, bgg_id: int) -> dict[str, Any] | None:
         source = self._source(bgg_id)
         if source is None:
             return None
-        board_game_id, source_text = source
-        digest = _source_hash(source_text)
-        with self.database.connect() as connection:
-            row = connection.execute(
-                """
-                SELECT source_sha256,source_language,target_language,translated_text,
-                       provider,model,translated_at
-                FROM board_game_description_translations
-                WHERE board_game_id=?
-                """,
-                (board_game_id,),
-            ).fetchone()
-        if row is None or row["source_sha256"] != digest:
+        record = self._load(bgg_id)
+        if record is None or record["source_sha256"] != _source_hash(source):
             return None
-        return dict(row)
+        return record
 
     def status(self, bgg_id: int) -> dict[str, Any]:
-        source = self._source(bgg_id)
-        if source is None:
+        if self._source(bgg_id) is None:
             return {
                 "bgg_id": int(bgg_id),
                 "source_available": False,
@@ -144,6 +179,31 @@ class DescriptionTranslationService:
             "bgg_id": int(bgg_id),
             "source_available": True,
             "status": "ready" if cached else "pending",
+            "translation": cached,
+        }
+
+    def translate(self, bgg_id: int) -> dict[str, Any]:
+        source = self._source(bgg_id)
+        if source is None:
+            raise DescriptionTranslationError("No BGG description is available to translate")
+
+        cached = self.get_cached(bgg_id)
+        if cached is None:
+            translated, provider_name, model = self._translate_with_providers(source)
+            cached = {
+                "source_sha256": _source_hash(source),
+                "source_language": "en",
+                "target_language": "it",
+                "translated_text": translated,
+                "provider": provider_name,
+                "model": model,
+                "translated_at": datetime.now(UTC).isoformat(),
+            }
+            self._save(bgg_id, cached)
+        return {
+            "bgg_id": int(bgg_id),
+            "source_available": True,
+            "status": "ready",
             "translation": cached,
         }
 
@@ -263,22 +323,7 @@ class DescriptionTranslationService:
         translated = message.get("content") if isinstance(message, dict) else None
         return _validate_translation(translated), "ollama", model
 
-    def translate(self, bgg_id: int) -> dict[str, Any]:
-        source = self._source(bgg_id)
-        if source is None:
-            raise DescriptionTranslationError("No BGG description is available to translate")
-        board_game_id, source_text = source
-        digest = _source_hash(source_text)
-
-        cached = self.get_cached(bgg_id)
-        if cached is not None:
-            return {
-                "bgg_id": int(bgg_id),
-                "source_available": True,
-                "status": "ready",
-                "translation": cached,
-            }
-
+    def _translate_with_providers(self, source_text: str) -> tuple[str, str, str]:
         rag = resolve_rag_settings(self.database)
         provider_order = getattr(rag, "generation_provider_order", (rag.generation_provider,))
         translated: str | None = None
@@ -322,39 +367,52 @@ class DescriptionTranslationService:
                 "No configured description translation provider succeeded"
                 + (f" ({'; '.join(failures)})" if failures else "")
             )
+        return translated, provider_name, model
 
-        translated_at = datetime.now(UTC).isoformat()
+
+class ReferenceDescriptionTranslationService(DescriptionTranslationService):
+    """Translations for BGG reference titles, cached inside their details JSON."""
+
+    def _source(self, bgg_id: int) -> str | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT description FROM bgg_reference_games WHERE bgg_id=? AND removed_at IS NULL",
+                (int(bgg_id),),
+            ).fetchone()
+        if row is None:
+            raise DescriptionTranslationError(f"Board game BGG #{bgg_id} not found")
+        return _clean_source(row["description"] or "") or None
+
+    def _load(self, bgg_id: int) -> dict[str, Any] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT details_json FROM bgg_reference_games WHERE bgg_id=?",
+                (int(bgg_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        record = _json_object(row["details_json"]).get(REFERENCE_TRANSLATION_KEY)
+        return dict(record) if isinstance(record, dict) else None
+
+    def _save(self, bgg_id: int, record: dict[str, Any]) -> None:
         with self.database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT details_json FROM bgg_reference_games WHERE bgg_id=? AND removed_at IS NULL",
+                (int(bgg_id),),
+            ).fetchone()
+            if row is None:
+                raise DescriptionTranslationError(f"Board game BGG #{bgg_id} not found")
+            details = _json_object(row["details_json"])
+            details[REFERENCE_TRANSLATION_KEY] = record
             connection.execute(
-                """
-                INSERT INTO board_game_description_translations
-                    (board_game_id,source_sha256,source_language,target_language,
-                     translated_text,provider,model,translated_at)
-                VALUES (?,?,'en','it',?,?,?,?)
-                ON CONFLICT(board_game_id) DO UPDATE SET
-                    source_sha256=excluded.source_sha256,
-                    source_language=excluded.source_language,
-                    target_language=excluded.target_language,
-                    translated_text=excluded.translated_text,
-                    provider=excluded.provider,
-                    model=excluded.model,
-                    translated_at=excluded.translated_at
-                """,
-                (
-                    board_game_id,
-                    digest,
-                    translated,
-                    provider_name,
-                    model,
-                    translated_at,
-                ),
+                "UPDATE bgg_reference_games SET details_json=? WHERE bgg_id=?",
+                (json.dumps(details, ensure_ascii=False, sort_keys=True), int(bgg_id)),
             )
 
-        cached = self.get_cached(bgg_id)
-        assert cached is not None
-        return {
-            "bgg_id": int(bgg_id),
-            "source_available": True,
-            "status": "ready",
-            "translation": cached,
-        }
+
+def _json_object(value: str | None) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value or "{}")
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

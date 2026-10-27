@@ -23,6 +23,10 @@ from boardgamecompanion.bgg_reference import (
     save_reference_settings,
 )
 from boardgamecompanion.bgg_reference_worker import worker_status
+from boardgamecompanion.description_translation import (
+    DescriptionTranslationError,
+    ReferenceDescriptionTranslationService,
+)
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.service_factories import get_bgg_api_client
 from boardgamecompanion.settings import settings
@@ -97,6 +101,39 @@ def reference_detail(bgg_id: int) -> dict[str, object]:
     if item is None:
         raise HTTPException(status_code=404, detail=f"BGG #{bgg_id} is not in the reference catalog")
     return item
+
+
+def _reference_translation_service() -> ReferenceDescriptionTranslationService:
+    database = get_database()
+    database.initialize()
+    return ReferenceDescriptionTranslationService(database)
+
+
+def _translation_http_error(exc: DescriptionTranslationError) -> HTTPException:
+    detail = str(exc)
+    if "not found" in detail:
+        code = 404
+    elif "No BGG description" in detail:
+        code = 409
+    else:
+        code = 503
+    return HTTPException(status_code=code, detail=detail)
+
+
+@router.get("/api/reference/{bgg_id:int}/description-it")
+def reference_description_it(bgg_id: int) -> dict[str, object]:
+    try:
+        return _reference_translation_service().status(bgg_id)
+    except DescriptionTranslationError as exc:
+        raise _translation_http_error(exc) from exc
+
+
+@router.post("/api/reference/{bgg_id:int}/description-it/translate")
+def reference_translate_description_it(bgg_id: int) -> dict[str, object]:
+    try:
+        return _reference_translation_service().translate(bgg_id)
+    except DescriptionTranslationError as exc:
+        raise _translation_http_error(exc) from exc
 
 
 @router.post("/api/reference/{bgg_id:int}/collection", status_code=201)

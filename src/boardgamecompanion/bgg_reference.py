@@ -28,6 +28,7 @@ DUMP_REQUIRED_COLUMNS = {
     "is_expansion",
 }
 
+REFERENCE_TRANSLATION_KEY = "description_it"
 MIN_VOTES_KEY = "bgg_reference_min_votes"
 INCLUDE_EXPANSIONS_KEY = "bgg_reference_include_expansions"
 MIN_WISHING_KEY = "bgg_reference_min_wishing"
@@ -736,6 +737,7 @@ class BggReferenceCatalog:
         except ValueError:
             details = {}
         details.pop("raw_xml", None)
+        details.pop(REFERENCE_TRANSLATION_KEY, None)
         return {
             "bgg_id": int(row["bgg_id"]),
             "name": row["name"],
@@ -776,6 +778,14 @@ class BggReferenceCatalog:
         now = datetime.now(UTC).isoformat()
         alt_names = "\n".join(metadata.get("alternate_titles") or [])
         with self.database.connect() as connection:
+            previous = connection.execute(
+                "SELECT details_json FROM bgg_reference_games WHERE bgg_id = ?", (bgg_id,)
+            ).fetchone()
+            details: dict[str, Any] = {**metadata, "raw_xml": raw_xml}
+            if previous is not None:
+                kept = json.loads(previous["details_json"] or "{}").get(REFERENCE_TRANSLATION_KEY)
+                if kept is not None:
+                    details[REFERENCE_TRANSLATION_KEY] = kept
             connection.execute(
                 """
                 UPDATE bgg_reference_games SET
@@ -800,7 +810,7 @@ class BggReferenceCatalog:
                     metadata.get("cover_url"),
                     metadata.get("description"),
                     alt_names,
-                    json.dumps({**metadata, "raw_xml": raw_xml}, ensure_ascii=False, sort_keys=True),
+                    json.dumps(details, ensure_ascii=False, sort_keys=True),
                     now,
                     now,
                     bgg_id,
