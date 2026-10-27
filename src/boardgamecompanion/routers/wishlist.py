@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.price_search import PriceSearchError, best_offer
-from boardgamecompanion.service_factories import get_price_provider
+from boardgamecompanion.service_factories import get_bgg_metadata_store, get_price_provider
+from boardgamecompanion.title_search import alternate_titles as bgg_alternate_titles
 from boardgamecompanion.wishlist import WishlistError, WishlistNotFound, WishlistStore
 
 router = APIRouter(tags=["wishlist"])
@@ -51,8 +52,13 @@ def refresh_wishlist_prices(item_id: str) -> dict[str, object]:
             status_code=409,
             detail="Configura la chiave del provider di ricerca web nelle impostazioni AI per cercare i prezzi.",
         )
+    alternate_titles: tuple[str, ...] = ()
+    if item.get("bgg_id"):
+        stored = get_bgg_metadata_store().get(int(item["bgg_id"]))
+        if stored:
+            alternate_titles = tuple(bgg_alternate_titles(stored["metadata"]))
     try:
-        offers = provider.search(title=item["title"], year=item["year_published"])
+        offers = provider.search(title=item["title"], year=item["year_published"], alternate_titles=alternate_titles)
     except PriceSearchError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return store.set_prices(item_id, offers=offers, best=best_offer(offers))

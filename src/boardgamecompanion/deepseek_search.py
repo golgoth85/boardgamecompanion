@@ -11,7 +11,9 @@ from boardgamecompanion.rulebook_providers import _title_matches
 from boardgamecompanion.rulebooks import (
     RulebookCandidate, RulebookProviderError, RulebookQuery, RulebookSource, canonical_http_url,
 )
-from boardgamecompanion.price_search import ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host
+from boardgamecompanion.price_search import (
+    ITALIAN_SHOP_HOSTS, MAX_OFFERS, MAX_PRICE_EUR, PriceSearchError, shop_host, shop_search_title,
+)
 
 
 def matching_title(query: RulebookQuery, page: dict) -> bool:
@@ -137,13 +139,14 @@ class DeepSeekPriceProvider:
     def __init__(self, client: CloudAIClient):
         self.web = DeepSeekWeb(client)
 
-    def search(self, *, title: str, year: int | None = None) -> list[dict]:
+    def search(self, *, title: str, year: int | None = None, alternate_titles: tuple[str, ...] = ()) -> list[dict]:
+        query_title = shop_search_title(title, alternate_titles)
         try:
             pages = []
             read_failures = 0
             seen = set()
             for shop in sorted(ITALIAN_SHOP_HOSTS):
-                for result in self.web.search(f'"{title[:85]}" prezzo site:{shop}', count=2):
+                for result in self.web.search(f'"{query_title[:85]}" prezzo site:{shop}', count=2):
                     if shop_host(result["url"]) is None or result["url"] in seen:
                         continue
                     seen.add(result["url"])
@@ -167,7 +170,7 @@ class DeepSeekPriceProvider:
                 '{"offers":[{"url":"exact supplied URL","price_eur":29.99,'
                 '"availability":"in_stock|out_of_stock|unknown","quote":"verbatim price passage"}]}. '
                 "Return empty offers when identity or the actual price is uncertain.",
-                {"title": title, "year": year, "pages": pages},
+                {"titles": list(dict.fromkeys([title, query_title])), "year": year, "pages": pages},
             )
             items = structured.get("offers")
             if not isinstance(items, list):

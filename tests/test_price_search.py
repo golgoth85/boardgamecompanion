@@ -131,7 +131,7 @@ class _FakeProvider:
         self.offers = offers or []
         self.error = error
 
-    def search(self, *, title: str, year: int | None = None):
+    def search(self, *, title: str, year: int | None = None, alternate_titles: tuple[str, ...] = ()):
         if self.error:
             raise self.error
         return self.offers

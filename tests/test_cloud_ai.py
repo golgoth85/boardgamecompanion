@@ -211,6 +211,28 @@ def test_price_searches_each_shop_because_generic_results_are_never_shops():
     assert not any('gioco prezzo Italia' in query for query in queries)
 
 
+def test_price_search_prefers_italian_alternate_title():
+    queries = []
+    def handler(request):
+        path = request.url.path
+        if path.endswith('/search'):
+            query = json.loads(request.content)['query']
+            queries.append(query)
+            if 'site:dungeondice.it' in query and 'Il Destino' in query:
+                return httpx.Response(200, json={'results': [{'url': 'https://dungeondice.it/fellowship', 'title': 'Fellowship'}]})
+            return httpx.Response(200, json={'results': []})
+        if path.endswith('/fetch'):
+            return httpx.Response(200, json={'title': 'Fellowship', 'content': 'Il Signore degli Anelli: prezzo 39,90 EUR.'})
+        return response(json.dumps({'offers': [
+            {'url': 'https://dungeondice.it/fellowship', 'price_eur': 39.9, 'availability': 'in_stock', 'quote': 'prezzo 39,90 EUR'},
+        ]}))
+    alternates = ('Der Herr der Ringe: Das Schicksal der Gemeinschaft', 'Il Signore degli Anelli: Il Destino della Compagnia')
+    offers = DeepSeekPriceProvider(make_client(handler)).search(
+        title='The Lord of the Rings: Fate of the Fellowship', alternate_titles=alternates)
+    assert [offer['price_eur'] for offer in offers] == [39.9]
+    assert all('Fate of the Fellowship' not in query for query in queries)
+
+
 def test_price_rejects_hallucinated_price_even_on_known_shop():
     def handler(request):
         if request.url.path.endswith('/search'):

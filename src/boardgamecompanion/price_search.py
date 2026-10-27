@@ -60,6 +60,13 @@ def _api_error_message(response: httpx.Response) -> str | None:
     return " ".join(message.split())[:300]
 
 
+_ITALIAN_TITLE_MARKER = re.compile(r"\b(il|gli|degli|della|delle|dei|del)\b", re.IGNORECASE)
+
+
+def shop_search_title(title: str, alternate_titles: tuple[str, ...] | list[str] = ()) -> str:
+    return next((item for item in alternate_titles if _ITALIAN_TITLE_MARKER.search(item)), title)
+
+
 def shop_host(url: str) -> str | None:
     host = (urlsplit(url).hostname or "").lower()
     for known in ITALIAN_SHOP_HOSTS:
@@ -245,11 +252,11 @@ class GeminiPriceProvider:
                 raise PriceSearchError("Price search endpoint is unreachable") from exc
         raise PriceSearchError("Price search exhausted retry budget")
 
-    def search(self, *, title: str, year: int | None = None) -> list[dict[str, Any]]:
+    def search(self, *, title: str, year: int | None = None, alternate_titles: tuple[str, ...] = ()) -> list[dict[str, Any]]:
         shops = ", ".join(sorted(ITALIAN_SHOP_HOSTS))
         prompt = (
             "Find the current selling price in Italy, in euro, of exactly one board game. "
-            f"Title: {title!r}. Year: {year!r}. "
+            f"Title: {shop_search_title(title, alternate_titles)!r}. Year: {year!r}. "
             "Prefer the Italian edition when it exists. Use Google Search and only "
             f"report product pages from these Italian shops: {shops}. "
             "Report only prices actually shown for this exact product, never a bundle, "
