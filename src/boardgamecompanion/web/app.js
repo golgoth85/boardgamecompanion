@@ -2558,6 +2558,7 @@ function referenceAsGame(item) {
       rank: item.rank,
     },
     bgg_metadata: {cover_url: item.image_url || item.thumbnail_url || ""},
+    has_description: Boolean(item.has_description),
     collection: {own: Boolean(item.owned)},
     progress: {},
   };
@@ -5202,9 +5203,10 @@ async function ensureRankingGameplaySummaries(items) {
   if (navigator.webdriver) return;
   const missing = (items || []).filter(
     (item) =>
-      item.game?.source !== "catalog"
-      && !String(item.game?.gameplay_summary || "").trim()
-      && String(item.game?.bgg_metadata?.description || "").trim()
+      !String(item.game?.gameplay_summary || "").trim()
+      && (item.game?.source === "catalog"
+        ? item.game?.has_description
+        : String(item.game?.bgg_metadata?.description || "").trim())
   ).slice(0, 8);
   if (!missing.length) return;
 
@@ -5238,7 +5240,10 @@ function rankingGameView(game) {
       game: asGame,
       href: `/bgg/${encodeURIComponent(game.bgg_id)}`,
       hasCover: Boolean(game.image_url || game.thumbnail_url),
-      summary: "",
+      summary: rankingGameSummary({
+        gameplay_summary: game.gameplay_summary,
+        bgg_metadata: {description: game.has_description ? "available" : ""},
+      }),
       catalog: true,
     };
   }
@@ -5258,8 +5263,8 @@ function rankingCover(view) {
 }
 
 function rankingMeta(game) {
-  const rating = game.bgg?.average ? `★ ${formatNumber(game.bgg.average, 1)}` : "★ —";
-  return `${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · ${rating}`;
+  const rating = game.bgg?.average ? formatNumber(game.bgg.average, 1) : "—";
+  return `${escapeHtml(playerText(game))} gioc. · ${escapeHtml(timeText(game))} · <span class="ranking-rating">★ ${escapeHtml(rating)}</span>`;
 }
 
 function rankingPodiumCard(item, index) {
@@ -5273,7 +5278,6 @@ function rankingPodiumCard(item, index) {
         <small>${rankingMeta(view.game)}${view.catalog ? ' · <em>Catalogo</em>' : ""}</small>
         ${view.summary ? `<span class="ranking-podium-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
       </span>
-      <span class="ranking-score" title="${escapeHtml(item.reason || "")}">${formatNumber(item.score, 1)}</span>
     </a>
   `;
 }

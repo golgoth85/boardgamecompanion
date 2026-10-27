@@ -1815,6 +1815,22 @@ def _game_plays(connection: sqlite3.Connection) -> None:
     )
 
 
+def _catalog_gameplay_summaries(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bgg_reference_gameplay_summaries (
+            bgg_id INTEGER PRIMARY KEY
+                REFERENCES bgg_reference_games(bgg_id) ON DELETE CASCADE,
+            source_sha256 TEXT NOT NULL,
+            summary_text TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            generated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1842,6 +1858,7 @@ MIGRATIONS = (
     Migration(24, "bgg-reference-catalog", _bgg_reference_catalog),
     Migration(25, "bgg-reference-alt-names", _bgg_reference_alt_names),
     Migration(26, "game-plays", _game_plays),
+    Migration(27, "catalog-gameplay-summaries", _catalog_gameplay_summaries),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
