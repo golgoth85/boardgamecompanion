@@ -5302,7 +5302,6 @@ function rankingGameRow(item, index) {
         ${view.summary ? `<span class="ranking-result-summary" data-ranking-summary-bgg="${escapeHtml(view.game.bgg_id)}">${escapeHtml(view.summary)}</span>` : ""}
         <span class="ranking-result-factors">${factors}</span>
       </span>
-      <span class="ranking-score" title="${escapeHtml(item.reason || "Criterio della classifica")}">${formatNumber(item.score, 1)}</span>
     </a>
   `;
 }
