@@ -694,10 +694,9 @@ def test_rankings_have_mode_tiles_sources_group_filters_and_mobile_layout(browse
         expect(page.get_by_role("heading", name="Classifiche")).to_be_visible()
         expect(page.locator("#rankingCurrentDescription")).to_have_text("Descrizione overall")
         expect(page.locator(".ranking-podium-card")).to_have_count(1)
-        expect(page.locator(".ranking-podium-card .ranking-score")).to_have_text("88,4")
-        expect(page.locator(".ranking-podium-card .ranking-score")).to_have_attribute(
-            "title", "Motivo deterministico"
-        )
+        expect(page.locator(".ranking-podium-card .ranking-score")).to_have_count(0)
+        expect(page.locator(".ranking-rating").first).to_have_css("color", "rgb(251, 191, 36)")
+        expect(page.locator(".ranking-podium-summary").first).to_have_css("display", "block")
         assert ranking_requests[-1]["source"] == ["library"]
         assert ranking_requests[-1]["limit"] == ["20"]
         expect(page.get_by_role("heading", name="Dipendenza dalla lingua")).to_be_visible()

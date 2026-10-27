@@ -731,6 +731,7 @@ class BggReferenceCatalog:
                 SELECT g.bgg_id, g.name, g.year_published, g.rank,
                        g.bayes_average, g.average, g.users_rated,
                        g.thumbnail_url, g.image_url, g.admission_reason,
+                       CASE WHEN g.description IS NOT NULL AND trim(g.description) != '' THEN 1 ELSE 0 END AS has_description,
                        json_extract(g.details_json, {", ".join(f"'$.{field}'" for field in _EXPLORE_FIELDS)}) AS facts,
                        substr(g.details_json, NULLIF(instr(g.details_json, :poll_mark), 0), 3000)
                            AS language_poll
@@ -760,6 +761,7 @@ class BggReferenceCatalog:
                     "thumbnail_url": row["thumbnail_url"],
                     "image_url": row["image_url"],
                     "cover_url": row["image_url"] or row["thumbnail_url"],
+                    "has_description": bool(row["has_description"]),
                     "admission_reason": row["admission_reason"],
                     "min_players": facts.get("min_players"),
                     "max_players": facts.get("max_players"),

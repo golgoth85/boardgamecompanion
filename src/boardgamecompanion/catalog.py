@@ -299,6 +299,7 @@ def _entry_payload(entry, metadata_by_id: dict[int, dict[str, Any]]) -> dict[str
         "users_rated": row["users_rated"],
         "thumbnail_url": row["thumbnail_url"],
         "image_url": row["image_url"],
+        "has_description": bool(row.get("has_description")),
         "admission_reason": row["admission_reason"] or "votes",
         "in_catalog": False,
         "owned": False,
@@ -1075,9 +1076,13 @@ class Catalog:
             return max(20.0, min(100.0, 25.0 + (value - 2.0) * 30.0))
 
         def calculate(row, origin: str) -> tuple[float, str, list[str]] | None:
-            # Catalog titles without a BGG rank have too little rating history
-            # to compete in these rating-based lists.
-            if origin == "catalog" and int(row["bgg_rank"] or 0) <= 0:
+            # Catalog titles need a BGG rank and at least 200 votes for these lists.
+            if origin == "catalog" and (
+                int(row["users_rated"] or 0) < 200
+                or int(row["bgg_rank"] or 0) <= 0
+            ):
+                return None
+            if origin == "library" and row["item_type"] == "expansion":
                 return None
             q = quality(row)
             user_rating = (

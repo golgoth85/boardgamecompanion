@@ -1100,7 +1100,7 @@ def catalog_rankings(
     games = [
         item.get("game", {})
         for item in payload.get("items", [])
-        if isinstance(item, dict) and item.get("game", {}).get("source") == "library"
+        if isinstance(item, dict) and isinstance(item.get("game"), dict)
     ]
     bgg_ids = [
         int(game["bgg_id"])

@@ -525,13 +525,13 @@ def test_explore_and_rankings_sources_groups_and_language(database: Database) ->
     rank = lambda **kwargs: catalog.rankings(reference_rows=ranked_rows, **kwargs)  # noqa: E731
     assert [item["game"]["bgg_id"] for item in rank()["items"]] == [28720]
     both_ranked = rank(source="both")
-    assert {item["game"]["bgg_id"] for item in both_ranked["items"]} == {224517, 28720, 900200}
+    assert {item["game"]["bgg_id"] for item in both_ranked["items"]} == {224517, 28720}
     assert {item["game"]["source"] for item in both_ranked["items"]} == {"library", "catalog"}
     economy_ranked = rank(source="catalog", category_groups=["economy"])
     assert [item["game"]["bgg_id"] for item in economy_ranked["items"]] == [224517]
     # Group counts ignore the group filter itself, so alternatives stay visible.
     party = next(group for group in economy_ranked["category_groups"] if group["key"] == "party")
-    assert party["count"] == 1
+    assert party["count"] == 0
     language_ranked = rank(source="both", max_language=2)
     assert [item["game"]["bgg_id"] for item in language_ranked["items"]] == [224517]
     assert {item["label"]: item["count"] for item in language_ranked["options"]["max_language"]} == {

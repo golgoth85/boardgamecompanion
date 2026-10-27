@@ -74,6 +74,7 @@ class GameplaySummaryService:
                 ids,
             ).fetchall()
         result: list[dict[str, Any]] = []
+        found_ids: set[int] = set()
         for row in rows:
             raw = _clean_source(row["description"] or "")
             if not raw:
@@ -90,6 +91,7 @@ class GameplaySummaryService:
             )
             result.append(
                 {
+                    "source_kind": "library",
                     "board_game_id": int(row["board_game_id"]),
                     "bgg_id": int(row["bgg_id"]),
                     "title": str(row["title"]),
@@ -97,40 +99,87 @@ class GameplaySummaryService:
                     "source": (translated or raw)[:MAX_SOURCE_CHARS],
                 }
             )
+            found_ids.add(int(row["bgg_id"]))
+        catalog_ids = [bgg_id for bgg_id in ids if bgg_id not in found_ids]
+        if catalog_ids:
+            catalog_placeholders = ",".join("?" for _ in catalog_ids)
+            with self.database.connect() as connection:
+                catalog_rows = connection.execute(
+                    f"""
+                    SELECT bgg_id,name,description
+                    FROM bgg_reference_games
+                    WHERE bgg_id IN ({catalog_placeholders}) AND removed_at IS NULL
+                    """,
+                    catalog_ids,
+                ).fetchall()
+            for row in catalog_rows:
+                raw = _clean_source(row["description"] or "")
+                if not raw:
+                    continue
+                digest = _source_hash(raw)
+                summary_digest = hashlib.sha256(
+                    f"{digest}\0{SUMMARY_STYLE_VERSION}".encode("utf-8")
+                ).hexdigest()
+                result.append(
+                    {
+                        "source_kind": "catalog",
+                        "bgg_id": int(row["bgg_id"]),
+                        "title": str(row["name"]),
+                        "source_sha256": summary_digest,
+                        "source": raw[:MAX_SOURCE_CHARS],
+                    }
+                )
         return result
 
     def _cached(self, sources: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
         if not sources:
             return {}
-        board_ids = [item["board_game_id"] for item in sources]
-        placeholders = ",".join("?" for _ in board_ids)
-        with self.database.connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT board_game_id,source_sha256,summary_text,provider,model,generated_at
-                FROM board_game_gameplay_summaries
-                WHERE board_game_id IN ({placeholders})
-                """,
-                board_ids,
-            ).fetchall()
-        source_by_board = {item["board_game_id"]: item for item in sources}
+        board_sources = [item for item in sources if item["source_kind"] == "library"]
+        catalog_sources = [item for item in sources if item["source_kind"] == "catalog"]
         result: dict[int, dict[str, Any]] = {}
-        for row in rows:
-            source = source_by_board.get(int(row["board_game_id"]))
-            if source is None or row["source_sha256"] != source["source_sha256"]:
-                continue
-            result[source["bgg_id"]] = {
-                "bgg_id": source["bgg_id"],
-                "summary": row["summary_text"],
-                "provider": row["provider"],
-                "model": row["model"],
-                "generated_at": row["generated_at"],
-                "cached": True,
-            }
+        with self.database.connect() as connection:
+            if board_sources:
+                ids = [item["board_game_id"] for item in board_sources]
+                placeholders = ",".join("?" for _ in ids)
+                rows = connection.execute(
+                    f"""SELECT board_game_id,source_sha256,summary_text,provider,model,generated_at
+                        FROM board_game_gameplay_summaries WHERE board_game_id IN ({placeholders})""",
+                    ids,
+                ).fetchall()
+                source_by_key = {item["board_game_id"]: item for item in board_sources}
+                for row in rows:
+                    source = source_by_key.get(int(row["board_game_id"]))
+                    if source is not None and row["source_sha256"] == source["source_sha256"]:
+                        result[source["bgg_id"]] = {
+                            "bgg_id": source["bgg_id"], "summary": row["summary_text"],
+                            "provider": row["provider"], "model": row["model"],
+                            "generated_at": row["generated_at"], "cached": True,
+                        }
+            if catalog_sources:
+                ids = [item["bgg_id"] for item in catalog_sources]
+                placeholders = ",".join("?" for _ in ids)
+                rows = connection.execute(
+                    f"""SELECT bgg_id,source_sha256,summary_text,provider,model,generated_at
+                        FROM bgg_reference_gameplay_summaries WHERE bgg_id IN ({placeholders})""",
+                    ids,
+                ).fetchall()
+                source_by_key = {item["bgg_id"]: item for item in catalog_sources}
+                for row in rows:
+                    source = source_by_key.get(int(row["bgg_id"]))
+                    if source is not None and row["source_sha256"] == source["source_sha256"]:
+                        result[source["bgg_id"]] = {
+                            "bgg_id": source["bgg_id"], "summary": row["summary_text"],
+                            "provider": row["provider"], "model": row["model"],
+                            "generated_at": row["generated_at"], "cached": True,
+                        }
         return result
 
     def get_cached_many(self, bgg_ids: list[int]) -> dict[int, dict[str, Any]]:
-        return self._cached(self._sources(bgg_ids))
+        ids = list(dict.fromkeys(int(value) for value in bgg_ids if int(value) > 0))
+        result: dict[int, dict[str, Any]] = {}
+        for offset in range(0, len(ids), MAX_BATCH):
+            result.update(self._cached(self._sources(ids[offset:offset + MAX_BATCH])))
+        return result
 
     def _prompt_payload(self, sources: list[dict[str, Any]]) -> str:
         return json.dumps(
@@ -312,27 +361,37 @@ class GameplaySummaryService:
         with self.database.transaction(immediate=True) as connection:
             for bgg_id, summary in validated.items():
                 source = source_by_id[bgg_id]
-                connection.execute(
-                    """
-                    INSERT INTO board_game_gameplay_summaries(
-                        board_game_id,source_sha256,summary_text,provider,model,generated_at
-                    ) VALUES(?,?,?,?,?,?)
-                    ON CONFLICT(board_game_id) DO UPDATE SET
-                        source_sha256=excluded.source_sha256,
-                        summary_text=excluded.summary_text,
-                        provider=excluded.provider,
-                        model=excluded.model,
-                        generated_at=excluded.generated_at
-                    """,
-                    (
-                        source["board_game_id"],
-                        source["source_sha256"],
-                        summary,
-                        provider,
-                        model,
-                        generated_at,
-                    ),
-                )
+                if source["source_kind"] == "library":
+                    connection.execute(
+                        """
+                        INSERT INTO board_game_gameplay_summaries(
+                            board_game_id,source_sha256,summary_text,provider,model,generated_at
+                        ) VALUES(?,?,?,?,?,?)
+                        ON CONFLICT(board_game_id) DO UPDATE SET
+                            source_sha256=excluded.source_sha256,
+                            summary_text=excluded.summary_text,
+                            provider=excluded.provider,
+                            model=excluded.model,
+                            generated_at=excluded.generated_at
+                        """,
+                        (source["board_game_id"], source["source_sha256"], summary,
+                         provider, model, generated_at),
+                    )
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO bgg_reference_gameplay_summaries(
+                            bgg_id,source_sha256,summary_text,provider,model,generated_at
+                        ) VALUES(?,?,?,?,?,?)
+                        ON CONFLICT(bgg_id) DO UPDATE SET
+                            source_sha256=excluded.source_sha256,
+                            summary_text=excluded.summary_text,
+                            provider=excluded.provider,
+                            model=excluded.model,
+                            generated_at=excluded.generated_at
+                        """,
+                        (bgg_id, source["source_sha256"], summary, provider, model, generated_at),
+                    )
 
         result = dict(cached)
         for bgg_id, summary in validated.items():

@@ -8,6 +8,14 @@ import pytest
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.gameplay_summary import GameplaySummaryService
+from boardgamecompanion.bgg_reference import BggReferenceImporter
+
+REFERENCE_DUMP = (
+    "id,name,yearpublished,rank,bayesaverage,average,usersrated,is_expansion,"
+    "abstracts_rank,cgs_rank,childrensgames_rank,familygames_rank,partygames_rank,"
+    "strategygames_rank,thematic_rank,wargames_rank\n"
+    '900001,"Catalog Synthetic",2024,100,7.1,7.4,500,0,,,,,,,,\n'
+).encode()
 
 
 def _seed_game(database: Database, *, description: str) -> int:
@@ -145,6 +153,47 @@ def test_gameplay_summary_is_invalidated_when_source_changes(
 
     assert first["items"][0]["summary"] != second["items"][0]["summary"]
     assert second["generated"] == 1
+
+
+def test_catalog_gameplay_summary_is_generated_and_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "catalog-summary.sqlite3")
+    database.initialize()
+    BggReferenceImporter(database).import_bytes(REFERENCE_DUMP, "synthetic.csv")
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE bgg_reference_games SET description=? WHERE bgg_id=900001",
+            ("Players collect resources, build structures, and score objectives in a shared city.",),
+        )
+
+    service = GameplaySummaryService(database)
+    monkeypatch.setattr(
+        "boardgamecompanion.gameplay_summary.resolve_rag_settings",
+        lambda _database: SimpleNamespace(generation_provider="gemini"),
+    )
+    calls = 0
+
+    def generate(_prompt: str, _rag):
+        nonlocal calls
+        calls += 1
+        return (
+            {"summaries": [{"bgg_id": 900001, "summary": (
+                "A turno si raccolgono risorse e si costruiscono edifici nella città condivisa. "
+                "Gli obiettivi premiano combinazioni diverse, mentre ogni scelta influenza "
+                "le opportunità disponibili agli altri partecipanti."
+            )}]},
+            "gemini",
+            "test-model",
+        )
+
+    monkeypatch.setattr(service, "_generate_gemini", generate)
+    first = service.ensure_many([900001])
+    second = service.ensure_many([900001])
+    assert calls == 1
+    assert first["generated"] == 1 and first["items"][0]["cached"] is False
+    assert second["generated"] == 0 and second["items"][0]["cached"] is True
 
 
 def test_gameplay_summary_style_version_invalidates_cached_text(
