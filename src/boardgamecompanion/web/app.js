@@ -4975,11 +4975,11 @@ function renderAssistantThread() {
 function setAssistantScope(scope) {
   assistantState.scope = scope === "all" ? "all" : "library";
   saveAssistantState();
-  document.querySelectorAll("[data-assistant-scope]").forEach((button) => {
-    const active = button.dataset.assistantScope === assistantState.scope;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
+  const catalogBox = document.querySelector('[data-assistant-source="catalog"]');
+  if (!catalogBox) return;
+  const active = assistantState.scope === "all";
+  catalogBox.classList.toggle("is-active", active);
+  catalogBox.setAttribute("aria-checked", String(active));
 }
 
 async function createAssistantList(index, button) {
@@ -5077,9 +5077,19 @@ async function renderAssistant() {
         <h1>Assistente AI</h1>
         <p class="muted catalog-page-summary">Consigli, domande e liste sui giochi da tavolo</p>
       </div>
-      <div class="catalog-stats catalog-sort-pills" role="group" aria-label="Giochi considerati">
-        <button type="button" class="stat" data-assistant-scope="library"><span>Solo ludoteca</span></button>
-        <button type="button" class="stat" data-assistant-scope="all"><span>Ludoteca + catalogo BGG</span></button>
+      <div class="explore-sources" role="group" aria-label="Dove cercare">
+        <button class="explore-source-box is-active" type="button" role="checkbox" aria-checked="true"
+                data-assistant-source="library" title="Giochi base posseduti">
+          <span class="explore-source-icon" aria-hidden="true">${icon("shelf")}</span>
+          <strong>Ludoteca</strong>
+          <span class="explore-source-check" aria-hidden="true">${icon("check")}</span>
+        </button>
+        <button class="explore-source-box" type="button" role="checkbox" aria-checked="false"
+                data-assistant-source="catalog" title="Catalogo BGG non posseduto">
+          <span class="explore-source-icon" aria-hidden="true">${icon("globe")}</span>
+          <strong>Catalogo</strong>
+          <span class="explore-source-check" aria-hidden="true">${icon("check")}</span>
+        </button>
       </div>
     </section>
     <section class="catalog-workspace assistant-workspace" aria-label="Conversazione con l'assistente">
@@ -5097,8 +5107,8 @@ async function renderAssistant() {
     </section>
   `;
   setAssistantScope(assistantState.scope);
-  document.querySelectorAll("[data-assistant-scope]").forEach((button) => {
-    button.addEventListener("click", () => setAssistantScope(button.dataset.assistantScope));
+  document.querySelector('[data-assistant-source="catalog"]')?.addEventListener("click", () => {
+    setAssistantScope(assistantState.scope === "all" ? "library" : "all");
   });
   const input = document.querySelector("#assistantQuestion");
   document.querySelector("#assistantForm")?.addEventListener("submit", (event) => {
