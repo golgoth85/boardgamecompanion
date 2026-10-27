@@ -878,7 +878,8 @@
   line-height:1.04;
   letter-spacing:-.035em
 }
-.suggestions-header,.crowdfunding-header{margin-bottom:0}
+.suggestions-header{margin-bottom:1rem}
+.crowdfunding-header{margin-bottom:0}
 
 /* Giochi giocati: intestazione coerente con le altre sezioni */
 .completed-header{align-items:flex-start}
