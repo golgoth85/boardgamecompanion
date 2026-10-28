@@ -671,8 +671,8 @@ def _ranking_payload(query, *, items=None):
                                "selected": query.get("ideal_players") == ["2"]}],
             "max_minutes": [{"value": 60, "label": "≤60", "count": 1, "selected": False}],
             "weight": [{"value": "light", "label": "Semplice", "count": 1, "selected": False}],
-            "max_language": [{"value": 1, "label": "Nessuna", "count": 1,
-                              "selected": query.get("max_language") == ["1"]}],
+            "language": [{"value": 1, "label": "Nessuna", "count": 1,
+                              "selected": query.get("language") == ["1"]}],
         },
         "filters": {},
     }
@@ -849,7 +849,7 @@ def test_explore_combines_sources_groups_facets_and_parameters(browser, live_ser
         categories = query.get("category", [])
         category_groups = query.get("category_group", [])
         source = query.get("source", ["library"])[0]
-        filtered = bool(categories or category_groups or query.get("max_language"))
+        filtered = bool(categories or category_groups or query.get("language"))
         total = 1 if filtered else 2
         games = [{
             "source": "library",
@@ -906,9 +906,9 @@ def test_explore_combines_sources_groups_facets_and_parameters(browser, live_ser
                     {"value": 2, "label": "2", "count": total, "selected": False},
                     *([] if filtered else [{"value": 6, "label": "6+", "count": 1, "selected": False}]),
                 ],
-                "max_language": [
+                "language": [
                     {"value": 1, "label": "Nessuna", "count": 1,
-                     "selected": "1" in query.get("max_language", [])},
+                     "selected": "1" in query.get("language", [])},
                     {"value": 3, "label": "Moderata", "count": total, "selected": False},
                 ],
             },
@@ -953,10 +953,10 @@ def test_explore_combines_sources_groups_facets_and_parameters(browser, live_ser
         expect(fantasy).to_have_count(0)
         page.locator("#exploreFacetQuery").fill("")
 
-        language = page.locator('[data-explore-option-key="max_language"][data-explore-option-value="1"]')
+        language = page.locator('[data-explore-option-key="language"][data-explore-option-value="1"]')
         language.click()
         expect(language).to_have_attribute("aria-pressed", "true")
-        assert requests[-1]["max_language"] == ["1"]
+        assert requests[-1]["language"] == ["1"]
 
         page.locator("#exploreClearSelections").click()
         expect(page.locator(".explore-selection-chip")).to_have_count(0)

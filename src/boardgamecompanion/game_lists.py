@@ -21,7 +21,7 @@ ALLOWED_SMART_FILTERS = {
     "query", "item_type", "owned", "supports_players", "ideal_players",
     "recommended_players", "player_age", "weight", "max_minutes", "min_rating", "category",
     "mechanic", "completed", "played", "personal_rating_min",
-    "personal_rating_max", "sort",
+    "personal_rating_max", "sort", "language",
 }
 
 
@@ -32,6 +32,7 @@ _INTEGER_LIMITS = {
     "recommended_players": (1, 30),
     "player_age": (3, 99),
     "max_minutes": (1, 1440),
+    "language": (1, 4),
 }
 _HALF_STAR_FILTERS = {"personal_rating_min", "personal_rating_max"}
 _TEXT_LIMITS = {

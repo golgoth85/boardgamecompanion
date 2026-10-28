@@ -13,6 +13,7 @@ export function activateSettingsTab({
   saveSettings,
   saveTestSettings,
   onDiagnostics,
+  onRulebooks,
 }) {
   const active = SETTINGS_TABS.has(name) ? name : "general";
   for (const tab of tabs || []) {
@@ -28,5 +29,6 @@ export function activateSettingsTab({
   }
   if (saveTestSettings) saveTestSettings.hidden = active !== "general";
   if (active === "diagnostics") onDiagnostics?.();
+  if (active === "rulebooks") onRulebooks?.();
   return active;
 }

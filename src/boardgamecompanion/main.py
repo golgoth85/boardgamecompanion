@@ -380,7 +380,7 @@ class CatalogAssistantTurn(BaseModel):
 
 class CatalogAssistantPayload(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
-    scope: Literal["library", "all"] = "library"
+    scope: Literal["library", "all", "catalog"] = "library"
     history: list[CatalogAssistantTurn] = Field(default_factory=list, max_length=20)
 
 
@@ -976,12 +976,48 @@ def list_crowdfunding(
         except Exception:
             LOGGER.exception("Crowdfunding notification scan failed")
         links = crowdfunding_matches(get_database())
-        for item in payload.get("items") or []:
-            if isinstance(item, dict):
-                item["bgg_id"] = links.get(str(item.get("id") or ""))
+        items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
+        descriptions = _crowdfunding_description_service().cached(items)
+        for item in items:
+            item["bgg_id"] = links.get(str(item.get("id") or ""))
+            cached = descriptions.get(str(item.get("id") or ""))
+            item["description_it"] = cached["text"] if cached else None
         return payload
     except CrowdfundingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _crowdfunding_description_service():
+    from boardgamecompanion.crowdfunding_description import CrowdfundingDescriptionService
+
+    database = get_database()
+    database.initialize()
+    return CrowdfundingDescriptionService(
+        database, cache_path=settings.config_dir / "crowdfunding-descriptions.json"
+    )
+
+
+class CrowdfundingDescriptionPayload(BaseModel):
+    id: str = Field(min_length=3, max_length=500)
+
+
+@app.post("/api/crowdfunding/description", tags=["crowdfunding"])
+def generate_crowdfunding_description(payload: CrowdfundingDescriptionPayload) -> dict[str, object]:
+    """Italian description of a cached campaign, written by the configured AI provider."""
+    from boardgamecompanion.crowdfunding_description import CrowdfundingDescriptionError
+
+    campaign = next(
+        (item for item in get_crowdfunding_service().cached_campaigns() if str(item.get("id")) == payload.id),
+        None,
+    )
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campagna non trovata")
+    bgg_id = crowdfunding_matches(get_database()).get(payload.id)
+    try:
+        entry = _crowdfunding_description_service().generate(campaign, bgg_id=bgg_id)
+    except CrowdfundingDescriptionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"id": payload.id, "description_it": entry["text"], "sources": entry["sources"]}
 
 
 @app.post("/api/imports/bgg-csv", tags=["imports"])
@@ -1025,6 +1061,7 @@ def list_games(
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     min_rating: float | None = Query(default=None, ge=0, le=10),
+    language: int | None = Query(default=None, ge=1, le=4),
     category: str | None = Query(default=None, min_length=1, max_length=500),
     mechanic: str | None = Query(default=None, min_length=1, max_length=500),
     completed: bool | None = Query(default=None),
@@ -1048,6 +1085,7 @@ def list_games(
         weight=weight,
         max_minutes=max_minutes,
         min_rating=min_rating,
+        language=language,
         category=category,
         mechanic=mechanic,
         completed=completed,
@@ -1080,6 +1118,7 @@ def catalog_rankings(
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     weight: Literal["light", "medium", "heavy"] | None = Query(default=None),
     max_language: int | None = Query(default=None, ge=1, le=5),
+    language: int | None = Query(default=None, ge=1, le=4),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> dict[str, object]:
     database = get_database()
@@ -1095,6 +1134,7 @@ def catalog_rankings(
         max_minutes=max_minutes,
         weight=weight,
         max_language=max_language,
+        language=language,
         limit=limit,
     )
     games = [
@@ -1142,6 +1182,7 @@ def explore_catalog(
     max_minutes: int | None = Query(default=None, ge=1, le=1440),
     min_rating: float | None = Query(default=None, ge=0, le=10),
     max_language: int | None = Query(default=None, ge=1, le=5),
+    language: int | None = Query(default=None, ge=1, le=4),
     limit: int = Query(default=250, ge=1, le=250),
 ) -> dict[str, object]:
     database = get_database()
@@ -1153,6 +1194,7 @@ def explore_catalog(
         category_groups=category_group,
         mechanic_groups=mechanic_group,
         max_language=max_language,
+        language=language,
         supports_players=supports_players,
         ideal_players=ideal_players,
         player_age=player_age,
@@ -1242,8 +1284,12 @@ def get_game(bgg_id: int) -> dict[str, object]:
     game["description_it"] = (
         cached_translation["translated_text"] if cached_translation else None
     )
-    cached_ai_description = GameDescriptionService(database).get_cached(bgg_id)
+    description_service = GameDescriptionService(database)
+    cached_ai_description = description_service.get_cached(bgg_id)
     game["description_ai"] = cached_ai_description
+    game["description_ai_previous"] = (
+        None if cached_ai_description else description_service.get_previous(bgg_id)
+    )
     return game
 
 
@@ -2070,6 +2116,69 @@ def run_rulebook_discovery_batch(
     result = get_rulebook_discovery_service().run_due(limit=limit)
     get_rulebook_update_service().synchronize_approved_targets()
     return result
+
+
+@app.get("/api/rulebooks/missing", tags=["rulebooks"])
+def list_games_missing_rulebooks() -> dict[str, object]:
+    """Owned games without any rulebook document, for the Regolamenti settings page.
+
+    Games whose rules are known to live elsewhere (components, cards, curated
+    availability notes) are reported apart: there is nothing to search for them.
+    """
+    database = get_database()
+    database.initialize()
+    with database.connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT g.bgg_id, g.title, g.item_type, d.status AS discovery_status,
+                   d.last_finished_at, d.next_attempt_at, d.lease_until,
+                   (SELECT COUNT(*) FROM rulebook_review_items r
+                     WHERE r.board_game_id = g.id AND r.status = 'pending') AS pending_reviews
+            FROM board_games g
+            JOIN collection_entries c ON c.board_game_id = g.id AND COALESCE(c.own, 0) = 1
+            LEFT JOIN rulebook_discovery_games d ON d.board_game_id = g.id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM game_documents doc
+                WHERE doc.board_game_id = g.id AND doc.document_type = 'rulebook'
+            )
+            ORDER BY g.item_type = 'expansion', g.title COLLATE NOCASE
+            """
+        ).fetchall()
+        totals = connection.execute(
+            """
+            SELECT COUNT(*) AS owned,
+                   SUM(EXISTS (SELECT 1 FROM game_documents doc
+                               WHERE doc.board_game_id = g.id AND doc.document_type = 'rulebook')) AS with_rulebook
+            FROM board_games g
+            JOIN collection_entries c ON c.board_game_id = g.id AND COALESCE(c.own, 0) = 1
+            """
+        ).fetchone()
+        pending = connection.execute(
+            "SELECT COUNT(*) FROM rulebook_review_items WHERE status = 'pending'"
+        ).fetchone()[0]
+    missing, resolved = [], []
+    for row in rows:
+        item = {
+            "bgg_id": int(row["bgg_id"]),
+            "title": row["title"],
+            "expansion": row["item_type"] == "expansion",
+            "discovery_status": row["discovery_status"],
+            "last_search_at": row["last_finished_at"],
+            "next_search_at": row["next_attempt_at"],
+            "pending_reviews": int(row["pending_reviews"] or 0),
+        }
+        availability = get_rulebook_availability(item["bgg_id"])
+        if availability:
+            resolved.append({**item, "availability": availability})
+        else:
+            missing.append(item)
+    return {
+        "owned": int(totals["owned"] or 0),
+        "with_rulebook": int(totals["with_rulebook"] or 0),
+        "pending_reviews": int(pending or 0),
+        "missing": missing,
+        "resolved_elsewhere": resolved,
+    }
 
 
 @app.post("/api/games/{bgg_id}/rulebook-discovery/run", tags=["rulebooks"])

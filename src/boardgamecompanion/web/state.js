@@ -36,6 +36,8 @@ export const state = {
   weight: "",
   maxMinutes: "",
   minRating: "",
+  language: "",
+  played: "",
   category: "",
   mechanic: "",
 };
@@ -59,7 +61,7 @@ export const exploreState = {
   weight: "",
   maxMinutes: "",
   minRating: "",
-  maxLanguage: "",
+  language: "",
   expandedResults: false,
 };
 
@@ -76,7 +78,7 @@ export const rankingState = {
   idealPlayers: "",
   maxMinutes: "",
   weight: "",
-  maxLanguage: "",
+  language: "",
   expanded: false,
 };
 

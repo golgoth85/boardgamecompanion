@@ -169,6 +169,26 @@ def test_rulebook_search_remains_review_only_and_rejects_wrong_identity():
     assert len(calls) == 2
 
 
+def test_rulebook_search_uses_italian_title_then_english_fallback():
+    queries = []
+    def handler(request):
+        query = json.loads(request.content)['query']
+        queries.append(query)
+        if 'rulebook rules pdf' in query:
+            return httpx.Response(200, json={'results': [
+                {'url': 'https://publisher.test/fellowship-rules.pdf', 'title': 'Fate of the Fellowship', 'content': ''},
+            ]})
+        return httpx.Response(200, json={'results': []})
+    query = RulebookQuery(
+        bgg_id=1, title='Fate of the Fellowship', original_title='Fate of the Fellowship',
+        verified_titles=('Fate of the Fellowship', 'Il Signore degli Anelli: Il Destino della Compagnia'),
+    )
+    results = DeepSeekRulebookProvider(make_client(handler)).discover(query)
+    assert [item.url for item in results] == ['https://publisher.test/fellowship-rules.pdf']
+    assert 'Il Destino della Compagnia' in queries[0] and 'regolamento' in queries[0]
+    assert len(queries) == 3 and 'rulebook rules pdf' in queries[2]
+
+
 def test_price_requires_fetched_known_url_and_verbatim_price():
     requests = []
     def handler(request):

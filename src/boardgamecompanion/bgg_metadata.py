@@ -206,20 +206,32 @@ class BggApiClient:
         return items[identifier]
 
     def things_with_xml(
-        self, bgg_ids: list[int] | tuple[int, ...]
+        self,
+        bgg_ids: list[int] | tuple[int, ...],
+        *,
+        skipped: set[int] | None = None,
     ) -> dict[int, tuple[dict[str, Any], str]]:
-        """One request for up to MAX_THING_IDS IDs; missing IDs are simply absent."""
+        """One request for up to MAX_THING_IDS IDs; missing IDs are simply absent.
+
+        Items BGG returns in an unusable shape (e.g. a just-created entry without
+        a primary title) are left out and, when ``skipped`` is given, added to it:
+        one bad item must not discard the rest of the batch.
+        """
         identifiers = tuple(dict.fromkeys(int(value) for value in bgg_ids))
         if not identifiers or len(identifiers) > MAX_THING_IDS:
             raise ValueError(f"BGG thing batch must contain between 1 and {MAX_THING_IDS} IDs")
         if any(value <= 0 for value in identifiers):
             raise ValueError("BGG IDs must be positive")
         content = self._request_things(identifiers)
-        parsed = _parse_things(content, expected_bgg_ids=set(identifiers))
+        invalid: set[int] = set()
+        parsed = _parse_things(content, expected_bgg_ids=set(identifiers), invalid=invalid)
+        if skipped is not None:
+            skipped.update(invalid)
         root = ET.fromstring(content)
         return {
             int(node.attrib["id"]): (parsed[int(node.attrib["id"])], ET.tostring(node, encoding="unicode"))
             for node in root.findall("item")
+            if str(node.attrib.get("id", "")).isdigit() and int(node.attrib["id"]) in parsed
         }
 
     def things(self, bgg_ids: list[int] | tuple[int, ...]) -> dict[int, dict[str, Any]]:
@@ -436,7 +448,10 @@ def _parse_things(
     content: bytes,
     *,
     expected_bgg_ids: set[int],
+    invalid: set[int] | None = None,
 ) -> dict[int, dict[str, Any]]:
+    """Parse a /thing answer. With ``invalid``, unusable items are collected there
+    instead of failing the whole answer."""
     try:
         root = ET.fromstring(content)
     except (ET.ParseError, ValueError) as exc:
@@ -444,7 +459,14 @@ def _parse_things(
 
     result: dict[int, dict[str, Any]] = {}
     for item in root.findall("item"):
-        metadata = _parse_item(item)
+        try:
+            metadata = _parse_item(item)
+        except BggMetadataError:
+            raw_id = str(item.attrib.get("id", ""))
+            if invalid is None or not raw_id.isdigit() or int(raw_id) not in expected_bgg_ids:
+                raise
+            invalid.add(int(raw_id))
+            continue
         identifier = int(metadata["bgg_id"])
         if identifier not in expected_bgg_ids:
             raise BggMetadataError("BGG API returned a conflicting canonical ID")
