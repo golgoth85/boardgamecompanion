@@ -1375,6 +1375,36 @@ def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live
         context.close()
 
 
+
+def test_scanner_adds_reference_game_to_library(browser, live_server, tmp_path):
+    dump = tmp_path / "import" / "boardgames_ranks.csv"
+    dump.write_text(
+        "id,name,yearpublished,rank,bayesaverage,average,usersrated,is_expansion\n"
+        "28720,Brass,2007,250,7.3,7.5,15000,0\n",
+        encoding="utf-8",
+    )
+    context, page = new_page(browser)
+    try:
+        assert page.request.post(f"{live_server}/api/reference/import-dump").ok
+        page.goto(live_server)
+        _stub_unresolved_barcode_lookup(page, "4000000000999")
+        open_barcode_scanner(page)
+        page.locator("#scannerManualFallback").evaluate("el => el.open = true")
+        page.locator("#scannerBarcode").fill("4000000000999")
+        page.locator("#lookupBarcode").click()
+        page.locator("#scannerGameSearch").fill("Brass")
+        page.locator("#scannerGameSearch").press("Enter")
+        choice = page.locator("#scannerGameResults .scanner-game-choice")
+        expect(choice).to_contain_text("Aggiungi alla ludoteca con questo barcode")
+        choice.click()
+        expect(page.locator(".scanner-success")).to_contain_text("Brass")
+        copies = page.request.get(f"{live_server}/api/games/28720/copies").json()["items"]
+        assert len(copies) == 1 and copies[0]["barcode"] == "4000000000999"
+        page.locator("#closeScanner").click()
+        expect(page.locator('a[href="/games/28720"]').first).to_be_visible()
+    finally:
+        context.close()
+
 def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server):
     context, page = new_page(browser, mobile=True)
     try:

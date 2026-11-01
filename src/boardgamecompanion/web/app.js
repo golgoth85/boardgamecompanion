@@ -2157,7 +2157,7 @@ function resetScanner() {
   lookupBarcode.disabled = false;
   lookupBarcode.textContent = "Cerca";
   scannerResult.innerHTML =
-    '<p class="muted">Inquadra o fotografa il barcode: se non è associato potrai scegliere il gioco e importarlo.</p>';
+    '<p class="muted">Digita o scansiona il barcode, poi scegli un gioco dalla ludoteca o dal catalogo BGG per aggiungerlo.</p>';
   cameraSection.hidden = false;
   const cameraUsable = scannerCameraUsable();
   toggleCamera.disabled = !cameraUsable;
@@ -2191,7 +2191,7 @@ function renderScannerImported(barcode, title) {
   scannerBarcode.value = barcode;
   scannerResult.innerHTML = `
     <div class="scanner-success">
-      <strong>Barcode importato</strong>
+      <strong>Barcode importato · gioco in ludoteca</strong>
       <span class="muted">${escapeHtml(title || "Copia fisica")} · ${escapeHtml(barcode)}</span>
     </div>
     <div class="dialog-actions scanner-next-actions">
@@ -2296,7 +2296,8 @@ function renderScannerUnmatched(barcode, lookup = null) {
       ` : ""}
       <div class="inline-input-action">
         <input id="scannerGameSearch" type="search" autocomplete="off"
-               placeholder="Cerca gioco posseduto…"
+               aria-label="Cerca gioco nella ludoteca o nel catalogo BGG"
+               placeholder="Cerca un gioco da aggiungere…"
                value="${escapeHtml(product?.title || "")}">
         <button class="button button-ghost" id="scannerSearchGames" type="button">Cerca</button>
       </div>
@@ -2392,26 +2393,47 @@ async function searchScannerGames(query, barcode) {
       offset: "0",
       sort: "title",
     });
-    const catalog = await api(`/api/games?${params}`);
-    if (!catalog.items.length) {
-      results.innerHTML = '<p class="muted">Nessun gioco posseduto trovato.</p>';
-      return;
+    const [local, reference] = await Promise.allSettled([
+      api(`/api/games?${params}`),
+      api(`/api/reference/search?q=${encodeURIComponent(value)}&limit=8`),
+    ]);
+    if (!results.isConnected || scannerResult.querySelector("#scannerGameSearch")?.value.trim() !== value) return;
+    const games = new Map();
+    if (local.status === "fulfilled") {
+      for (const game of local.value.items || []) games.set(Number(game.bgg_id), {...game, owned: true});
     }
-    results.innerHTML = catalog.items.map((game) => `
-      <button class="scanner-game-choice" type="button"
-              data-bgg="${escapeHtml(game.bgg_id)}"
-              data-title="${escapeHtml(game.title)}">
-        <strong>${escapeHtml(game.title)}</strong>
-        <span class="muted">BGG #${escapeHtml(game.bgg_id)} · ${game.item_type === "expansion" ? "Espansione" : "Gioco base"}</span>
-      </button>
-    `).join("");
+    if (reference.status === "fulfilled") {
+      for (const game of reference.value.items || []) {
+        if (!games.has(Number(game.bgg_id))) games.set(Number(game.bgg_id), {
+          ...game, title: game.name, item_type: game.is_expansion ? "expansion" : "standalone",
+        });
+      }
+    }
+    if (local.status === "rejected" && reference.status === "rejected") throw local.reason;
+    results.innerHTML = `
+      ${games.size ? Array.from(games.values()).map((game) => `
+        <button class="scanner-game-choice" type="button"
+                data-bgg="${escapeHtml(game.bgg_id)}" data-owned="${game.owned ? "true" : "false"}"
+                data-title="${escapeHtml(game.title)}">
+          <strong>${escapeHtml(game.title)}</strong>
+          <span class="muted">BGG #${escapeHtml(game.bgg_id)}${game.year_published ? ` · ${escapeHtml(game.year_published)}` : ""} · ${game.item_type === "expansion" ? "Espansione" : "Gioco base"}</span>
+          <span>${game.owned ? "Associa alla copia in ludoteca" : "Aggiungi alla ludoteca con questo barcode"}</span>
+        </button>
+      `).join("") : '<p class="muted">Nessun gioco trovato. Prova con il titolo originale o con meno parole; per nuovi titoli serve il catalogo BGG locale importato.</p>'}
+      ${reference.status === "rejected" ? '<p class="integration-error">Catalogo BGG non disponibile. Puoi scegliere un gioco già in ludoteca o riprovare.</p>' : ""}
+    `;
     results.querySelectorAll(".scanner-game-choice").forEach((button) => {
-      button.addEventListener("click", () => {
-        void assignScannedBarcodeToGame(
-          Number(button.dataset.bgg),
-          button.dataset.title,
-          barcode,
-        );
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          if (button.dataset.owned !== "true") {
+            await api(`/api/reference/${encodeURIComponent(button.dataset.bgg)}/collection`, {method: "POST"});
+          }
+          await assignScannedBarcodeToGame(Number(button.dataset.bgg), button.dataset.title, barcode);
+        } catch (error) {
+          button.disabled = false;
+          showToast(error.message, true);
+        }
       });
     });
   } catch (error) {
@@ -8709,7 +8731,11 @@ scannerDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
   closeScannerDialog();
 });
-scannerDialog.addEventListener("close", resetScanner);
+scannerDialog.addEventListener("close", () => {
+  const imported = scannerImportCount;
+  resetScanner();
+  if (imported) void route();
+});
 scannerForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!scannerBarcode.value.trim()) return;

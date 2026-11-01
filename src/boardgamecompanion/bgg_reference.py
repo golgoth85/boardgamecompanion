@@ -1001,7 +1001,7 @@ class BggReferenceCatalog:
         Idempotent: an existing board game or collection entry is never overwritten.
         """
         now = datetime.now(UTC).isoformat()
-        with self.database.connect() as connection:
+        with self.database.transaction(immediate=True) as connection:
             reference = connection.execute(
                 """
                 SELECT bgg_id, name, year_published, is_expansion, rank,
@@ -1041,7 +1041,7 @@ class BggReferenceCatalog:
             else:
                 board_game_id = int(board["id"])
             entry = connection.execute(
-                "SELECT id FROM collection_entries WHERE board_game_id = ? LIMIT 1",
+                "SELECT id FROM collection_entries WHERE board_game_id = ? AND own = 1 LIMIT 1",
                 (board_game_id,),
             ).fetchone()
             created_entry = entry is None
