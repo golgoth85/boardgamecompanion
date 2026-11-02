@@ -16,7 +16,7 @@ export const initialCatalogColumns = [3, 4, 5].includes(storedCatalogColumns)
 export const state = {
   q: "",
   itemType: "",
-  owned: "",
+  owned: "true",
   sort: "title",
   pageSize: initialCatalogPageSize,
   limit: initialCatalogPageSize === "all"
