@@ -41,7 +41,6 @@ from boardgamecompanion.bgg_collection_sync import (
 from boardgamecompanion.bgg_csv import BggCsvError, BggCsvImporter
 from boardgamecompanion.bgg_reference import BggReferenceCatalog, BggReferenceImporter
 from boardgamecompanion.bgg_reference_worker import BggReferenceWorker, crowdfunding_matches
-from boardgamecompanion.barcode_resolution import BarcodeResolver
 from boardgamecompanion.bgg_metadata import (
     BggApiClient,
     BggApiConfig,
@@ -145,6 +144,7 @@ from boardgamecompanion.embedding_retrieval import (
     OllamaEmbeddingProvider,
 )
 from boardgamecompanion.service_factories import (
+    get_barcode_resolver,
     get_bgg_api_client,
     get_bgg_metadata_store,
     get_crowdfunding_service,
@@ -1444,10 +1444,8 @@ def update_physical_copy(
 
 @app.post("/api/barcodes/lookup", tags=["copies"])
 def lookup_barcode(payload: BarcodeLookupRequest) -> dict[str, object]:
-    database = get_database()
-    database.initialize()
     try:
-        return BarcodeResolver(database).lookup(payload.barcode)
+        return get_barcode_resolver().lookup(payload.barcode)
     except PhysicalCopyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

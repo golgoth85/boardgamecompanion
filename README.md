@@ -21,7 +21,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
 - Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
-- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available. Exact audited GTIN mappings are resolved through the verified catalog before network fallbacks, with versioned cache invalidation for corrected results.
+- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available. Exact audited GTIN mappings are resolved through the verified catalog before network fallbacks, with versioned cache invalidation for corrected results. Unknown codes can also be identified through the configured web-search AI provider; AI proposals are review-only and matching BGG reference titles can be explicitly added to the collection from the scanner.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
@@ -241,7 +241,7 @@ Missing rows are **not deleted automatically**. This is intentional because an `
 
 ## Barcode import
 
-Choose **Importa barcode** from the top bar. On HTTPS or localhost the rear camera starts automatically; native `BarcodeDetector` is preferred and the bundled ZXing reader is the fallback. Unknown EAN/UPC values can be assigned to an existing unbarcoded physical copy or used to create a new copy for an owned game. After each assignment, **Scansiona prossimo** continues the same import session. Manual barcode entry remains available when camera access is unavailable.
+Choose **Importa barcode** from the top bar. On HTTPS or localhost the rear camera starts automatically; native `BarcodeDetector` is preferred and the bundled ZXing reader is the fallback. Unknown EAN/UPC values can be assigned to an existing unbarcoded physical copy or used to create a new copy for an owned game. If the audited and exact providers find nothing, the configured web-search AI can propose the product, and matching BGG reference titles can be added to the collection explicitly before the barcode is assigned. After each assignment, **Scansiona prossimo** continues the same import session. Manual barcode entry remains available when camera access is unavailable.
 
 ## Rulebook updates
 

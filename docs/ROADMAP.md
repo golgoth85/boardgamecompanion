@@ -15,8 +15,9 @@ production evidence:
   rankings and Explore views;
 - personal ratings, played/completed state, lists, wishlist, global search and
   notifications;
-- barcode/copy workflow, including verified exact-GTIN resolution and fallback
-  provider matching;
+- barcode/copy workflow, including verified exact-GTIN resolution, fallback
+  provider matching and an evidence-checked AI web fallback that proposes BGG
+  reference titles for explicit promotion into the collection;
 - bidirectional localized/original title aliases in universal search;
 - game-centric detail pages;
 - rulebook discovery, review, guarded acquisition, archival, scheduled updates,
@@ -78,6 +79,21 @@ Universal search also remains production-verified for localized/original aliases
 `Codenames` and `Nome in Codice` resolve to the same owned game.
 
 Do not reopen either incident without new production regression evidence.
+
+## Barcode AI fallback — review-only
+
+Unknown EAN/UPC values now reach the configured web-search AI provider
+(DeepSeek Search/Fetch or Gemini grounded search) after the audited and exact
+providers return nothing. The AI proposal is accepted only when the exact
+barcode occurs in fetched evidence (DeepSeek) or in a grounded result (Gemini);
+a BGG id is kept only when the reference catalogue or `board_games` names match
+the proposed title. AI results are always `requires_review`, never auto-matched
+to an unowned title, and are cached under the `v9` barcode namespace.
+
+The scanner also queries the BGG reference catalogue: an unidentified or
+AI-identified product can be explicitly added to the collection
+(`POST /api/reference/{bgg_id}/collection`) and then receive the barcode. This
+keeps automatic import out of scope while making new games reachable from a scan.
 
 ## Expansions — major-only policy
 

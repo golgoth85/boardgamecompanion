@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import unicodedata
 from html import unescape
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import httpx
 
+from boardgamecompanion.bgg_reference import BggReferenceCatalog
 from boardgamecompanion.copies import PhysicalCopyStore, normalize_barcode
 from boardgamecompanion.database import Database
 from boardgamecompanion.title_search import game_title_terms
@@ -456,7 +458,7 @@ class BarcodeResolver:
 
     @staticmethod
     def _cache_key(barcode: str) -> str:
-        return f"barcode_product_lookup:v8:{barcode}"
+        return f"barcode_product_lookup:v9:{barcode}"
 
     def _read_cache(self, barcode: str) -> tuple[bool, dict[str, Any] | None]:
         key = self._cache_key(barcode)
@@ -481,7 +483,7 @@ class BarcodeResolver:
     def _write_cache(self, barcode: str, product: dict[str, Any] | None) -> None:
         now = datetime.now(UTC).isoformat()
         value = json.dumps(
-            {"schema_version": 8, "product": product},
+            {"schema_version": 9, "product": product},
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -594,11 +596,22 @@ class BarcodeResolver:
         self,
         product: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-        verified_candidate = self._verified_candidate(product)
-        if verified_candidate is not None:
-            return [verified_candidate], verified_candidate
+        # AI/web proposals are review-only: a BGG id supplied by the model must
+        # not bypass the local catalogue checks and auto-import a title.
+        if not product.get("requires_review"):
+            verified_candidate = self._verified_candidate(product)
+            if verified_candidate is not None:
+                return [verified_candidate], verified_candidate
 
         candidates = self._owned_candidates(product)
+        if product.get("requires_review"):
+            # Weak fuzzy hits ("Il Regno di Valiria" vs an unrelated card game)
+            # would hide the reference-catalogue search in the scanner.
+            candidates = [
+                candidate
+                for candidate in candidates
+                if float(candidate["confidence"]) >= 0.6
+            ]
         best = candidates[0] if candidates else None
         second = candidates[1] if len(candidates) > 1 else None
         auto_match = None
@@ -633,7 +646,7 @@ class BarcodeResolver:
         best_product: dict[str, Any] | None = None
         best_candidates: list[dict[str, Any]] = []
         best_auto_match: dict[str, Any] | None = None
-        best_rank: tuple[float, int] | None = None
+        best_rank: tuple[float, int, int] | None = None
 
         for index, lookup in enumerate(self.product_lookup.lookups):
             try:
@@ -648,13 +661,19 @@ class BarcodeResolver:
             candidates, auto_match = self._evaluate_product(product)
             if auto_match is not None:
                 return product, candidates, auto_match
+            # An exact Uplay page already carries the barcode verbatim; there is
+            # nothing to gain from a further web-search round trip.
+            if str(product.get("source") or "") in {"uplay", "verified_catalog"}:
+                return product, candidates, None
 
             top_score = (
                 float(candidates[0]["confidence"])
                 if candidates
                 else 0.0
             )
-            rank = (top_score, -index)
+            # On an equal title score prefer the evidence-backed AI proposal,
+            # which also unlocks the reference-catalogue path for new titles.
+            rank = (top_score, 1 if product.get("requires_review") else 0, -index)
             if best_rank is None or rank > best_rank:
                 best_rank = rank
                 best_product = product
@@ -667,6 +686,92 @@ class BarcodeResolver:
             raise BarcodeProductLookupError("; ".join(errors))
         return None, [], None
 
+    @staticmethod
+    def _reference_item(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "bgg_id": int(row["bgg_id"]),
+            "name": str(row["name"]),
+            "year_published": row["year_published"],
+            "is_expansion": bool(row["is_expansion"]),
+            "rank": row["rank"],
+            "thumbnail_url": row["thumbnail_url"],
+            "owned": bool(row["owned"]),
+            "in_catalog": row["board_game_id"] is not None,
+        }
+
+    def _reference_candidate(self, bgg_id: int) -> dict[str, Any] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT g.bgg_id,g.name,g.year_published,g.is_expansion,g.rank,
+                       g.thumbnail_url,b.id AS board_game_id,
+                       EXISTS(
+                           SELECT 1 FROM collection_entries c
+                           WHERE c.board_game_id=b.id AND c.own=1
+                       ) AS owned
+                FROM bgg_reference_games g
+                LEFT JOIN board_games b ON b.bgg_id=g.bgg_id
+                WHERE g.bgg_id=? AND g.removed_at IS NULL
+                """,
+                (bgg_id,),
+            ).fetchone()
+        return self._reference_item(row) if row is not None else None
+
+    def _reference_candidates(
+        self,
+        product: dict[str, Any],
+        *,
+        exclude: set[int],
+    ) -> list[dict[str, Any]]:
+        """BGG reference titles the user can explicitly promote to the collection."""
+        limit = 5
+        found: list[dict[str, Any]] = []
+        seen = set(exclude)
+
+        raw_hint = product.get("bgg_id")
+        if not isinstance(raw_hint, bool):
+            try:
+                hint = int(raw_hint)
+            except (TypeError, ValueError):
+                hint = 0
+            if hint > 0 and hint not in seen:
+                item = self._reference_candidate(hint)
+                if item is not None:
+                    found.append(item)
+                    seen.add(item["bgg_id"])
+
+        catalogue = BggReferenceCatalog(self.database)
+        for key in ("title", "description"):
+            if len(found) >= limit:
+                break
+            query = str(product.get(key) or "").strip()
+            if not query:
+                continue
+            try:
+                items = catalogue.search(query, limit=limit)
+            except (ValueError, sqlite3.Error):
+                continue
+            for item in items:
+                bgg_id = int(item["bgg_id"])
+                if bgg_id in seen:
+                    continue
+                seen.add(bgg_id)
+                found.append(
+                    {
+                        "bgg_id": bgg_id,
+                        "name": item.get("name"),
+                        "year_published": item.get("year_published"),
+                        "is_expansion": bool(item.get("is_expansion")),
+                        "rank": item.get("rank"),
+                        "thumbnail_url": item.get("thumbnail_url"),
+                        "owned": bool(item.get("owned")),
+                        "in_catalog": bool(item.get("in_catalog")),
+                    }
+                )
+                if len(found) >= limit:
+                    break
+        return found
+
     def lookup(self, barcode: str) -> dict[str, Any]:
         local = PhysicalCopyStore(self.database).lookup_barcode(barcode)
         if local["count"]:
@@ -676,6 +781,7 @@ class BarcodeResolver:
                 "product": None,
                 "auto_match": None,
                 "candidates": [],
+                "reference_candidates": [],
                 "external_lookup": "not_needed",
             }
 
@@ -687,6 +793,7 @@ class BarcodeResolver:
                 "product": None,
                 "auto_match": None,
                 "candidates": [],
+                "reference_candidates": [],
                 "external_lookup": "unsupported_barcode",
             }
 
@@ -711,6 +818,7 @@ class BarcodeResolver:
                     "product": None,
                     "auto_match": None,
                     "candidates": [],
+                    "reference_candidates": [],
                     "external_lookup": "failed",
                     "external_error": str(exc),
                 }
@@ -722,8 +830,20 @@ class BarcodeResolver:
                 "product": None,
                 "auto_match": None,
                 "candidates": [],
+                "reference_candidates": [],
                 "external_lookup": external_lookup,
             }
+
+        reference_candidates: list[dict[str, Any]] = []
+        if auto_match is None:
+            reference_candidates = self._reference_candidates(
+                product,
+                exclude={
+                    int(item["bgg_id"])
+                    for item in candidates
+                    if item.get("bgg_id") is not None
+                },
+            )
 
         return {
             **local,
@@ -731,5 +851,6 @@ class BarcodeResolver:
             "product": product,
             "auto_match": auto_match,
             "candidates": candidates,
+            "reference_candidates": reference_candidates,
             "external_lookup": external_lookup,
         }
