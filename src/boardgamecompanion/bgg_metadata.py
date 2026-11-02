@@ -19,6 +19,7 @@ BGG_API_ORIGIN = "https://boardgamegeek.com"
 MAX_XML_BYTES = 2 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
 MAX_THING_IDS = 20
+ITALIAN_TITLE_KEYS = ("italian_title", "italian_title_next_check_at")
 BGG_IMAGE_HOSTS = frozenset(
     {"cf.geekdo-images.com", "cf.geekdo-static.com", "boardgamegeek.com"}
 )
@@ -152,6 +153,16 @@ class BggApiClient:
     def _request_things(self, identifiers: tuple[int, ...]) -> bytes:
         url = f"{BGG_API_ORIGIN}/xmlapi2/thing?id={','.join(str(value) for value in identifiers)}&stats=1"
         return self._request_xml(url)
+
+    def versions(self, bgg_id: int) -> list[dict[str, Any]]:
+        """Published editions of one item with their languages (approved XML API2)."""
+        identifier = int(bgg_id)
+        if identifier <= 0:
+            raise ValueError("BGG ID must be positive")
+        content = self._request_xml(
+            f"{BGG_API_ORIGIN}/xmlapi2/thing?id={identifier}&versions=1"
+        )
+        return _parse_versions(content, expected_bgg_id=identifier)
 
     def comments_page(self, bgg_id: int, page: int = 1) -> bytes:
         """One page (100 items) of user comments, from the approved XML API2."""
@@ -444,6 +455,45 @@ def _parse_item(item: ET.Element) -> dict[str, Any]:
     }
 
 
+def _parse_versions(content: bytes, *, expected_bgg_id: int) -> list[dict[str, Any]]:
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as exc:
+        raise BggMetadataError("BGG API returned invalid XML") from exc
+    item = next(
+        (
+            node
+            for node in root.findall("item")
+            if node.attrib.get("id") == str(expected_bgg_id)
+        ),
+        None,
+    )
+    if item is None:
+        raise BggMetadataError("BGG API did not return the requested item")
+    versions: list[dict[str, Any]] = []
+    for node in item.findall("versions/item"):
+        primary = next(
+            (name for name in node.findall("name") if name.attrib.get("type") == "primary"),
+            None,
+        )
+        name = _attribute(primary)
+        if not name:
+            continue
+        versions.append(
+            {
+                "name": name,
+                "languages": [
+                    value
+                    for link in node.findall("link")
+                    if link.attrib.get("type") == "language"
+                    for value in (_attribute(link),)
+                    if value
+                ],
+            }
+        )
+    return versions
+
+
 def _parse_things(
     content: bytes,
     *,
@@ -562,6 +612,21 @@ class BggMetadataStore:
             ).fetchone()
             if game is None:
                 raise BggMetadataError(f"Board game BGG #{bgg_id} not found")
+            previous = connection.execute(
+                "SELECT metadata_json FROM board_game_enrichments WHERE board_game_id=?",
+                (game["id"],),
+            ).fetchone()
+            if previous is not None:
+                # Collected by the edition scan, not part of the item payload.
+                kept = json.loads(previous["metadata_json"] or "{}")
+                carried = {key: kept[key] for key in ITALIAN_TITLE_KEYS if key in kept}
+                if carried:
+                    raw = json.dumps(
+                        {**metadata, **carried},
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
             board_updates = {
                 "title": metadata.get("title"),
                 "original_title": metadata.get("original_title"),

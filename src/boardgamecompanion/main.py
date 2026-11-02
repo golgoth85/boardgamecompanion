@@ -149,6 +149,7 @@ from boardgamecompanion.service_factories import (
     get_bgg_metadata_store,
     get_crowdfunding_service,
     get_expansion_service,
+    get_italian_title_service,
 )
 from boardgamecompanion.rulebook_availability import get_rulebook_availability
 from boardgamecompanion.rulebook_review import (
@@ -627,6 +628,27 @@ async def _expansion_watch_worker(stop_event: asyncio.Event) -> None:
             pass
 
 
+async def _italian_title_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            summary = await asyncio.to_thread(
+                get_italian_title_service().scan_due,
+                limit=settings.italian_title_batch_size,
+            )
+            if summary["checked"] or summary["failed"]:
+                LOGGER.info("Italian title scan: %s", summary)
+        except Exception:
+            LOGGER.exception("Scheduled Italian title scan failed")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=settings.italian_title_poll_seconds,
+            )
+            break
+        except TimeoutError:
+            pass
+
+
 def _scan_crowdfunding_notifications() -> dict[str, int]:
     service = get_crowdfunding_service()
     active = service.list_campaigns(
@@ -759,6 +781,7 @@ async def lifespan(_: FastAPI):
     worker_tasks.append(asyncio.create_task(_bgg_collection_sync_worker(worker_stop)))
     worker_tasks.append(asyncio.create_task(_bgg_metadata_backfill_once(worker_stop)))
     worker_tasks.append(asyncio.create_task(_expansion_watch_worker(worker_stop)))
+    worker_tasks.append(asyncio.create_task(_italian_title_worker(worker_stop)))
     if settings.bgg_reference_dump_worker_enabled:
         worker_tasks.append(asyncio.create_task(_bgg_reference_dump_worker(worker_stop)))
     if settings.bgg_reference_api_worker_enabled:

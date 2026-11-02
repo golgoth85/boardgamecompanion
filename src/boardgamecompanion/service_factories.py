@@ -30,6 +30,7 @@ from boardgamecompanion.crowdfunding import (
 from boardgamecompanion.database import Database
 from boardgamecompanion.dependencies import get_database
 from boardgamecompanion.expansions import ExpansionService
+from boardgamecompanion.italian_titles import ItalianTitleService
 from boardgamecompanion.rate_limits import PersistentRateLimiter
 from boardgamecompanion.settings import settings
 
@@ -119,6 +120,12 @@ def get_barcode_resolver() -> BarcodeResolver:
         database,
         product_lookup=FallbackBarcodeLookup(*lookups),
     )
+
+
+def get_italian_title_service() -> ItalianTitleService:
+    database = get_database()
+    database.initialize()
+    return ItalianTitleService(database, get_bgg_api_client())
 
 
 def get_expansion_service() -> ExpansionService:

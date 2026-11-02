@@ -111,7 +111,7 @@ def _row_title_terms(row) -> list[str]:
         if "enriched_metadata_json" in row.keys()
         else None
     )
-    extras = []
+    extras = [_metadata_from_row(row).get("italian_title")]
     if "version_nickname" in row.keys():
         extras.append(row["version_nickname"])
     return game_title_terms(
@@ -128,7 +128,8 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
     result = {
         "bgg_id": row["bgg_id"],
         "parent_bgg_id": metadata.get("parent_bgg_id"),
-        "title": italian_title(row["title"], alternate_titles(metadata)),
+        "title": metadata.get("italian_title")
+        or italian_title(row["title"], alternate_titles(metadata)),
         "bgg_title": row["title"],
         "original_title": row["original_title"],
         "year_published": row["year_published"],

@@ -6,7 +6,7 @@ from typing import Any
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, _normalize_personal_date
-from boardgamecompanion.title_search import alternate_titles, italian_title
+from boardgamecompanion.title_search import display_title
 
 OUTCOMES = {"won", "lost", "draw"}
 MAX_PLAYERS = 20
@@ -74,7 +74,7 @@ class PlayLog:
         return {
             "id": int(row["id"]),
             "bgg_id": int(row["bgg_id"]),
-            "title": italian_title(row["title"], alternate_titles(row["metadata_json"])),
+            "title": display_title(row["title"], row["metadata_json"]),
             "has_cover": bool(row["cover_url"]),
             "played_on": row["played_on"],
             "player_count": row["player_count"],
@@ -355,7 +355,7 @@ class PlayLog:
             "games_played": [
                 {
                     "bgg_id": int(row["bgg_id"]),
-                    "title": italian_title(row["title"], alternate_titles(row["metadata_json"])),
+                    "title": display_title(row["title"], row["metadata_json"]),
                     "has_cover": bool(row["cover_url"]),
                     "plays": int(row["plays"]),
                     "last_played_on": row["last_played_on"],

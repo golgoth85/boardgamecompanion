@@ -113,3 +113,11 @@ def italian_title(title: object, alternate_titles: Iterable[object] = ()) -> str
         if text and _looks_italian(text):
             return text
     return primary
+
+
+def display_title(title: object, metadata_json: object = None) -> str:
+    """Title shown in the UI: the collected Italian edition title, else the heuristic."""
+    metadata = metadata_dict(metadata_json)
+    return str(metadata.get("italian_title") or "").strip() or italian_title(
+        title, alternate_titles(metadata)
+    )
