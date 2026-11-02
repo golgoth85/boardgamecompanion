@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.explore_groups import group_definitions, group_key, valid_group_keys
-from boardgamecompanion.title_search import game_title_terms, title_query_matches
+from boardgamecompanion.title_search import (
+    alternate_titles,
+    game_title_terms,
+    italian_title,
+    title_query_matches,
+)
 
 
 SORT_SQL = {
@@ -50,6 +56,12 @@ SORT_SQL = {
         "COALESCE(NULLIF(c.acquisition_date,''),c.first_seen_at) IS NULL, "
         "COALESCE(NULLIF(c.acquisition_date,''),c.first_seen_at) DESC, "
         "g.title COLLATE NOCASE ASC"
+    ),
+    "added_desc": (
+        "c.first_seen_at IS NULL, c.first_seen_at DESC, c.id DESC, g.title COLLATE NOCASE ASC"
+    ),
+    "added_asc": (
+        "c.first_seen_at IS NULL, c.first_seen_at ASC, c.id ASC, g.title COLLATE NOCASE ASC"
     ),
     "completed_desc": (
         "p.completed_at IS NULL, p.completed_at DESC, g.title COLLATE NOCASE ASC"
@@ -116,7 +128,8 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
     result = {
         "bgg_id": row["bgg_id"],
         "parent_bgg_id": metadata.get("parent_bgg_id"),
-        "title": row["title"],
+        "title": italian_title(row["title"], alternate_titles(metadata)),
+        "bgg_title": row["title"],
         "original_title": row["original_title"],
         "year_published": row["year_published"],
         "item_type": row["item_type"],
@@ -607,6 +620,24 @@ class Catalog:
             "offset": offset,
             "sort": sort if sort in SORT_SQL else "title",
         }
+
+    def remove_from_library(self, bgg_id: int) -> int:
+        """Take a game out of the Ludoteca without deleting it.
+
+        Copies, barcodes, documents and progress stay in place, so adding the game
+        again restores them. Returns the number of collection entries released.
+        """
+        now = datetime.now(UTC).isoformat()
+        with self.database.transaction(immediate=True) as connection:
+            cursor = connection.execute(
+                """
+                UPDATE collection_entries
+                SET own = 0, previously_owned = 1, updated_at = ?
+                WHERE own = 1 AND board_game_id = (SELECT id FROM board_games WHERE bgg_id = ?)
+                """,
+                (now, bgg_id),
+            )
+        return cursor.rowcount
 
     def get_game(self, bgg_id: int) -> dict[str, Any] | None:
         with self.database.connect() as connection:

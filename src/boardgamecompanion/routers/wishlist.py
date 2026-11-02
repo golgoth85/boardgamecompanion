@@ -14,6 +14,7 @@ from boardgamecompanion.bgg_reference import BggReferenceCatalog
 from boardgamecompanion.catalog import Catalog
 from boardgamecompanion.gameplay_summary import GameplaySummaryService
 from boardgamecompanion.service_factories import get_crowdfunding_service, get_price_provider
+from boardgamecompanion.title_search import italian_title
 from boardgamecompanion.wishlist import WishlistError, WishlistNotFound, WishlistStore
 
 router = APIRouter(tags=["wishlist"])
@@ -46,7 +47,7 @@ def _game_from_reference(detail: dict[str, Any]) -> dict[str, Any]:
     details = detail.get("details") or {}
     return {
         "bgg_id": detail["bgg_id"],
-        "title": detail["name"],
+        "title": italian_title(detail["name"], detail.get("alternate_names") or ()),
         "year_published": detail.get("year_published"),
         "players": {"min": details.get("min_players"), "max": details.get("max_players")},
         "play_time": {
@@ -103,6 +104,7 @@ def _attach_current_data(database, items: list[dict[str, Any]]) -> None:
         if game is not None:
             summary = summaries.get(bgg_id)
             game["gameplay_summary"] = summary["summary"] if summary else None
+            item["title"] = game["title"] or item["title"]
             item["game"] = game
 
     campaigns = {}

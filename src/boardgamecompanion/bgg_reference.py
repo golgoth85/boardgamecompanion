@@ -16,7 +16,7 @@ from typing import Any
 
 from boardgamecompanion.app_settings import AppSettingsStore
 from boardgamecompanion.database import Database
-from boardgamecompanion.title_search import normalize_title_text
+from boardgamecompanion.title_search import italian_title, normalize_title_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -519,7 +519,11 @@ def _reference_item(row: Any) -> dict[str, Any]:
     return {
         **extra,
         "bgg_id": int(row["bgg_id"]),
-        "name": row["name"],
+        "name": (
+            italian_title(row["name"], (row["alt_names"] or "").split("\n"))
+            if "alt_names" in keys
+            else row["name"]
+        ),
         "year_published": row["year_published"],
         "is_expansion": bool(row["is_expansion"]),
         "rank": row["rank"],
@@ -747,7 +751,7 @@ class BggReferenceCatalog:
         with self.database.connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT g.bgg_id, g.name, g.year_published, g.rank,
+                SELECT g.bgg_id, g.name, g.alt_names, g.year_published, g.rank,
                        g.bayes_average, g.average, g.users_rated,
                        g.thumbnail_url, g.image_url, g.admission_reason,
                        CASE WHEN g.description IS NOT NULL AND trim(g.description) != '' THEN 1 ELSE 0 END AS has_description,
@@ -769,7 +773,7 @@ class BggReferenceCatalog:
             result.append(
                 {
                     "bgg_id": int(row["bgg_id"]),
-                    "name": row["name"],
+                    "name": italian_title(row["name"], (row["alt_names"] or "").split("\n")),
                     "year_published": row["year_published"],
                     "rank": row["rank"],
                     "bgg_rank": row["rank"],
@@ -918,7 +922,7 @@ class BggReferenceCatalog:
         details.pop(REFERENCE_TRANSLATION_KEY, None)
         return {
             "bgg_id": int(row["bgg_id"]),
-            "name": row["name"],
+            "name": italian_title(row["name"], (row["alt_names"] or "").split("\n")),
             "year_published": row["year_published"],
             "is_expansion": bool(row["is_expansion"]),
             "rank": row["rank"] or None,
@@ -1045,7 +1049,24 @@ class BggReferenceCatalog:
                 (board_game_id,),
             ).fetchone()
             created_entry = entry is None
-            if entry is None:
+            released = (
+                connection.execute(
+                    """
+                    SELECT id FROM collection_entries
+                    WHERE board_game_id = ? AND own = 0 AND previously_owned = 1 AND COALESCE(wishlist, 0) = 0
+                    ORDER BY id LIMIT 1
+                    """,
+                    (board_game_id,),
+                ).fetchone()
+                if entry is None
+                else None
+            )
+            if released is not None:
+                connection.execute(
+                    "UPDATE collection_entries SET own = 1, first_seen_at = ?, updated_at = ? WHERE id = ?",
+                    (now, now, released["id"]),
+                )
+            elif entry is None:
                 connection.execute(
                     """
                     INSERT INTO collection_entries(

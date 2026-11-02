@@ -89,4 +89,5 @@ export const catalogColumnSorts = Object.freeze({
   duration: ["duration_asc", "duration_desc"],
   weight: ["weight_desc", "weight_asc"],
   rating: ["rating_desc", "rating_asc"],
+  added: ["added_desc", "added_asc"],
 });

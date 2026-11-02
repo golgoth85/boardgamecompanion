@@ -1325,6 +1325,16 @@ def update_game_completion(
     }
 
 
+@app.delete("/api/games/{bgg_id}/collection", tags=["catalog"])
+def remove_game_from_library(bgg_id: int) -> dict[str, object]:
+    database = get_database()
+    database.initialize()
+    released = Catalog(database).remove_from_library(bgg_id)
+    if not released:
+        raise HTTPException(status_code=404, detail="Il gioco non è in ludoteca")
+    return {"bgg_id": bgg_id, "released": released}
+
+
 @app.get("/api/games/{bgg_id}/description-it", tags=["catalog"])
 def get_game_description_it(bgg_id: int) -> dict[str, object]:
     try:

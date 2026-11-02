@@ -565,3 +565,38 @@ def test_barcode_collection_add_preserves_nonowned_import(database: Database) ->
     with database.connect() as connection:
         rows = connection.execute("SELECT own, wishlist FROM collection_entries ORDER BY id").fetchall()
     assert [(r["own"], r["wishlist"]) for r in rows] == [(0, 1), (1, 0)]
+
+
+def test_remove_from_library_keeps_the_game_and_readding_reuses_the_entry(database: Database) -> None:
+    from boardgamecompanion.catalog import Catalog
+
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    reference = BggReferenceCatalog(database)
+    catalog = Catalog(database)
+    reference.add_to_collection(28720)
+
+    assert catalog.remove_from_library(28720) == 1
+    assert catalog.remove_from_library(28720) == 0
+    assert catalog.list_games(owned=True)["total"] == 0
+    assert catalog.get_game(28720) is not None
+
+    again = reference.add_to_collection(28720)
+    assert again["created_entry"] is True
+    with database.connect() as connection:
+        entries = connection.execute("SELECT own FROM collection_entries").fetchall()
+    assert [row["own"] for row in entries] == [1]
+
+
+def test_library_lists_italian_titles_and_sorts_by_last_added(database: Database) -> None:
+    from boardgamecompanion.catalog import Catalog
+    from boardgamecompanion.title_search import italian_title
+
+    assert italian_title("Castles of Burgundy", ["Les Châteaux de Bourgogne", "I Castelli di Borgogna"]) == "I Castelli di Borgogna"
+    assert italian_title("Wingspan", ["Flügelschlag"]) == "Wingspan"
+
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    reference = BggReferenceCatalog(database)
+    reference.add_to_collection(28720)
+    reference.add_to_collection(224517)
+    items = Catalog(database).list_games(owned=True, sort="added_desc")["items"]
+    assert [item["bgg_id"] for item in items] == [224517, 28720]

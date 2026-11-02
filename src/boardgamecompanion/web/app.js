@@ -225,6 +225,7 @@ const catalogSortFieldLabels = Object.freeze({
   duration: "Durata",
   weight: "Peso",
   rating: "Rating BGG",
+  added: "Ultima aggiunta",
 });
 
 function currentCatalogSortField() {
@@ -2186,13 +2187,26 @@ function beginNextScannerImport() {
   }
 }
 
+// Game being linked to the scanned barcode, so the confirmation can show its cover.
+let scannerGame = null;
+
+function scannerCoverImage(bggId, fallback = "") {
+  const src = coverSrc(bggId, fallback);
+  return src
+    ? `<img class="scanner-cover" src="${escapeHtml(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`
+    : "";
+}
+
 function renderScannerImported(barcode, title) {
   scannerImportCount += 1;
   scannerBarcode.value = barcode;
   scannerResult.innerHTML = `
     <div class="scanner-success">
-      <strong>Barcode importato · gioco in ludoteca</strong>
-      <span class="muted">${escapeHtml(title || "Copia fisica")} · ${escapeHtml(barcode)}</span>
+      ${scannerGame ? scannerCoverImage(scannerGame.bggId, scannerGame.cover) : ""}
+      <div class="scanner-success-text">
+        <strong>Barcode importato · gioco in ludoteca</strong>
+        <span class="muted">${escapeHtml(title || "Copia fisica")} · ${escapeHtml(barcode)}</span>
+      </div>
     </div>
     <div class="dialog-actions scanner-next-actions">
       <button class="button button-primary" id="scannerNextBarcode" type="button">
@@ -2288,6 +2302,7 @@ function renderScannerUnmatched(barcode, lookup = null) {
             <button class="scanner-game-choice scanner-resolved-choice" type="button"
                     data-bgg="${escapeHtml(game.bgg_id)}"
                     data-title="${escapeHtml(game.title)}">
+              ${scannerCoverImage(game.bgg_id)}
               <strong>${escapeHtml(game.title)}</strong>
               <span class="muted">Confidenza ${Math.round(Number(game.confidence || 0) * 100)}%</span>
             </button>
@@ -2414,7 +2429,9 @@ async function searchScannerGames(query, barcode) {
       ${games.size ? Array.from(games.values()).map((game) => `
         <button class="scanner-game-choice" type="button"
                 data-bgg="${escapeHtml(game.bgg_id)}" data-owned="${game.owned ? "true" : "false"}"
-                data-title="${escapeHtml(game.title)}">
+                data-title="${escapeHtml(game.title)}"
+                data-cover="${escapeHtml(game.image_url || game.thumbnail_url || game.bgg_metadata?.cover_url || "")}">
+          ${scannerCoverImage(game.bgg_id, game.thumbnail_url || game.image_url || game.bgg_metadata?.cover_url || "")}
           <strong>${escapeHtml(game.title)}</strong>
           <span class="muted">BGG #${escapeHtml(game.bgg_id)}${game.year_published ? ` · ${escapeHtml(game.year_published)}` : ""} · ${game.item_type === "expansion" ? "Espansione" : "Gioco base"}</span>
           <span>${game.owned ? "Associa alla copia in ludoteca" : "Aggiungi alla ludoteca con questo barcode"}</span>
@@ -2429,7 +2446,7 @@ async function searchScannerGames(query, barcode) {
           if (button.dataset.owned !== "true") {
             await api(`/api/reference/${encodeURIComponent(button.dataset.bgg)}/collection`, {method: "POST"});
           }
-          await assignScannedBarcodeToGame(Number(button.dataset.bgg), button.dataset.title, barcode);
+          await assignScannedBarcodeToGame(Number(button.dataset.bgg), button.dataset.title, barcode, button.dataset.cover || "");
         } catch (error) {
           button.disabled = false;
           showToast(error.message, true);
@@ -2452,7 +2469,8 @@ async function assignBarcodeToCopy(copyId, barcode, title = null) {
   renderScannerImported(barcode, title);
 }
 
-async function assignScannedBarcodeToGame(bggId, title, barcode) {
+async function assignScannedBarcodeToGame(bggId, title, barcode, cover = "") {
+  scannerGame = {bggId, cover};
   scannerResult.innerHTML = '<p class="muted">Controllo copie fisiche…</p>';
   try {
     const copies = await api(`/api/games/${bggId}/copies`);
@@ -4118,6 +4136,12 @@ async function renderDetail(bggId) {
                 </label>
                 <button class="button button-ghost completion-date-save" id="saveCompletionDate" type="button">Salva data</button>
               ` : ""}
+              ${collection.own ? `
+                <button class="game-state-icon game-remove-library" id="removeFromLibrary" type="button"
+                        aria-label="Rimuovi dalla ludoteca" title="Rimuovi dalla ludoteca">
+                  ${icon("trash")}
+                </button>
+              ` : ""}
             </div>
           </header>
 
@@ -4251,6 +4275,20 @@ async function renderDetail(bggId) {
         });
         showToast(next ? "Gioco segnato come completato." : "Completamento rimosso; resta giocato se applicabile.");
         await renderDetail(game.bgg_id);
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
+    document.querySelector("#removeFromLibrary")?.addEventListener("click", async (event) => {
+      if (!window.confirm(`Rimuovere "${game.title}" dalla ludoteca? Copie, barcode, regolamenti e partite restano salvati.`)) return;
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        await api(`/api/games/${game.bgg_id}/collection`, {method: "DELETE"});
+        showToast("Gioco rimosso dalla ludoteca.");
+        history.pushState({}, "", "/");
+        await route();
       } catch (error) {
         showToast(error.message, true);
         button.disabled = false;
@@ -8733,6 +8771,7 @@ scannerDialog.addEventListener("cancel", (event) => {
 });
 scannerDialog.addEventListener("close", () => {
   const imported = scannerImportCount;
+  scannerGame = null;
   resetScanner();
   if (imported) void route();
 });

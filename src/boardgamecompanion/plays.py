@@ -6,6 +6,7 @@ from typing import Any
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, _normalize_personal_date
+from boardgamecompanion.title_search import alternate_titles, italian_title
 
 OUTCOMES = {"won", "lost", "draw"}
 MAX_PLAYERS = 20
@@ -73,7 +74,7 @@ class PlayLog:
         return {
             "id": int(row["id"]),
             "bgg_id": int(row["bgg_id"]),
-            "title": row["title"],
+            "title": italian_title(row["title"], alternate_titles(row["metadata_json"])),
             "has_cover": bool(row["cover_url"]),
             "played_on": row["played_on"],
             "player_count": row["player_count"],
@@ -89,7 +90,7 @@ class PlayLog:
         }
 
     _SELECT = """
-        SELECT p.*, g.bgg_id, g.title, e.cover_url
+        SELECT p.*, g.bgg_id, g.title, e.cover_url, e.metadata_json
         FROM game_plays p
         JOIN board_games g ON g.id=p.board_game_id
         LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
@@ -329,7 +330,7 @@ class PlayLog:
             ).fetchall()
             games = connection.execute(
                 """
-                SELECT g.bgg_id, g.title, e.cover_url, COUNT(p.id) AS plays,
+                SELECT g.bgg_id, g.title, e.cover_url, e.metadata_json, COUNT(p.id) AS plays,
                        MAX(p.played_on) AS last_played_on,
                        COALESCE(SUM(p.duration_minutes),0) AS minutes,
                        SUM(CASE WHEN p.outcome='won' THEN 1 ELSE 0 END) AS won,
@@ -354,7 +355,7 @@ class PlayLog:
             "games_played": [
                 {
                     "bgg_id": int(row["bgg_id"]),
-                    "title": row["title"],
+                    "title": italian_title(row["title"], alternate_titles(row["metadata_json"])),
                     "has_cover": bool(row["cover_url"]),
                     "plays": int(row["plays"]),
                     "last_played_on": row["last_played_on"],

@@ -78,3 +78,38 @@ def title_query_matches(query: object, terms: Iterable[object]) -> bool:
         for term in terms
         if str(term or "").strip()
     )
+
+
+_ITALIAN_MARKERS = frozenset(
+    "il lo gli della delle dello dei degli nel nella nei nelle sul sulla alla alle allo agli "
+    "dalla dalle uno per che sono".split()
+)
+_FOREIGN_MARKERS = frozenset(
+    "the of and for with les des du de der die das und von el los las y et at in".split()
+)
+_ITALIAN_WEAK_MARKERS = frozenset("i le la di e un una del da con".split())
+_ITALIAN_ACCENTED_END = re.compile(r"\w{2,}[àìòù]$")
+
+
+def _looks_italian(text: str) -> bool:
+    words = re.findall(r"[^\W\d_]+", text.casefold())
+    if not words or any(word in _FOREIGN_MARKERS for word in words):
+        return False
+    if any(word in _ITALIAN_MARKERS or _ITALIAN_ACCENTED_END.match(word) for word in words):
+        return True
+    return sum(word in _ITALIAN_WEAK_MARKERS for word in words) >= 2
+
+
+def italian_title(title: object, alternate_titles: Iterable[object] = ()) -> str:
+    """The Italian title when BGG lists one among the alternate names, else ``title``.
+
+    BGG does not tag the language of alternate names, so an alternate counts as Italian
+    only when it carries Italian function words or accents; otherwise the primary
+    title is kept.
+    """
+    primary = str(title or "").strip()
+    for item in alternate_titles:
+        text = str(item or "").strip()
+        if text and _looks_italian(text):
+            return text
+    return primary

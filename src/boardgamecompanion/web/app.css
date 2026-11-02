@@ -4329,3 +4329,20 @@ a { color: inherit; text-decoration: none; }
 .game-description-sources { margin: .7rem 0 0; color: var(--muted); font-size: .8rem; }
 .game-description-actions { margin-top: .6rem; }
 .game-description-actions .button { display: inline-flex; align-items: center; gap: .45rem; font-size: .8rem; padding: .3rem .7rem; }
+
+.scanner-cover {
+  width: 3.4rem;
+  height: 3.4rem;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: none;
+}
+.scanner-game-choice:has(.scanner-cover) {
+  grid-template-columns: 3.4rem 1fr;
+  column-gap: .75rem;
+  align-items: center;
+}
+.scanner-game-choice .scanner-cover { grid-row: 1 / span 3; }
+.scanner-success { display: flex; align-items: center; gap: .75rem; }
+.scanner-success .scanner-cover { width: 4.5rem; height: 4.5rem; }
+.scanner-success-text { display: grid; gap: .2rem; min-width: 0; }
