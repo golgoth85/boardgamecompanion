@@ -7,6 +7,7 @@ from boardgamecompanion.bgg_metadata import BggMetadataStore, _parse_versions
 from boardgamecompanion.catalog import Catalog
 from boardgamecompanion.database import Database
 from boardgamecompanion.italian_titles import ItalianTitleService, choose_italian_title
+from boardgamecompanion.title_search import display_title, is_edition_label, italian_title
 
 XML = b"""<items><item type="boardgame" id="7"><versions>
 <item><name type="primary" value="Creature e Reietti"/><link type="language" value="Italian"/></item>
@@ -81,3 +82,45 @@ def test_metadata_refresh_keeps_collected_italian_title(tmp_path: Path) -> None:
     with database.connect() as connection:
         stored = json.loads(connection.execute("SELECT metadata_json FROM board_game_enrichments").fetchone()[0])
     assert stored["italian_title"] == "Creature e Reietti"
+
+
+def test_edition_labels_are_not_titles() -> None:
+    for label in (
+        "Italian edition 2016", "Ghenos Games Italian edition", "Italian 2.0 edition",
+        "Multilingual first edition", "DUT/ENG/FRE/GER/ITA/SPA edition", "Italian sundrop edition",
+    ):
+        assert is_edition_label(label), label
+        assert choose_italian_title([{"name": label, "languages": ["Italian"]}]) is None
+    for title in (
+        "Il Trono di Spade: il Gioco di Carte (Seconda edizione)", "Mercoledì: Creature e Reietti",
+        "Arkham Horror: Il Gioco di Carte", "Chronicles of Crime: 2400",
+    ):
+        assert not is_edition_label(title), title
+    assert not is_edition_label("Italian Job 2012", ["The Italian Job 2012", "Italian Job 2012"])
+
+
+def test_stored_edition_label_is_hidden_and_rescanned(tmp_path: Path) -> None:
+    database = Database(tmp_path / "db.sqlite3")
+    database.initialize()
+    _game(database)
+    with database.transaction() as connection:
+        connection.execute(
+            "UPDATE board_game_enrichments SET metadata_json=?",
+            (json.dumps({"italian_title": "Italian edition 2016", "italian_title_next_check_at": "9999"}),),
+        )
+    assert display_title("Creatures and Outcasts", {"italian_title": "Italian edition 2016"}) == (
+        "Creatures and Outcasts"
+    )
+    assert Catalog(database).list_games(owned=True)["items"][0]["title"] == "Creatures and Outcasts"
+    service = ItalianTitleService(database, _Client())
+    assert service.due_ids(limit=5) == [7]
+    service.scan_due(limit=5)
+    assert service.due_ids(limit=5) == []
+    assert Catalog(database).list_games(owned=True)["items"][0]["title"] == "Creature e Reietti"
+
+
+def test_alternate_with_non_italian_accents_is_not_italian() -> None:
+    assert italian_title(
+        "Chronicles of Crime: 2400", ["Crónicas del Crimen: La Saga Millenium – 2400"]
+    ) == "Chronicles of Crime: 2400"
+    assert italian_title("Wednesday", ["Mercoledì: Creature e Reietti"]) == "Mercoledì: Creature e Reietti"

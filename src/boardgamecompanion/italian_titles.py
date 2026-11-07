@@ -9,19 +9,15 @@ from typing import Any
 
 from boardgamecompanion.bgg_metadata import BggApiClient, BggMetadataError
 from boardgamecompanion.database import Database
-from boardgamecompanion.title_search import alternate_titles, normalize_title_text
+from boardgamecompanion.title_search import alternate_titles, is_edition_label, normalize_title_text
 
 LOGGER = logging.getLogger(__name__)
 
 RECHECK_DAYS = 180
 RETRY_DAYS = 1
 OVERSIZE_RETRY_DAYS = 30
-# Edition names such as "Italian edition" describe the release, they are not a title.
-_GENERIC_WORDS = frozenset(
-    "italian italiano italiana edition edizione version versione first second third "
-    "prima seconda terza reprint ristampa printing stampa 1st 2nd 3rd new nuova "
-    "revised revisionata".split()
-)
+# Bumped when the choice changes, so titles stored by an older rule are checked again.
+TITLE_RULE = 2
 
 
 def choose_italian_title(versions: list[dict[str, Any]], known_titles: list[str] = ()) -> str | None:
@@ -38,8 +34,7 @@ def choose_italian_title(versions: list[dict[str, Any]], known_titles: list[str]
             continue
         name = " ".join(str(version.get("name") or "").split())
         key = normalize_title_text(name)
-        words = key.split()
-        if not key or all(word in _GENERIC_WORDS for word in words):
+        if is_edition_label(name, known_titles):
             continue
         counts[key] += 1
         names.setdefault(key, name)
@@ -65,6 +60,8 @@ class ItalianTitleService:
                 FROM board_games g
                 JOIN board_game_enrichments e ON e.board_game_id = g.id
                 WHERE COALESCE(json_extract(e.metadata_json, '$.italian_title_next_check_at'), '') <= ?
+                   OR (json_extract(e.metadata_json, '$.italian_title') IS NOT NULL
+                       AND COALESCE(json_extract(e.metadata_json, '$.italian_title_rule'), 0) < ?)
                 ORDER BY EXISTS(
                              SELECT 1 FROM collection_entries c
                              WHERE c.board_game_id = g.id AND c.own = 1
@@ -73,7 +70,7 @@ class ItalianTitleService:
                          g.bgg_id
                 LIMIT ?
                 """,
-                (now, max(1, int(limit))),
+                (now, TITLE_RULE, max(1, int(limit))),
             ).fetchall()
         return [int(row["bgg_id"]) for row in rows]
 
@@ -120,6 +117,7 @@ class ItalianTitleService:
                 return
             metadata = json.loads(row["metadata_json"] or "{}")
             metadata["italian_title_next_check_at"] = next_check
+            metadata["italian_title_rule"] = TITLE_RULE
             if not keep:
                 if title:
                     metadata["italian_title"] = title

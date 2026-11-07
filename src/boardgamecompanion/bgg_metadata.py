@@ -19,7 +19,7 @@ BGG_API_ORIGIN = "https://boardgamegeek.com"
 MAX_XML_BYTES = 2 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
 MAX_THING_IDS = 20
-ITALIAN_TITLE_KEYS = ("italian_title", "italian_title_next_check_at")
+ITALIAN_TITLE_KEYS = ("italian_title", "italian_title_next_check_at", "italian_title_rule")
 BGG_IMAGE_HOSTS = frozenset(
     {"cf.geekdo-images.com", "cf.geekdo-static.com", "boardgamegeek.com"}
 )
