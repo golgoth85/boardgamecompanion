@@ -179,7 +179,8 @@ def test_browse_filters_by_type_and_returns_card_facts(database: Database) -> No
             """
             UPDATE bgg_reference_games
             SET details_json = '{"min_players": 2, "max_players": 4, "playing_time": 120,
-                                 "bgg_average_weight": 3.9, "bgg_recommended_age": "14"}'
+                                 "bgg_average_weight": 3.9, "bgg_recommended_age": "14",
+                                 "bgg_best_players": "3", "bgg_recommended_players": "2-4"}'
             WHERE bgg_id = 224517
             """
         )
@@ -196,6 +197,7 @@ def test_browse_filters_by_type_and_returns_card_facts(database: Database) -> No
     assert items[224517]["players"] == {"min": 2, "max": 4}
     assert items[224517]["play_time"]["playing"] == 120
     assert (items[224517]["average_weight"], items[224517]["recommended_age"]) == (3.9, "14")
+    assert (items[224517]["best_players"], items[224517]["recommended_players"]) == ("3", "2-4")
     assert (items[224517]["owned"], items[28720]["owned"]) == (False, True)
     assert catalog.detail(28720)["owned"] is True
 

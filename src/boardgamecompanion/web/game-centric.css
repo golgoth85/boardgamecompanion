@@ -1475,3 +1475,32 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .game-summary-list > .game-term-row dd{display:flex;flex-wrap:wrap;justify-content:flex-start;max-width:100%}
 .bgg-term{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #rulebookSearchMissing{min-height:2.3rem;padding:.4rem .9rem;font-size:.8rem}
+
+/* Giocatori a colpo d'occhio: ideale nel disco dorato, consigliato chiaro, il resto attenuato */
+.player-fit{display:inline-flex;align-items:center;gap:.06em;font-variant-numeric:tabular-nums;line-height:1;vertical-align:middle}
+.player-fit i{display:inline-grid;place-items:center;min-width:1.32em;height:1.32em;padding:0 .14em;border-radius:999px;color:#6f7b92;font-style:normal;font-weight:800;font-size:.92em}
+.player-fit i.is-recommended{color:var(--accent-2)}
+.player-fit i.is-best{color:#1b1303;background:linear-gradient(180deg,var(--accent-2),var(--accent));box-shadow:0 0 0 1px rgba(251,191,36,.35)}
+.player-fit i.is-unknown{opacity:.7}
+.catalog-metric-players strong{overflow:visible;text-overflow:clip}
+/* Nelle card i giocatori hanno una riga propria, sopra età, durata e peso */
+.catalog-results-cards .catalog-metrics{grid-template-columns:repeat(3,auto);column-gap:.3rem}
+.catalog-results-cards .catalog-metric:nth-child(2){display:block}
+.catalog-results-cards .catalog-metric-players{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:-.2rem -.15rem .55rem;padding:0 .15rem .5rem;border-bottom:1px solid rgba(41,52,76,.55)}
+.catalog-results-cards .catalog-metric-players span{order:-1;margin:0}
+.catalog-metric-players .player-fit{font-size:.78rem}
+.list-stat .player-fit{font-size:.78rem}
+.ranking-tag.is-players{align-items:center}
+.ranking-tag .player-fit{font-size:.62rem}
+.ranking-voters{color:var(--muted);font-weight:700}
+
+/* Wishlist: dati tecnici sotto la cover */
+.wishlist-side .wishlist-facts-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+.wishlist-side .wishlist-facts-row>div{padding:.32rem .4rem}
+.wishlist-side .wishlist-facts-row dd{font-size:.72rem}
+.wishlist-side .wishlist-fact-players{grid-column:1 / -1}
+.wishlist-fact-players .player-fit{font-size:.74rem}
+@media(max-width:640px){
+  .wishlist-side .wishlist-facts-row{grid-column:2;grid-row:1}
+  .wishlist-side .wishlist-tags{grid-column:1 / -1}
+}

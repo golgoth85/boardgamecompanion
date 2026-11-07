@@ -386,11 +386,11 @@ function playerCountSet(text, max) {
 
 // One entry per player count in the box range, from the BGG community poll
 // when stored, otherwise from the best/recommended summaries.
-function playerChartRows(game, poll) {
+function playerChartRows(game, poll, span = 10) {
   const min = Number(game.players?.min) || 0;
   const max = Number(game.players?.max) || min;
   if (!min) return [];
-  const last = Math.min(max, min + 9);
+  const last = Math.min(max, min + span - 1);
   const votesByCount = new Map(
     (Array.isArray(poll) ? poll : [])
       .filter((row) => /^\d+$/.test(String(row?.players || "")))
@@ -408,7 +408,10 @@ function playerChartRows(game, poll) {
       else if (votes.best + votes.recommended > votes.not_recommended) verdict = "recommended";
       else verdict = "not_recommended";
     } else if (best.size || recommended.size) {
-      verdict = best.has(count) ? "best" : recommended.has(count) ? "recommended" : "not_recommended";
+      // The open-ended last entry ("5+") takes the best verdict of the counts it covers.
+      const covered = count === last && last < max ? Array.from({length: max - count + 1}, (_, step) => count + step) : [count];
+      verdict = covered.some((value) => best.has(value)) ? "best"
+        : covered.some((value) => recommended.has(value)) ? "recommended" : "not_recommended";
     }
     rows.push({
       label: count === last && last < max ? `${count}+` : String(count),
@@ -461,6 +464,40 @@ function playerChartMarkup(game, poll) {
       ${tip}
     </div>
   `;
+}
+
+// "2–4" style text for a sorted list of player-count labels, joining consecutive counts.
+function playerLabelsText(labels) {
+  const parts = [];
+  for (const label of labels) {
+    const last = parts[parts.length - 1];
+    const value = parseInt(label, 10);
+    if (last && value === last.high + 1 && !last.open) {
+      last.high = value;
+      last.open = label.endsWith("+");
+    } else {
+      parts.push({low: value, high: value, open: label.endsWith("+")});
+    }
+  }
+  return parts
+    .map((part) => (part.low === part.high ? String(part.low) : `${part.low}–${part.high}`) + (part.open ? "+" : ""))
+    .join(", ");
+}
+
+// Player counts at a glance for lists and cards: every count in the box range,
+// the ideal ones in a gold disc, the recommended ones bright, the others muted.
+function playerFitMarkup(game, {span = 6} = {}) {
+  const rows = playerChartRows(game, null, span);
+  if (!rows.some((row) => row.verdict)) return escapeHtml(playerText(game));
+  const best = rows.filter((row) => row.verdict === "best").map((row) => row.label);
+  const good = rows.filter((row) => row.verdict === "best" || row.verdict === "recommended").map((row) => row.label);
+  const summary = [
+    best.length ? `Ideale: ${playerLabelsText(best)}` : "",
+    good.length ? `Consigliato: ${playerLabelsText(good)}` : "",
+    `Scatola: ${playerText(game)}`,
+  ].filter(Boolean).join(" · ");
+  return `
+    <span class="player-fit" title="${escapeHtml(`${summary} (sondaggio BGG)`)}" aria-label="${escapeHtml(`Giocatori ${summary}`)}">${rows.map((row) => `<i class="is-${row.verdict || "unknown"}" aria-hidden="true">${escapeHtml(row.label)}</i>`).join("")}</span>`.trim();
 }
 
 // BGG language dependence poll, summarised in four levels.
@@ -2561,9 +2598,10 @@ function ageText(game) {
   return text;
 }
 
-function catalogMetric(label, value, kind = "") {
+function catalogMetric(label, value, kind = "", {html = ""} = {}) {
   const suffix = kind ? ` catalog-metric-${kind}` : "";
-  return `<div class="catalog-metric${suffix}"><strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`;
+  const content = html || `<strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>`;
+  return `<div class="catalog-metric${suffix}">${html ? `<strong>${content}</strong>` : content}<span>${escapeHtml(label)}</span></div>`;
 }
 
 function inferExpansionParent(expansion, standaloneGames) {
@@ -2725,7 +2763,7 @@ function gameCard(game, expansions = [], {reference = null} = {}) {
         <div class="card-body">
           <h3 class="card-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3>
           <div class="catalog-metrics">
-            ${catalogMetric("Giocatori", playerText(game))}
+            ${catalogMetric("Giocatori", playerText(game), "players", {html: playerFitMarkup(game)})}
             ${catalogMetric("Età", ageText(game))}
             ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
             ${catalogMetric("Peso", weight)}
@@ -2776,7 +2814,7 @@ function gameListRow(game, expansions = [], isExpansion = false, {reference = nu
           <small>${escapeHtml(subtitle || "—")}</small>
         </span>
       </${open.tag}>
-      <span class="list-stat"><strong>${escapeHtml(playerText(game))}</strong><small>Giocatori</small></span>
+      <span class="list-stat"><strong>${playerFitMarkup(game)}</strong><small>Giocatori</small></span>
       <span class="list-stat"><strong>${escapeHtml(ageText(game))}</strong><small>Età</small></span>
       <span class="list-stat"><strong>${escapeHtml(timeText(game).replace(" min", ""))}</strong><small>Minuti</small></span>
       <span class="list-stat"><strong>${weight}</strong><small>Peso</small></span>
@@ -5610,17 +5648,17 @@ function rankingCover(view) {
 function rankingTags(game, factors = [], {compact = false} = {}) {
   const bgg = game.bgg || {};
   const tag = (label, value, className = "") => value && value !== "—"
-    ? `<span class="ranking-tag ${className}"><small>${escapeHtml(label)}</small>${escapeHtml(value)}</span>`
+    ? `<span class="ranking-tag ${className}"><small>${escapeHtml(label)}</small>${value.html || escapeHtml(value)}</span>`
     : "";
-  const factorText = (prefix) => (factors || []).find((factor) => String(factor).startsWith(prefix));
-  const ideal = factorText("ideale in ")?.slice("ideale in ".length);
   const special = (factors || []).filter((factor) => !/^(ideale in|peso|età) /.test(String(factor)));
   const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 1) : "";
   const age = ageText(game);
   const rating = Number(bgg.average) > 0
-    ? `★ ${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0 ? ` · ${compactCount(bgg.users_rated)}` : ""}`
+    ? {html: `★ ${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0
+      ? `<span class="ranking-voters" title="${escapeHtml(`${formatNumber(bgg.users_rated, 0)} votanti`)}"> · ${compactCount(bgg.users_rated)}</span>`
+      : ""}`}
     : "";
-  const genres = compact ? [] : (game.bgg_metadata?.categories || []).slice(0, 2);
+  const players = playerText(game) !== "—" ? {html: playerFitMarkup(game)} : "";
   return `
     <span class="ranking-tags">
       ${special.map((factor) => {
@@ -5628,15 +5666,11 @@ function rankingTags(game, factors = [], {compact = false} = {}) {
         return tag(label, rest.join(" "), "is-mode");
       }).join("")}
       ${tag("Voto", rating, "is-rating")}
-      ${tag("Giocatori", playerText(game))}
-      ${compact ? "" : tag("Ideale", ideal || "")}
+      ${tag("Giocatori", players, "is-players")}
       ${tag("Durata", timeText(game))}
       ${tag("Peso", weight ? `${weight}/5` : "")}
       ${compact ? "" : tag("Età", age)}
       ${tag("Lingua", bgg.language_dependence ? languageDependenceText(bgg.language_dependence) : "")}
-      ${compact ? "" : tag("BGG", Number(bgg.rank) > 0 ? `#${formatNumber(bgg.rank, 0)}` : "")}
-      ${compact ? "" : tag("Anno", game.year_published ? String(game.year_published) : "")}
-      ${genres.map((name) => tag("Genere", bggTermLabel(name))).join("")}
     </span>`;
 }
 
@@ -8126,11 +8160,11 @@ function wishlistCard(item) {
   const bgg = game?.bgg || {};
   const subtitle = isCrowdfunding
     ? [campaign?.creator, campaign?.platform === "kickstarter" ? "Kickstarter" : "Gamefound"].filter(Boolean).join(" · ")
-    : [game?.year_published || item.year_published || "", Number(bgg.rank) > 0 ? `#${formatNumber(bgg.rank, 0)} BGG` : "", game?.owned ? "già nella ludoteca" : ""].filter(Boolean).join(" · ");
+    : game?.owned ? "già nella ludoteca" : "";
   const weight = Number(bgg.average_weight) > 0 ? `${formatNumber(bgg.average_weight, 1)} / 5` : "—";
   const facts = game ? `
     <dl class="wishlist-facts-row">
-      <div><dt>Giocatori</dt><dd>${escapeHtml(playerText(game))}</dd></div>
+      <div class="wishlist-fact-players"><dt>Giocatori</dt><dd>${playerFitMarkup(game, {span: 8})}</dd></div>
       <div><dt>Età</dt><dd>${escapeHtml(ageText(game))}</dd></div>
       <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
       <div><dt>Complessità</dt><dd>${escapeHtml(weight)}</dd></div>
@@ -8167,6 +8201,7 @@ function wishlistCard(item) {
           </button>
           ${game ? bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated}) : ""}
         </div>
+        ${facts}
         ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag"})}</div>` : ""}
       </div>
       <div class="wishlist-card-body">
@@ -8175,7 +8210,7 @@ function wishlistCard(item) {
           <h2><a href="${escapeHtml(href)}" ${linkAttributes}>${escapeHtml(title)}</a></h2>
           ${subtitle ? `<span class="muted">${escapeHtml(subtitle)}</span>` : ""}
         </header>
-        ${facts}${campaignFacts}
+        ${campaignFacts}
         ${summary ? `<p class="wishlist-summary" ${game ? `data-ranking-summary-bgg="${escapeHtml(game.bgg_id)}"` : ""}>${escapeHtml(summary)}</p>` : ""}
         ${isCrowdfunding ? "" : wishlistPriceMarkup(item)}
       </div>

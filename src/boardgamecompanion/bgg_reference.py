@@ -495,6 +495,9 @@ _ITEM_SELECT = """
            COALESCE(b.max_play_time, json_extract(g.details_json, '$.max_play_time')) AS max_play_time,
            COALESCE(b.bgg_average_weight, json_extract(g.details_json, '$.bgg_average_weight')) AS average_weight,
            COALESCE(b.bgg_recommended_age, json_extract(g.details_json, '$.bgg_recommended_age')) AS recommended_age,
+           COALESCE(b.bgg_best_players, json_extract(g.details_json, '$.bgg_best_players')) AS best_players,
+           COALESCE(b.bgg_recommended_players, json_extract(g.details_json, '$.bgg_recommended_players'))
+               AS recommended_players,
            EXISTS(
                SELECT 1 FROM collection_entries c WHERE c.board_game_id = b.id AND c.own = 1
            ) AS owned
@@ -515,6 +518,8 @@ def _reference_item(row: Any) -> dict[str, Any]:
             },
             "average_weight": row["average_weight"],
             "recommended_age": row["recommended_age"],
+            "best_players": row["best_players"],
+            "recommended_players": row["recommended_players"],
         }
     return {
         **extra,
