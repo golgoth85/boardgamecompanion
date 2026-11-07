@@ -1476,19 +1476,23 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .bgg-term{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #rulebookSearchMissing{min-height:2.3rem;padding:.4rem .9rem;font-size:.8rem}
 
-/* Giocatori a colpo d'occhio: ideale nel disco dorato, consigliato chiaro, il resto attenuato */
-.player-fit{display:inline-flex;align-items:center;gap:.06em;font-variant-numeric:tabular-nums;line-height:1;vertical-align:middle}
-.player-fit i{display:inline-grid;place-items:center;min-width:1.32em;height:1.32em;padding:0 .14em;border-radius:999px;color:#6f7b92;font-style:normal;font-weight:800;font-size:.92em}
-.player-fit i.is-recommended{color:var(--accent-2)}
-.player-fit i.is-best{color:#1b1303;background:linear-gradient(180deg,var(--accent-2),var(--accent));box-shadow:0 0 0 1px rgba(251,191,36,.35)}
+/* Giocatori a colpo d'occhio: ideale in oro, consigliato chiaro, sconsigliato attenuato */
+.player-fit{display:inline-flex;align-items:baseline;gap:.3em;font-variant-numeric:tabular-nums;line-height:1.2;vertical-align:baseline}
+.player-fit i{color:#5d687c;font-style:normal;font-weight:800}
+.player-fit i.is-recommended{color:var(--text)}
+.player-fit i.is-best{color:var(--accent-2)}
 .player-fit i.is-unknown{opacity:.7}
 .catalog-metric-players strong{overflow:visible;text-overflow:clip}
-/* Nelle card la fila resta sulla riga di durata e peso: cifre strette, disco solo sull'ideale */
 .catalog-metrics{column-gap:.3rem}
-.player-fit.is-compact{gap:.12em}
-.player-fit.is-compact i{min-width:1.3em;padding:0 .22em;font-size:.9em}
-.player-fit.is-compact b{margin-left:.2em;color:var(--accent-2);font-size:.78em;font-weight:800;letter-spacing:-.02em}
-.catalog-metric-players .player-fit{font-size:.8rem}
+/* ".catalog-metric span" è l'etichetta sotto il valore: non deve toccare la fila dei giocatori */
+.catalog-metric strong .player-fit{display:inline-flex;margin:0;color:inherit;font-size:inherit;letter-spacing:0}
+.catalog-metric-players .player-fit{gap:.26em}
+/* Card molto strette (circa 130 px, ad esempio a 1100 px di finestra): valori più compatti */
+@container (max-width: 150px) {
+  .catalog-metrics{padding-inline:.3rem;column-gap:.12rem}
+  .catalog-metric strong,.catalog-metric-duration strong{font-size:.66rem;letter-spacing:-.035em}
+  .catalog-metric-players .player-fit{gap:.06em}
+}
 .list-stat .player-fit{font-size:.78rem}
 .ranking-tag.is-players{align-items:center}
 .ranking-tag .player-fit{font-size:.62rem}
