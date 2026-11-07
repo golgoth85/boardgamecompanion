@@ -486,8 +486,9 @@ function playerLabelsText(labels) {
 
 // Player counts at a glance for lists and cards: every count in the box range,
 // the ideal ones in a gold disc, the recommended ones bright, the others muted.
-function playerFitMarkup(game, {span = 6} = {}) {
-  const rows = playerChartRows(game, null, span);
+// Compact form for narrow cards: the ideal counts in one gold pill, then the recommended range.
+function playerFitMarkup(game, {span = 6, compact = false} = {}) {
+  const rows = playerChartRows(game, null, compact ? 10 : span);
   if (!rows.some((row) => row.verdict)) return escapeHtml(playerText(game));
   const best = rows.filter((row) => row.verdict === "best").map((row) => row.label);
   const good = rows.filter((row) => row.verdict === "best" || row.verdict === "recommended").map((row) => row.label);
@@ -496,8 +497,14 @@ function playerFitMarkup(game, {span = 6} = {}) {
     good.length ? `Consigliato: ${playerLabelsText(good)}` : "",
     `Scatola: ${playerText(game)}`,
   ].filter(Boolean).join(" · ");
+  const attrs = `title="${escapeHtml(`${summary} (sondaggio BGG)`)}" aria-label="${escapeHtml(`Giocatori ${summary}`)}"`;
+  if (compact) {
+    const ideal = best.length ? playerLabelsText(best).replaceAll(", ", ",") : "";
+    const goodRange = good.length > 1 ? `${parseInt(good[0], 10)}–${good[good.length - 1]}` : good[0] || "";
+    return `<span class="player-fit is-compact" ${attrs}>${ideal ? `<i class="is-best" aria-hidden="true">${escapeHtml(ideal)}</i>` : ""}${goodRange && goodRange !== ideal ? `<b class="is-recommended" aria-hidden="true">${escapeHtml(goodRange)}</b>` : ""}</span>`;
+  }
   return `
-    <span class="player-fit" title="${escapeHtml(`${summary} (sondaggio BGG)`)}" aria-label="${escapeHtml(`Giocatori ${summary}`)}">${rows.map((row) => `<i class="is-${row.verdict || "unknown"}" aria-hidden="true">${escapeHtml(row.label)}</i>`).join("")}</span>`.trim();
+    <span class="player-fit" ${attrs}>${rows.map((row) => `<i class="is-${row.verdict || "unknown"}" aria-hidden="true">${escapeHtml(row.label)}</i>`).join("")}</span>`.trim();
 }
 
 // BGG language dependence poll, summarised in four levels.
@@ -2763,7 +2770,7 @@ function gameCard(game, expansions = [], {reference = null} = {}) {
         <div class="card-body">
           <h3 class="card-title" title="${escapeHtml(game.title)}">${escapeHtml(game.title)}</h3>
           <div class="catalog-metrics">
-            ${catalogMetric("Giocatori", playerText(game), "players", {html: playerFitMarkup(game)})}
+            ${catalogMetric("Giocatori", playerText(game), "players", {html: playerFitMarkup(game, {compact: true})})}
             ${catalogMetric("Età", ageText(game))}
             ${catalogMetric("Durata", timeText(game).replace(" min", ""), "duration")}
             ${catalogMetric("Peso", weight)}
