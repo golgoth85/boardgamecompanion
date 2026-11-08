@@ -588,6 +588,7 @@
 
 
 .relevant-expansions-section{display:grid;gap:.75rem}
+.relevant-expansions-section[hidden]{display:none!important}
 .relevant-expansions-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem}
 .relevant-expansion-card{
   display:grid;grid-template-columns:5.5rem minmax(0,1fr);gap:.62rem;min-width:0;padding:.58rem;
