@@ -656,6 +656,7 @@
   font:inherit;font-size:1.05rem;cursor:pointer
 }
 .global-notification-trigger:hover,.global-notification-trigger:focus-visible{border-color:rgba(73,190,132,.42);background:rgba(24,33,49,.9)}
+.global-notification-trigger > span:first-child{display:grid;place-items:center}
 
 .catalog-head-compact-actions{gap:.5rem}
 .catalog-head-compact-actions .catalog-density-controls{grid-column:auto;justify-content:flex-end;gap:.45rem}
