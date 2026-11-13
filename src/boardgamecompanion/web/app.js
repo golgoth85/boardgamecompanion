@@ -8583,6 +8583,7 @@ async function renderLists() {
             remove.className = "manual-list-remove";
             remove.textContent = "×";
             remove.title = "Rimuovi dalla lista";
+            card.classList.add("has-remove");
             remove.addEventListener("click", async () => {
               await api(`/api/lists/${encodeURIComponent(listId)}/items/${bggId}`, {method: "DELETE"});
               await openList(listId);

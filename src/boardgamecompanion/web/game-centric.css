@@ -1543,3 +1543,15 @@ a.bgg-term.is-link:hover,a.bgg-term.is-link:focus-visible,.suggestion-tags a:hov
 .saved-list-rows .manual-list-remove{top:50%;right:.7rem;transform:translateY(-50%)}
 .manual-list-add{max-width:26rem}
 @media(max-width:600px){.list-builder-head .list-builder-name{flex:1 1 100%}.list-filter-group label{width:calc(50% - .25rem)}.saved-list-rows .catalog-list-head{display:none}}
+@media(max-width:760px){
+  .saved-lists-layout,.saved-list-results,.saved-list-rows{min-width:0;max-width:100%}
+  .saved-list-rows .catalog-list-row{grid-template-columns:56px minmax(0,1fr) auto;gap:.55rem;min-height:4.2rem;margin-bottom:.4rem;padding:.4rem .5rem;border:1px solid var(--line);border-radius:12px;background:rgba(18,24,38,.58)}
+  .saved-list-rows .catalog-list-game{display:contents}
+  .saved-list-rows .catalog-list-cover{grid-column:1;width:56px;height:56px}
+  .saved-list-rows .catalog-list-title{grid-column:2;text-align:left;justify-items:start;min-width:0}
+  .saved-list-rows .catalog-list-title strong{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
+  .saved-list-rows .catalog-list-row>.list-stat,.saved-list-rows .catalog-list-row>.list-personal-rating,.saved-list-rows .catalog-list-row>.list-expansion-placeholder{display:none}
+  .saved-list-rows .catalog-list-row>.list-rating{display:grid;grid-column:3;grid-row:1}
+  .saved-list-rows .has-remove .catalog-list-row{padding-right:2.6rem}
+  .saved-list-rows .manual-list-remove{right:.5rem;width:1.6rem;height:1.6rem}
+}
