@@ -7727,7 +7727,7 @@ const bggCatalogSorts = [
   ["votes", "Più votati"],
   ["rating", "Voto medio"],
   ["newest", "Più recenti"],
-  ["title", "Titolo"],
+  ["hidden", "Poco note"],
 ];
 const bggCatalogPageSizes = ["20", "50", "100", "200"];
 const storedBggCatalogPageSize = window.localStorage.getItem("bgc.bggCatalogPageSize");

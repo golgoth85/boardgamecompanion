@@ -419,7 +419,10 @@ BROWSE_SORT_SQL = {
     "votes": "g.users_rated DESC, g.bgg_id",
     "rating": "(g.average IS NULL), g.average DESC, g.users_rated DESC, g.bgg_id",
     "newest": "(g.year_published IS NULL), g.year_published DESC, g.users_rated DESC, g.bgg_id",
-    "title": "g.name COLLATE NOCASE, g.bgg_id",
+    "hidden": (
+        "(g.average IS NULL), "
+        "((g.average * g.users_rated + 5.5 * 500.0) / (g.users_rated + 500.0)) DESC, g.bgg_id"
+    ),
 }
 
 
@@ -437,11 +440,13 @@ BROWSE_SORT_KEYS = {
     "votes": lambda r: (-r[5], r[0]),
     "rating": lambda r: (r[4] is None, -_weighted_rating(r[4], r[5]), -r[5], r[0]),
     "newest": lambda r: (r[2] is None, -(r[2] or 0), -r[5], r[0]),
-    "title": lambda r: (str(r[1]).casefold(), r[0]),
+    "hidden": lambda r: (r[4] is None, -_weighted_rating(r[4], r[5]), r[0]),
 }
 # Without a search text, these orders list only titles with enough votes to matter,
 # and "rating" ranks by a vote-weighted score so a handful of 10s cannot top it.
-BROWSE_SORT_MIN_VOTES = {"newest": 300, "title": 1000}
+BROWSE_SORT_MIN_VOTES = {"newest": 300, "hidden": 300}
+# "Poco note": well-rated titles that never reached the mainstream.
+BROWSE_SORT_MAX_VOTES = {"hidden": 5000}
 RATING_PRIOR_MEAN = 5.5
 RATING_PRIOR_VOTES = 500
 BROWSE_CACHE_SECONDS = 300
@@ -698,6 +703,9 @@ class BggReferenceCatalog:
             floor = BROWSE_SORT_MIN_VOTES.get(sort, 0)
             if floor:
                 rows = [row for row in rows if int(row[5] or 0) >= floor]
+            ceiling = BROWSE_SORT_MAX_VOTES.get(sort)
+            if ceiling:
+                rows = [row for row in rows if int(row[5] or 0) <= ceiling]
             orders[order_key] = [row[0] for row in sorted(rows, key=BROWSE_SORT_KEYS[sort])]
         return orders[order_key]
 
