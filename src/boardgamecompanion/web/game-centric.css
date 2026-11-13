@@ -1515,3 +1515,31 @@ a.bgg-term.is-link,.suggestion-tags a,.suggestions-profile>a,a.wishlist-tag{text
 .suggestion-side .suggestion-tags a{font-size:.58rem}
 .suggestions-profile>a{flex:0 0 auto;padding:.2rem .45rem;border-radius:999px;background:rgba(255,255,255,.045);color:#c9d3e1;font-size:.62rem}
 a.bgg-term.is-link:hover,a.bgg-term.is-link:focus-visible,.suggestion-tags a:hover,.suggestion-tags a:focus-visible,.suggestions-profile>a:hover,.suggestions-profile>a:focus-visible{background:rgba(110,150,220,.28);color:#fff}
+
+/* Raccolte: form compatto, lista a righe */
+.list-builder-card{padding:0}
+.list-builder-summary{display:flex;align-items:center;gap:.5rem;padding:.6rem .85rem;cursor:pointer;font-size:.82rem;font-weight:800;list-style:none}
+.list-builder-summary::-webkit-details-marker{display:none}
+.list-builder-summary .icon{width:1rem;height:1rem}
+.list-builder-card[open]>.list-builder-summary{border-bottom:1px solid var(--line)}
+.list-builder-card form{padding:.75rem .85rem .85rem}
+.list-builder-head{display:flex;flex-wrap:wrap;gap:.6rem;align-items:end}
+.list-builder-head .list-builder-name{flex:0 1 16rem}
+.list-builder-name input{min-height:2.3rem;font-size:.82rem}
+.list-kind-switch{display:flex;gap:.35rem}
+.list-kind-option{padding:.4rem .75rem;border-radius:999px}
+.list-kind-option strong{font-size:.74rem}
+.list-builder-filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-start}
+.list-filter-group{display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem .6rem .6rem}
+.list-filter-group label{flex:0 0 auto;width:8.5rem}
+.list-filter-group input[list],.list-filter-group input[type=text]{width:100%}
+.list-builder-filters select,.list-builder-filters input{min-height:2rem;font-size:.74rem}
+.saved-lists-layout{grid-template-columns:1fr;gap:.75rem}
+.saved-lists-panel{padding:.6rem}
+.saved-lists-panel .section-heading{margin-bottom:.45rem}
+#savedLists{display:flex;flex-wrap:wrap;gap:.4rem}
+#savedLists .saved-list-card{flex:0 1 17rem;min-width:11rem}
+.saved-list-rows .saved-list-row{position:relative}
+.saved-list-rows .manual-list-remove{top:50%;right:.7rem;transform:translateY(-50%)}
+.manual-list-add{max-width:26rem}
+@media(max-width:600px){.list-builder-head .list-builder-name{flex:1 1 100%}.list-filter-group label{width:calc(50% - .25rem)}.saved-list-rows .catalog-list-head{display:none}}

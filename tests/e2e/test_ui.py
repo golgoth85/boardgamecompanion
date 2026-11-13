@@ -3059,18 +3059,18 @@ def test_lists_wishlist_and_global_search_desktop_mobile(browser, live_server):
         page.get_by_role("button", name="Chiudi ricerca").click()
 
         page.goto(f"{live_server}/lists")
-        expect(page.get_by_role("heading", name="Liste", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Raccolte", exact=True)).to_be_visible()
+        page.locator(".list-builder-summary").click()
         page.locator("#gameListName").fill("Mai giocati")
-        page.locator("#gameListKind").select_option("smart")
-        page.locator("#listPlayed").select_option("false")
-        page.get_by_role("button", name="Crea lista").click()
+        page.locator("#listFilter-played").select_option("false")
+        page.get_by_role("button", name="Crea", exact=True).click()
         expect(page.locator(".saved-list-card")).to_have_count(1)
         expect(page.locator(".saved-list-card")).to_contain_text("Mai giocati")
         page.locator("[data-open-list]").click()
         # Synthetic Alpha has imported numplays=3 and is therefore already
         # considered played. Only the expansion remains in "Mai giocati".
-        expect(page.locator(".saved-list-game-grid .game-card")).to_have_count(1)
-        expect(page.locator(".saved-list-game-grid .game-card")).to_contain_text(
+        expect(page.locator(".saved-list-row")).to_have_count(1)
+        expect(page.locator(".saved-list-row")).to_contain_text(
             "Synthetic Beta Expansion"
         )
     finally:

@@ -7727,7 +7727,7 @@ const bggCatalogSorts = [
   ["votes", "Più votati"],
   ["rating", "Voto medio"],
   ["newest", "Più recenti"],
-  ["underrated", "Sottovalutati"],
+  ["underrated", "Meno noti"],
 ];
 const bggCatalogPageSizes = ["20", "50", "100", "200"];
 const storedBggCatalogPageSize = window.localStorage.getItem("bgc.bggCatalogPageSize");
@@ -8372,16 +8372,17 @@ async function renderLists() {
         <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri</p>
       </div>
     </section>
-    <section class="list-builder-card">
+    <details class="list-builder-card" id="listBuilder">
+      <summary class="list-builder-summary">${icon("plus")}<span id="listBuilderTitle">Nuova raccolta</span></summary>
       <form id="createGameListForm">
         <div class="list-builder-head">
-          <label class="list-builder-name"><span>Nome della raccolta</span><input id="gameListName" type="text" maxlength="200" required placeholder="Es. Brevi in due"></label>
+          <label class="list-builder-name"><span>Nome</span><input id="gameListName" type="text" maxlength="60" required placeholder="Es. Brevi in due"></label>
           <div class="list-kind-switch" role="radiogroup" aria-label="Tipo di raccolta">
-            <button type="button" class="list-kind-option is-active" data-list-kind="smart" role="radio" aria-checked="true">
-              ${icon("bolt")}<span><strong>Dinamica</strong><small>si aggiorna da sola con i filtri</small></span>
+            <button type="button" class="list-kind-option is-active" data-list-kind="smart" role="radio" aria-checked="true" title="Si aggiorna da sola con i filtri">
+              ${icon("bolt")}<strong>Dinamica</strong>
             </button>
-            <button type="button" class="list-kind-option" data-list-kind="manual" role="radio" aria-checked="false">
-              ${icon("list")}<span><strong>Manuale</strong><small>scegli tu i titoli</small></span>
+            <button type="button" class="list-kind-option" data-list-kind="manual" role="radio" aria-checked="false" title="Scegli tu i titoli">
+              ${icon("list")}<strong>Manuale</strong>
             </button>
           </div>
         </div>
@@ -8397,12 +8398,12 @@ async function renderLists() {
         </div>
         <div class="list-builder-footer">
           <span class="list-builder-preview" id="listBuilderPreview" aria-live="polite"></span>
-          <button class="button button-ghost" id="cancelListEdit" type="button" hidden>Annulla modifica</button>
+          <button class="button button-ghost" id="cancelListEdit" type="button" hidden>Annulla</button>
           <button class="button button-ghost" id="resetListFilters" type="button">Azzera filtri</button>
-          <button class="button button-primary" id="submitGameList" type="submit">${icon("plus")}<span>Crea raccolta</span></button>
+          <button class="button button-primary" id="submitGameList" type="submit">${icon("plus")}<span>Crea</span></button>
         </div>
       </form>
-    </section>
+    </details>
     <section class="saved-lists-layout">
       <aside class="saved-lists-panel">
         <div class="section-heading"><h2>Le tue raccolte</h2><span id="savedListCount" class="muted"></span></div>
@@ -8452,7 +8453,9 @@ async function renderLists() {
     editingList = null;
     form.reset();
     cancelEdit.hidden = true;
-    submitButton.innerHTML = `${icon("plus")}<span>Crea raccolta</span>`;
+    submitButton.innerHTML = `${icon("plus")}<span>Crea</span>`;
+    document.querySelector("#listBuilderTitle").textContent = "Nuova raccolta";
+    document.querySelector("#listBuilder").open = false;
     document.querySelectorAll("[data-list-kind]").forEach((button) => { button.disabled = false; });
     setKind("smart");
   };
@@ -8469,7 +8472,9 @@ async function renderLists() {
       control.value = term ? term.value : String(value);
     });
     cancelEdit.hidden = false;
-    submitButton.innerHTML = `${icon("check")}<span>Salva modifiche</span>`;
+    submitButton.innerHTML = `${icon("check")}<span>Salva</span>`;
+    document.querySelector("#listBuilderTitle").textContent = `Modifica «${list.name}»`;
+    document.querySelector("#listBuilder").open = true;
     void updatePreview();
     form.scrollIntoView({behavior: "smooth", block: "start"});
   };
@@ -8532,11 +8537,11 @@ async function renderLists() {
           </header>
           ${list.kind === "manual" ? `
             <div class="manual-list-add">
-              <label><span>Aggiungi un gioco posseduto</span><input id="manualListSearch" type="search" placeholder="Cerca per titolo…" autocomplete="off"></label>
+              <label><span>Aggiungi un gioco posseduto</span><input id="manualListSearch" type="search" placeholder="Cerca per titolo…" autocomplete="off" maxlength="60"></label>
               <div id="manualListSearchResults"></div>
             </div>
           ` : ""}
-          <div class="catalog-grid saved-list-game-grid">${games.length ? games.map((game) => gameCard(game)).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
+          <div class="catalog-results-list saved-list-rows">${games.length ? `<div class="catalog-list-head"><span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span><span>Peso</span><span>BGG</span><span>Tu</span><span aria-hidden="true"></span></div>` + games.map((game) => `<div class="saved-list-row" data-game-id="${game.bgg_id}">${gameListRow(game)}</div>`).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
         `;
         document.querySelector("#editOpenList")?.addEventListener("click", () => startEditing(list));
         document.querySelectorAll("[data-open-list]").forEach((button) => {
@@ -8571,7 +8576,7 @@ async function renderLists() {
               }
             }, 180);
           });
-          result.querySelectorAll(".game-card-wrap").forEach((card) => {
+          result.querySelectorAll(".saved-list-row").forEach((card) => {
             const bggId = card.dataset.gameId;
             const remove = document.createElement("button");
             remove.type = "button";
