@@ -5655,7 +5655,7 @@ function rankingTags(game, factors = [], {compact = false} = {}) {
   const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 1) : "";
   const age = ageText(game);
   const rating = Number(bgg.average) > 0
-    ? {html: `★ ${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0
+    ? {html: `<b class="ranking-star" aria-hidden="true">★</b>${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0
       ? `<span class="ranking-voters" title="${escapeHtml(`${formatNumber(bgg.users_rated, 0)} votanti`)}"> · ${compactCount(bgg.users_rated)}</span>`
       : ""}`}
     : "";

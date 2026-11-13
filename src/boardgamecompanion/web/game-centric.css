@@ -1297,7 +1297,8 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .ranking-tags{display:flex;flex-wrap:wrap;gap:.28rem;margin-top:.35rem}
 .ranking-tag{display:inline-flex;align-items:baseline;gap:.28rem;padding:.16rem .45rem;border:1px solid rgba(110,130,170,.22);border-radius:999px;background:rgba(255,255,255,.04);color:#dbe2ee;font-size:.62rem;font-weight:750;line-height:1.3;white-space:nowrap}
 .ranking-tag small{color:var(--muted);font-size:.54rem;font-weight:800;letter-spacing:.03em;text-transform:uppercase}
-.ranking-tag.is-rating{color:#f5d27a}
+.ranking-tag.is-rating{color:var(--text)}
+.ranking-tag .ranking-star{color:var(--accent-2);margin-right:.12rem;font-weight:inherit}
 .ranking-tag.is-mode{border-color:rgba(232,191,93,.35);background:rgba(245,158,11,.08)}
 .ranking-podium-body .ranking-tags{margin-top:.45rem}
 .ranking-podium-body strong .ranking-source-tag{font-size:.62rem;font-weight:700}
