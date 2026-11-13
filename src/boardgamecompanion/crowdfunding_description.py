@@ -22,7 +22,7 @@ from boardgamecompanion.cloud_ai import CloudAIError, cloud_client
 from boardgamecompanion.database import Database
 from boardgamecompanion.game_description import GameDescriptionError, GameDescriptionService
 
-DESCRIPTION_VERSION = 3
+DESCRIPTION_VERSION = 4
 MAX_PAGE_CHARS = 12000
 MAX_WEB_RESULTS = 4
 MAX_WEB_RESULT_CHARS = 3000
@@ -51,14 +51,33 @@ I risultati web possono riguardare altro (film, libri, altri giochi omonimi):
 usa solo quelli che parlano chiaramente di questo gioco da tavolo o di questa
 campagna (stesso titolo e, se indicato, stesso editore).
 
-Scrivi 3-4 frasi, 60-100 parole, testo semplice senza titoli, elenchi o markdown:
+Scrivi 3-4 frasi, 60-100 parole, testo semplice senza titoli, elenchi o markdown.
+Copri, nell'ordine che rende il testo più naturale:
 - che gioco è: ambientazione, cosa fanno i giocatori, tipo di esperienza;
 - cosa propone la campagna, se il materiale lo dice: edizioni o pledge, contenuti
   inclusi, espansioni, stretch goal, lingua italiana disponibile, consegna prevista.
-Non nominare il titolo del gioco all'inizio, non ripetere cifre raccolte, numero di
-backer o giorni rimasti (sono già nella scheda), niente toni pubblicitari o
-superlativi. Se il materiale è troppo scarso, scrivi solo ciò che è certo, anche
-in una o due frasi."""
+
+Ogni scheda della pagina ha una presentazione diversa: evita le formule fisse.
+- La prima frase NON comincia con il titolo del gioco e NON ha la forma
+  «è un gioco/dungeon crawler/... per N giocatori». Il numero di giocatori, se
+  serve, va più avanti nel testo.
+- Segui l'attacco indicato qui sotto per la prima frase.
+- Varia la lunghezza delle frasi; niente elenchi di aggettivi.
+Non ripetere cifre raccolte, numero di backer o giorni rimasti (sono già nella
+scheda), niente toni pubblicitari o superlativi. Se il materiale è troppo scarso,
+scrivi solo ciò che è certo, anche in una o due frasi, ignorando l'attacco se non
+c'è materiale per seguirlo."""
+
+# One opening per campaign, stable across regenerations, so the page reads varied.
+OPENINGS = (
+    "parti da cosa fanno concretamente i giocatori durante una partita",
+    "parti dall'ambientazione o dalla situazione in cui si trovano i personaggi",
+    "parti dal conflitto o dall'obiettivo centrale del gioco",
+    "parti da una meccanica caratteristica che lo distingue",
+    "parti da cosa propone questa campagna (ristampa, novità, edizione, espansione)",
+    "parti dall'opera, dal gioco o dall'universo a cui si ispira, se il materiale lo dice",
+    "parti dal tipo di serata o di gruppo per cui è pensato (solitario, coppia, gruppo numeroso, cooperativo, competitivo)",
+)
 
 
 class CrowdfundingDescriptionError(RuntimeError):
@@ -149,6 +168,11 @@ class CrowdfundingDescriptionService:
             return ""
         return text[:MAX_IMAGE_TEXT_CHARS]
 
+    @staticmethod
+    def _system_prompt(key: str) -> str:
+        index = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % len(OPENINGS)
+        return f"{SYSTEM_PROMPT}\n\nAttacco per questa scheda: {OPENINGS[index]}."
+
     def _web_results(self, campaign: dict[str, Any]) -> tuple[str, str]:
         """Text of a few web search results about the game (Gamefound pages are often image-only)."""
         rag = resolve_rag_settings(self.database)
@@ -201,7 +225,7 @@ class CrowdfundingDescriptionService:
             raise CrowdfundingDescriptionError("Nessun materiale da cui scrivere la descrizione")
         try:
             text, provider, model = GameDescriptionService(self.database)._complete(
-                SYSTEM_PROMPT, json.dumps(material, ensure_ascii=False)
+                self._system_prompt(key), json.dumps(material, ensure_ascii=False)
             )
         except GameDescriptionError as exc:
             raise CrowdfundingDescriptionError(str(exc)) from exc
