@@ -15,7 +15,7 @@ import {
 import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {exploreGroupArt} from "./explore-art.js";
-import {bggTermChips, bggTermLabel} from "./bgg-terms.js";
+import {bggTermChips, bggTermHref, bggTermLabel} from "./bgg-terms.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
 const app = document.querySelector("#app");
@@ -4135,8 +4135,8 @@ async function renderDetail(bggId) {
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Dipendenza lingua</dt><dd ${bgg.language_dependence ? `title="${escapeHtml(bgg.language_dependence)}"` : ""}>${escapeHtml(languageDependenceText(bgg.language_dependence))}</dd></div>
-              ${categories.length ? `<div class="game-term-row"><dt>Generi</dt><dd class="bgg-term-list">${bggTermChips(categories)}</dd></div>` : ""}
-              ${mechanics.length ? `<div class="game-term-row"><dt>Meccaniche</dt><dd class="bgg-term-list">${bggTermChips(mechanics, {limit: 8})}</dd></div>` : ""}
+              ${categories.length ? `<div class="game-term-row"><dt>Generi</dt><dd class="bgg-term-list">${bggTermChips(categories, {kind: "category"})}</dd></div>` : ""}
+              ${mechanics.length ? `<div class="game-term-row"><dt>Meccaniche</dt><dd class="bgg-term-list">${bggTermChips(mechanics, {limit: 8, kind: "mechanic"})}</dd></div>` : ""}
             </dl>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
@@ -7136,6 +7136,21 @@ async function renderExplore(initialTab = null) {
   if (initialTab === "category" || initialTab === "mechanic") {
     exploreState.activeTab = initialTab;
   }
+  // Deep link from a genre/mechanic chip: /explore?mechanic=Dice+Rolling
+  const linkParams = new URLSearchParams(window.location.search);
+  for (const kind of ["category", "mechanic"]) {
+    const name = (linkParams.get(kind) || "").trim();
+    if (!name) continue;
+    exploreState.categories.clear();
+    exploreState.mechanics.clear();
+    exploreState.categoryGroups.clear();
+    exploreState.mechanicGroups.clear();
+    (kind === "category" ? exploreState.categories : exploreState.mechanics).add(name);
+    exploreState.activeTab = kind;
+    exploreState.expandedResults = false;
+    exploreState.facetQuery = "";
+    break;
+  }
   const tab = exploreState.activeTab;
   app.innerHTML = `
     <section class="page-header catalog-page-header explore-page-header">
@@ -7281,9 +7296,6 @@ function crowdfundingCard(item) {
           ${italian ? "" : `<button class="crowdfunding-ai-description" type="button" data-crowdfunding-describe="${escapeHtml(item.id || "")}"
                   title="L'AI legge la pagina della campagna e scrive una presentazione in italiano">${icon("sparkle")}<span>Descrizione in italiano</span></button>`}
         </div>
-        <div class="crowdfunding-progress" ${hasPercent ? "" : "hidden"}>
-          <span class="crowdfunding-progress-bar"><span style="width:${Math.max(2, Math.min(100, percentValue || 0))}%"></span></span>
-        </div>
         <dl class="crowdfunding-stats">
           <div><dt>Raccolto</dt><dd>${escapeHtml(funds)}</dd></div>
           <div><dt>Finanziato</dt><dd class="${percentValue >= 100 ? "is-funded" : ""}">${hasPercent ? `${formatNumber(percentValue, 0)}%` : "—"}</dd></div>
@@ -7407,10 +7419,10 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
     bgg: {best_players: players.best, recommended_players: players.recommended},
   };
   const tags = [
-    ...(Array.isArray(overview.setting) ? overview.setting : []),
+    ...(Array.isArray(overview.setting) ? overview.setting : []).map((value) => ({value, kind: ""})),
     ...(Array.isArray(overview.mechanics) && overview.mechanics.length
       ? overview.mechanics
-      : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : [])),
+      : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : [])).map((value) => ({value, kind: "mechanic"})),
   ];
   const overviewText = item.game_summary_it || overview.summary || "Descrizione non disponibile.";
   const whyText = item.why_it_fits || item.reason || "È un candidato verificato BGG non presente nella tua ludoteca.";
@@ -7437,7 +7449,9 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
             : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
           ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
         </a>
-        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map((value) => `<span>${escapeHtml(bggTermLabel(value))}</span>`).join("")}</div>` : ""}
+        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map(({value, kind}) => kind
+          ? `<a href="${escapeHtml(bggTermHref(kind, value))}" data-nav>${escapeHtml(bggTermLabel(value))}</a>`
+          : `<span>${escapeHtml(bggTermLabel(value))}</span>`).join("")}</div>` : ""}
       </div>
       <div class="suggestion-body">
         <header class="suggestion-heading">
@@ -7658,6 +7672,8 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       .slice(0, count).map((entry) => entry?.[0]).filter(Boolean);
     const profileGenres = topNames("top_categories", 2);
     const profileMechanics = topNames("top_mechanics", 3);
+    const profileTag = (kind) => (value) =>
+      `<a href="${escapeHtml(bggTermHref(kind, value))}" data-nav title="${escapeHtml(value)}">${escapeHtml(bggTermLabel(value))}</a>`;
     const profileFacts = [
       Number(profileData.owned_standalone_count) > 0 ? `${formatNumber(profileData.owned_standalone_count, 0)} giochi base` : "",
       Number(profileData.average_weight) > 0 ? `complessità media ${formatNumber(profileData.average_weight, 1)}/5` : "",
@@ -7667,7 +7683,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     profile.innerHTML = profileGenres.length || profileMechanics.length
       ? `<span class="suggestions-profile-label" title="I punteggi “Per te” premiano i titoli simili a questi tratti della tua ludoteca">Calcolati sulla tua ludoteca</span>
          ${profileFacts.length ? `<span class="suggestions-profile-fact">${escapeHtml(profileFacts.join(" · "))}</span>` : ""}
-         ${[...profileGenres, ...profileMechanics].map((value) => `<span title="${escapeHtml(value)}">${escapeHtml(bggTermLabel(value))}</span>`).join("")}`
+         ${[...profileGenres.map(profileTag("category")), ...profileMechanics.map(profileTag("mechanic"))].join("")}`
       : "";
 
     const total = Math.min(wanted, Number(payload.total_available) || 0);
@@ -8203,7 +8219,7 @@ function wishlistCard(item) {
           ${game ? bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated}) : ""}
         </div>
         ${facts}
-        ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag"})}</div>` : ""}
+        ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag", kind: "category"})}</div>` : ""}
       </div>
       <div class="wishlist-card-body">
         <header class="wishlist-heading">
