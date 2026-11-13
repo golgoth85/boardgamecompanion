@@ -7307,9 +7307,21 @@ function crowdfundingCard(item) {
   `;
 }
 
+let crowdfundingAutoRun = 0;
+
+async function autoGenerateCrowdfundingDescriptions(root) {
+  const run = ++crowdfundingAutoRun;
+  for (const button of [...root.querySelectorAll("[data-crowdfunding-describe]")]) {
+    // Stop if the grid was re-rendered or the user navigated away.
+    if (run !== crowdfundingAutoRun || !button.isConnected) return;
+    if (button.disabled) continue;
+    if (!(await button.__describe())) return;
+  }
+}
+
 function bindCrowdfundingDescriptions(root) {
   root.querySelectorAll("[data-crowdfunding-describe]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.__describe = async () => {
       const card = button.closest(".crowdfunding-card");
       const target = card?.querySelector("[data-crowdfunding-description]");
       button.disabled = true;
@@ -7326,13 +7338,17 @@ function bindCrowdfundingDescriptions(root) {
           if (payload.sources?.length) target.title = `Scritta dall'AI da: ${payload.sources.join(", ")}`;
         }
         button.remove();
+        return true;
       } catch (error) {
         showToast(error.message, true);
         button.disabled = false;
         button.querySelector("span").textContent = "Descrizione in italiano";
+        return false;
       }
-    });
+    };
+    button.addEventListener("click", () => button.__describe());
   });
+  void autoGenerateCrowdfundingDescriptions(root);
 }
 
 function crowdfundingProviderNotice(payload) {
