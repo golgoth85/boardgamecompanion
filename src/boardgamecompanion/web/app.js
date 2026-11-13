@@ -5696,7 +5696,7 @@ function rankingGameRow(item, index) {
     <a class="ranking-result-row" href="${view.href}" data-nav>
       <span class="ranking-result-cover">
         ${rankingCover(view)}
-        <span class="ranking-position${index >= 4 ? " ranking-position-lower" : ""}">${index}</span>
+        ${index ? `<span class="ranking-position${index >= 4 ? " ranking-position-lower" : ""}">${index}</span>` : ""}
       </span>
       <span class="ranking-result-body">
         <span class="ranking-result-title">
@@ -8557,8 +8557,9 @@ async function renderLists() {
               <div id="manualListSearchResults"></div>
             </div>
           ` : ""}
-          <div class="catalog-results-list saved-list-rows">${games.length ? `<div class="catalog-list-head"><span>Gioco</span><span>Giocatori</span><span>Età</span><span>Durata</span><span>Peso</span><span>BGG</span><span>Tu</span><span aria-hidden="true"></span></div>` + games.map((game) => `<div class="saved-list-row" data-game-id="${game.bgg_id}">${gameListRow(game)}</div>`).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
+          <div class="ranking-list saved-list-rows">${games.length ? games.map((game) => `<div class="saved-list-row" data-game-id="${game.bgg_id}">${rankingGameRow({game, factors: []}, 0)}</div>`).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
         `;
+        void ensureRankingGameplaySummaries(games.map((game) => ({game})));
         document.querySelector("#editOpenList")?.addEventListener("click", () => startEditing(list));
         document.querySelectorAll("[data-open-list]").forEach((button) => {
           button.closest(".saved-list-card")?.classList.toggle("is-open", button.dataset.openList === listId);

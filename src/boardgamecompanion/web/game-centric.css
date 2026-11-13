@@ -1542,7 +1542,8 @@ a.bgg-term.is-link:hover,a.bgg-term.is-link:focus-visible,.suggestion-tags a:hov
 #savedLists{display:flex;flex-wrap:wrap;gap:.4rem}
 #savedLists .saved-list-card{flex:0 1 17rem;min-width:11rem}
 .saved-list-rows .saved-list-row{position:relative}
-.saved-list-rows .manual-list-remove{top:50%;right:.7rem;transform:translateY(-50%)}
+.saved-list-rows .manual-list-remove{top:.5rem;right:.5rem;transform:none}
+.saved-list-rows .has-remove .ranking-result-row{padding-right:2.6rem}
 .manual-list-add{max-width:26rem}
 @media(max-width:600px){.list-builder-head .list-builder-name{flex:1 1 100%}.list-filter-group label{width:calc(50% - .25rem)}.saved-list-rows .catalog-list-head{display:none}}
 @media(max-width:760px){
