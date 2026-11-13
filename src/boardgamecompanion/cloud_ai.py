@@ -126,6 +126,26 @@ class CloudAIClient:
             raise CloudAIError(f"{self.provider}: risposta senza testo valido") from None
         return content
 
+    def read_images(self, prompt: str, image_urls: list[str], *, max_tokens: int = 1500) -> str:
+        """Ask the model about public HTTPS images; the provider downloads them, not the NAS."""
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        content += [{"type": "image_url", "image_url": {"url": url}} for url in image_urls]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "stream": False, "max_tokens": max_tokens,
+        }
+        if self.provider == "deepseek":
+            payload["thinking"] = {"type": "disabled"}
+        result = self.request("POST", "chat/completions", payload)
+        try:
+            text = result["choices"][0]["message"]["content"]
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise CloudAIError(f"{self.provider}: risposta senza testo valido") from None
+        return text.strip()
+
     def structured(self, system: str, payload: Any, *, schema: dict | None = None) -> dict:
         text = self.text(system, json.dumps(payload, ensure_ascii=False),
                          schema=schema, json_output=True)
