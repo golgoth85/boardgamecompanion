@@ -6085,6 +6085,7 @@ function playPlayersMarkup(play) {
 
 function playRow(play, {showGame = true} = {}) {
   const facts = [
+    play.session ? `<span class="play-round-number">Partita ${Number(play.session_round)}</span>` : "",
     play.outcome ? `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" ? " di gruppo" : ""}</span>` : "",
     play.completed_game ? `<span class="play-outcome is-completed"><i aria-hidden="true">${icon("crown")}</i>Completato</span>` : "",
     play.duration_minutes ? `<span>${escapeHtml(playDuration(play.duration_minutes))}</span>` : "",
@@ -6200,11 +6201,75 @@ function applySuggestedPlayMode(mode) {
   syncPlayMode();
 }
 
+function playIsMultiple() {
+  return !playDialogContext.play && playDialog.querySelector("#playMultiple").checked;
+}
+
+function sessionParticipants() {
+  return [...playDialog.querySelectorAll(".play-player-row")].map((row) => ({
+    key: row.dataset.playerKey,
+    name: row.querySelector("input[type=text]").value.trim(),
+  })).filter((player) => player.name);
+}
+
+function renderPlayRounds() {
+  const root = playDialog.querySelector("#playRounds");
+  const multiple = playIsMultiple();
+  root.hidden = !multiple;
+  if (!multiple) return;
+  const count = Number(playDialog.querySelector("#playRoundCount").value);
+  if (!Number.isInteger(count) || count < 2 || count > 20) return;
+  const participants = sessionParticipants();
+  const mode = playDialog.querySelector("#playMode").value;
+  const rounds = playDialogContext.rounds;
+  while (rounds.length < count) rounds.push({winners: [], scores: {}, outcome: ""});
+  root.innerHTML = Array.from({length: count}, (_, index) => {
+    const round = rounds[index];
+    return `<fieldset class="play-session-round">
+      <legend>Partita ${index + 1}</legend>
+      ${mode === "cooperative" ? `<label class="settings-field"><span>Esito del gruppo</span>
+        <select data-round-outcome="${index}" aria-label="Esito partita ${index + 1}"><option value="">—</option>
+          ${Object.entries(PLAY_OUTCOMES).map(([value, label]) => `<option value="${value}" ${round.outcome === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select></label>` : mode === "competitive" ? `<span class="play-round-caption">Vincitori (anche più di uno)</span>
+        <div class="play-round-winners">${participants.map((player) => `<label class="play-round-winner">
+          <input type="checkbox" data-round-winner="${index}" data-player-key="${player.key}" ${round.winners.includes(player.key) ? "checked" : ""}>
+          <span>${icon("crown")}${escapeHtml(player.name)}</span>
+        </label>`).join("") || '<p class="muted">Aggiungi i nomi dei giocatori per scegliere i vincitori.</p>'}</div>`
+        : '<p class="muted">Scegli la modalità della partita.</p>'}
+      ${participants.length ? `<details class="play-round-scores"><summary>Punti (facoltativi)</summary>
+        <div>${participants.map((player) => `<label><span>${escapeHtml(player.name)}</span>
+          <input type="text" maxlength="20" inputmode="decimal" data-round-score="${index}" data-player-key="${player.key}"
+                 aria-label="Punti di ${escapeHtml(player.name)}, partita ${index + 1}" value="${escapeHtml(round.scores[player.key] || "")}" placeholder="—">
+        </label>`).join("")}</div></details>` : ""}
+    </fieldset>`;
+  }).join("");
+  root.querySelectorAll("[data-round-winner]").forEach((input) => input.addEventListener("change", () => {
+    const round = rounds[Number(input.dataset.roundWinner)];
+    round.winners = round.winners.filter((key) => key !== input.dataset.playerKey);
+    if (input.checked) round.winners.push(input.dataset.playerKey);
+  }));
+  root.querySelectorAll("[data-round-outcome]").forEach((input) => input.addEventListener("change", () => {
+    rounds[Number(input.dataset.roundOutcome)].outcome = input.value;
+  }));
+  root.querySelectorAll("[data-round-score]").forEach((input) => input.addEventListener("input", () => {
+    rounds[Number(input.dataset.roundScore)].scores[input.dataset.playerKey] = input.value;
+  }));
+}
+
 function syncPlayMode() {
   const mode = playDialog.querySelector("#playMode").value;
+  const multiple = playIsMultiple();
   playDialog.querySelector(".play-players").classList.toggle("is-cooperative", mode !== "competitive");
-  playDialog.querySelectorAll(".play-winner input").forEach((input) => { input.disabled = mode !== "competitive"; });
-  playDialog.querySelector("#playOutcomeField").hidden = mode !== "cooperative";
+  playDialog.querySelector(".play-players").classList.toggle("is-session", multiple);
+  playDialog.querySelectorAll(".play-winner input").forEach((input) => { input.disabled = mode !== "competitive" || multiple; });
+  playDialog.querySelector("#playOutcomeField").hidden = mode !== "cooperative" || multiple;
+  playDialog.querySelector("#playSessionOptions").hidden = !multiple;
+  playDialog.querySelector("#playRoundCount").disabled = !multiple;
+  playDialog.querySelector("#playDurationLabel").textContent = multiple || playDialogContext.play?.session
+    ? "Durata sessione (minuti)" : "Durata (minuti)";
+  playDialog.querySelector("#savePlay").textContent = multiple ? "Salva sessione" : "Salva partita";
+  if (!playDialogContext.play) playDialog.querySelector("#playDialogTitle").textContent = multiple ? "Registra sessione" : "Registra partita";
+  renderPlayRounds();
   const legacy = playDialog.querySelector("#playLegacyOutcome");
   const outcome = playDialogContext.play?.outcome;
   legacy.hidden = !(outcome && mode !== "cooperative");
@@ -6238,9 +6303,19 @@ function ensurePlayDialog() {
           <input id="playDate" type="date" required>
         </label>
         <label class="settings-field">
-          <span>Durata (minuti)</span>
+          <span id="playDurationLabel">Durata (minuti)</span>
           <input id="playDuration" type="number" min="1" max="10000" inputmode="numeric" placeholder="es. 90">
         </label>
+        <label class="play-check play-span-2" id="playMultipleField">
+          <input id="playMultiple" type="checkbox"><span>Più partite nella stessa sessione</span>
+        </label>
+        <div class="play-session-options play-span-2" id="playSessionOptions" hidden>
+          <label class="settings-field"><span>Numero di partite</span>
+            <input id="playRoundCount" type="number" min="2" max="20" value="3" inputmode="numeric" required disabled>
+          </label>
+          <p class="muted">Gioco, data e giocatori si inseriscono una volta. La durata è il totale della sessione.</p>
+        </div>
+        <p class="muted play-span-2" id="playSessionNote" hidden></p>
         <label class="settings-field play-span-2">
           <span>Modalità della partita</span>
           <select id="playMode" required>
@@ -6268,6 +6343,7 @@ function ensurePlayDialog() {
             </label>
           </details>
         </fieldset>
+        <div class="play-session-rounds play-span-2" id="playRounds" hidden></div>
         <label class="settings-field play-span-2">
           <span class="play-label-row">Cosa abbiamo fatto
             <button class="play-inline-action" id="playCopyActivity" type="button" hidden>Come l'ultima volta</button>
@@ -6354,6 +6430,8 @@ function ensurePlayDialog() {
     playDialogContext.modeTouched = true;
     syncPlayMode();
   });
+  playDialog.querySelector("#playMultiple").addEventListener("change", () => { syncPlayMode(); syncPlayerCount(); });
+  playDialog.querySelector("#playRoundCount").addEventListener("input", renderPlayRounds);
   playDialog.querySelector("#playCount").addEventListener("input", syncPlayerCount);
   playDialog.addEventListener("close", () => { ++playGameSearchVersion; clearTimeout(playGameSearchTimer); });
   playDialog.querySelector("#playCopyActivity").addEventListener("click", () => {
@@ -6371,6 +6449,8 @@ function addPlayerRow(player) {
   const rows = playDialog.querySelector("#playPlayerRows");
   const row = document.createElement("div");
   row.className = "play-player-row";
+  playDialogContext.playerSeq = (playDialogContext.playerSeq || 0) + 1;
+  row.dataset.playerKey = String(playDialogContext.playerSeq);
   row.innerHTML = `
     <input type="text" maxlength="60" list="playPlayerNames" autocomplete="off" aria-label="Nome giocatore" placeholder="Nome" value="${escapeHtml(player.name || "")}">
     <input type="text" maxlength="20" inputmode="decimal" aria-label="Punti" placeholder="—" value="${escapeHtml(player.score || "")}">
@@ -6400,10 +6480,11 @@ function playerRowsData() {
 
 function syncPlayerCount() {
   const count = playDialog.querySelector("#playCount");
-  const named = playerRowsData().length;
+  const named = playIsMultiple() ? sessionParticipants().length : playerRowsData().length;
   count.min = String(Math.max(1, named));
   count.placeholder = named ? String(named) : "Auto";
   playDialog.querySelector("#playAutoCount").textContent = named ? `${named} ${named === 1 ? "giocatore" : "giocatori"}` : "";
+  renderPlayRounds();
 }
 
 function setPlayers(players) {
@@ -6452,7 +6533,8 @@ function applyPlayDefaults(defaults, {copy}) {
 
 async function openPlayDialog({bggId = null, title = "", play = null, onSaved = null} = {}) {
   ensurePlayDialog();
-  const context = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null, modeTouched: false};
+  const context = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null, modeTouched: false, rounds: [], playerSeq: 0,
+    sessionRequestId: Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")};
   context.fixed = Boolean(context.bggId);
   playDialogContext = context;
   const form = playDialog.querySelector("#playForm");
@@ -6464,6 +6546,10 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
   playDialog.querySelector("#playMode").value = play?.play_mode || "";
   playDialog.querySelector("#playDialogTitle").textContent = play ? "Modifica partita" : "Registra partita";
   playDialog.querySelector("#deletePlay").hidden = !play;
+  playDialog.querySelector("#playMultipleField").hidden = Boolean(play);
+  const sessionNote = playDialog.querySelector("#playSessionNote");
+  sessionNote.hidden = !play?.session;
+  sessionNote.textContent = play?.session ? `Partita ${play.session_round} della sessione. La durata complessiva è condivisa con le altre partite della sessione.` : "";
   playDialog.querySelector("#playCopyNote").hidden = true;
   const dateInput = playDialog.querySelector("#playDate");
   dateInput.max = todayIso();
@@ -6480,7 +6566,7 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
     count.value = play.player_count ? String(play.player_count) : "";
     if (play.player_count === playerRowsData().length) count.value = "";
     playDialog.querySelector("#playCountDetails").open = Boolean(count.value);
-    playDialog.querySelector("#playDuration").value = play.duration_minutes || "";
+    playDialog.querySelector("#playDuration").value = (play.session ? play.session.duration_minutes : play.duration_minutes) || "";
     playDialog.querySelector("#playActivity").value = play.activity || "";
     playDialog.querySelector("#playOutcome").value = play.outcome || "";
     playDialog.querySelector("#playLocation").value = play.location || "";
@@ -6517,7 +6603,10 @@ async function savePlay() {
     return Number.isInteger(value) && value > 0 ? value : null;
   };
   const text = (selector) => playDialog.querySelector(selector).value.trim() || null;
-  const players = playerRowsData();
+  const context = playDialogContext;
+  const multiple = playIsMultiple();
+  const participants = sessionParticipants();
+  const players = multiple ? participants.map((player) => ({name: player.name})) : playerRowsData();
   const payload = {
     played_on: dateInput.value,
     players,
@@ -6531,19 +6620,33 @@ async function savePlay() {
     notes: text("#playNotes"),
     completed_game: playDialog.querySelector("#playCompleted").checked,
   };
+  if (context.play?.session) {
+    payload.session_duration_minutes = payload.duration_minutes;
+    delete payload.duration_minutes;
+  }
+  if (multiple) {
+    payload.request_id = context.sessionRequestId;
+    delete payload.outcome;
+    payload.rounds = context.rounds.slice(0, number("#playRoundCount")).map((round) => ({
+      winner_indices: payload.play_mode === "competitive" ? participants.flatMap((player, i) => round.winners.includes(player.key) ? [i] : []) : [],
+      outcome: payload.play_mode === "cooperative" ? round.outcome || null : null,
+      scores: participants.map((player) => (round.scores[player.key] || "").trim() || null),
+    }));
+  }
   const button = playDialog.querySelector("#savePlay");
   button.disabled = true;
   try {
-    const play = playDialogContext.play
-      ? await api(`/api/plays/${playDialogContext.play.id}`, {
+    const result = context.play
+      ? await api(`/api/plays/${context.play.id}`, {
           method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
         })
-      : await api(`/api/games/${playDialogContext.bggId}/plays`, {
+      : await api(`/api/games/${context.bggId}/${multiple ? "play-sessions" : "plays"}`, {
           method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload),
         });
     playDialog.close();
-    showToast(playDialogContext.play ? "Partita aggiornata." : `Partita a ${play.title} registrata.`);
-    await playDialogContext.onSaved?.(play);
+    const play = multiple ? result.items[0] : result;
+    showToast(context.play ? "Partita aggiornata." : multiple ? `Sessione registrata: ${result.items.length} partite.` : `Partita a ${play.title} registrata.`);
+    await context.onSaved?.(play);
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -6724,13 +6827,30 @@ async function refreshPlaysPage() {
       return;
     }
     let month = "";
-    list.innerHTML = plays.items.map((play) => {
+    const groups = [];
+    const sessions = new Map();
+    for (const play of plays.items) {
+      const key = play.session ? `${play.session.id}:${play.played_on}` : null;
+      if (key && sessions.has(key)) sessions.get(key).push(play);
+      else {
+        const group = [play];
+        groups.push(group);
+        if (key) sessions.set(key, group);
+      }
+    }
+    list.innerHTML = groups.map((group) => {
+      const play = group[0];
       const key = play.played_on.slice(0, 7);
       const heading = key !== month
-        ? `<h2 class="plays-month">${escapeHtml(playDate(`${key}-01`, {month: "long", year: "numeric"}))}</h2>`
-        : "";
+        ? `<h2 class="plays-month">${escapeHtml(playDate(`${key}-01`, {month: "long", year: "numeric"}))}</h2>` : "";
       month = key;
-      return heading + playRow(play);
+      if (!play.session) return heading + playRow(play);
+      group.sort((a, b) => a.session_round - b.session_round);
+      const count = group.length === play.session.plays ? String(group.length) : `${group.length} di ${play.session.plays}`;
+      return heading + `<section class="play-session" aria-label="Sessione del ${escapeHtml(playDate(play.played_on))}">
+        <div class="play-session-head"><strong>Sessione · ${count} ${play.session.plays === 1 ? "partita" : "partite"}</strong>
+          ${play.session.duration_minutes ? `<span>${escapeHtml(playDuration(play.session.duration_minutes))} complessivi</span>` : ""}</div>
+        ${group.map((item) => playRow(item)).join("")}</section>`;
     }).join("") + (plays.total > plays.items.length
       ? `<p class="play-empty">Mostrate le ultime ${formatNumber(plays.items.length, 0)} di ${formatNumber(plays.total, 0)} partite: usa la ricerca per trovare le altre.</p>`
       : "");

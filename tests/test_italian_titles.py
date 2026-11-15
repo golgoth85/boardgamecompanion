@@ -124,3 +124,9 @@ def test_alternate_with_non_italian_accents_is_not_italian() -> None:
         "Chronicles of Crime: 2400", ["Crónicas del Crimen: La Saga Millenium – 2400"]
     ) == "Chronicles of Crime: 2400"
     assert italian_title("Wednesday", ["Mercoledì: Creature e Reietti"]) == "Mercoledì: Creature e Reietti"
+
+
+def test_italian_title_with_one_preposition_is_recognized() -> None:
+    metadata = {"alternate_titles": ["Masky a Mlsky", "Notte da brivido", "Tricky Treats"]}
+    assert display_title("Tricky Treats", metadata) == "Notte da brivido"
+    assert display_title("Tricky Treats", {"alternate_titles": ["Masky a Mlsky"]}) == "Tricky Treats"

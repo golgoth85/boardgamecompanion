@@ -82,7 +82,7 @@ def title_query_matches(query: object, terms: Iterable[object]) -> bool:
 
 _ITALIAN_MARKERS = frozenset(
     "il lo gli della delle dello dei degli nel nella nei nelle sul sulla alla alle allo agli "
-    "dalla dalle uno per che sono".split()
+    "dalla dalle uno per che sono notte brivido brividi".split()
 )
 _FOREIGN_MARKERS = frozenset(
     "the of and for with les des du de der die das und von el los las y et at in".split()

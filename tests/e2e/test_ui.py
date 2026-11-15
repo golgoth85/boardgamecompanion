@@ -3315,3 +3315,34 @@ def test_play_log_search_and_group_result(browser, live_server):
         assert saved["outcome"] == "lost"
     finally:
         context.close()
+
+
+def test_play_session_has_independent_winners_and_one_duration(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+        page.goto(f"{live_server}/plays")
+        page.locator("#playsAdd").click()
+        dialog = page.locator(".play-dialog")
+        dialog.locator("#playGame").fill("alpha")
+        dialog.get_by_role("option", name="Synthetic Alpha").click()
+        dialog.locator("#playMode").select_option("competitive")
+        dialog.locator("#playMultiple").check()
+        expect(dialog.locator("#playDialogTitle")).to_have_text("Registra sessione")
+        dialog.locator("#playDuration").fill("60")
+        dialog.locator(".play-player-row input[type=text]").first.fill("Anna")
+        dialog.locator("#playAddPlayer").click()
+        dialog.locator(".play-player-row").last.locator("input[type=text]").first.fill("Luca")
+        dialog.locator('[data-round-winner="0"]').nth(0).check()
+        dialog.locator('[data-round-winner="1"]').nth(1).check()
+        dialog.locator('[data-round-winner="2"]').nth(0).check()
+        dialog.locator('[data-round-winner="2"]').nth(1).check()
+        dialog.locator("#savePlay").click()
+        expect(dialog).to_be_hidden()
+        expect(page.locator(".play-session-head")).to_contain_text("3 partite")
+        expect(page.locator(".play-session-head")).to_contain_text("1 h complessivi")
+        summary = page.request.get(f"{live_server}/api/plays/summary").json()
+        assert summary["plays"] == 3 and summary["minutes"] == 60
+        assert {item["name"]: item["wins"] for item in summary["players"]} == {"Anna": 2, "Luca": 2}
+    finally:
+        context.close()

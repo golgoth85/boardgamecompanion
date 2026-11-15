@@ -24,6 +24,7 @@ class PlayPayload(BaseModel):
     player_count: int | None = Field(default=None, ge=1, le=99)
     players: list[PlayerPayload] | None = Field(default=None, max_length=20)
     duration_minutes: int | None = Field(default=None, ge=1, le=10000)
+    session_duration_minutes: int | None = Field(default=None, ge=1, le=10000)
     outcome: str | None = Field(default=None, pattern="^(won|lost|draw)$")
     play_mode: str | None = Field(default=None, pattern="^(competitive|cooperative)$")
     activity: str | None = Field(default=None, max_length=500)
@@ -36,6 +37,17 @@ class PlayPayload(BaseModel):
         if data.get("completed_game") is None:
             data.pop("completed_game", None)
         return data
+
+
+class SessionRoundPayload(BaseModel):
+    winner_indices: list[int] = Field(default_factory=list, max_length=20)
+    scores: list[str | None] | None = Field(default=None, max_length=20)
+    outcome: str | None = Field(default=None, pattern="^(won|lost|draw)$")
+
+
+class PlaySessionPayload(PlayPayload):
+    request_id: str = Field(pattern="^[a-f0-9]{32}$")
+    rounds: list[SessionRoundPayload] = Field(min_length=2, max_length=20)
 
 
 def _log() -> PlayLog:
@@ -80,6 +92,14 @@ def create_play(bgg_id: int, payload: PlayPayload) -> dict[str, object]:
 @router.patch("/api/plays/{play_id}")
 def update_play(play_id: int, payload: PlayPayload) -> dict[str, object]:
     return _call(_log().update, play_id, payload.values())
+
+
+@router.post("/api/games/{bgg_id}/play-sessions", status_code=201)
+def create_session(bgg_id: int, payload: PlaySessionPayload) -> dict[str, object]:
+    # I default delle righe fanno parte del contenuto idempotente della richiesta.
+    values = payload.values()
+    values["rounds"] = [item.model_dump() for item in payload.rounds]
+    return _call(_log().create_session, bgg_id, values)
 
 
 @router.delete("/api/plays/{play_id}", status_code=204)

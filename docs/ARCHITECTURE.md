@@ -63,6 +63,22 @@ Suggested fields:
 
 Maps internal objects to optional external systems when a future adapter requires a durable association.
 
+### Partite e sessioni
+
+`game_plays` conserva una riga per ogni partita, con partecipanti, punteggi, vincitori o esito
+cooperativo. Una sessione collega 2–20 partite dello stesso gioco tramite `session_id` e
+`session_round`; i dati delle partite precedenti restano indipendenti e non vengono riscritti.
+La durata complessiva risiede in `play_sessions`, mentre le partite collegate non hanno una
+durata individuale. Statistiche generali e per gioco sommano il tempo della sessione una volta,
+finché esiste almeno una partita collegata. Il diario espone anche i risultati delle singole partite.
+
+`POST /api/games/{bgg_id}/play-sessions` riceve dati comuni e un elenco di risultati:
+`winner_indices` identifica i partecipanti competitivi per posizione, `outcome` l'esito del
+gruppo cooperativo, `scores` i punti facoltativi. Il salvataggio è transazionale e il
+`request_id` generato dal client impedisce duplicati dopo una risposta persa; riutilizzarlo
+con contenuto diverso è un errore. La modifica di una partita collegata può correggere
+`session_duration_minutes`, condivisa con le altre partite della sessione.
+
 ## Personal library foundation
 
 Personal state is additive to imported collection data. A 0.5–5 `personal_rating` in 0.5 steps, local

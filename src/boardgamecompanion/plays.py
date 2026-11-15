@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -71,7 +72,7 @@ def _optional_int(value: Any, field: str, low: int, high: int) -> int | None:
 
 
 class PlayLog:
-    """Sessions played, one row each; keeps game_progress in step."""
+    """Una riga per partita; le sessioni collegano più partite e condividono la durata."""
 
     def __init__(self, database: Database):
         self.database = database
@@ -91,6 +92,11 @@ class PlayLog:
             "player_count": row["player_count"],
             "players": players if isinstance(players, list) else [],
             "duration_minutes": row["duration_minutes"],
+            "session_round": row["session_round"],
+            "session": {
+                "id": row["session_id"], "duration_minutes": row["session_duration_minutes"],
+                "plays": row["session_plays"],
+            } if row["session_id"] else None,
             "outcome": row["outcome"],
             "play_mode": row["play_mode"] or suggested_play_mode(row["metadata_json"]),
             "activity": row["activity"],
@@ -102,10 +108,13 @@ class PlayLog:
         }
 
     _SELECT = """
-        SELECT p.*, g.bgg_id, g.title, e.cover_url, e.metadata_json
+        SELECT p.*, g.bgg_id, g.title, e.cover_url, e.metadata_json,
+               s.duration_minutes AS session_duration_minutes,
+               (SELECT COUNT(*) FROM game_plays sp WHERE sp.session_id=p.session_id) AS session_plays
         FROM game_plays p
         JOIN board_games g ON g.id=p.board_game_id
         LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
+        LEFT JOIN play_sessions s ON s.id=p.session_id
     """
 
     def _validated(self, values: dict[str, Any], *, partial: bool) -> dict[str, Any]:
@@ -186,6 +195,8 @@ class PlayLog:
         return self._row(row)
 
     def create(self, bgg_id: int, values: dict[str, Any]) -> dict[str, Any]:
+        if values.get("session_duration_minutes") is not None:
+            raise PlayError("use duration_minutes for a single play")
         data = self._validated(values, partial=False)
         now = datetime.now(UTC).isoformat()
         with self.database.transaction(immediate=True) as connection:
@@ -199,13 +210,88 @@ class PlayLog:
             play_id = int(cursor.lastrowid)
         return self.get(play_id)
 
+    def create_session(self, bgg_id: int, values: dict[str, Any]) -> dict[str, Any]:
+        """Un solo salvataggio atomico; ritentare la stessa richiesta non duplica le partite."""
+        request_id = values.get("request_id")
+        if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise PlayError("request_id must contain 32 lowercase hexadecimal characters")
+        rounds = values.get("rounds")
+        if not isinstance(rounds, list) or not 2 <= len(rounds) <= 20:
+            raise PlayError("a session must contain between 2 and 20 plays")
+        mode = values.get("play_mode")
+        if mode not in {"competitive", "cooperative"}:
+            raise PlayError("choose the session play_mode")
+        common = self._validated(values, partial=False)
+        duration = common.pop("duration_minutes", None)
+        players = json.loads(common.get("players_json", "[]"))
+        if any(not player["name"] for player in players):
+            raise PlayError("session participants must have a name")
+        if common.get("player_count") and common["player_count"] < len(players):
+            raise PlayError("player_count cannot be less than the participants")
+        data = []
+        for index, round_values in enumerate(rounds):
+            if not isinstance(round_values, dict):
+                raise PlayError("each session play must be an object")
+            winners = round_values.get("winner_indices") or []
+            if (not isinstance(winners, list) or any(type(i) is not int or not 0 <= i < len(players) for i in winners)
+                    or len(set(winners)) != len(winners)):
+                raise PlayError("winner_indices must identify distinct session participants")
+            outcome = round_values.get("outcome")
+            if (mode == "cooperative" and winners) or (mode == "competitive" and outcome):
+                raise PlayError("use individual winners for competitive games or a group outcome for cooperative games")
+            scores = round_values.get("scores")
+            if scores is None:
+                scores = [None] * len(players)
+            if not isinstance(scores, list) or len(scores) != len(players):
+                raise PlayError("scores must match the session participants")
+            participants = _clean_players([
+                {"name": player["name"], "score": scores[i], "winner": i in winners}
+                for i, player in enumerate(players)
+            ])
+            clean_outcome = self._validated({"outcome": outcome}, partial=True)["outcome"]
+            data.append({**common, "duration_minutes": None,
+                         "players_json": json.dumps(participants, ensure_ascii=False), "outcome": clean_outcome,
+                         "completed_game": common.get("completed_game", 0) if index == len(rounds) - 1 else 0,
+                         "session_id": request_id, "session_round": index + 1})
+        fingerprint = json.dumps({"bgg_id": bgg_id, "duration_minutes": duration, "plays": data},
+                                 ensure_ascii=False, sort_keys=True)
+        now = datetime.now(UTC).isoformat()
+        with self.database.transaction(immediate=True) as connection:
+            game_id = self._game_id(connection, bgg_id)
+            existing = connection.execute("SELECT request_json FROM play_sessions WHERE id=?", (request_id,)).fetchone()
+            if existing:
+                if existing["request_json"] != fingerprint:
+                    raise PlayError("request_id was already used for a different session; reopen the form")
+            else:
+                connection.execute(
+                    "INSERT INTO play_sessions(id,board_game_id,duration_minutes,request_json,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?)", (request_id, game_id, duration, fingerprint, now, now),
+                )
+                for play in data:
+                    columns = ["board_game_id", *play, "created_at", "updated_at"]
+                    connection.execute(
+                        f"INSERT INTO game_plays({','.join(columns)}) VALUES({','.join('?' * len(columns))})",
+                        (game_id, *play.values(), now, now),
+                    )
+                self._sync_progress(connection, game_id, now)
+            rows = connection.execute(self._SELECT + " WHERE p.session_id=? ORDER BY p.session_round", (request_id,)).fetchall()
+        return {"session_id": request_id, "items": [self._row(row) for row in rows]}
+
     def update(self, play_id: int, values: dict[str, Any]) -> dict[str, Any]:
         data = self._validated(values, partial=True)
         now = datetime.now(UTC).isoformat()
         with self.database.transaction(immediate=True) as connection:
-            row = connection.execute("SELECT board_game_id FROM game_plays WHERE id=?", (int(play_id),)).fetchone()
+            row = connection.execute("SELECT board_game_id,session_id FROM game_plays WHERE id=?", (int(play_id),)).fetchone()
             if row is None:
                 raise PlayNotFound(f"Play #{play_id} not found")
+            if row["session_id"] and data.get("duration_minutes") is not None:
+                raise PlayError("use session_duration_minutes for a session")
+            if "session_duration_minutes" in values:
+                if not row["session_id"]:
+                    raise PlayError("this play does not belong to a session")
+                duration = _optional_int(values["session_duration_minutes"], "session_duration_minutes", 1, 10000)
+                connection.execute("UPDATE play_sessions SET duration_minutes=?,updated_at=? WHERE id=?",
+                                   (duration, now, row["session_id"]))
             if data:
                 assignments = ",".join(f"{column}=?" for column in data)
                 connection.execute(
@@ -260,13 +346,16 @@ class PlayLog:
         if q:
             like = f"%{q.strip()}%"
             where.append(
-                "(g.title LIKE ? OR p.activity LIKE ? OR p.notes LIKE ? OR p.location LIKE ? OR p.players_json LIKE ?)"
+                "(g.title LIKE ? OR p.activity LIKE ? OR p.notes LIKE ? OR p.location LIKE ? OR p.players_json LIKE ? "
+                "OR json_extract(e.metadata_json,'$.alternate_titles') LIKE ? "
+                "OR json_extract(e.metadata_json,'$.italian_title') LIKE ?)"
             )
-            params.extend([like] * 5)
+            params.extend([like] * 7)
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         with self.database.connect() as connection:
             total = connection.execute(
-                f"SELECT COUNT(*) FROM game_plays p JOIN board_games g ON g.id=p.board_game_id {clause}",
+                "SELECT COUNT(*) FROM game_plays p JOIN board_games g ON g.id=p.board_game_id "
+                f"LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id {clause}",
                 params,
             ).fetchone()[0]
             rows = connection.execute(
@@ -333,6 +422,10 @@ class PlayLog:
                 """,
                 (str(today.year),),
             ).fetchone()
+            session_minutes = connection.execute(
+                "SELECT COALESCE(SUM(s.duration_minutes),0) FROM play_sessions s "
+                "WHERE EXISTS(SELECT 1 FROM game_plays p WHERE p.session_id=s.id)"
+            ).fetchone()[0]
             months = connection.execute(
                 """
                 SELECT substr(played_on,1,7) AS month, COUNT(*) AS plays
@@ -358,7 +451,10 @@ class PlayLog:
                 """
                 SELECT g.bgg_id, g.title, e.cover_url, e.metadata_json, COUNT(p.id) AS plays,
                        MAX(p.played_on) AS last_played_on,
-                       COALESCE(SUM(p.duration_minutes),0) AS minutes,
+                       COALESCE(SUM(p.duration_minutes),0) + (
+                           SELECT COALESCE(SUM(s.duration_minutes),0) FROM play_sessions s
+                           WHERE s.board_game_id=g.id AND EXISTS(SELECT 1 FROM game_plays sp WHERE sp.session_id=s.id)
+                       ) AS minutes,
                        SUM(CASE WHEN p.outcome='won' THEN 1 ELSE 0 END) AS won,
                        SUM(CASE WHEN p.outcome='lost' THEN 1 ELSE 0 END) AS lost
                 FROM game_plays p
@@ -371,7 +467,7 @@ class PlayLog:
             "plays": int(totals["plays"] or 0),
             "games": int(totals["games"] or 0),
             "this_year": int(totals["this_year"] or 0),
-            "minutes": int(totals["minutes"] or 0),
+            "minutes": int(totals["minutes"] or 0) + int(session_minutes),
             "last_played_on": totals["last_played_on"],
             "months": [dict(row) for row in months],
             "players": [

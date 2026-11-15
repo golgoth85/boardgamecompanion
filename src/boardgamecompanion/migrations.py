@@ -1839,6 +1839,22 @@ def _play_modes(connection: sqlite3.Connection) -> None:
     )
 
 
+def _play_sessions(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE play_sessions (
+            id TEXT PRIMARY KEY,
+            board_game_id INTEGER NOT NULL REFERENCES board_games(id) ON DELETE CASCADE,
+            duration_minutes INTEGER CHECK(duration_minutes BETWEEN 1 AND 10000),
+            request_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute("ALTER TABLE game_plays ADD COLUMN session_id TEXT REFERENCES play_sessions(id)")
+    connection.execute("ALTER TABLE game_plays ADD COLUMN session_round INTEGER CHECK(session_round BETWEEN 1 AND 20)")
+    connection.execute("CREATE INDEX idx_game_plays_session ON game_plays(session_id, session_round)")
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1868,6 +1884,7 @@ MIGRATIONS = (
     Migration(26, "game-plays", _game_plays),
     Migration(27, "catalog-gameplay-summaries", _catalog_gameplay_summaries),
     Migration(28, "play-modes", _play_modes),
+    Migration(29, "play-sessions", _play_sessions),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
