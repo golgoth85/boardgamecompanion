@@ -1831,6 +1831,14 @@ def _catalog_gameplay_summaries(connection: sqlite3.Connection) -> None:
     )
 
 
+def _play_modes(connection: sqlite3.Connection) -> None:
+    # Additive only: historical sessions, counts and results stay byte-for-byte intact.
+    connection.execute(
+        "ALTER TABLE game_plays ADD COLUMN play_mode TEXT "
+        "CHECK(play_mode IN ('competitive', 'cooperative'))"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1859,6 +1867,7 @@ MIGRATIONS = (
     Migration(25, "bgg-reference-alt-names", _bgg_reference_alt_names),
     Migration(26, "game-plays", _game_plays),
     Migration(27, "catalog-gameplay-summaries", _catalog_gameplay_summaries),
+    Migration(28, "play-modes", _play_modes),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version

@@ -6,11 +6,22 @@ from typing import Any
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, _normalize_personal_date
-from boardgamecompanion.title_search import display_title
+from boardgamecompanion.title_search import display_title, metadata_dict
 
 OUTCOMES = {"won", "lost", "draw"}
 MAX_PLAYERS = 20
 TEXT_LIMITS = {"activity": 500, "notes": 4000, "location": 120}
+
+
+def suggested_play_mode(raw_metadata: Any) -> str | None:
+    mechanics = metadata_dict(raw_metadata).get("mechanics")
+    if not isinstance(mechanics, list) or not mechanics:
+        return None
+    names = {str(name).casefold() for name in mechanics}
+    # Mixed/hidden-role games need the player to choose the variant actually played.
+    if names & {"semi-cooperative game", "traitor game"}:
+        return None
+    return "cooperative" if "cooperative game" in names else "competitive"
 
 
 class PlayError(PersonalStateError):
@@ -81,6 +92,7 @@ class PlayLog:
             "players": players if isinstance(players, list) else [],
             "duration_minutes": row["duration_minutes"],
             "outcome": row["outcome"],
+            "play_mode": row["play_mode"] or suggested_play_mode(row["metadata_json"]),
             "activity": row["activity"],
             "notes": row["notes"],
             "location": row["location"],
@@ -117,6 +129,11 @@ class PlayLog:
             if outcome is not None and outcome not in OUTCOMES:
                 raise PlayError("outcome must be won, lost or draw")
             result["outcome"] = outcome
+        if "play_mode" in values:
+            mode = values["play_mode"]
+            if mode is not None and mode not in {"competitive", "cooperative"}:
+                raise PlayError("play_mode must be competitive or cooperative")
+            result["play_mode"] = mode
         for field in TEXT_LIMITS:
             if field in values:
                 result[field] = _clean_text(values[field], field)
@@ -124,7 +141,7 @@ class PlayLog:
             if type(values["completed_game"]) is not bool:
                 raise PlayError("completed_game must be boolean")
             result["completed_game"] = int(values["completed_game"])
-        if "players_json" in result and "player_count" not in result and not partial:
+        if "players_json" in result and "player_count" not in result:
             named = len(json.loads(result["players_json"]))
             result["player_count"] = named or None
         return result
@@ -261,6 +278,11 @@ class PlayLog:
     def defaults(self, bgg_id: int | None = None) -> dict[str, Any]:
         """What a new play can copy: the last play of this game, else the last play overall."""
         with self.database.connect() as connection:
+            game = connection.execute(
+                "SELECT e.metadata_json FROM board_games g "
+                "LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id WHERE g.bgg_id=?",
+                (bgg_id,),
+            ).fetchone() if bgg_id is not None else None
             row = None
             if bgg_id is not None:
                 row = connection.execute(
@@ -295,6 +317,7 @@ class PlayLog:
             "same_game": same_game,
             "player_names": [item["name"] for item in names],
             "locations": [item["location"] for item in locations],
+            "suggested_mode": suggested_play_mode(game["metadata_json"]) if game else None,
         }
 
     def summary(self) -> dict[str, Any]:
@@ -318,16 +341,19 @@ class PlayLog:
                 """,
                 (date(today.year - 1, today.month, 1).isoformat(),),
             ).fetchall()
-            players = connection.execute(
-                """
-                SELECT MIN(json_extract(j.value,'$.name')) AS name, COUNT(*) AS plays,
-                       SUM(CASE WHEN json_extract(j.value,'$.winner') THEN 1 ELSE 0 END) AS wins
-                FROM game_plays p, json_each(p.players_json) j
-                WHERE COALESCE(json_extract(j.value,'$.name'),'') != ''
-                GROUP BY lower(json_extract(j.value,'$.name'))
-                ORDER BY plays DESC, wins DESC LIMIT 8
-                """
-            ).fetchall()
+            player_totals: dict[str, dict[str, Any]] = {}
+            for session in connection.execute(self._SELECT):
+                play = self._row(session)
+                for player in play["players"]:
+                    name = player.get("name") or ""
+                    if not name:
+                        continue
+                    entry = player_totals.setdefault(name.casefold(), {"name": name, "plays": 0, "wins": 0})
+                    entry["name"] = min(entry["name"], name)
+                    entry["plays"] += 1
+                    won = play["outcome"] == "won" if play["play_mode"] == "cooperative" else bool(player.get("winner"))
+                    entry["wins"] += int(won)
+            players = sorted(player_totals.values(), key=lambda item: (-item["plays"], -item["wins"]))[:8]
             games = connection.execute(
                 """
                 SELECT g.bgg_id, g.title, e.cover_url, e.metadata_json, COUNT(p.id) AS plays,

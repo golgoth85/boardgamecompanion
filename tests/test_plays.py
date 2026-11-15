@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from boardgamecompanion.database import Database
 from boardgamecompanion.personal_state import PersonalStateStore
 from boardgamecompanion.plays import PlayError, PlayLog, PlayNotFound
+from boardgamecompanion.plays import suggested_play_mode
 
 
 def _database(tmp_path: Path) -> Database:
@@ -127,3 +128,72 @@ def test_plays_page_and_old_address_serve_the_app() -> None:
     for path in ("/plays", "/completed"):
         response = client.get(path)
         assert response.status_code == 200 and "text/html" in response.headers["content-type"]
+
+
+@pytest.mark.parametrize(("metadata", "expected"), [
+    ({"mechanics": ["Cooperative Game", "Hand Management"]}, "cooperative"),
+    ({"mechanics": ["Set Collection"]}, "competitive"),
+    ({"mechanics": ["Cooperative Game", "Traitor Game"]}, None),
+    ({"mechanics": ["Semi-Cooperative Game"]}, None),
+    ({}, None), ({"mechanics": []}, None), ("invalid json", None),
+])
+def test_suggested_mode_uses_mechanics_without_guessing_mixed_games(metadata, expected):
+    assert suggested_play_mode(metadata) == expected
+
+
+def test_modes_and_count_updates_preserve_historical_data(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    log = PlayLog(database)
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO board_game_enrichments(board_game_id,source,external_id,metadata_json,fetched_at,"
+            "next_refresh_at,created_at,updated_at) VALUES(1,'bgg','1',?,?,'2099-01-01','2026-01-01','2026-01-01')",
+            ('{"mechanics":["Cooperative Game"]}', datetime.now(UTC).isoformat()),
+        )
+    assert log.defaults(1)["suggested_mode"] == "cooperative"
+    assert log.defaults(2)["suggested_mode"] is None
+    old = log.create(1, {
+        "played_on": "2026-10-01", "players": [{"name": "Anna", "winner": True}],
+        "player_count": 4, "outcome": "won", "notes": "Storico",
+    })
+    assert old["play_mode"] == "cooperative"
+    log.create(1, {
+        "played_on": "2026-10-02", "play_mode": "cooperative", "outcome": "lost",
+        "players": [{"name": "Anna", "winner": True}, {"name": "Luca"}],
+    })
+    log.create(1, {
+        "played_on": "2026-10-03", "play_mode": "cooperative", "outcome": "won",
+        "players": [{"name": "Anna"}, {"name": "Luca"}],
+    })
+    summary = {item["name"]: item for item in log.summary()["players"]}
+    assert summary["Anna"]["wins"] == 2
+    assert summary["Luca"]["wins"] == 1
+    updated = log.update(old["id"], {"play_mode": "competitive"})
+    assert updated["play_mode"] == "competitive"
+    for field in ("players", "player_count", "outcome", "notes", "played_on"):
+        assert updated[field] == old[field]
+    updated = log.update(old["id"], {"players": [{"name": "Anna"}, {"name": "Luca"}]})
+    assert updated["player_count"] == 2
+    assert log.update(old["id"], {"notes": "Aggiornato"})["player_count"] == 2
+    assert log.update(old["id"], {"player_count": 5})["player_count"] == 5
+    with pytest.raises(PlayError):
+        log.update(old["id"], {"play_mode": "invalid"})
+
+
+def test_mode_migration_preserves_all_session_columns(tmp_path: Path) -> None:
+    database = _database(tmp_path)
+    play = PlayLog(database).create(1, {
+        "played_on": "2026-10-01", "players": [{"name": "Anna", "score": "10", "winner": True}],
+        "player_count": 4, "outcome": "won", "activity": "Capitolo 17", "notes": "Da conservare",
+        "duration_minutes": 60, "location": "Casa", "completed_game": True,
+    })
+    with database.transaction() as connection:
+        connection.execute("ALTER TABLE game_plays DROP COLUMN play_mode")
+        connection.execute("DELETE FROM schema_migrations WHERE version=28")
+        before = tuple(connection.execute("SELECT * FROM game_plays WHERE id=?", (play["id"],)).fetchone())
+    database.initialize()
+    database.initialize()
+    with database.connect() as connection:
+        after = tuple(connection.execute("SELECT * FROM game_plays WHERE id=?", (play["id"],)).fetchone())
+        assert after[:-1] == before and after[-1] is None
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

@@ -6043,7 +6043,8 @@ const PLAY_OUTCOMES = {won: "Vittoria", lost: "Sconfitta", draw: "Pareggio"};
 const playsState = {view: "log", q: "", player: "", bggId: null};
 let playDialog = null;
 let playDialogContext = null;
-let ownedGamesForPlays = null;
+let playGameSearchTimer = null;
+let playGameSearchVersion = 0;
 
 function todayIso() {
   const now = new Date();
@@ -6070,24 +6071,28 @@ function playPlayersMarkup(play) {
   if (!players.length) {
     return play.player_count ? `<span class="play-chip">${formatNumber(play.player_count, 0)} giocatori</span>` : "";
   }
-  return players.map((player) => `
+  return players.map((entry) => {
+    const player = {...entry, winner: play.play_mode !== "cooperative" && entry.winner};
+    return `
     <span class="play-chip ${player.winner ? "is-winner" : ""}" ${player.winner ? 'title="Vincitore"' : ""}>
       ${player.winner ? `<i aria-hidden="true">${icon("crown")}</i>` : ""}${escapeHtml(player.name || "Giocatore")}${player.score ? `<small>${escapeHtml(player.score)}</small>` : ""}
     </span>
-  `).join("") + (play.player_count > players.length
+  `;
+  }).join("") + (play.player_count > players.length
     ? `<span class="play-chip">+${formatNumber(play.player_count - players.length, 0)}</span>`
     : "");
 }
 
 function playRow(play, {showGame = true} = {}) {
   const facts = [
-    play.outcome ? `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}</span>` : "",
+    play.outcome ? `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" ? " di gruppo" : ""}</span>` : "",
     play.completed_game ? `<span class="play-outcome is-completed"><i aria-hidden="true">${icon("crown")}</i>Completato</span>` : "",
     play.duration_minutes ? `<span>${escapeHtml(playDuration(play.duration_minutes))}</span>` : "",
     play.location ? `<span>${escapeHtml(play.location)}</span>` : "",
   ].filter(Boolean).join("");
   return `
     <article class="play-row ${showGame ? "" : "is-game-scoped"}" data-play-id="${Number(play.id)}">
+      <div class="play-row-aside">
       ${showGame ? `
         <a class="play-row-cover" href="/games/${Number(play.bgg_id)}" data-nav aria-hidden="true" tabindex="-1">
           ${play.has_cover
@@ -6099,6 +6104,7 @@ function playRow(play, {showGame = true} = {}) {
         <strong>${escapeHtml(playDate(play.played_on, {day: "numeric"}))}</strong>
         <small>${escapeHtml(playDate(play.played_on, {month: "short"}))}</small>
       </time>
+      </div>
       <div class="play-row-body">
         <div class="play-row-head">
           ${showGame ? `<a class="play-row-title" href="/games/${Number(play.bgg_id)}" data-nav>${escapeHtml(play.title)}</a>` : ""}
@@ -6123,11 +6129,86 @@ function bindPlayRows(root, plays, onSaved) {
   });
 }
 
-async function loadOwnedGamesForPlays() {
-  if (ownedGamesForPlays) return ownedGamesForPlays;
-  const payload = await api("/api/games?owned=true&sort=title&limit=2000&offset=0");
-  ownedGamesForPlays = (payload.items || []).map((game) => ({bgg_id: Number(game.bgg_id), title: game.title, item_type: game.item_type}));
-  return ownedGamesForPlays;
+function closePlayGameResults() {
+  playDialog.querySelector("#playGameResults").hidden = true;
+  const input = playDialog.querySelector("#playGame");
+  input.setAttribute("aria-expanded", "false");
+  input.removeAttribute("aria-activedescendant");
+}
+
+async function searchPlayGames() {
+  const version = ++playGameSearchVersion;
+  const context = playDialogContext;
+  const input = playDialog.querySelector("#playGame");
+  const query = input.value.trim();
+  const results = playDialog.querySelector("#playGameResults");
+  if (!playDialog.open || context.fixed) return;
+  results.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-activedescendant");
+  results.textContent = "Ricerca…";
+  try {
+    const params = new URLSearchParams({owned: "true", sort: "title", limit: "20"});
+    if (query) params.set("q", query);
+    const payload = await api(`/api/games?${params}`);
+    if (version !== playGameSearchVersion || context !== playDialogContext || !playDialog.open || document.activeElement !== input) return;
+    context.matches = payload.items || [];
+    results.innerHTML = context.matches.length ? context.matches.map((game, index) => `
+      <div class="play-game-option" id="playGameOption${index}" role="option" aria-selected="false" data-game-index="${index}">
+        <span class="play-game-option-cover">${game.bgg_metadata?.cover_url
+          ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy">`
+          : escapeHtml(initials(game.title))}</span>
+        <span>${escapeHtml(game.title)}<small>${game.year || `BGG #${Number(game.bgg_id)}`}</small></span>
+      </div>`).join("") : '<p class="muted">Nessun gioco compatibile nella ludoteca.</p>';
+    results.querySelectorAll("[data-game-index]").forEach((option) => {
+      option.addEventListener("pointerdown", (event) => event.preventDefault());
+      option.addEventListener("click", () => void choosePlayGame(context.matches[Number(option.dataset.gameIndex)]));
+    });
+  } catch (error) {
+    if (version === playGameSearchVersion && context === playDialogContext) results.textContent = error.message;
+  }
+}
+
+async function choosePlayGame(game) {
+  if (!game) return;
+  const context = playDialogContext;
+  const input = playDialog.querySelector("#playGame");
+  ++playGameSearchVersion;
+  clearTimeout(playGameSearchTimer);
+  input.value = game.title;
+  input.setCustomValidity("");
+  closePlayGameResults();
+  context.bggId = Number(game.bgg_id);
+  context.modeTouched = false;
+  playDialog.querySelector("#playMode").value = "";
+  syncPlayMode();
+  try {
+    const defaults = await api(`/api/plays/defaults?bgg_id=${context.bggId}`);
+    if (context !== playDialogContext || context.bggId !== Number(game.bgg_id) || !playDialog.open) return;
+    applyPlayDefaults(defaults, {copy: true});
+    applySuggestedPlayMode(defaults.suggested_mode);
+  } catch (error) { showToast(error.message, true); }
+}
+
+function applySuggestedPlayMode(mode) {
+  if (!playDialogContext.modeTouched && !playDialogContext.play) {
+    playDialog.querySelector("#playMode").value = mode || "";
+  }
+  playDialog.querySelector("#playModeHelp").textContent = mode
+    ? "Modalità proposta dalle meccaniche del catalogo; puoi cambiarla per questa partita."
+    : "Scegli la modalità usata: il catalogo non offre un'indicazione univoca.";
+  syncPlayMode();
+}
+
+function syncPlayMode() {
+  const mode = playDialog.querySelector("#playMode").value;
+  playDialog.querySelector(".play-players").classList.toggle("is-cooperative", mode !== "competitive");
+  playDialog.querySelectorAll(".play-winner input").forEach((input) => { input.disabled = mode !== "competitive"; });
+  playDialog.querySelector("#playOutcomeField").hidden = mode !== "cooperative";
+  const legacy = playDialog.querySelector("#playLegacyOutcome");
+  const outcome = playDialogContext.play?.outcome;
+  legacy.hidden = !(outcome && mode !== "cooperative");
+  legacy.textContent = outcome ? `Esito precedente conservato: ${PLAY_OUTCOMES[outcome]}.` : "";
 }
 
 function ensurePlayDialog() {
@@ -6145,11 +6226,12 @@ function ensurePlayDialog() {
         <button class="icon-button" id="closePlayDialog" type="button" aria-label="Chiudi">×</button>
       </div>
       <div class="play-form-grid">
-        <label class="settings-field play-span-2" id="playGameField">
-          <span>Gioco</span>
-          <input id="playGame" type="text" list="playGameOptions" autocomplete="off" placeholder="Cerca nella ludoteca…" required>
-          <datalist id="playGameOptions"></datalist>
-        </label>
+        <div class="settings-field play-span-2 play-game-search" id="playGameField">
+          <label for="playGame">Gioco</label>
+          <input id="playGame" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false"
+                 aria-controls="playGameResults" autocomplete="off" placeholder="Cerca nella ludoteca…" required>
+          <div id="playGameResults" class="play-game-results" role="listbox" aria-label="Giochi compatibili" hidden></div>
+        </div>
         <p class="play-game-fixed play-span-2" id="playGameFixed" hidden></p>
         <label class="settings-field">
           <span>Data</span>
@@ -6159,6 +6241,15 @@ function ensurePlayDialog() {
           <span>Durata (minuti)</span>
           <input id="playDuration" type="number" min="1" max="10000" inputmode="numeric" placeholder="es. 90">
         </label>
+        <label class="settings-field play-span-2">
+          <span>Modalità della partita</span>
+          <select id="playMode" required>
+            <option value="">Scegli la modalità…</option>
+            <option value="competitive">Competitivo · vincitori individuali</option>
+            <option value="cooperative">Cooperativo · esito di gruppo</option>
+          </select>
+          <small class="muted" id="playModeHelp"></small>
+        </label>
         <fieldset class="play-players play-span-2">
           <legend>Giocatori</legend>
           <div class="play-copy-note" id="playCopyNote" hidden></div>
@@ -6167,11 +6258,15 @@ function ensurePlayDialog() {
           <datalist id="playPlayerNames"></datalist>
           <div class="play-player-actions">
             <button class="button button-ghost" id="playAddPlayer" type="button">${icon("plus")}<span>Giocatore</span></button>
-            <label class="play-count-field">
-              <span>Totale giocatori</span>
-              <input id="playCount" type="number" min="1" max="99" inputmode="numeric">
-            </label>
+            <output class="play-auto-count" id="playAutoCount" aria-live="polite"></output>
           </div>
+          <details class="play-count-details" id="playCountDetails">
+            <summary>Altri giocatori senza nome</summary>
+            <label class="play-count-field">
+              <span>Totale (facoltativo)</span>
+              <input id="playCount" type="number" min="1" max="99" inputmode="numeric" placeholder="Auto">
+            </label>
+          </details>
         </fieldset>
         <label class="settings-field play-span-2">
           <span class="play-label-row">Cosa abbiamo fatto
@@ -6179,13 +6274,14 @@ function ensurePlayDialog() {
           </span>
           <input id="playActivity" type="text" maxlength="500" autocomplete="off" placeholder="Scenario, capitolo, missione, varianti…">
         </label>
-        <label class="settings-field">
-          <span>Esito</span>
+        <label class="settings-field" id="playOutcomeField" hidden>
+          <span>Esito del gruppo</span>
           <select id="playOutcome">
             <option value="">—</option>
             ${Object.entries(PLAY_OUTCOMES).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}
           </select>
         </label>
+        <p class="muted play-span-2" id="playLegacyOutcome" hidden></p>
         <label class="settings-field">
           <span>Luogo</span>
           <input id="playLocation" type="text" maxlength="120" list="playLocations" autocomplete="off" placeholder="es. Casa">
@@ -6215,7 +6311,50 @@ function ensurePlayDialog() {
     addPlayerRow({});
     playDialog.querySelector("#playPlayerRows .play-player-row:last-child input")?.focus();
   });
-  playDialog.querySelector("#playGame").addEventListener("change", () => void onPlayGameChosen());
+  const gameInput = playDialog.querySelector("#playGame");
+  gameInput.addEventListener("input", () => {
+    playDialogContext.bggId = null;
+    playDialogContext.modeTouched = false;
+    playDialog.querySelector("#playMode").value = "";
+    syncPlayMode();
+    gameInput.setCustomValidity("Scegli un gioco dai risultati della ricerca");
+    ++playGameSearchVersion;
+    closePlayGameResults();
+    clearTimeout(playGameSearchTimer);
+    playGameSearchTimer = setTimeout(() => void searchPlayGames(), 160);
+  });
+  gameInput.addEventListener("focus", () => { if (!playDialogContext.bggId) void searchPlayGames(); });
+  gameInput.addEventListener("blur", closePlayGameResults);
+  gameInput.addEventListener("keydown", (event) => {
+    const results = playDialog.querySelector("#playGameResults");
+    const options = [...results.querySelectorAll("[role=option]")];
+    if (event.key === "Escape" && !results.hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      ++playGameSearchVersion;
+      clearTimeout(playGameSearchTimer);
+      closePlayGameResults();
+    } else if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      if (results.hidden) { void searchPlayGames(); return; }
+      if (!options.length) return;
+      const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+      const index = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      options.forEach((option, i) => option.setAttribute("aria-selected", String(i === index)));
+      gameInput.setAttribute("aria-activedescendant", options[index].id);
+      options[index].scrollIntoView({block: "nearest"});
+    } else if (event.key === "Enter" && !results.hidden) {
+      event.preventDefault();
+      const selected = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+      if (selected >= 0 || options.length === 1) void choosePlayGame(playDialogContext.matches[selected >= 0 ? selected : 0]);
+    }
+  });
+  playDialog.querySelector("#playMode").addEventListener("change", () => {
+    playDialogContext.modeTouched = true;
+    syncPlayMode();
+  });
+  playDialog.querySelector("#playCount").addEventListener("input", syncPlayerCount);
+  playDialog.addEventListener("close", () => { ++playGameSearchVersion; clearTimeout(playGameSearchTimer); });
   playDialog.querySelector("#playCopyActivity").addEventListener("click", () => {
     playDialog.querySelector("#playActivity").value = playDialogContext?.defaults?.last_play?.activity || "";
   });
@@ -6241,9 +6380,10 @@ function addPlayerRow(player) {
     row.remove();
     syncPlayerCount();
   });
-  row.querySelector("input").addEventListener("input", syncPlayerCount);
+  row.addEventListener("input", syncPlayerCount);
   rows.append(row);
   syncPlayerCount();
+  syncPlayMode();
 }
 
 function playerRowsData() {
@@ -6260,7 +6400,9 @@ function playerRowsData() {
 function syncPlayerCount() {
   const count = playDialog.querySelector("#playCount");
   const named = playerRowsData().length;
-  if (!count.dataset.touched || Number(count.value) < named) count.value = named ? String(named) : "";
+  count.min = String(Math.max(1, named));
+  count.placeholder = named ? String(named) : "Auto";
+  playDialog.querySelector("#playAutoCount").textContent = named ? `${named} ${named === 1 ? "giocatore" : "giocatori"}` : "";
 }
 
 function setPlayers(players) {
@@ -6292,10 +6434,8 @@ function applyPlayDefaults(defaults, {copy}) {
   }
   setPlayers((last.players || []).map((player) => ({name: player.name})));
   const count = playDialog.querySelector("#playCount");
-  if (last.player_count) {
-    count.value = String(last.player_count);
-    count.dataset.touched = "1";
-  }
+  count.value = "";
+  playDialog.querySelector("#playCountDetails").open = false;
   if (!playDialog.querySelector("#playLocation").value) playDialog.querySelector("#playLocation").value = last.location || "";
   note.hidden = false;
   note.innerHTML = `
@@ -6303,31 +6443,24 @@ function applyPlayDefaults(defaults, {copy}) {
     <button class="play-inline-action" type="button" id="playClearCopy">Svuota</button>
   `;
   note.querySelector("#playClearCopy").addEventListener("click", () => {
-    delete count.dataset.touched;
+    count.value = "";
     setPlayers([]);
     note.hidden = true;
   });
 }
 
-async function onPlayGameChosen() {
-  const input = playDialog.querySelector("#playGame");
-  const games = ownedGamesForPlays || [];
-  const value = input.value.trim().toLowerCase();
-  const game = games.find((item) => item.title.toLowerCase() === value);
-  input.setCustomValidity(game ? "" : "Scegli un gioco della ludoteca");
-  if (!game || playDialogContext.bggId === game.bgg_id) return;
-  playDialogContext.bggId = game.bgg_id;
-  try {
-    applyPlayDefaults(await api(`/api/plays/defaults?bgg_id=${game.bgg_id}`), {copy: true});
-  } catch (_) {}
-}
-
 async function openPlayDialog({bggId = null, title = "", play = null, onSaved = null} = {}) {
   ensurePlayDialog();
-  playDialogContext = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null};
+  const context = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null, modeTouched: false};
+  context.fixed = Boolean(context.bggId);
+  playDialogContext = context;
   const form = playDialog.querySelector("#playForm");
   form.reset();
-  delete playDialog.querySelector("#playCount").dataset.touched;
+  playDialog.querySelector("#playCountDetails").open = false;
+  playDialog.querySelector("#playModeHelp").textContent = "Scegli prima un gioco.";
+  closePlayGameResults();
+  playDialog.querySelector("#playGame").setCustomValidity("");
+  playDialog.querySelector("#playMode").value = play?.play_mode || "";
   playDialog.querySelector("#playDialogTitle").textContent = play ? "Modifica partita" : "Registra partita";
   playDialog.querySelector("#deletePlay").hidden = !play;
   playDialog.querySelector("#playCopyNote").hidden = true;
@@ -6344,7 +6477,8 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
     setPlayers(play.players || []);
     const count = playDialog.querySelector("#playCount");
     count.value = play.player_count ? String(play.player_count) : "";
-    if (play.player_count) count.dataset.touched = "1";
+    if (play.player_count === playerRowsData().length) count.value = "";
+    playDialog.querySelector("#playCountDetails").open = Boolean(count.value);
     playDialog.querySelector("#playDuration").value = play.duration_minutes || "";
     playDialog.querySelector("#playActivity").value = play.activity || "";
     playDialog.querySelector("#playOutcome").value = play.outcome || "";
@@ -6356,14 +6490,11 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
   }
   openDialog(playDialog, {focus: fixed ? dateInput : playDialog.querySelector("#playGame")});
   try {
-    const [defaults] = await Promise.all([
-      api(`/api/plays/defaults${playDialogContext.bggId ? `?bgg_id=${playDialogContext.bggId}` : ""}`),
-      fixed ? null : loadOwnedGamesForPlays().then((games) => {
-        playDialog.querySelector("#playGameOptions").innerHTML = games
-          .map((game) => `<option value="${escapeHtml(game.title)}"></option>`).join("");
-      }),
-    ]);
-    applyPlayDefaults(defaults, {copy: !play});
+    const defaultsGameId = context.bggId;
+    const defaults = await api(`/api/plays/defaults${defaultsGameId ? `?bgg_id=${defaultsGameId}` : ""}`);
+    if (context !== playDialogContext || !playDialog.open || context.bggId !== defaultsGameId) return;
+    applyPlayDefaults(defaults, {copy: !play && context.bggId === (bggId ? Number(bggId) : null)});
+    if (context.fixed) applySuggestedPlayMode(defaults.suggested_mode);
   } catch (error) {
     showToast(error.message, true);
   }
@@ -6372,12 +6503,9 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
 async function savePlay() {
   const form = playDialog.querySelector("#playForm");
   if (!playDialogContext.bggId) {
-    await onPlayGameChosen();
-    if (!playDialogContext.bggId) {
-      form.reportValidity();
-      return;
-    }
+    playDialog.querySelector("#playGame").setCustomValidity("Scegli un gioco dai risultati della ricerca");
   }
+  if (!form.reportValidity() || !playDialogContext.bggId) return;
   const dateInput = playDialog.querySelector("#playDate");
   if (!dateInput.value) {
     dateInput.reportValidity();
@@ -6395,7 +6523,9 @@ async function savePlay() {
     player_count: number("#playCount") || (players.length || null),
     duration_minutes: number("#playDuration"),
     activity: text("#playActivity"),
-    outcome: playDialog.querySelector("#playOutcome").value || null,
+    play_mode: playDialog.querySelector("#playMode").value,
+    ...(playDialog.querySelector("#playMode").value === "cooperative"
+      ? {outcome: playDialog.querySelector("#playOutcome").value || null} : {}),
     location: text("#playLocation"),
     notes: text("#playNotes"),
     completed_game: playDialog.querySelector("#playCompleted").checked,

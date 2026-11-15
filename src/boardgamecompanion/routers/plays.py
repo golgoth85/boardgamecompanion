@@ -25,6 +25,7 @@ class PlayPayload(BaseModel):
     players: list[PlayerPayload] | None = Field(default=None, max_length=20)
     duration_minutes: int | None = Field(default=None, ge=1, le=10000)
     outcome: str | None = Field(default=None, pattern="^(won|lost|draw)$")
+    play_mode: str | None = Field(default=None, pattern="^(competitive|cooperative)$")
     activity: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=4000)
     location: str | None = Field(default=None, max_length=120)

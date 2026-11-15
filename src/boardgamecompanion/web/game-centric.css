@@ -1115,19 +1115,21 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .plays-month:first-child{margin-top:0}
 
 .play-row{
-  display:grid;grid-template-columns:3rem 2.6rem minmax(0,1fr) auto;gap:.7rem;align-items:start;
+  display:grid;grid-template-columns:4.2rem minmax(0,1fr) auto;gap:.7rem;align-items:start;
   padding:.55rem .6rem;border:1px solid var(--line);border-radius:12px;background:var(--surface)
 }
 .play-row.is-game-scoped{grid-template-columns:2.6rem minmax(0,1fr) auto}
 .play-row:hover{border-color:#3e4c68}
-.play-row-cover{display:grid;width:3rem;height:3.6rem;place-items:center;overflow:hidden;border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:.7rem;font-weight:800;text-decoration:none}
-.play-row-cover img{width:100%;height:100%;object-fit:cover}
-.play-row-date{display:grid;justify-items:center;padding:.3rem 0;border-radius:9px;background:rgba(245,158,11,.08);line-height:1.05}
+.play-row-aside{display:grid;gap:.35rem;min-width:0}
+.play-row-cover{display:grid;width:100%;aspect-ratio:1;place-items:center;overflow:hidden;border-radius:8px;background:var(--surface-2);color:var(--muted);font-size:.7rem;font-weight:800;text-decoration:none}
+.play-row-cover img{width:100%;height:100%;object-fit:contain}
+.play-row-date{display:flex;align-items:baseline;justify-content:center;gap:.25rem;padding:.3rem .1rem;border-radius:9px;background:rgba(245,158,11,.08);line-height:1.05}
 .play-row-date strong{font-size:1.05rem}
 .play-row-date small{color:var(--accent-2);font-size:.6rem;font-weight:800;text-transform:uppercase}
 .play-row-body{display:grid;gap:.35rem;min-width:0}
 .play-row-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .6rem}
 .play-row-title{color:var(--text);font-size:.88rem;font-weight:800;text-decoration:none}
+.play-row-title{flex-basis:100%;overflow-wrap:anywhere}
 .play-row-title:hover,.play-row-title:focus-visible{color:var(--accent-2)}
 .play-row-activity{color:#dce4ed;font-size:.78rem}
 .play-row-facts{display:inline-flex;flex-wrap:wrap;gap:.3rem .55rem;color:var(--muted);font-size:.7rem}
@@ -1184,11 +1186,23 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .play-game-fixed{display:flex;align-items:baseline;gap:.5rem;margin:0}
 .play-game-fixed span{color:var(--muted);font-size:.72rem}
 .play-game-fixed strong{font-size:.95rem}
+.play-game-search{position:relative}
+.play-game-search>label{color:var(--muted);font-size:.75rem;font-weight:700}
+.play-game-results{position:absolute;top:100%;left:0;right:0;z-index:5;max-height:15rem;overflow-y:auto;overscroll-behavior:contain;padding:.3rem;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:0 12px 32px rgba(0,0,0,.4);font-size:.8rem}
+.play-game-results>p{margin:.6rem}
+.play-game-option{display:flex;align-items:center;gap:.6rem;min-height:3rem;padding:.4rem;border-radius:8px;cursor:pointer}
+.play-game-option:hover,.play-game-option[aria-selected=true]{background:var(--surface-2);outline:1px solid var(--accent-2);outline-offset:-1px}
+.play-game-option>span:last-child{min-width:0;overflow-wrap:anywhere}
+.play-game-option small{display:block;color:var(--muted);font-size:.7rem}
+.play-game-option-cover{display:grid;place-items:center;flex:0 0 2.4rem;height:2.4rem;overflow:hidden;border-radius:5px;background:var(--surface-2);font-size:.65rem}
+.play-game-option-cover img{width:100%;height:100%;object-fit:contain}
 .play-players{display:grid;gap:.35rem;margin:0;padding:.6rem .7rem .7rem;border:1px solid var(--line);border-radius:12px}
 .play-players legend{padding:0 .3rem;color:var(--muted);font-size:.72rem;font-weight:700}
 .play-copy-note{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem;padding:.4rem .55rem;border-radius:9px;background:rgba(245,158,11,.08);color:#e9dcc0;font-size:.72rem}
 .play-player-head,.play-player-row{display:grid;grid-template-columns:minmax(0,1fr) 5.5rem 2.6rem 2rem;gap:.35rem;align-items:center}
 .play-player-head span{color:var(--muted);font-size:.62rem;font-weight:700}
+.play-players.is-cooperative .play-player-head,.play-players.is-cooperative .play-player-row{grid-template-columns:minmax(0,1fr) 5.5rem 2rem}
+.play-players.is-cooperative .play-winner,.play-players.is-cooperative .play-player-head>span:nth-child(3){display:none}
 .play-player-row input[type=text]{width:100%;min-width:0;min-height:2.2rem;padding:.35rem .55rem;border:1px solid var(--line);border-radius:9px;background:rgba(18,24,38,.88);color:var(--text);font:inherit;font-size:.8rem}
 .play-player-row .icon-button{width:2rem;height:2rem;min-height:0;padding:0}
 .play-winner{position:relative;display:grid;width:2.2rem;height:2.2rem;place-items:center;border:1px solid var(--line);border-radius:9px;color:var(--muted);cursor:pointer}
@@ -1196,10 +1210,14 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .play-winner:has(input:checked){border-color:rgba(251,191,36,.55);background:rgba(245,158,11,.14);color:var(--accent-2)}
 .play-winner:has(input:focus-visible){outline:2px solid var(--accent-2);outline-offset:2px}
 .play-winner .icon{width:1rem;height:1rem}
+.play-winner>span{display:grid;place-items:center}
 .play-player-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
 .play-player-actions .button{gap:.3rem;min-height:2.1rem;padding:.3rem .65rem;font-size:.74rem}
 .play-count-field{display:flex;align-items:center;gap:.45rem;color:var(--muted);font-size:.72rem}
 .play-count-field input{width:4.2rem;min-height:2.1rem;padding:.3rem .5rem;border:1px solid var(--line);border-radius:9px;background:rgba(18,24,38,.88);color:var(--text);font:inherit}
+.play-auto-count,.play-count-details{color:var(--muted);font-size:.72rem}
+.play-count-details summary{padding:.3rem 0;cursor:pointer}
+.play-count-details .play-count-field{margin-top:.35rem}
 .play-label-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.4rem}
 .play-inline-action{max-width:100%;overflow:hidden;padding:0;border:0;background:none;color:var(--accent-2);font:inherit;font-size:.7rem;font-weight:700;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .play-inline-action:hover,.play-inline-action:focus-visible{text-decoration:underline}
@@ -1220,10 +1238,11 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
   .plays-add{flex:1 1 100%;justify-content:center}
   .plays-side{grid-template-columns:1fr}
   .plays-side-block:has(.plays-leaderboard){display:none}
-  .play-row{grid-template-columns:2.6rem minmax(0,1fr) auto;gap:.55rem}
-  .play-row-cover{display:none}
+  .play-row{grid-template-columns:3rem minmax(0,1fr) auto;gap:.55rem}
+  .play-row-date strong{font-size:.9rem}
   .play-form-grid{grid-template-columns:1fr}
   .play-player-head,.play-player-row{grid-template-columns:minmax(0,1fr) 4rem 2.4rem 2rem}
+  .play-players.is-cooperative .play-player-head,.play-players.is-cooperative .play-player-row{grid-template-columns:minmax(0,1fr) 4rem 2rem}
 }
 .plays-add .icon,.plays-view-switch .icon,.game-plays-section .button .icon,.play-player-actions .button .icon{flex:0 0 auto;margin-right:.3rem}
 /* Scheda gioco: titolo e stato giocato/completato non si sovrappongono */
