@@ -3279,3 +3279,39 @@ def test_play_log_copies_players_from_last_play(browser, live_server):
         expect(page.locator(".plays-leaderboard")).to_contain_text("Giulia")
     finally:
         context.close()
+
+
+def test_play_log_search_and_group_result(browser, live_server):
+    context, page = new_page(browser, mobile=True)
+    try:
+        import_csv(page, live_server)
+
+        def defaults(route):
+            route.fulfill(json={
+                "last_play": None, "same_game": False, "player_names": [], "locations": [],
+                "suggested_mode": "cooperative" if "bgg_id=" in route.request.url else None,
+            })
+
+        page.route("**/api/plays/defaults*", defaults)
+        page.goto(f"{live_server}/plays")
+        page.locator("#playsAdd").click()
+        dialog = page.locator(".play-dialog")
+        query = dialog.locator("#playGame")
+        query.fill("alpha")
+        expect(dialog.get_by_role("option", name="Synthetic Alpha")).to_be_visible()
+        query.press("ArrowDown")
+        query.press("Enter")
+        expect(dialog.locator("#playMode")).to_have_value("cooperative")
+        expect(dialog.locator("#playOutcome")).to_be_visible()
+        expect(dialog.locator(".play-winner")).to_be_hidden()
+        dialog.locator(".play-player-row input[type=text]").first.fill("Anna")
+        dialog.locator("#playOutcome").select_option("lost")
+        dialog.locator("#savePlay").click()
+        expect(dialog).to_be_hidden()
+        expect(page.locator(".play-row")).to_contain_text("Sconfitta di gruppo")
+        saved = page.request.get(f"{live_server}/api/plays").json()["items"][0]
+        assert saved["play_mode"] == "cooperative"
+        assert saved["player_count"] == 1
+        assert saved["outcome"] == "lost"
+    finally:
+        context.close()

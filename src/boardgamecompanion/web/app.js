@@ -6339,7 +6339,8 @@ function ensurePlayDialog() {
       if (results.hidden) { void searchPlayGames(); return; }
       if (!options.length) return;
       const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
-      const index = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+      const index = current < 0 ? (event.key === "ArrowDown" ? 0 : options.length - 1)
+        : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
       options.forEach((option, i) => option.setAttribute("aria-selected", String(i === index)));
       gameInput.setAttribute("aria-activedescendant", options[index].id);
       options[index].scrollIntoView({block: "nearest"});
