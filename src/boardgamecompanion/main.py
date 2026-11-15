@@ -1022,6 +1022,8 @@ def _crowdfunding_description_service():
 
 class CrowdfundingDescriptionPayload(BaseModel):
     id: str = Field(min_length=3, max_length=500)
+    # Extra images (platform CDNs only) to read when the page itself is unreadable.
+    image_urls: list[str] = Field(default_factory=list, max_length=6)
 
 
 @app.post("/api/crowdfunding/description", tags=["crowdfunding"])
@@ -1037,7 +1039,9 @@ def generate_crowdfunding_description(payload: CrowdfundingDescriptionPayload) -
         raise HTTPException(status_code=404, detail="Campagna non trovata")
     bgg_id = crowdfunding_matches(get_database()).get(payload.id)
     try:
-        entry = _crowdfunding_description_service().generate(campaign, bgg_id=bgg_id)
+        entry = _crowdfunding_description_service().generate(
+            campaign, bgg_id=bgg_id, image_urls=payload.image_urls
+        )
     except CrowdfundingDescriptionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"id": payload.id, "description_it": entry["text"], "sources": entry["sources"]}

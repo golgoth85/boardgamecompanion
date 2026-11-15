@@ -224,13 +224,19 @@ export function bggTermLabel(name) {
 }
 
 // Tag chips for categories/mechanics; the BGG name stays in the tooltip.
-export function bggTermChips(names, {limit = 0, className = "bgg-term"} = {}) {
+export function bggTermHref(kind, name) {
+  return `/explore?${kind}=${encodeURIComponent(String(name || "").trim())}`;
+}
+
+export function bggTermChips(names, {limit = 0, className = "bgg-term", kind = ""} = {}) {
   const values = [...new Set((Array.isArray(names) ? names : []).map((name) => String(name || "").trim()).filter(Boolean))];
   const shown = limit > 0 ? values.slice(0, limit) : values;
   const escape = (value) => value.replace(/[&<>"']/g, (char) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"})[char]);
   const extra = values.length - shown.length;
   return shown.map((name) => {
     const label = bggTermLabel(name);
-    return `<span class="${className}"${label !== name ? ` title="${escape(name)}"` : ""}>${escape(label)}</span>`;
+    const title = label !== name ? ` title="${escape(name)}"` : "";
+    if (kind) return `<a class="${className} is-link" href="${escape(bggTermHref(kind, name))}" data-nav${title}>${escape(label)}</a>`;
+    return `<span class="${className}"${title}>${escape(label)}</span>`;
   }).join("") + (extra > 0 ? `<span class="${className} is-more" title="${escape(values.slice(shown.length).map(bggTermLabel).join(", "))}">+${extra}</span>` : "");
 }

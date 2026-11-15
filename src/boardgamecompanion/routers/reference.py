@@ -79,7 +79,7 @@ def reference_search(
 @router.get("/api/reference/browse")
 def reference_browse(
     q: str | None = Query(default=None, max_length=200),
-    sort: Literal["rank", "votes", "rating", "newest", "title"] = Query(default="rank"),
+    sort: Literal["rank", "votes", "rating", "newest", "underrated"] = Query(default="rank"),
     limit: int = Query(default=48, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     item_type: Literal["standalone", "expansion"] | None = Query(default=None),

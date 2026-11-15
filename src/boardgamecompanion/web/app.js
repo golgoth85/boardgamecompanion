@@ -15,7 +15,7 @@ import {
 import {coverSrc, escapeHtml, formatNumber, icon, initials, safeExternalHref} from "./ui-utils.js";
 import {activateSettingsTab} from "./settings-ui.js";
 import {exploreGroupArt} from "./explore-art.js";
-import {bggTermChips, bggTermLabel} from "./bgg-terms.js";
+import {bggTermChips, bggTermHref, bggTermLabel} from "./bgg-terms.js";
 import {bindDialogCancel, closeDialog, openDialog} from "./dialogs.js";
 
 const app = document.querySelector("#app");
@@ -4135,8 +4135,8 @@ async function renderDetail(bggId) {
               <div><dt>Durata</dt><dd>${escapeHtml(timeText(game))}</dd></div>
               <div><dt>Complessità</dt><dd>${bgg.average_weight ? `${formatNumber(bgg.average_weight, 2)} / 5` : "—"}</dd></div>
               <div><dt>Dipendenza lingua</dt><dd ${bgg.language_dependence ? `title="${escapeHtml(bgg.language_dependence)}"` : ""}>${escapeHtml(languageDependenceText(bgg.language_dependence))}</dd></div>
-              ${categories.length ? `<div class="game-term-row"><dt>Generi</dt><dd class="bgg-term-list">${bggTermChips(categories)}</dd></div>` : ""}
-              ${mechanics.length ? `<div class="game-term-row"><dt>Meccaniche</dt><dd class="bgg-term-list">${bggTermChips(mechanics, {limit: 8})}</dd></div>` : ""}
+              ${categories.length ? `<div class="game-term-row"><dt>Generi</dt><dd class="bgg-term-list">${bggTermChips(categories, {kind: "category"})}</dd></div>` : ""}
+              ${mechanics.length ? `<div class="game-term-row"><dt>Meccaniche</dt><dd class="bgg-term-list">${bggTermChips(mechanics, {limit: 8, kind: "mechanic"})}</dd></div>` : ""}
             </dl>
             <a class="external-link game-bgg-link"
                href="https://boardgamegeek.com/boardgame/${game.bgg_id}"
@@ -5655,7 +5655,7 @@ function rankingTags(game, factors = [], {compact = false} = {}) {
   const weight = Number(bgg.average_weight) > 0 ? formatNumber(bgg.average_weight, 1) : "";
   const age = ageText(game);
   const rating = Number(bgg.average) > 0
-    ? {html: `★ ${formatNumber(bgg.average, 1)}${Number(bgg.users_rated) > 0
+    ? {html: `<span class="ranking-score"><b class="ranking-star" aria-hidden="true">★</b>${formatNumber(bgg.average, 1)}</span>${Number(bgg.users_rated) > 0
       ? `<span class="ranking-voters" title="${escapeHtml(`${formatNumber(bgg.users_rated, 0)} votanti`)}"> · ${compactCount(bgg.users_rated)}</span>`
       : ""}`}
     : "";
@@ -5696,7 +5696,7 @@ function rankingGameRow(item, index) {
     <a class="ranking-result-row" href="${view.href}" data-nav>
       <span class="ranking-result-cover">
         ${rankingCover(view)}
-        <span class="ranking-position${index >= 4 ? " ranking-position-lower" : ""}">${index}</span>
+        ${index ? `<span class="ranking-position${index >= 4 ? " ranking-position-lower" : ""}">${index}</span>` : ""}
       </span>
       <span class="ranking-result-body">
         <span class="ranking-result-title">
@@ -7266,6 +7266,21 @@ async function renderExplore(initialTab = null) {
   if (initialTab === "category" || initialTab === "mechanic") {
     exploreState.activeTab = initialTab;
   }
+  // Deep link from a genre/mechanic chip: /explore?mechanic=Dice+Rolling
+  const linkParams = new URLSearchParams(window.location.search);
+  for (const kind of ["category", "mechanic"]) {
+    const name = (linkParams.get(kind) || "").trim();
+    if (!name) continue;
+    exploreState.categories.clear();
+    exploreState.mechanics.clear();
+    exploreState.categoryGroups.clear();
+    exploreState.mechanicGroups.clear();
+    (kind === "category" ? exploreState.categories : exploreState.mechanics).add(name);
+    exploreState.activeTab = kind;
+    exploreState.expandedResults = false;
+    exploreState.facetQuery = "";
+    break;
+  }
   const tab = exploreState.activeTab;
   app.innerHTML = `
     <section class="page-header catalog-page-header explore-page-header">
@@ -7411,9 +7426,6 @@ function crowdfundingCard(item) {
           ${italian ? "" : `<button class="crowdfunding-ai-description" type="button" data-crowdfunding-describe="${escapeHtml(item.id || "")}"
                   title="L'AI legge la pagina della campagna e scrive una presentazione in italiano">${icon("sparkle")}<span>Descrizione in italiano</span></button>`}
         </div>
-        <div class="crowdfunding-progress" ${hasPercent ? "" : "hidden"}>
-          <span class="crowdfunding-progress-bar"><span style="width:${Math.max(2, Math.min(100, percentValue || 0))}%"></span></span>
-        </div>
         <dl class="crowdfunding-stats">
           <div><dt>Raccolto</dt><dd>${escapeHtml(funds)}</dd></div>
           <div><dt>Finanziato</dt><dd class="${percentValue >= 100 ? "is-funded" : ""}">${hasPercent ? `${formatNumber(percentValue, 0)}%` : "—"}</dd></div>
@@ -7425,9 +7437,21 @@ function crowdfundingCard(item) {
   `;
 }
 
+let crowdfundingAutoRun = 0;
+
+async function autoGenerateCrowdfundingDescriptions(root) {
+  const run = ++crowdfundingAutoRun;
+  for (const button of [...root.querySelectorAll("[data-crowdfunding-describe]")]) {
+    // Stop if the grid was re-rendered or the user navigated away.
+    if (run !== crowdfundingAutoRun || !button.isConnected) return;
+    if (button.disabled) continue;
+    if (!(await button.__describe())) return;
+  }
+}
+
 function bindCrowdfundingDescriptions(root) {
   root.querySelectorAll("[data-crowdfunding-describe]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.__describe = async () => {
       const card = button.closest(".crowdfunding-card");
       const target = card?.querySelector("[data-crowdfunding-description]");
       button.disabled = true;
@@ -7444,13 +7468,17 @@ function bindCrowdfundingDescriptions(root) {
           if (payload.sources?.length) target.title = `Scritta dall'AI da: ${payload.sources.join(", ")}`;
         }
         button.remove();
+        return true;
       } catch (error) {
         showToast(error.message, true);
         button.disabled = false;
         button.querySelector("span").textContent = "Descrizione in italiano";
+        return false;
       }
-    });
+    };
+    button.addEventListener("click", () => button.__describe());
   });
+  void autoGenerateCrowdfundingDescriptions(root);
 }
 
 function crowdfundingProviderNotice(payload) {
@@ -7537,10 +7565,10 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
     bgg: {best_players: players.best, recommended_players: players.recommended},
   };
   const tags = [
-    ...(Array.isArray(overview.setting) ? overview.setting : []),
+    ...(Array.isArray(overview.setting) ? overview.setting : []).map((value) => ({value, kind: ""})),
     ...(Array.isArray(overview.mechanics) && overview.mechanics.length
       ? overview.mechanics
-      : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : [])),
+      : (Array.isArray(item.mechanics) ? item.mechanics.slice(0, 6) : [])).map((value) => ({value, kind: "mechanic"})),
   ];
   const overviewText = item.game_summary_it || overview.summary || "Descrizione non disponibile.";
   const whyText = item.why_it_fits || item.reason || "È un candidato verificato BGG non presente nella tua ludoteca.";
@@ -7567,7 +7595,9 @@ function suggestionCard(item, index, {proposedView = false} = {}) {
             : `<span class="cover-initials">${escapeHtml(initials(title))}</span>`}
           ${bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated})}
         </a>
-        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map((value) => `<span>${escapeHtml(bggTermLabel(value))}</span>`).join("")}</div>` : ""}
+        ${tags.length ? `<div class="suggestion-tags" aria-label="Generi e meccaniche">${tags.map(({value, kind}) => kind
+          ? `<a href="${escapeHtml(bggTermHref(kind, value))}" data-nav>${escapeHtml(bggTermLabel(value))}</a>`
+          : `<span>${escapeHtml(bggTermLabel(value))}</span>`).join("")}</div>` : ""}
       </div>
       <div class="suggestion-body">
         <header class="suggestion-heading">
@@ -7788,6 +7818,8 @@ async function renderSuggestions({forceRefresh = false} = {}) {
       .slice(0, count).map((entry) => entry?.[0]).filter(Boolean);
     const profileGenres = topNames("top_categories", 2);
     const profileMechanics = topNames("top_mechanics", 3);
+    const profileTag = (kind) => (value) =>
+      `<a href="${escapeHtml(bggTermHref(kind, value))}" data-nav title="${escapeHtml(value)}">${escapeHtml(bggTermLabel(value))}</a>`;
     const profileFacts = [
       Number(profileData.owned_standalone_count) > 0 ? `${formatNumber(profileData.owned_standalone_count, 0)} giochi base` : "",
       Number(profileData.average_weight) > 0 ? `complessità media ${formatNumber(profileData.average_weight, 1)}/5` : "",
@@ -7797,7 +7829,7 @@ async function renderSuggestions({forceRefresh = false} = {}) {
     profile.innerHTML = profileGenres.length || profileMechanics.length
       ? `<span class="suggestions-profile-label" title="I punteggi “Per te” premiano i titoli simili a questi tratti della tua ludoteca">Calcolati sulla tua ludoteca</span>
          ${profileFacts.length ? `<span class="suggestions-profile-fact">${escapeHtml(profileFacts.join(" · "))}</span>` : ""}
-         ${[...profileGenres, ...profileMechanics].map((value) => `<span title="${escapeHtml(value)}">${escapeHtml(bggTermLabel(value))}</span>`).join("")}`
+         ${[...profileGenres.map(profileTag("category")), ...profileMechanics.map(profileTag("mechanic"))].join("")}`
       : "";
 
     const total = Math.min(wanted, Number(payload.total_available) || 0);
@@ -7841,7 +7873,7 @@ const bggCatalogSorts = [
   ["votes", "Più votati"],
   ["rating", "Voto medio"],
   ["newest", "Più recenti"],
-  ["title", "Titolo"],
+  ["underrated", "Meno noti"],
 ];
 const bggCatalogPageSizes = ["20", "50", "100", "200"];
 const storedBggCatalogPageSize = window.localStorage.getItem("bgc.bggCatalogPageSize");
@@ -8333,7 +8365,7 @@ function wishlistCard(item) {
           ${game ? bggRatingBadge({average: Number(bgg.average) > 0 ? Number(bgg.average) : null, users_rated: bgg.users_rated}) : ""}
         </div>
         ${facts}
-        ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag"})}</div>` : ""}
+        ${game?.categories?.length ? `<div class="suggestion-tags wishlist-tags" aria-label="Generi">${bggTermChips(game.categories, {limit: 3, className: "wishlist-tag", kind: "category"})}</div>` : ""}
       </div>
       <div class="wishlist-card-body">
         <header class="wishlist-heading">
@@ -8486,16 +8518,17 @@ async function renderLists() {
         <p class="muted catalog-page-summary">Crea raccolte manuali o dinamiche per organizzare i giochi secondo i tuoi criteri</p>
       </div>
     </section>
-    <section class="list-builder-card">
+    <details class="list-builder-card" id="listBuilder">
+      <summary class="list-builder-summary">${icon("plus")}<span id="listBuilderTitle">Nuova raccolta</span></summary>
       <form id="createGameListForm">
         <div class="list-builder-head">
-          <label class="list-builder-name"><span>Nome della raccolta</span><input id="gameListName" type="text" maxlength="200" required placeholder="Es. Brevi in due"></label>
+          <label class="list-builder-name"><span>Nome</span><input id="gameListName" type="text" maxlength="60" required placeholder="Es. Brevi in due"></label>
           <div class="list-kind-switch" role="radiogroup" aria-label="Tipo di raccolta">
-            <button type="button" class="list-kind-option is-active" data-list-kind="smart" role="radio" aria-checked="true">
-              ${icon("bolt")}<span><strong>Dinamica</strong><small>si aggiorna da sola con i filtri</small></span>
+            <button type="button" class="list-kind-option is-active" data-list-kind="smart" role="radio" aria-checked="true" title="Si aggiorna da sola con i filtri">
+              ${icon("bolt")}<strong>Dinamica</strong>
             </button>
-            <button type="button" class="list-kind-option" data-list-kind="manual" role="radio" aria-checked="false">
-              ${icon("list")}<span><strong>Manuale</strong><small>scegli tu i titoli</small></span>
+            <button type="button" class="list-kind-option" data-list-kind="manual" role="radio" aria-checked="false" title="Scegli tu i titoli">
+              ${icon("list")}<strong>Manuale</strong>
             </button>
           </div>
         </div>
@@ -8511,12 +8544,12 @@ async function renderLists() {
         </div>
         <div class="list-builder-footer">
           <span class="list-builder-preview" id="listBuilderPreview" aria-live="polite"></span>
-          <button class="button button-ghost" id="cancelListEdit" type="button" hidden>Annulla modifica</button>
+          <button class="button button-ghost" id="cancelListEdit" type="button" hidden>Annulla</button>
           <button class="button button-ghost" id="resetListFilters" type="button">Azzera filtri</button>
-          <button class="button button-primary" id="submitGameList" type="submit">${icon("plus")}<span>Crea raccolta</span></button>
+          <button class="button button-primary" id="submitGameList" type="submit">${icon("plus")}<span>Crea</span></button>
         </div>
       </form>
-    </section>
+    </details>
     <section class="saved-lists-layout">
       <aside class="saved-lists-panel">
         <div class="section-heading"><h2>Le tue raccolte</h2><span id="savedListCount" class="muted"></span></div>
@@ -8566,7 +8599,9 @@ async function renderLists() {
     editingList = null;
     form.reset();
     cancelEdit.hidden = true;
-    submitButton.innerHTML = `${icon("plus")}<span>Crea raccolta</span>`;
+    submitButton.innerHTML = `${icon("plus")}<span>Crea</span>`;
+    document.querySelector("#listBuilderTitle").textContent = "Nuova raccolta";
+    document.querySelector("#listBuilder").open = false;
     document.querySelectorAll("[data-list-kind]").forEach((button) => { button.disabled = false; });
     setKind("smart");
   };
@@ -8583,7 +8618,9 @@ async function renderLists() {
       control.value = term ? term.value : String(value);
     });
     cancelEdit.hidden = false;
-    submitButton.innerHTML = `${icon("check")}<span>Salva modifiche</span>`;
+    submitButton.innerHTML = `${icon("check")}<span>Salva</span>`;
+    document.querySelector("#listBuilderTitle").textContent = `Modifica «${list.name}»`;
+    document.querySelector("#listBuilder").open = true;
     void updatePreview();
     form.scrollIntoView({behavior: "smooth", block: "start"});
   };
@@ -8646,12 +8683,13 @@ async function renderLists() {
           </header>
           ${list.kind === "manual" ? `
             <div class="manual-list-add">
-              <label><span>Aggiungi un gioco posseduto</span><input id="manualListSearch" type="search" placeholder="Cerca per titolo…" autocomplete="off"></label>
+              <label><span>Aggiungi un gioco posseduto</span><input id="manualListSearch" type="search" placeholder="Cerca per titolo…" autocomplete="off" maxlength="60"></label>
               <div id="manualListSearchResults"></div>
             </div>
           ` : ""}
-          <div class="catalog-grid saved-list-game-grid">${games.length ? games.map((game) => gameCard(game)).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
+          <div class="ranking-list saved-list-rows">${games.length ? games.map((game) => `<div class="saved-list-row" data-game-id="${game.bgg_id}">${rankingGameRow({game, factors: []}, 0)}</div>`).join("") : '<div class="empty"><span>Nessun gioco corrisponde alla lista.</span></div>'}</div>
         `;
+        void ensureRankingGameplaySummaries(games.map((game) => ({game})));
         document.querySelector("#editOpenList")?.addEventListener("click", () => startEditing(list));
         document.querySelectorAll("[data-open-list]").forEach((button) => {
           button.closest(".saved-list-card")?.classList.toggle("is-open", button.dataset.openList === listId);
@@ -8685,13 +8723,14 @@ async function renderLists() {
               }
             }, 180);
           });
-          result.querySelectorAll(".game-card-wrap").forEach((card) => {
+          result.querySelectorAll(".saved-list-row").forEach((card) => {
             const bggId = card.dataset.gameId;
             const remove = document.createElement("button");
             remove.type = "button";
             remove.className = "manual-list-remove";
             remove.textContent = "×";
             remove.title = "Rimuovi dalla lista";
+            card.classList.add("has-remove");
             remove.addEventListener("click", async () => {
               await api(`/api/lists/${encodeURIComponent(listId)}/items/${bggId}`, {method: "DELETE"});
               await openList(listId);

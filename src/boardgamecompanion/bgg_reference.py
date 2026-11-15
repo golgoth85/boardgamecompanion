@@ -419,18 +419,44 @@ BROWSE_SORT_SQL = {
     "votes": "g.users_rated DESC, g.bgg_id",
     "rating": "(g.average IS NULL), g.average DESC, g.users_rated DESC, g.bgg_id",
     "newest": "(g.year_published IS NULL), g.year_published DESC, g.users_rated DESC, g.bgg_id",
-    "title": "g.name COLLATE NOCASE, g.bgg_id",
+    "underrated": (
+        "(g.average IS NULL), "
+        "((g.average * g.users_rated + 5.5 * 150.0) / (g.users_rated + 150.0)) DESC, g.bgg_id"
+    ),
 }
 
 
 # Cached rows are (bgg_id, name, year_published, rank, average, users_rated, is_expansion).
+RATING_PRIOR_MEAN = 5.5
+RATING_PRIOR_VOTES = 500
+
+
+def _weighted_rating(
+    average: float | None, votes: int | None, prior_votes: int = RATING_PRIOR_VOTES
+) -> float:
+    votes = int(votes or 0)
+    return (
+        (float(average or 0) * votes + RATING_PRIOR_MEAN * prior_votes) / (votes + prior_votes)
+    )
+
+
 BROWSE_SORT_KEYS = {
     "rank": lambda r: (not r[3], r[3] or 0, -r[5], r[0]),
     "votes": lambda r: (-r[5], r[0]),
-    "rating": lambda r: (r[4] is None, -(r[4] or 0), -r[5], r[0]),
+    "rating": lambda r: (r[4] is None, -_weighted_rating(r[4], r[5]), -r[5], r[0]),
     "newest": lambda r: (r[2] is None, -(r[2] or 0), -r[5], r[0]),
-    "title": lambda r: (str(r[1]).casefold(), r[0]),
+    "underrated": lambda r: (r[4] is None, -_weighted_rating(r[4], r[5], 150), r[0]),
 }
+# Without a search text, these orders list only titles with enough votes to matter,
+# and "rating" ranks by a vote-weighted score so a handful of 10s cannot top it.
+BROWSE_SORT_MIN_VOTES = {"newest": 300, "underrated": 150}
+# "Sottovalutati": well-liked titles that stayed out of the mainstream. Candidates
+# have a modest audience (few votes) and sit outside the BGG top ranks; they are
+# ordered by a rating with a light prior (150 votes), so a real consensus of
+# 7.5+ among a few hundred voters still wins over popularity.
+BROWSE_SORT_MAX_VOTES = {"underrated": 3000}
+UNDERRATED_MIN_RANK = 1500
+UNDERRATED_MIN_AVERAGE = 7.0
 BROWSE_CACHE_SECONDS = 300
 # Esplora reads every stored /thing (hundreds of MB): kept longer and
 # refreshed in the background rather than on a user request.
@@ -682,6 +708,18 @@ class BggReferenceCatalog:
             rows = entry["rows"]
             if expansion is not None:
                 rows = [row for row in rows if int(row[6]) == expansion]
+            floor = BROWSE_SORT_MIN_VOTES.get(sort, 0)
+            if floor:
+                rows = [row for row in rows if int(row[5] or 0) >= floor]
+            ceiling = BROWSE_SORT_MAX_VOTES.get(sort)
+            if ceiling:
+                rows = [row for row in rows if int(row[5] or 0) <= ceiling]
+            if sort == "underrated":
+                rows = [
+                    row for row in rows
+                    if (row[4] or 0) >= UNDERRATED_MIN_AVERAGE
+                    and (not row[3] or int(row[3]) > UNDERRATED_MIN_RANK)
+                ]
             orders[order_key] = [row[0] for row in sorted(rows, key=BROWSE_SORT_KEYS[sort])]
         return orders[order_key]
 
