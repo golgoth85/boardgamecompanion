@@ -6066,66 +6066,274 @@ function playDuration(minutes) {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-function playPlayersMarkup(play) {
-  const players = Array.isArray(play.players) ? play.players : [];
-  if (!players.length) {
-    return play.player_count ? `<span class="play-chip">${formatNumber(play.player_count, 0)} giocatori</span>` : "";
-  }
-  return players.map((entry) => {
-    const player = {...entry, winner: play.play_mode !== "cooperative" && entry.winner};
-    return `
-    <span class="play-chip ${player.winner ? "is-winner" : ""}" ${player.winner ? 'title="Vincitore"' : ""}>
-      ${player.winner ? `<i aria-hidden="true">${icon("crown")}</i>` : ""}${escapeHtml(player.name || "Giocatore")}${player.score ? `<small>${escapeHtml(player.score)}</small>` : ""}
-    </span>
-  `;
-  }).join("") + (play.player_count > players.length
-    ? `<span class="play-chip">+${formatNumber(play.player_count - players.length, 0)}</span>`
-    : "");
+// Profili dei giocatori fissi: caricati una volta e aggiornati dopo ogni modifica.
+let playerProfiles = [];
+let playerProfilesLoaded = false;
+
+async function loadPlayerProfiles({force = false} = {}) {
+  if (playerProfilesLoaded && !force) return playerProfiles;
+  const payload = await api("/api/players");
+  playerProfiles = payload.items || [];
+  playerProfilesLoaded = true;
+  return playerProfiles;
 }
 
-function playRow(play, {showGame = true} = {}) {
-  const facts = [
-    play.session ? `<span class="play-round-number">Partita ${Number(play.session_round)}</span>` : "",
-    play.outcome ? `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" ? " di gruppo" : ""}</span>` : "",
-    play.completed_game ? `<span class="play-outcome is-completed"><i aria-hidden="true">${icon("crown")}</i>Completato</span>` : "",
-    play.duration_minutes ? `<span>${escapeHtml(playDuration(play.duration_minutes))}</span>` : "",
-    play.location ? `<span>${escapeHtml(play.location)}</span>` : "",
-  ].filter(Boolean).join("");
-  return `
-    <article class="play-row ${showGame ? "" : "is-game-scoped"}" data-play-id="${Number(play.id)}">
-      <div class="play-row-aside">
-      ${showGame ? `
-        <a class="play-row-cover" href="/games/${Number(play.bgg_id)}" data-nav aria-hidden="true" tabindex="-1">
-          ${play.has_cover
-            ? `<img src="${coverSrc(play.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-            : `<span>${escapeHtml(initials(play.title))}</span>`}
-        </a>
-      ` : ""}
-      <time class="play-row-date" datetime="${escapeHtml(play.played_on)}">
-        <strong>${escapeHtml(playDate(play.played_on, {day: "numeric"}))}</strong>
-        <small>${escapeHtml(playDate(play.played_on, {month: "short"}))}</small>
-      </time>
-      </div>
-      <div class="play-row-body">
-        <div class="play-row-head">
-          ${showGame ? `<a class="play-row-title" href="/games/${Number(play.bgg_id)}" data-nav>${escapeHtml(play.title)}</a>` : ""}
-          ${play.activity ? `<span class="play-row-activity">${escapeHtml(play.activity)}</span>` : ""}
-          <span class="play-row-facts">${facts}</span>
-        </div>
-        <div class="play-row-players">${playPlayersMarkup(play)}</div>
+function playerNameKey(value) {
+  return String(value || "").trim().split(/\s+/).join(" ").toLocaleLowerCase("it-IT");
+}
+
+function profileById(id) {
+  return playerProfiles.find((profile) => Number(profile.id) === Number(id)) || null;
+}
+
+function profileForName(name) {
+  const key = playerNameKey(name);
+  if (!key) return null;
+  return playerProfiles.find((profile) => [profile.name, ...(profile.aliases || [])].some((item) => playerNameKey(item) === key)) || null;
+}
+
+function playerPhotoSrc(profile) {
+  return `/api/players/${Number(profile.id)}/photo?v=${encodeURIComponent(profile.photo_version || "")}`;
+}
+
+function playerAvatar(profile, {name = "", className = ""} = {}) {
+  const label = profile?.name || name || "?";
+  const letters = escapeHtml(initials(label).slice(0, 2));
+  if (!profile) return `<span class="player-avatar is-guest ${className}" aria-hidden="true">${letters}</span>`;
+  return `<span class="player-avatar ${className}" style="--player-color:${escapeHtml(profile.color || "#3987e5")}" aria-hidden="true">${
+    profile.has_photo ? `<img src="${playerPhotoSrc(profile)}" alt="" loading="lazy">` : letters}</span>`;
+}
+
+function playerHref(profile) {
+  return `/plays/players/${Number(profile.id)}`;
+}
+
+// Nome cliccabile: i giocatori fissi aprono il profilo, gli ospiti filtrano il diario.
+function playerNameLink(entry, {winner = false, score = null, compact = false} = {}) {
+  const profile = entry.profile_id ? profileById(entry.profile_id) : profileForName(entry.name);
+  const name = profile?.name || entry.name || "Giocatore";
+  const inner = `${playerAvatar(profile, {name})}<span>${escapeHtml(name)}</span>${
+    winner ? `<i class="play-chip-crown" title="Vincitore">${icon("crown")}</i>` : ""}${
+    score ? `<small>${escapeHtml(score)}</small>` : ""}`;
+  const classes = `play-chip ${profile ? "is-profile" : "is-guest"} ${winner ? "is-winner" : ""} ${compact ? "is-compact" : ""}`;
+  if (profile) return `<a class="${classes}" href="${playerHref(profile)}" data-nav title="Profilo di ${escapeHtml(name)}">${inner}</a>`;
+  if (!entry.name) return `<span class="${classes}">${inner}</span>`;
+  return `<button class="${classes}" type="button" data-plays-player="${escapeHtml(entry.name)}" title="Partite con ${escapeHtml(name)}">${inner}</button>`;
+}
+
+function playPlayersMarkup(play, {withResults = true} = {}) {
+  const players = Array.isArray(play.players) ? play.players : [];
+  const extra = Number(play.player_count || 0) - players.length;
+  return players.map((entry) => playerNameLink(entry, {
+    winner: withResults && play.play_mode !== "cooperative" && entry.winner,
+    score: withResults ? entry.score : null,
+  })).join("") + (extra > 0
+    ? `<span class="play-chip is-more">+${formatNumber(extra, 0)}${players.length ? "" : ` ${extra === 1 ? "giocatore" : "giocatori"}`}</span>` : "");
+}
+
+function playPlayersKey(play) {
+  return (play.players || []).map((entry) => playerNameKey(profileForName(entry.name)?.name || entry.name)).sort().join("|")
+    + `#${Number(play.player_count || 0)}`;
+}
+
+function playOutcomeMarkup(play) {
+  if (!play.outcome) return "";
+  return `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" ? " di gruppo" : ""}</span>`;
+}
+
+// Gruppo: stesse partite di uno stesso gioco nello stesso giorno (una sessione o partite separate).
+function groupPlaysByDay(plays) {
+  const days = [];
+  const byDay = new Map();
+  for (const play of plays) {
+    let day = byDay.get(play.played_on);
+    if (!day) {
+      day = {date: play.played_on, games: [], byGame: new Map()};
+      byDay.set(play.played_on, day);
+      days.push(day);
+    }
+    let game = day.byGame.get(play.bgg_id);
+    if (!game) {
+      game = {bgg_id: play.bgg_id, title: play.title, has_cover: play.has_cover, plays: []};
+      day.byGame.set(play.bgg_id, game);
+      day.games.push(game);
+    }
+    game.plays.push(play);
+  }
+  for (const day of days) {
+    for (const game of day.games) {
+      game.plays.sort((a, b) => (a.session_round || 0) - (b.session_round || 0) || a.id - b.id);
+      const sessions = new Map();
+      game.minutes = 0;
+      for (const play of game.plays) {
+        if (play.session) sessions.set(play.session.id, play.session.duration_minutes || 0);
+        else game.minutes += Number(play.duration_minutes || 0);
+      }
+      for (const minutes of sessions.values()) game.minutes += Number(minutes || 0);
+      game.playersKey = playPlayersKey(game.plays[0]);
+      game.samePlayers = game.plays.every((play) => playPlayersKey(play) === game.playersKey);
+      const places = new Set(game.plays.map((play) => play.location || ""));
+      game.location = places.size === 1 ? game.plays[0].location || "" : null;
+      const activities = [...new Set(game.plays.map((play) => play.activity).filter(Boolean))];
+      game.activities = activities;
+    }
+    day.samePlayers = day.games.every((game) => game.samePlayers && game.playersKey === day.games[0].playersKey);
+    const places = new Set(day.games.map((game) => game.location));
+    day.location = places.size === 1 && !places.has(null) ? day.games[0].location : null;
+    day.minutes = day.games.reduce((sum, game) => sum + game.minutes, 0);
+    day.count = day.games.reduce((sum, game) => sum + game.plays.length, 0);
+  }
+  return days;
+}
+
+function playResultSummary(game) {
+  const plays = game.plays;
+  const mode = plays[0].play_mode;
+  if (plays.length === 1) {
+    const play = plays[0];
+    if (mode === "cooperative" || !mode) return playOutcomeMarkup(play);
+    const winners = (play.players || []).filter((entry) => entry.winner);
+    const scored = (play.players || []).some((entry) => entry.score);
+    if (scored) return ""; // i punti stanno accanto ai nomi
+    return winners.map((entry) => playerNameLink(entry, {winner: true, compact: true})).join("") || playOutcomeMarkup(play);
+  }
+  if (mode === "cooperative" || plays.every((play) => play.play_mode !== "competitive" && play.outcome)) {
+    const won = plays.filter((play) => play.outcome === "won").length;
+    const decided = plays.filter((play) => play.outcome).length;
+    return `<span class="play-result-dots" role="img" aria-label="${won} vittorie su ${plays.length} partite">${plays.map((play, index) => `
+      <i class="is-${play.outcome || "unknown"}" title="Partita ${index + 1}: ${play.outcome ? PLAY_OUTCOMES[play.outcome] : "esito non indicato"}"></i>`).join("")}</span>
+      <span class="play-result-text">${decided ? `${won} ${won === 1 ? "vittoria" : "vittorie"} su ${plays.length}` : `${plays.length} partite`}</span>`;
+  }
+  const tally = new Map();
+  for (const play of plays) {
+    for (const entry of play.players || []) {
+      if (!entry.winner) continue;
+      const key = playerNameKey(profileForName(entry.name)?.name || entry.name);
+      const item = tally.get(key) || {entry, wins: 0};
+      item.wins += 1;
+      tally.set(key, item);
+    }
+  }
+  return [...tally.values()].sort((a, b) => b.wins - a.wins).map(({entry, wins}) =>
+    `${playerNameLink(entry, {winner: true, compact: true, score: wins > 1 ? `×${wins}` : null})}`).join("");
+}
+
+function playRoundLine(play, index, game) {
+  const mode = play.play_mode;
+  const result = mode === "competitive"
+    ? (play.players || []).filter((entry) => entry.winner || entry.score).map((entry) => playerNameLink(entry, {winner: entry.winner, score: entry.score, compact: true})).join("")
+    : playOutcomeMarkup(play);
+  const activity = game.activities.length > 1 && play.activity ? `<span class="play-round-activity">${escapeHtml(play.activity)}</span>` : "";
+  return `<li class="play-round-line">
+      <span class="play-round-index">${index + 1}</span>
+      <div class="play-round-main">
+        <div class="play-round-result">${result || '<span class="muted">Nessun risultato</span>'}${activity}
+          ${!game.samePlayers ? `<span class="play-round-players">${playPlayersMarkup(play, {withResults: false})}</span>` : ""}</div>
         ${play.notes ? `<p class="play-row-notes">${escapeHtml(play.notes)}</p>` : ""}
       </div>
       <button class="icon-button play-row-edit" type="button" data-play-edit="${Number(play.id)}"
-              aria-label="Modifica la partita del ${escapeHtml(playDate(play.played_on))}" title="Modifica">${icon("settings")}</button>
-    </article>
-  `;
+              aria-label="Modifica la partita ${index + 1} a ${escapeHtml(play.title)}" title="Modifica">${icon("pencil")}</button>
+    </li>`;
 }
 
-function bindPlayRows(root, plays, onSaved) {
+function playGameLine(game, day, {showGame = true} = {}) {
+  const plays = game.plays;
+  const single = plays.length === 1;
+  const play = plays[0];
+  const completed = plays.some((item) => item.completed_game);
+  const facts = [
+    !single ? `<span class="play-fact"><b>${plays.length}</b> partite</span>` : "",
+    game.minutes ? `<span class="play-fact">${icon("clock")}${escapeHtml(playDuration(game.minutes))}</span>` : "",
+    game.location && !day.location ? `<span class="play-fact">${icon("pin")}${escapeHtml(game.location)}</span>` : "",
+    completed ? `<span class="play-outcome is-completed">${icon("crown")}Completato</span>` : "",
+  ].filter(Boolean).join("");
+  const showPlayers = !day.samePlayers || !showGame;
+  const groupKey = `${day.date}:${game.bgg_id}`;
+  return `
+    <div class="play-line ${showGame ? "" : "is-game-scoped"}" data-play-group="${escapeHtml(groupKey)}">
+      ${showGame ? `<a class="play-line-cover" href="/games/${Number(game.bgg_id)}" data-nav tabindex="-1" aria-hidden="true">
+        ${game.has_cover ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span>${escapeHtml(initials(game.title))}</span>`}
+      </a>` : ""}
+      <div class="play-line-body">
+        <div class="play-line-head">
+          ${showGame ? `<a class="play-line-title" href="/games/${Number(game.bgg_id)}" data-nav>${escapeHtml(game.title)}</a>` : ""}
+          ${game.activities.length ? `<span class="play-line-activity">${escapeHtml(game.activities.join(" · "))}</span>` : ""}
+        </div>
+        <div class="play-line-results">${playResultSummary(game)}${facts}</div>
+        ${showPlayers || (single && (play.players || []).some((entry) => entry.score)) ? `<div class="play-row-players">${
+          playPlayersMarkup(play, {withResults: single})}</div>` : ""}
+        ${single && play.notes ? `<p class="play-row-notes">${escapeHtml(play.notes)}</p>` : ""}
+        ${!single ? `<ol class="play-line-rounds" hidden>${plays.map((item, index) => playRoundLine(item, index, game)).join("")}</ol>` : ""}
+      </div>
+      <div class="play-line-actions">
+        <button class="icon-button play-again" type="button" data-play-again="${Number(game.bgg_id)}" data-play-title="${escapeHtml(game.title)}"
+                aria-label="Registra un'altra partita a ${escapeHtml(game.title)}" title="Registra un'altra partita">${icon("plus")}</button>
+        ${single
+          ? `<button class="icon-button play-row-edit" type="button" data-play-edit="${Number(play.id)}"
+                     aria-label="Modifica la partita del ${escapeHtml(playDate(play.played_on))} a ${escapeHtml(game.title)}" title="Modifica">${icon("pencil")}</button>`
+          : `<button class="icon-button play-expand" type="button" data-play-expand aria-expanded="false"
+                     aria-label="Mostra le ${plays.length} partite a ${escapeHtml(game.title)}" title="Dettaglio delle partite">${icon("caret-down")}</button>`}
+      </div>
+    </div>`;
+}
+
+function playDiaryMarkup(plays, {showGame = true, months = true} = {}) {
+  let month = "";
+  return groupPlaysByDay(plays).map((day) => {
+    const key = day.date.slice(0, 7);
+    const heading = months && key !== month
+      ? `<h2 class="plays-month">${escapeHtml(playDate(`${key}-01`, {month: "long", year: "numeric"}))}</h2>` : "";
+    month = key;
+    const first = day.games[0].plays[0];
+    const meta = [
+      day.samePlayers && showGame ? `<span class="play-day-players">${playPlayersMarkup(first, {withResults: false})}</span>` : "",
+      day.location ? `<span class="play-fact">${icon("pin")}${escapeHtml(day.location)}</span>` : "",
+      day.games.length > 1 && day.minutes ? `<span class="play-fact">${icon("clock")}${escapeHtml(playDuration(day.minutes))} in tutto</span>` : "",
+    ].filter(Boolean).join("");
+    return heading + `
+      <article class="play-day" aria-label="${escapeHtml(playDate(day.date, {weekday: "long", day: "numeric", month: "long"}))}">
+        <time class="play-day-date" datetime="${escapeHtml(day.date)}">
+          <small>${escapeHtml(playDate(day.date, {weekday: "short"}))}</small>
+          <strong>${escapeHtml(playDate(day.date, {day: "numeric"}))}</strong>
+          <small>${escapeHtml(playDate(day.date, {month: "short"}))}</small>
+        </time>
+        <div class="play-day-body">
+          ${meta ? `<div class="play-day-meta">${meta}</div>` : ""}
+          ${day.games.map((game) => playGameLine(game, day, {showGame})).join("")}
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function bindPlayDiary(root, plays, onSaved) {
   root.querySelectorAll("[data-play-edit]").forEach((button) => {
     button.addEventListener("click", () => {
       const play = plays.find((item) => Number(item.id) === Number(button.dataset.playEdit));
       if (play) void openPlayDialog({play, onSaved});
+    });
+  });
+  root.querySelectorAll("[data-play-again]").forEach((button) => {
+    button.addEventListener("click", () => void openPlayDialog({
+      bggId: Number(button.dataset.playAgain), title: button.dataset.playTitle, onSaved}));
+  });
+  root.querySelectorAll("[data-play-expand]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const line = button.closest(".play-line");
+      const rounds = line.querySelector(".play-line-rounds");
+      const open = rounds.hidden;
+      rounds.hidden = !open;
+      line.classList.toggle("is-open", open);
+      button.setAttribute("aria-expanded", String(open));
+      button.innerHTML = icon(open ? "caret-up" : "caret-down");
+    });
+  });
+  root.querySelectorAll("[data-plays-player]").forEach((button) => {
+    button.addEventListener("click", () => {
+      playsState.player = playsState.player === button.dataset.playsPlayer ? "" : button.dataset.playsPlayer;
+      playsState.view = "log";
+      if (!/^\/plays\/?$/.test(window.location.pathname)) history.pushState({}, "", "/plays");
+      void renderPlays();
+      window.scrollTo({top: 0});
     });
   });
 }
@@ -6186,7 +6394,7 @@ async function choosePlayGame(game) {
   try {
     const defaults = await api(`/api/plays/defaults?bgg_id=${context.bggId}`);
     if (context !== playDialogContext || context.bggId !== Number(game.bgg_id) || !playDialog.open) return;
-    applyPlayDefaults(defaults, {copy: true});
+    applyPlayDefaults(defaults, {copy: !context.presetPlayers});
     applySuggestedPlayMode(defaults.suggested_mode);
   } catch (error) { showToast(error.message, true); }
 }
@@ -6205,10 +6413,14 @@ function playIsMultiple() {
   return !playDialogContext.play && playDialog.querySelector("#playMultiple").checked;
 }
 
+function playerRowName(row) {
+  return row.dataset.playerName || row.querySelector(".play-player-name-input")?.value.trim() || "";
+}
+
 function sessionParticipants() {
   return [...playDialog.querySelectorAll(".play-player-row")].map((row) => ({
     key: row.dataset.playerKey,
-    name: row.querySelector("input[type=text]").value.trim(),
+    name: playerRowName(row),
   })).filter((player) => player.name);
 }
 
@@ -6328,11 +6540,12 @@ function ensurePlayDialog() {
         <fieldset class="play-players play-span-2">
           <legend>Giocatori</legend>
           <div class="play-copy-note" id="playCopyNote" hidden></div>
+          <div class="play-fixed-players" id="playFixedPlayers" role="group" aria-label="Giocatori fissi: tocca per aggiungere o togliere" hidden></div>
           <div class="play-player-head" aria-hidden="true"><span>Nome</span><span>Punti</span><span>Vince</span><span></span></div>
           <div id="playPlayerRows"></div>
           <datalist id="playPlayerNames"></datalist>
           <div class="play-player-actions">
-            <button class="button button-ghost" id="playAddPlayer" type="button">${icon("plus")}<span>Giocatore</span></button>
+            <button class="button button-ghost" id="playAddPlayer" type="button">${icon("plus")}<span>Ospite</span></button>
             <output class="play-auto-count" id="playAutoCount" aria-live="polite"></output>
           </div>
           <details class="play-count-details" id="playCountDetails">
@@ -6358,11 +6571,11 @@ function ensurePlayDialog() {
           </select>
         </label>
         <p class="muted play-span-2" id="playLegacyOutcome" hidden></p>
-        <label class="settings-field">
-          <span>Luogo</span>
-          <input id="playLocation" type="text" maxlength="120" list="playLocations" autocomplete="off" placeholder="es. Casa">
-          <datalist id="playLocations"></datalist>
-        </label>
+        <div class="settings-field play-location-field">
+          <label for="playLocationSelect">Luogo</label>
+          <select id="playLocationSelect"><option value="">—</option><option value="__new">Nuovo luogo…</option></select>
+          <input id="playLocation" type="text" maxlength="120" autocomplete="off" placeholder="Nome del luogo, es. Casa" aria-label="Nuovo luogo">
+        </div>
         <label class="settings-field play-span-2">
           <span>Com'è andata</span>
           <textarea id="playNotes" rows="3" maxlength="4000" placeholder="Momenti chiave, regole da ricordare, impressioni…"></textarea>
@@ -6384,8 +6597,13 @@ function ensurePlayDialog() {
   playDialog.querySelector("#closePlayDialog").addEventListener("click", close);
   playDialog.querySelector("#cancelPlayDialog").addEventListener("click", close);
   playDialog.querySelector("#playAddPlayer").addEventListener("click", () => {
-    addPlayerRow({});
+    addPlayerRow({}, {guest: true});
     playDialog.querySelector("#playPlayerRows .play-player-row:last-child input")?.focus();
+  });
+  playDialog.querySelector("#playLocationSelect").addEventListener("change", (event) => {
+    const input = playDialog.querySelector("#playLocation");
+    input.hidden = event.target.value !== "__new";
+    if (!input.hidden) input.focus();
   });
   const gameInput = playDialog.querySelector("#playGame");
   gameInput.addEventListener("input", () => {
@@ -6445,37 +6663,91 @@ function ensurePlayDialog() {
   return playDialog;
 }
 
-function addPlayerRow(player) {
+function playerRowForProfile(profileId) {
+  return playDialog.querySelector(`.play-player-row[data-profile-id="${Number(profileId)}"]`);
+}
+
+// Giocatori fissi: un tocco li aggiunge o li toglie; gli ospiti si scrivono a mano.
+function renderFixedPlayerChips() {
+  const root = playDialog.querySelector("#playFixedPlayers");
+  root.hidden = !playerProfiles.length;
+  root.innerHTML = playerProfiles.map((profile) => {
+    const selected = Boolean(playerRowForProfile(profile.id));
+    return `<button type="button" class="play-fixed-chip ${selected ? "is-selected" : ""}" aria-pressed="${selected}" data-fixed-player="${Number(profile.id)}">
+      ${playerAvatar(profile)}<span>${escapeHtml(profile.name)}</span><i aria-hidden="true">${icon(selected ? "check" : "plus")}</i></button>`;
+  }).join("");
+  root.querySelectorAll("[data-fixed-player]").forEach((button) => button.addEventListener("click", () => {
+    const profile = profileById(button.dataset.fixedPlayer);
+    const row = playerRowForProfile(profile.id);
+    if (row) row.remove();
+    else {
+      // Una riga ospite vuota lasciata aperta viene riusata dal giocatore scelto.
+      const empty = [...playDialog.querySelectorAll(".play-player-row.is-guest")].find((item) => !playerRowName(item)
+        && !item.querySelector(".play-player-score").value && !item.querySelector(".play-winner input").checked);
+      empty?.remove();
+      addPlayerRow({name: profile.name});
+    }
+    syncPlayerCount();
+    syncPlayMode();
+    renderFixedPlayerChips();
+    playDialog.querySelector(`[data-fixed-player="${Number(profile.id)}"]`)?.focus();
+  }));
+}
+
+function addPlayerRow(player, {guest = false} = {}) {
   const rows = playDialog.querySelector("#playPlayerRows");
+  const profile = guest ? null : profileForName(player.name);
+  if (profile && playerRowForProfile(profile.id)) return;
   const row = document.createElement("div");
-  row.className = "play-player-row";
+  row.className = `play-player-row ${profile ? "is-fixed" : "is-guest"}`;
   playDialogContext.playerSeq = (playDialogContext.playerSeq || 0) + 1;
   row.dataset.playerKey = String(playDialogContext.playerSeq);
+  if (profile) {
+    row.dataset.profileId = String(profile.id);
+    row.dataset.playerName = profile.name;
+  }
+  const label = profile?.name || player.name || "giocatore";
   row.innerHTML = `
-    <input type="text" maxlength="60" list="playPlayerNames" autocomplete="off" aria-label="Nome giocatore" placeholder="Nome" value="${escapeHtml(player.name || "")}">
-    <input type="text" maxlength="20" inputmode="decimal" aria-label="Punti" placeholder="—" value="${escapeHtml(player.score || "")}">
-    <label class="play-winner" title="Vincitore"><input type="checkbox" aria-label="Vincitore" ${player.winner ? "checked" : ""}><span aria-hidden="true">${icon("crown")}</span></label>
-    <button class="icon-button" type="button" aria-label="Rimuovi giocatore">×</button>
+    ${profile
+      ? `<span class="play-player-name">${playerAvatar(profile)}<span>${escapeHtml(profile.name)}</span></span>`
+      : `<input class="play-player-name-input" type="text" maxlength="60" list="playPlayerNames" autocomplete="off" aria-label="Nome ospite" placeholder="Nome ospite" value="${escapeHtml(player.name || "")}">`}
+    <input class="play-player-score" type="text" maxlength="20" inputmode="decimal" aria-label="Punti di ${escapeHtml(label)}" placeholder="—" value="${escapeHtml(player.score || "")}">
+    <label class="play-winner" title="Vincitore"><input type="checkbox" aria-label="${escapeHtml(label)} vince" ${player.winner ? "checked" : ""}><span aria-hidden="true">${icon("crown")}</span></label>
+    <button class="icon-button" type="button" aria-label="Togli ${escapeHtml(label)}">×</button>
   `;
   row.querySelector("button").addEventListener("click", () => {
     row.remove();
     syncPlayerCount();
+    renderFixedPlayerChips();
   });
   row.addEventListener("input", syncPlayerCount);
+  // Un ospite scritto con il nome di un giocatore fisso diventa quel giocatore.
+  row.querySelector(".play-player-name-input")?.addEventListener("change", (event) => {
+    const match = profileForName(event.target.value);
+    if (!match) return;
+    const values = {name: match.name, score: row.querySelector(".play-player-score").value, winner: row.querySelector(".play-winner input").checked};
+    if (playerRowForProfile(match.id)) {
+      row.remove();
+    } else {
+      const placeholder = document.createElement("div");
+      row.replaceWith(placeholder);
+      addPlayerRow(values);
+      placeholder.replaceWith(rows.lastElementChild);
+    }
+    syncPlayerCount();
+    renderFixedPlayerChips();
+  });
   rows.append(row);
   syncPlayerCount();
   syncPlayMode();
 }
 
 function playerRowsData() {
-  return [...playDialog.querySelectorAll(".play-player-row")].map((row) => {
-    const [name, score] = row.querySelectorAll("input[type=text]");
-    return {
-      name: name.value.trim(),
-      score: score.value.trim() || null,
-      winner: row.querySelector("input[type=checkbox]").checked,
-    };
-  }).filter((player) => player.name || player.score || player.winner);
+  return [...playDialog.querySelectorAll(".play-player-row")].map((row) => ({
+    name: playerRowName(row),
+    score: row.querySelector(".play-player-score").value.trim() || null,
+    winner: row.querySelector(".play-winner input").checked,
+  })).filter((player) => player.name || player.score || player.winner);
 }
 
 function syncPlayerCount() {
@@ -6490,16 +6762,56 @@ function syncPlayerCount() {
 function setPlayers(players) {
   playDialog.querySelector("#playPlayerRows").innerHTML = "";
   for (const player of players) addPlayerRow(player);
-  if (!players.length) addPlayerRow({});
+  if (!players.length && !playerProfiles.length) addPlayerRow({}, {guest: true});
+  renderFixedPlayerChips();
+  syncPlayerCount();
+}
+
+// Luoghi: menu che si alimenta con i luoghi già usati (i più frequenti prima) e «Nuovo luogo…».
+function playLocationValue() {
+  const select = playDialog.querySelector("#playLocationSelect");
+  const input = playDialog.querySelector("#playLocation");
+  return (select.hidden || select.value === "__new" ? input.value : select.value).trim() || null;
+}
+
+function setPlayLocation(value) {
+  const select = playDialog.querySelector("#playLocationSelect");
+  const input = playDialog.querySelector("#playLocation");
+  const known = [...select.options].find((option) => option.value && option.value !== "__new" && playerNameKey(option.value) === playerNameKey(value));
+  select.hidden = select.options.length <= 2;
+  if (select.hidden) {
+    input.hidden = false;
+    input.value = value || "";
+  } else if (known || !value) {
+    select.value = known ? known.value : "";
+    input.hidden = true;
+    input.value = "";
+  } else {
+    select.value = "__new";
+    input.hidden = false;
+    input.value = value;
+  }
+}
+
+function renderLocationOptions(locations) {
+  const current = playLocationValue();
+  const select = playDialog.querySelector("#playLocationSelect");
+  select.innerHTML = `<option value="">—</option>${(locations || []).map((name) =>
+    `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}<option value="__new">Nuovo luogo…</option>`;
+  setPlayLocation(current);
 }
 
 // Players, place and activity are copied from the last play: of this game, else any.
 function applyPlayDefaults(defaults, {copy}) {
   playDialogContext.defaults = defaults;
-  playDialog.querySelector("#playPlayerNames").innerHTML = (defaults.player_names || [])
+  if (defaults.profiles) {
+    playerProfiles = defaults.profiles;
+    playerProfilesLoaded = true;
+  }
+  playDialog.querySelector("#playPlayerNames").innerHTML = (defaults.guest_names || defaults.player_names || [])
     .map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
-  playDialog.querySelector("#playLocations").innerHTML = (defaults.locations || [])
-    .map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  renderLocationOptions(defaults.locations || []);
+  renderFixedPlayerChips();
   const last = defaults.last_play;
   const note = playDialog.querySelector("#playCopyNote");
   const copyActivity = playDialog.querySelector("#playCopyActivity");
@@ -6507,6 +6819,7 @@ function applyPlayDefaults(defaults, {copy}) {
   copyActivity.textContent = last?.activity ? `Come l'ultima volta: ${last.activity}` : "Come l'ultima volta";
   if (!copy) {
     note.hidden = true;
+    if (playDialogContext.presetPlayers && !playLocationValue()) setPlayLocation(last?.location || "");
     return;
   }
   if (!last) {
@@ -6518,7 +6831,7 @@ function applyPlayDefaults(defaults, {copy}) {
   const count = playDialog.querySelector("#playCount");
   count.value = "";
   playDialog.querySelector("#playCountDetails").open = false;
-  if (!playDialog.querySelector("#playLocation").value) playDialog.querySelector("#playLocation").value = last.location || "";
+  if (!playLocationValue()) setPlayLocation(last.location || "");
   note.hidden = false;
   note.innerHTML = `
     <span>Giocatori ripresi dall'ultima partita${defaults.same_game ? "" : ` (${escapeHtml(last.title)})`} del ${escapeHtml(playDate(last.played_on))}.</span>
@@ -6531,9 +6844,11 @@ function applyPlayDefaults(defaults, {copy}) {
   });
 }
 
-async function openPlayDialog({bggId = null, title = "", play = null, onSaved = null} = {}) {
+async function openPlayDialog({bggId = null, title = "", play = null, players = null, onSaved = null} = {}) {
   ensurePlayDialog();
+  try { await loadPlayerProfiles(); } catch (_) { /* il modulo funziona anche senza profili */ }
   const context = {bggId: play ? Number(play.bgg_id) : (bggId ? Number(bggId) : null), play, onSaved, defaults: null, modeTouched: false, rounds: [], playerSeq: 0,
+    presetPlayers: Boolean(players?.length),
     sessionRequestId: Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")};
   context.fixed = Boolean(context.bggId);
   playDialogContext = context;
@@ -6569,18 +6884,19 @@ async function openPlayDialog({bggId = null, title = "", play = null, onSaved = 
     playDialog.querySelector("#playDuration").value = (play.session ? play.session.duration_minutes : play.duration_minutes) || "";
     playDialog.querySelector("#playActivity").value = play.activity || "";
     playDialog.querySelector("#playOutcome").value = play.outcome || "";
-    playDialog.querySelector("#playLocation").value = play.location || "";
+    setPlayLocation(play.location || "");
     playDialog.querySelector("#playNotes").value = play.notes || "";
     playDialog.querySelector("#playCompleted").checked = Boolean(play.completed_game);
   } else {
-    setPlayers([]);
+    setPlayLocation("");
+    setPlayers(players || []);
   }
   openDialog(playDialog, {focus: fixed ? dateInput : playDialog.querySelector("#playGame")});
   try {
     const defaultsGameId = context.bggId;
     const defaults = await api(`/api/plays/defaults${defaultsGameId ? `?bgg_id=${defaultsGameId}` : ""}`);
     if (context !== playDialogContext || !playDialog.open || context.bggId !== defaultsGameId) return;
-    applyPlayDefaults(defaults, {copy: !play && context.bggId === (bggId ? Number(bggId) : null)});
+    applyPlayDefaults(defaults, {copy: !play && !context.presetPlayers && context.bggId === (bggId ? Number(bggId) : null)});
     if (context.fixed) applySuggestedPlayMode(defaults.suggested_mode);
   } catch (error) {
     showToast(error.message, true);
@@ -6616,7 +6932,7 @@ async function savePlay() {
     play_mode: playDialog.querySelector("#playMode").value,
     ...(playDialog.querySelector("#playMode").value === "cooperative"
       ? {outcome: playDialog.querySelector("#playOutcome").value || null} : {}),
-    location: text("#playLocation"),
+    location: playLocationValue(),
     notes: text("#playNotes"),
     completed_game: playDialog.querySelector("#playCompleted").checked,
   };
@@ -6735,6 +7051,253 @@ function playedGameCard(game, stats) {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Statistiche per periodo (giorno, settimana, mese, anno, sempre), condivise da Partite e profili.
+// ---------------------------------------------------------------------------
+const PLAY_PERIODS = [["day", "Giorno"], ["week", "Settimana"], ["month", "Mese"], ["year", "Anno"], ["all", "Sempre"]];
+
+function playHours(minutes) {
+  const value = Number(minutes) || 0;
+  if (!value) return "0";
+  return value < 60 ? `${value} min` : `${formatNumber(value / 60, value < 600 ? 1 : 0)} h`;
+}
+
+function capitalizeFirst(text) {
+  return text ? text.charAt(0).toLocaleUpperCase("it-IT") + text.slice(1) : text;
+}
+
+function playPeriodLabel(stats) {
+  return capitalizeFirst(playPeriodText(stats));
+}
+
+function playPeriodText(stats) {
+  const start = new Date(`${stats.start}T12:00:00`);
+  const end = new Date(`${stats.end}T12:00:00`);
+  if (stats.period === "day") return playDate(stats.start, {weekday: "long", day: "numeric", month: "long", year: "numeric"});
+  if (stats.period === "week") {
+    const sameMonth = start.getMonth() === end.getMonth();
+    const left = start.toLocaleDateString("it-IT", sameMonth ? {day: "numeric"} : {day: "numeric", month: "short"});
+    return `${left} – ${end.toLocaleDateString("it-IT", {day: "numeric", month: sameMonth ? "long" : "short", year: "numeric"})}`;
+  }
+  if (stats.period === "month") return start.toLocaleDateString("it-IT", {month: "long", year: "numeric"});
+  if (stats.period === "year") return String(start.getFullYear());
+  return stats.first_played_on ? `Dal ${playDate(stats.first_played_on)}` : "Tutto lo storico";
+}
+
+function playPreviousLabel(period) {
+  return {day: "il giorno prima", week: "la settimana prima", month: "il mese prima", year: "l'anno prima"}[period] || "";
+}
+
+function playDelta(current, previous, period, format = (value) => formatNumber(value, 0)) {
+  if (!previous || period === "all") return "";
+  const diff = Number(current || 0) - Number(previous || 0);
+  if (!diff) return `<small class="play-kpi-delta">come ${playPreviousLabel(period)}</small>`;
+  return `<small class="play-kpi-delta ${diff > 0 ? "is-up" : "is-down"}">${diff > 0 ? "+" : "−"}${format(Math.abs(diff))} rispetto al${{
+    day: " giorno", week: "la settimana", month: " mese", year: "l'anno"}[period]} prima</small>`;
+}
+
+function playSeriesLabel(item, period, index, count) {
+  const date = new Date(`${item.start}T12:00:00`);
+  if (period === "week") return date.toLocaleDateString("it-IT", {weekday: "short"});
+  if (period === "month") {
+    const day = date.getDate();
+    return day === 1 || day % 5 === 0 ? String(day) : "";
+  }
+  if (item.key.length === 4) return item.key;
+  if (period === "all" && count > 12) return date.getMonth() === 0 || index === 0 ? date.toLocaleDateString("it-IT", {month: "short", year: "2-digit"}) : "";
+  return date.toLocaleDateString("it-IT", {month: "narrow"});
+}
+
+function playSeriesTitle(item, period) {
+  if (period === "week" || period === "month") return playDate(item.start, {weekday: "long", day: "numeric", month: "long"});
+  if (item.key.length === 4) return item.key;
+  return playDate(item.start, {month: "long", year: "numeric"});
+}
+
+function playStatsChart(stats, metric) {
+  const series = stats.series || [];
+  if (!series.length) return "";
+  const value = (item) => metric === "minutes" ? Number(item.minutes || 0) : Number(item.plays || 0);
+  const max = Math.max(1, ...series.map(value));
+  const today = todayIso();
+  const drill = stats.period === "week" || stats.period === "month" ? "day" : "month";
+  return `
+    <div class="play-chart" role="list" aria-label="${metric === "minutes" ? "Tempo di gioco" : "Partite"} per ${stats.period === "week" || stats.period === "month" ? "giorno" : stats.series[0].key.length === 4 ? "anno" : "mese"}"
+         style="--bars:${series.length}">
+      ${series.map((item, index) => {
+        const amount = value(item);
+        const text = `${playSeriesTitle(item, stats.period)}: ${metric === "minutes" ? playDuration(amount) || "nessun tempo registrato" : `${amount} ${amount === 1 ? "partita" : "partite"}`}`;
+        const target = item.key.length === 4 ? {period: "year", anchor: item.start} : {period: drill, anchor: item.start};
+        const future = item.start > today;
+        return `<button type="button" class="play-chart-bar ${amount ? "" : "is-empty"} ${item.start <= today && item.end >= today ? "is-today" : ""}" role="listitem"
+                  data-stats-drill="${target.period}" data-stats-anchor="${item.start}" ${future ? "disabled" : ""}
+                  aria-label="${escapeHtml(text)}" data-tip="${escapeHtml(text)}">
+            <span class="play-chart-fill" style="--h:${Math.round((amount / max) * 100)}%">${amount && series.length <= 14
+              ? `<b>${escapeHtml(metric === "minutes" ? playHours(amount) : String(amount))}</b>` : ""}</span>
+            <small aria-hidden="true">${escapeHtml(playSeriesLabel(item, stats.period, index, series.length))}</small>
+          </button>`;
+      }).join("")}
+    </div>`;
+}
+
+function playStatsGames(games, {focus = false} = {}) {
+  if (!games.length) return '<p class="play-empty">Nessun gioco nel periodo.</p>';
+  const max = Math.max(1, ...games.map((game) => game.plays));
+  return `<ol class="play-rank-list">${games.slice(0, 8).map((game) => `
+    <li><a class="play-rank-row" href="/games/${Number(game.bgg_id)}" data-nav>
+      <span class="play-rank-cover">${game.has_cover ? `<img src="${coverSrc(game.bgg_id)}" alt="" loading="lazy">` : escapeHtml(initials(game.title))}</span>
+      <span class="play-rank-body">
+        <strong>${escapeHtml(game.title)}</strong>
+        <small>${formatNumber(game.plays, 0)} ${game.plays === 1 ? "partita" : "partite"}${game.minutes ? ` · ${escapeHtml(playDuration(game.minutes))}` : ""}${focus && game.wins ? ` · ${formatNumber(game.wins, 0)} ${game.wins === 1 ? "vittoria" : "vittorie"}` : ""}</small>
+        <span class="play-rank-bar" style="--w:${Math.round((game.plays / max) * 100)}%"></span>
+      </span>
+    </a></li>`).join("")}</ol>${games.length > 8 ? `<p class="play-empty">e altri ${games.length - 8} giochi.</p>` : ""}`;
+}
+
+function playStatsPlayers(players, {label = "partite"} = {}) {
+  if (!players.length) return '<p class="play-empty">Nessun giocatore con nome nel periodo.</p>';
+  return `<ol class="play-rank-list">${players.slice(0, 10).map((player) => {
+    const profile = player.profile_id ? profileById(player.profile_id) : null;
+    const body = `${playerAvatar(profile, {name: player.name})}
+      <span class="play-rank-body"><strong>${escapeHtml(player.name)}</strong>
+        <small>${formatNumber(player.plays, 0)} ${label === "insieme" ? (player.plays === 1 ? "partita insieme" : "partite insieme") : (player.plays === 1 ? "partita" : "partite")}${
+          player.wins ? ` · <b>${formatNumber(player.wins, 0)}</b> ${player.wins === 1 ? "vittoria" : "vittorie"}` : ""}${
+          player.minutes ? ` · ${escapeHtml(playHours(player.minutes))}` : ""}</small></span>`;
+    return `<li>${profile
+      ? `<a class="play-rank-row is-person" href="${playerHref(profile)}" data-nav>${body}</a>`
+      : `<button class="play-rank-row is-person" type="button" data-plays-player="${escapeHtml(player.name)}">${body}</button>`}</li>`;
+  }).join("")}</ol>`;
+}
+
+const playStatsState = {period: "month", anchor: null, metric: "plays"};
+
+async function renderPlayStats(root, {playerId = null, player = "", onSaved = null} = {}) {
+  const state = playStatsState;
+  const params = new URLSearchParams({period: state.period});
+  if (state.anchor) params.set("anchor", state.anchor);
+  if (playerId) params.set("player_id", String(playerId));
+  else if (player) params.set("player", player);
+  root.innerHTML = `<div class="skeleton play-stats-skeleton"></div>`;
+  let stats;
+  try {
+    stats = await api(`/api/plays/stats?${params}`);
+  } catch (error) {
+    root.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if (!root.isConnected) return;
+  const focus = Boolean(playerId || player);
+  const totals = stats.totals;
+  const previous = stats.previous;
+  const rate = totals.decided ? Math.round((totals.wins / totals.decided) * 100) : null;
+  root.innerHTML = `
+    <div class="play-stats-bar">
+      <div class="catalog-view-switch play-period-switch" role="group" aria-label="Periodo">
+        ${PLAY_PERIODS.map(([key, label]) => `<button type="button" class="view-switch-button ${state.period === key ? "is-active" : ""}"
+          aria-pressed="${state.period === key}" data-stats-period="${key}">${label}</button>`).join("")}
+      </div>
+      <div class="play-period-nav">
+        <button class="icon-button" type="button" data-stats-step="${escapeHtml(stats.prev_anchor || "")}" ${stats.prev_anchor ? "" : "disabled"}
+                aria-label="Periodo precedente" title="Periodo precedente">${icon("caret-left")}</button>
+        <strong class="play-period-label" aria-live="polite">${escapeHtml(playPeriodLabel(stats))}</strong>
+        <button class="icon-button" type="button" data-stats-step="${escapeHtml(stats.next_anchor || "")}" ${stats.next_anchor ? "" : "disabled"}
+                aria-label="Periodo successivo" title="Periodo successivo">${icon("caret-right")}</button>
+        ${state.period !== "all" && !(stats.start <= todayIso() && stats.end >= todayIso())
+          ? `<button class="play-inline-action" type="button" data-stats-today>Oggi</button>` : ""}
+      </div>
+    </div>
+    <div class="play-kpis">
+      <div class="play-kpi"><span>Partite</span><strong>${formatNumber(totals.plays, 0)}</strong>${playDelta(totals.plays, previous?.plays, stats.period)}</div>
+      <div class="play-kpi"><span>Tempo di gioco</span><strong>${escapeHtml(playHours(totals.minutes))}</strong>${playDelta(totals.minutes, previous?.minutes, stats.period, playHours)}</div>
+      <div class="play-kpi"><span>Giochi diversi</span><strong>${formatNumber(totals.games, 0)}</strong></div>
+      <div class="play-kpi"><span>Giornate di gioco</span><strong>${formatNumber(totals.days, 0)}</strong></div>
+      ${focus
+        ? `<div class="play-kpi"><span>Vittorie</span><strong>${formatNumber(totals.wins, 0)}</strong><small class="play-kpi-delta">${rate === null ? "nessun esito registrato" : `${rate}% delle ${formatNumber(totals.decided, 0)} con esito`}</small></div>`
+        : `<div class="play-kpi"><span>Giocatori</span><strong>${formatNumber(totals.players, 0)}</strong></div>`}
+    </div>
+    ${stats.series.length ? `
+      <section class="play-stats-block play-stats-chart-block">
+        <div class="play-stats-block-head">
+          <h2>${state.metric === "minutes" ? "Tempo di gioco" : "Partite"} ${stats.period === "week" || stats.period === "month" ? "per giorno" : stats.series[0].key.length === 4 ? "per anno" : "per mese"}</h2>
+          <div class="catalog-view-switch play-metric-switch" role="group" aria-label="Misura del grafico">
+            <button type="button" class="view-switch-button ${state.metric === "plays" ? "is-active" : ""}" aria-pressed="${state.metric === "plays"}" data-stats-metric="plays">Partite</button>
+            <button type="button" class="view-switch-button ${state.metric === "minutes" ? "is-active" : ""}" aria-pressed="${state.metric === "minutes"}" data-stats-metric="minutes">Ore</button>
+          </div>
+        </div>
+        ${playStatsChart(stats, state.metric)}
+        <p class="play-chart-hint">Tocca una barra per aprire quel ${stats.period === "week" || stats.period === "month" ? "giorno" : stats.series[0].key.length === 4 ? "anno" : "mese"}.</p>
+      </section>` : ""}
+    <div class="play-stats-grid">
+      <section class="play-stats-block"><h2>Giochi</h2>${playStatsGames(stats.games, {focus})}</section>
+      <section class="play-stats-block"><h2>${focus ? "Ha giocato con" : "Giocatori"}</h2>${playStatsPlayers(focus ? stats.companions : stats.players, {label: focus ? "insieme" : "partite"})}</section>
+      ${stats.locations.length ? `<section class="play-stats-block"><h2>Luoghi</h2><ol class="play-place-list">${stats.locations.map((place) => `
+        <li><span>${icon("pin")}${escapeHtml(place.name)}</span><small>${formatNumber(place.plays, 0)} ${place.plays === 1 ? "partita" : "partite"}</small></li>`).join("")}</ol></section>` : ""}
+    </div>
+    <section class="play-stats-block play-stats-diary">
+      <h2>Partite del periodo</h2>
+      <div class="plays-log" data-stats-diary>${totals.plays ? skeletons() : '<p class="play-empty">Nessuna partita in questo periodo.</p>'}</div>
+    </section>`;
+  const rerender = () => void renderPlayStats(root, {playerId, player, onSaved});
+  root.querySelectorAll("[data-stats-period]").forEach((button) => button.addEventListener("click", () => {
+    state.period = button.dataset.statsPeriod;
+    rerender();
+  }));
+  root.querySelectorAll("[data-stats-step]").forEach((button) => button.addEventListener("click", () => {
+    if (!button.dataset.statsStep) return;
+    state.anchor = button.dataset.statsStep;
+    rerender();
+  }));
+  root.querySelector("[data-stats-today]")?.addEventListener("click", () => { state.anchor = null; rerender(); });
+  root.querySelectorAll("[data-stats-metric]").forEach((button) => button.addEventListener("click", () => {
+    state.metric = button.dataset.statsMetric;
+    rerender();
+  }));
+  root.querySelectorAll("[data-stats-drill]").forEach((button) => button.addEventListener("click", () => {
+    state.period = button.dataset.statsDrill;
+    state.anchor = button.dataset.statsAnchor;
+    rerender();
+  }));
+  bindPlayDiary(root.querySelector(".play-stats-grid"), [], onSaved);
+  const diary = root.querySelector("[data-stats-diary]");
+  if (!totals.plays) return;
+  const listParams = new URLSearchParams({limit: "200", date_from: stats.start, date_to: stats.end});
+  if (playerId) listParams.set("player_id", String(playerId));
+  else if (player) listParams.set("player", player);
+  try {
+    const plays = await api(`/api/plays?${listParams}`);
+    if (!diary.isConnected) return;
+    diary.innerHTML = playDiaryMarkup(plays.items, {months: stats.period === "year" || stats.period === "all"});
+    bindPlayDiary(diary, plays.items, onSaved);
+  } catch (error) {
+    diary.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pagina Partite
+// ---------------------------------------------------------------------------
+function playPeopleStrip(summary) {
+  const counts = new Map((summary.players || []).filter((item) => item.profile_id).map((item) => [Number(item.profile_id), item]));
+  const profiles = [...playerProfiles].sort((a, b) => (counts.get(b.id)?.plays || 0) - (counts.get(a.id)?.plays || 0) || a.name.localeCompare(b.name, "it"));
+  return `
+    <section class="plays-people" aria-label="Giocatori fissi">
+      ${profiles.map((profile) => {
+        const stats = counts.get(Number(profile.id));
+        return `<a class="plays-person" href="${playerHref(profile)}" data-nav>
+          ${playerAvatar(profile, {className: "is-large"})}
+          <strong>${escapeHtml(profile.name)}</strong>
+          <small>${stats ? `${formatNumber(stats.plays, 0)} partite${stats.wins ? ` · ${formatNumber(stats.wins, 0)} ${icon("crown")}` : ""}` : "nessuna partita"}</small>
+        </a>`;
+      }).join("")}
+      <button class="plays-person is-new" type="button" data-player-new>
+        <span class="player-avatar is-large is-add" aria-hidden="true">${icon("plus")}</span>
+        <strong>${profiles.length ? "Nuovo" : "Crea i profili"}</strong>
+        <small>${profiles.length ? "giocatore fisso" : "dei giocatori fissi"}</small>
+      </button>
+      ${profiles.length ? "" : `<p class="plays-people-hint">Con un profilo (foto, descrizione, statistiche) i giocatori fissi si scelgono con un tocco quando registri una partita; gli ospiti si scrivono a mano.</p>`}
+    </section>`;
+}
+
 async function refreshPlaysPage() {
   const list = document.querySelector("#playsList");
   if (!list) return;
@@ -6745,35 +7308,36 @@ async function refreshPlaysPage() {
   try {
     const [summary, plays, games] = await Promise.all([
       api("/api/plays/summary"),
-      api(`/api/plays?${params.toString()}`),
+      playsState.view === "log" ? api(`/api/plays?${params.toString()}`) : Promise.resolve({items: [], total: 0}),
       api("/api/games?owned=true&played=true&sort=played_desc&limit=500&offset=0"),
+      loadPlayerProfiles({force: true}),
     ]);
     if (!list.isConnected) return;
     const completed = (games.items || []).filter((game) => game.progress?.completed);
     document.querySelector("#playsStatPlays").textContent = formatNumber(summary.plays, 0);
+    document.querySelector("#playsStatHours").textContent = playHours(summary.minutes);
     document.querySelector("#playsStatGames").textContent = formatNumber((games.items || []).length, 0);
     document.querySelector("#playsStatCompleted").textContent = formatNumber(completed.length, 0);
-    document.querySelector("#playsStatYear").textContent = formatNumber(summary.this_year, 0);
     document.querySelector("#playsSummary").textContent = summary.last_played_on
-      ? `Ultima partita il ${playDate(summary.last_played_on)}${summary.minutes ? ` ${playDuration(summary.minutes)} di gioco registrate` : ""}`
+      ? `Ultima partita il ${playDate(summary.last_played_on)} · ${formatNumber(summary.this_year, 0)} quest'anno`
       : "Registra le partite per costruire il tuo diario di gioco";
+    document.querySelector("#playsPeople").innerHTML = playPeopleStrip(summary);
+    document.querySelector("[data-player-new]")?.addEventListener("click", () => void openPlayerDialog({onSaved: () => refreshPlaysPage()}));
     const playerSelect = document.querySelector("#playsPlayer");
-    playerSelect.innerHTML = `<option value="">Tutti i giocatori</option>${summary.players
-      .map((player) => `<option value="${escapeHtml(player.name)}" ${player.name === playsState.player ? "selected" : ""}>${escapeHtml(player.name)}</option>`).join("")}`;
+    const names = summary.players.map((player) => player.name);
+    if (playsState.player && !names.some((name) => playerNameKey(name) === playerNameKey(playsState.player))) names.push(playsState.player);
+    playerSelect.innerHTML = `<option value="">Tutti i giocatori</option>${names
+      .map((name) => `<option value="${escapeHtml(name)}" ${playerNameKey(name) === playerNameKey(playsState.player) ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
 
-    document.querySelector("#playsSide").innerHTML = `
+    const side = document.querySelector("#playsSide");
+    side.innerHTML = `
       <section class="plays-side-block">
         <h2>Ultimi 12 mesi</h2>
         ${playMonthChart(summary.months)}
       </section>
-      <section class="plays-side-block">
-        <h2>Giocatori</h2>
-        ${summary.players.length ? `<ol class="plays-leaderboard">${summary.players.map((player) => `
-          <li><button type="button" data-plays-player="${escapeHtml(player.name)}" class="${player.name === playsState.player ? "is-active" : ""}">
-            <span>${escapeHtml(player.name)}</span>
-            <small>${formatNumber(player.plays, 0)} partite${player.wins ? ` · <b>${formatNumber(player.wins, 0)}</b> vittorie` : ""}</small>
-          </button></li>`).join("")}</ol>`
-          : '<p class="play-empty">I nomi dei giocatori registrati compariranno qui.</p>'}
+      <section class="plays-side-block plays-side-ranking">
+        <h2>Classifica</h2>
+        ${summary.players.length ? playStatsPlayers(summary.players) : '<p class="play-empty">I nomi dei giocatori registrati compariranno qui.</p>'}
       </section>
       ${completed.length ? `
         <section class="plays-side-block">
@@ -6782,21 +7346,17 @@ async function refreshPlaysPage() {
         </section>
       ` : ""}
     `;
-    document.querySelectorAll("[data-plays-player]").forEach((button) => {
-      button.addEventListener("click", () => {
-        playsState.player = playsState.player === button.dataset.playsPlayer ? "" : button.dataset.playsPlayer;
-        playsState.view = "log";
-        void renderPlays();
-      });
-    });
+    bindPlayDiary(side, [], () => refreshPlaysPage());
 
     const filterGame = playsState.bggId ? (games.items || []).find((game) => Number(game.bgg_id) === playsState.bggId) : null;
+    const filterProfile = playsState.player ? profileForName(playsState.player) : null;
     const filters = [
       filterGame || playsState.bggId ? `<button type="button" class="active-facet-chip" data-plays-clear="game">${escapeHtml(filterGame?.title || plays.items[0]?.title || `BGG #${playsState.bggId}`)} <span aria-hidden="true">×</span></button>` : "",
-      playsState.player ? `<button type="button" class="active-facet-chip" data-plays-clear="player">${escapeHtml(playsState.player)} <span aria-hidden="true">×</span></button>` : "",
+      playsState.player ? `<button type="button" class="active-facet-chip" data-plays-clear="player">${escapeHtml(filterProfile?.name || playsState.player)} <span aria-hidden="true">×</span></button>` : "",
+      filterProfile ? `<a class="play-inline-action" href="${playerHref(filterProfile)}" data-nav>Apri il profilo di ${escapeHtml(filterProfile.name)}</a>` : "",
     ].join("");
     document.querySelector("#playsFilters").innerHTML = filters;
-    // Filters narrow the diary only; the games view always lists every played game.
+    // I filtri restringono diario e statistiche; la vista Giochi elenca sempre tutti i giochi giocati.
     document.querySelector("#playsFilters").hidden = !filters || playsState.view === "games";
     document.querySelectorAll("[data-plays-clear]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -6818,6 +7378,11 @@ async function refreshPlaysPage() {
         : `<div class="empty trophy-empty"><strong>Nessun gioco giocato.</strong><span>Registra una partita o segna un gioco come giocato dalla sua scheda.</span></div>`;
       return;
     }
+    if (playsState.view === "stats") {
+      list.className = "play-stats plays-stats-view";
+      await renderPlayStats(list, {player: playsState.player, onSaved: () => refreshPlaysPage()});
+      return;
+    }
     list.className = "plays-log";
     if (!plays.items.length) {
       list.innerHTML = `<div class="empty trophy-empty">
@@ -6826,35 +7391,10 @@ async function refreshPlaysPage() {
       </div>`;
       return;
     }
-    let month = "";
-    const groups = [];
-    const sessions = new Map();
-    for (const play of plays.items) {
-      const key = play.session ? `${play.session.id}:${play.played_on}` : null;
-      if (key && sessions.has(key)) sessions.get(key).push(play);
-      else {
-        const group = [play];
-        groups.push(group);
-        if (key) sessions.set(key, group);
-      }
-    }
-    list.innerHTML = groups.map((group) => {
-      const play = group[0];
-      const key = play.played_on.slice(0, 7);
-      const heading = key !== month
-        ? `<h2 class="plays-month">${escapeHtml(playDate(`${key}-01`, {month: "long", year: "numeric"}))}</h2>` : "";
-      month = key;
-      if (!play.session) return heading + playRow(play);
-      group.sort((a, b) => a.session_round - b.session_round);
-      const count = group.length === play.session.plays ? String(group.length) : `${group.length} di ${play.session.plays}`;
-      return heading + `<section class="play-session" aria-label="Sessione del ${escapeHtml(playDate(play.played_on))}">
-        <div class="play-session-head"><strong>Sessione · ${count} ${play.session.plays === 1 ? "partita" : "partite"}</strong>
-          ${play.session.duration_minutes ? `<span>${escapeHtml(playDuration(play.session.duration_minutes))} complessivi</span>` : ""}</div>
-        ${group.map((item) => playRow(item)).join("")}</section>`;
-    }).join("") + (plays.total > plays.items.length
-      ? `<p class="play-empty">Mostrate le ultime ${formatNumber(plays.items.length, 0)} di ${formatNumber(plays.total, 0)} partite: usa la ricerca per trovare le altre.</p>`
+    list.innerHTML = playDiaryMarkup(plays.items) + (plays.total > plays.items.length
+      ? `<p class="play-empty">Mostrate le ultime ${formatNumber(plays.items.length, 0)} di ${formatNumber(plays.total, 0)} partite: usa la ricerca o le statistiche per periodo per trovare le altre.</p>`
       : "");
-    bindPlayRows(list, plays.items, () => refreshPlaysPage());
+    bindPlayDiary(list, plays.items, () => refreshPlaysPage());
   } catch (error) {
     list.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
@@ -6867,7 +7407,9 @@ async function renderPlays() {
   }
   const params = new URLSearchParams(window.location.search);
   playsState.bggId = Number(params.get("game")) || null;
+  if (params.get("player")) playsState.player = params.get("player");
   document.title = "Partite · BoardGameCompanion";
+  const views = [["log", "list", "Diario"], ["stats", "chart", "Statistiche"], ["games", "catalog", "Giochi"]];
   app.innerHTML = `
     <section class="page-header catalog-page-header plays-header">
       <div class="page-header-copy">
@@ -6876,11 +7418,12 @@ async function renderPlays() {
       </div>
       <section class="catalog-stats" aria-label="Riepilogo partite">
         <div class="stat"><strong id="playsStatPlays">—</strong><span>Partite</span></div>
+        <div class="stat"><strong id="playsStatHours">—</strong><span>Di gioco</span></div>
         <div class="stat"><strong id="playsStatGames">—</strong><span>Giochi giocati</span></div>
         <div class="stat"><strong id="playsStatCompleted">—</strong><span>Completati</span></div>
-        <div class="stat"><strong id="playsStatYear">—</strong><span>Quest'anno</span></div>
       </section>
     </section>
+    <div id="playsPeople"></div>
 
     <section class="catalog-workspace plays-workspace" aria-label="Partite">
       <section class="toolbar catalog-simple-search" aria-label="Filtra partite">
@@ -6892,15 +7435,13 @@ async function renderPlays() {
           <select id="playsPlayer" aria-label="Giocatore"><option value="">Tutti i giocatori</option></select>
         </label>
         <div class="catalog-view-switch catalog-filter-view plays-view-switch" role="group" aria-label="Vista">
-          <button class="view-switch-button ${playsState.view === "log" ? "is-active" : ""}" type="button" data-plays-view="log"
-                  aria-pressed="${playsState.view === "log"}">${icon("list")}<span>Diario</span></button>
-          <button class="view-switch-button ${playsState.view === "games" ? "is-active" : ""}" type="button" data-plays-view="games"
-                  aria-pressed="${playsState.view === "games"}">${icon("catalog")}<span>Giochi</span></button>
+          ${views.map(([key, iconName, label]) => `<button class="view-switch-button ${playsState.view === key ? "is-active" : ""}" type="button" data-plays-view="${key}"
+                  aria-pressed="${playsState.view === key}">${icon(iconName)}<span>${label}</span></button>`).join("")}
         </div>
         <button class="button button-primary plays-add" id="playsAdd" type="button">${icon("plus")}<span>Registra partita</span></button>
       </section>
       <div class="plays-filters" id="playsFilters" hidden></div>
-      <div class="plays-layout">
+      <div class="plays-layout ${playsState.view === "log" ? "" : "is-wide"}">
         <div class="plays-log" id="playsList">${skeletons()}</div>
         <aside class="plays-side" id="playsSide" aria-label="Statistiche"></aside>
       </div>
@@ -6922,7 +7463,7 @@ async function renderPlays() {
   });
   document.querySelector("#playsPlayer").addEventListener("change", (event) => {
     playsState.player = event.target.value;
-    playsState.view = "log";
+    if (playsState.view === "games") playsState.view = "log";
     void renderPlays();
   });
   document.querySelectorAll("[data-plays-view]").forEach((button) => {
@@ -6936,6 +7477,273 @@ async function renderPlays() {
     void openPlayDialog({...game, onSaved: () => refreshPlaysPage()});
   });
   await refreshPlaysPage();
+}
+
+// ---------------------------------------------------------------------------
+// Profilo di un giocatore fisso
+// ---------------------------------------------------------------------------
+async function renderPlayerProfile(playerId) {
+  document.title = "Giocatore · BoardGameCompanion";
+  app.innerHTML = `<a class="detail-back" href="/plays" data-nav>← Partite</a><div class="skeleton player-hero-skeleton"></div>`;
+  let overview;
+  try {
+    [overview] = await Promise.all([api(`/api/players/${Number(playerId)}`), loadPlayerProfiles({force: true})]);
+  } catch (error) {
+    app.innerHTML = `<a class="detail-back" href="/plays" data-nav>← Partite</a><div class="empty">Profilo non disponibile: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const profile = overview.profile;
+  const totals = overview.totals;
+  const rate = totals.decided ? Math.round((totals.wins / totals.decided) * 100) : null;
+  const favorite = overview.games[0];
+  const bestWin = [...overview.games].sort((a, b) => b.wins - a.wins || b.plays - a.plays)[0];
+  const mate = overview.companions[0];
+  const place = overview.locations[0];
+  document.title = `${profile.name} · Partite · BoardGameCompanion`;
+  app.innerHTML = `
+    <a class="detail-back" href="/plays" data-nav>← Partite</a>
+    <section class="player-hero" style="--player-color:${escapeHtml(profile.color)}">
+      ${playerAvatar(profile, {className: "is-hero"})}
+      <div class="player-hero-copy">
+        <p class="eyebrow">Giocatore fisso</p>
+        <h1>${escapeHtml(profile.name)}</h1>
+        ${profile.description ? `<p class="player-description">${escapeHtml(profile.description)}</p>` : '<p class="player-description muted">Nessuna descrizione: aggiungila modificando il profilo.</p>'}
+        <p class="player-meta">${overview.first_played_on
+          ? `In ${formatNumber(totals.plays, 0)} partite dal ${escapeHtml(playDate(overview.first_played_on))} · ultima il ${escapeHtml(playDate(overview.last_played_on))}`
+          : "Ancora nessuna partita registrata"}${place ? ` · gioca soprattutto a ${escapeHtml(place.name)}` : ""}${profile.aliases.length ? ` · nelle partite anche come ${escapeHtml(profile.aliases.join(", "))}` : ""}</p>
+      </div>
+      <div class="player-hero-actions">
+        <button class="button button-ghost" type="button" id="playerEdit">${icon("pencil")}<span>Modifica</span></button>
+        <button class="button button-primary" type="button" id="playerAddPlay">${icon("plus")}<span>Registra partita</span></button>
+      </div>
+    </section>
+    <section class="player-facts" aria-label="In breve">
+      <div class="play-kpi"><span>Partite</span><strong>${formatNumber(totals.plays, 0)}</strong><small class="play-kpi-delta">${formatNumber(totals.days, 0)} giornate di gioco</small></div>
+      <div class="play-kpi"><span>Vittorie</span><strong>${formatNumber(totals.wins, 0)}</strong><small class="play-kpi-delta">${rate === null ? "nessun esito registrato" : `${rate}% delle partite con esito`}</small></div>
+      <div class="play-kpi"><span>Tempo di gioco</span><strong>${escapeHtml(playHours(totals.minutes))}</strong><small class="play-kpi-delta">${formatNumber(totals.games, 0)} giochi diversi</small></div>
+      ${favorite ? `<a class="play-kpi is-link" href="/games/${Number(favorite.bgg_id)}" data-nav><span>Gioco più giocato</span><strong>${escapeHtml(favorite.title)}</strong><small class="play-kpi-delta">${formatNumber(favorite.plays, 0)} partite</small></a>` : ""}
+      ${bestWin?.wins ? `<a class="play-kpi is-link" href="/games/${Number(bestWin.bgg_id)}" data-nav><span>Vince di più a</span><strong>${escapeHtml(bestWin.title)}</strong><small class="play-kpi-delta">${formatNumber(bestWin.wins, 0)} su ${formatNumber(bestWin.plays, 0)}</small></a>` : ""}
+      ${mate ? `<div class="play-kpi"><span>Gioca spesso con</span><strong>${escapeHtml(mate.name)}</strong><small class="play-kpi-delta">${formatNumber(mate.plays, 0)} partite insieme</small></div>` : ""}
+    </section>
+    <section class="play-stats player-stats" id="playerStats" aria-label="Statistiche di ${escapeHtml(profile.name)}"></section>
+  `;
+  const reload = () => renderPlayerProfile(playerId);
+  document.querySelector("#playerEdit").addEventListener("click", () => void openPlayerDialog({profile, onSaved: (saved) => {
+    if (saved) return reload();
+    history.pushState({}, "", "/plays");
+    return route();
+  }}));
+  document.querySelector("#playerAddPlay").addEventListener("click", () => void openPlayDialog({players: [{name: profile.name}], onSaved: reload}));
+  await renderPlayStats(document.querySelector("#playerStats"), {playerId, onSaved: reload});
+}
+
+// ---------------------------------------------------------------------------
+// Dialog del profilo: nome, altri nomi usati nelle partite, descrizione, colore e foto.
+// ---------------------------------------------------------------------------
+const PLAYER_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
+let playerDialog = null;
+let playerDialogContext = null;
+
+function resizePlayerPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      if (!side) { reject(new Error("Immagine non leggibile.")); return; }
+      const size = Math.min(384, side);
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/jpeg", 0.86));
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Formato immagine non supportato.")); };
+    image.src = url;
+  });
+}
+
+function renderPlayerDialogPhoto() {
+  const context = playerDialogContext;
+  const preview = playerDialog.querySelector("#playerPhotoPreview");
+  const name = playerDialog.querySelector("#playerName").value.trim() || "?";
+  const color = playerDialog.querySelector("input[name=playerColor]:checked")?.value || PLAYER_COLORS[0];
+  preview.style.setProperty("--player-color", color);
+  if (context.photoData) preview.innerHTML = `<img src="${context.photoData}" alt="">`;
+  else if (context.profile?.has_photo && !context.removePhoto) preview.innerHTML = `<img src="${playerPhotoSrc(context.profile)}" alt="">`;
+  else preview.textContent = initials(name).slice(0, 2);
+  playerDialog.querySelector("#playerPhotoRemove").hidden = !(context.photoData || (context.profile?.has_photo && !context.removePhoto));
+}
+
+function playerAliasesValue() {
+  return playerDialog.querySelector("#playerAliases").value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function renderPlayerAliasSuggestions() {
+  const root = playerDialog.querySelector("#playerAliasSuggestions");
+  const used = new Set([playerDialog.querySelector("#playerName").value, ...playerAliasesValue()].map(playerNameKey));
+  const names = (playerDialogContext.guestNames || []).filter((name) => !used.has(playerNameKey(name)));
+  root.hidden = !names.length;
+  root.innerHTML = names.length ? `<span>Nomi già usati nelle partite:</span>${names.slice(0, 12).map((name) =>
+    `<button type="button" class="play-inline-chip" data-alias="${escapeHtml(name)}">${icon("plus")}${escapeHtml(name)}</button>`).join("")}` : "";
+  root.querySelectorAll("[data-alias]").forEach((button) => button.addEventListener("click", () => {
+    const nameInput = playerDialog.querySelector("#playerName");
+    if (!nameInput.value.trim()) nameInput.value = button.dataset.alias;
+    else playerDialog.querySelector("#playerAliases").value = [...playerAliasesValue(), button.dataset.alias].join(", ");
+    renderPlayerAliasSuggestions();
+    renderPlayerDialogPhoto();
+  }));
+}
+
+function ensurePlayerDialog() {
+  if (playerDialog) return playerDialog;
+  playerDialog = document.createElement("dialog");
+  playerDialog.className = "dialog player-dialog";
+  playerDialog.setAttribute("aria-labelledby", "playerDialogTitle");
+  playerDialog.innerHTML = `
+    <form id="playerForm" novalidate>
+      <div class="dialog-head">
+        <div><p class="eyebrow">Giocatori fissi</p><h2 id="playerDialogTitle">Nuovo giocatore</h2></div>
+        <button class="icon-button" id="closePlayerDialog" type="button" aria-label="Chiudi">×</button>
+      </div>
+      <div class="player-form">
+        <div class="player-photo-field">
+          <span class="player-avatar is-hero" id="playerPhotoPreview" aria-hidden="true"></span>
+          <div class="player-photo-actions">
+            <label class="button button-ghost player-photo-pick">${icon("camera")}<span>Scegli foto</span>
+              <input id="playerPhoto" type="file" accept="image/*" class="visually-hidden-input">
+            </label>
+            <button class="play-inline-action" id="playerPhotoRemove" type="button" hidden>Rimuovi foto</button>
+          </div>
+        </div>
+        <label class="settings-field"><span>Nome</span>
+          <input id="playerName" type="text" maxlength="60" autocomplete="off" required placeholder="es. Raffaella">
+        </label>
+        <label class="settings-field"><span>Altri nomi usati nelle partite</span>
+          <input id="playerAliases" type="text" maxlength="400" autocomplete="off" placeholder="es. Raffi, Raffa (separati da virgola)">
+          <small class="muted">Le partite già registrate con questi nomi vengono attribuite al profilo, senza modificarle.</small>
+        </label>
+        <div class="player-alias-suggestions" id="playerAliasSuggestions" hidden></div>
+        <label class="settings-field"><span>Descrizione</span>
+          <textarea id="playerDescription" rows="3" maxlength="1000" placeholder="Giochi preferiti, stile di gioco, curiosità…"></textarea>
+        </label>
+        <fieldset class="player-colors"><legend>Colore</legend>
+          ${PLAYER_COLORS.map((color, index) => `<label class="player-color" style="--player-color:${color}">
+            <input type="radio" name="playerColor" value="${color}" aria-label="Colore ${index + 1}"><span></span></label>`).join("")}
+        </fieldset>
+      </div>
+      <div class="dialog-actions">
+        <button class="button button-ghost play-delete" type="button" id="deletePlayer" hidden>Elimina profilo</button>
+        <button class="button button-ghost" type="button" id="cancelPlayerDialog">Annulla</button>
+        <button class="button button-primary" type="submit" id="savePlayer">Salva</button>
+      </div>
+    </form>`;
+  document.body.append(playerDialog);
+  const close = () => playerDialog.close();
+  playerDialog.querySelector("#closePlayerDialog").addEventListener("click", close);
+  playerDialog.querySelector("#cancelPlayerDialog").addEventListener("click", close);
+  playerDialog.querySelector("#playerName").addEventListener("input", () => { renderPlayerDialogPhoto(); renderPlayerAliasSuggestions(); });
+  playerDialog.querySelector("#playerAliases").addEventListener("input", renderPlayerAliasSuggestions);
+  playerDialog.querySelectorAll("input[name=playerColor]").forEach((input) => input.addEventListener("change", renderPlayerDialogPhoto));
+  playerDialog.querySelector("#playerPhoto").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      playerDialogContext.photoData = await resizePlayerPhoto(file);
+      playerDialogContext.removePhoto = false;
+      renderPlayerDialogPhoto();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+    event.target.value = "";
+  });
+  playerDialog.querySelector("#playerPhotoRemove").addEventListener("click", () => {
+    playerDialogContext.photoData = null;
+    playerDialogContext.removePhoto = true;
+    renderPlayerDialogPhoto();
+  });
+  playerDialog.querySelector("#playerForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    void savePlayerProfile();
+  });
+  playerDialog.querySelector("#deletePlayer").addEventListener("click", () => void deletePlayerProfile());
+  return playerDialog;
+}
+
+async function openPlayerDialog({profile = null, name = "", onSaved = null} = {}) {
+  ensurePlayerDialog();
+  playerDialogContext = {profile, onSaved, photoData: null, removePhoto: false, guestNames: []};
+  const form = playerDialog.querySelector("#playerForm");
+  form.reset();
+  playerDialog.querySelector("#playerDialogTitle").textContent = profile ? `Modifica ${profile.name}` : "Nuovo giocatore";
+  playerDialog.querySelector("#deletePlayer").hidden = !profile;
+  playerDialog.querySelector("#playerName").value = profile?.name || name;
+  playerDialog.querySelector("#playerAliases").value = (profile?.aliases || []).join(", ");
+  playerDialog.querySelector("#playerDescription").value = profile?.description || "";
+  const used = new Set(playerProfiles.map((item) => item.color));
+  const color = profile?.color || PLAYER_COLORS.find((item) => !used.has(item)) || PLAYER_COLORS[playerProfiles.length % PLAYER_COLORS.length];
+  playerDialog.querySelector(`input[name=playerColor][value="${color}"]`).checked = true;
+  renderPlayerDialogPhoto();
+  renderPlayerAliasSuggestions();
+  openDialog(playerDialog, {focus: playerDialog.querySelector("#playerName")});
+  try {
+    const defaults = await api("/api/plays/defaults");
+    if (!playerDialog.open) return;
+    playerDialogContext.guestNames = defaults.guest_names || [];
+    renderPlayerAliasSuggestions();
+  } catch (_) {
+    // I suggerimenti sono una comodità: il profilo si salva anche senza.
+  }
+}
+
+async function savePlayerProfile() {
+  const context = playerDialogContext;
+  const nameInput = playerDialog.querySelector("#playerName");
+  nameInput.setCustomValidity(nameInput.value.trim() ? "" : "Scrivi il nome del giocatore");
+  if (!playerDialog.querySelector("#playerForm").reportValidity()) return;
+  const payload = {
+    name: nameInput.value.trim(),
+    aliases: playerAliasesValue(),
+    description: playerDialog.querySelector("#playerDescription").value.trim() || null,
+    color: playerDialog.querySelector("input[name=playerColor]:checked")?.value || null,
+  };
+  const button = playerDialog.querySelector("#savePlayer");
+  button.disabled = true;
+  try {
+    const json = {headers: {"Content-Type": "application/json"}};
+    let saved = context.profile
+      ? await api(`/api/players/${context.profile.id}`, {...json, method: "PATCH", body: JSON.stringify(payload)})
+      : await api("/api/players", {...json, method: "POST", body: JSON.stringify(payload)});
+    if (context.photoData) {
+      saved = await api(`/api/players/${saved.id}/photo`, {...json, method: "PUT", body: JSON.stringify({data_url: context.photoData})});
+    } else if (context.removePhoto && context.profile?.has_photo) {
+      saved = await api(`/api/players/${saved.id}/photo`, {method: "DELETE"});
+    }
+    playerDialog.close();
+    await loadPlayerProfiles({force: true});
+    showToast(context.profile ? "Profilo aggiornato." : `Profilo di ${saved.name} creato.`);
+    await context.onSaved?.(saved);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deletePlayerProfile() {
+  const profile = playerDialogContext?.profile;
+  if (!profile || !window.confirm(`Eliminare il profilo di ${profile.name}? Le partite restano registrate con i loro nomi.`)) return;
+  try {
+    await api(`/api/players/${profile.id}`, {method: "DELETE"});
+    playerDialog.close();
+    await loadPlayerProfiles({force: true});
+    showToast("Profilo eliminato.");
+    await playerDialogContext.onSaved?.(null);
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 const discoverySources = [
@@ -8975,6 +9783,11 @@ async function route() {
   }
   if (/^\/assistant\/?$/.test(window.location.pathname)) {
     await renderAssistant();
+    return;
+  }
+  const playerMatch = window.location.pathname.match(/^\/plays\/players\/(\d+)\/?$/);
+  if (playerMatch) {
+    await renderPlayerProfile(Number(playerMatch[1]));
     return;
   }
   if (/^\/(?:plays|completed)\/?$/.test(window.location.pathname)) {

@@ -79,6 +79,24 @@ gruppo cooperativo, `scores` i punti facoltativi. Il salvataggio è transazional
 con contenuto diverso è un errore. La modifica di una partita collegata può correggere
 `session_duration_minutes`, condivisa con le altre partite della sessione.
 
+### Giocatori fissi e statistiche per periodo
+
+`player_profiles` (schema 30) contiene i giocatori fissi: nome, alias, descrizione, colore e
+foto (JPEG/PNG/WebP fino a 600 KB, ridotta dal browser a 384 px e salvata nel database).
+Le partite continuano a memorizzare i nomi come sono stati scritti: un profilo vi si collega
+per nome o alias, senza distinzione di maiuscole e accenti (`bgc_name_key`, registrata su ogni
+connessione SQLite). Rinominare un profilo aggiunge il nome precedente agli alias;
+eliminarlo non tocca le partite. Un ospite con lo stesso nome di un giocatore fisso viene
+attribuito a quel profilo. API: `/api/players` (CRUD), `/api/players/{id}` (panoramica),
+`/api/players/{id}/photo` (GET/PUT/DELETE); `/api/plays` accetta anche `player_id`,
+`date_from`, `date_to`.
+
+`GET /api/plays/stats?period=day|week|month|year|all&anchor=YYYY-MM-DD[&player_id|player]`
+restituisce totali (partite, minuti, giochi, giornate, giocatori, vittorie su partite con
+esito), confronto con il periodo precedente, serie per sotto-periodo e classifiche di giochi,
+giocatori, compagni e luoghi. La settimana va da lunedì a domenica; la durata di una sessione
+è ripartita in parti uguali fra le sue partite, così ogni filtro la conta una sola volta.
+
 ## Personal library foundation
 
 Personal state is additive to imported collection data. A 0.5–5 `personal_rating` in 0.5 steps, local

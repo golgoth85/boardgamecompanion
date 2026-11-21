@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 29
+    assert first_version == LATEST_SCHEMA_VERSION == 30
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -66,6 +66,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (27, "catalog-gameplay-summaries"),
         (28, "play-modes"),
         (29, "play-sessions"),
+        (30, "player-profiles"),
     ]
     assert {
         "board_games",

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from boardgamecompanion.dependencies import get_database
+from boardgamecompanion.players import PlayerError, PlayerNotFound, PlayerProfiles
 from boardgamecompanion.plays import PlayError, PlayLog, PlayNotFound
 
 router = APIRouter(tags=["plays"])
@@ -54,13 +55,31 @@ def _log() -> PlayLog:
     return PlayLog(get_database())
 
 
-def _call(function, *args):
+def _profiles() -> PlayerProfiles:
+    return PlayerProfiles(get_database())
+
+
+def _call(function, *args, **kwargs):
     try:
-        return function(*args)
-    except PlayNotFound as exc:
+        return function(*args, **kwargs)
+    except (PlayNotFound, PlayerNotFound) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PlayError as exc:
+    except (PlayError, PlayerError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class PlayerProfilePayload(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    aliases: list[str] | None = Field(default=None, max_length=10)
+    description: str | None = Field(default=None, max_length=1000)
+    color: str | None = Field(default=None, pattern="^#[0-9a-f]{6}$")
+
+    def values(self) -> dict[str, Any]:
+        return self.model_dump(include=self.model_fields_set)
+
+
+class PlayerPhotoPayload(BaseModel):
+    data_url: str = Field(max_length=900_000)
 
 
 @router.get("/api/plays")
@@ -68,15 +87,74 @@ def list_plays(
     bgg_id: int | None = Query(default=None, ge=1),
     player: str | None = Query(default=None, max_length=60),
     q: str | None = Query(default=None, max_length=100),
+    player_id: int | None = Query(default=None, ge=1),
+    date_from: str | None = Query(default=None, pattern=DATE_PATTERN),
+    date_to: str | None = Query(default=None, pattern=DATE_PATTERN),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
-    return _log().list(bgg_id=bgg_id, player=player, q=q, limit=limit, offset=offset)
+    return _log().list(bgg_id=bgg_id, player=player, q=q, player_id=player_id,
+                       date_from=date_from, date_to=date_to, limit=limit, offset=offset)
 
 
 @router.get("/api/plays/summary")
 def plays_summary() -> dict[str, object]:
     return _log().summary()
+
+
+@router.get("/api/plays/stats")
+def plays_stats(
+    period: str = Query(default="month", pattern="^(day|week|month|year|all)$"),
+    anchor: str | None = Query(default=None, pattern=DATE_PATTERN),
+    player_id: int | None = Query(default=None, ge=1),
+    player: str | None = Query(default=None, max_length=60),
+) -> dict[str, object]:
+    return _call(_log().stats, period=period, anchor=anchor, player_id=player_id, player=player)
+
+
+@router.get("/api/players")
+def list_players() -> dict[str, object]:
+    return {"items": _profiles().list()}
+
+
+@router.post("/api/players", status_code=201)
+def create_player(payload: PlayerProfilePayload) -> dict[str, object]:
+    return _call(_profiles().create, payload.values())
+
+
+@router.get("/api/players/{player_id}")
+def player_overview(player_id: int) -> dict[str, object]:
+    return _call(_log().player_overview, player_id)
+
+
+@router.patch("/api/players/{player_id}")
+def update_player(player_id: int, payload: PlayerProfilePayload) -> dict[str, object]:
+    return _call(_profiles().update, player_id, payload.values())
+
+
+@router.delete("/api/players/{player_id}", status_code=204)
+def delete_player(player_id: int) -> Response:
+    _call(_profiles().delete, player_id)
+    return Response(status_code=204)
+
+
+@router.put("/api/players/{player_id}/photo")
+def set_player_photo(player_id: int, payload: PlayerPhotoPayload) -> dict[str, object]:
+    return _call(_profiles().set_photo, player_id, payload.data_url)
+
+
+@router.delete("/api/players/{player_id}/photo")
+def clear_player_photo(player_id: int) -> dict[str, object]:
+    return _call(_profiles().clear_photo, player_id)
+
+
+@router.get("/api/players/{player_id}/photo")
+def player_photo(player_id: int) -> Response:
+    content, media_type = _call(_profiles().photo, player_id)
+    # L'indirizzo cambia a ogni nuova foto (?v=...), quindi la cache può essere lunga.
+    return Response(content=content, media_type=media_type,
+                    headers={"Cache-Control": "private, max-age=31536000, immutable",
+                             "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/api/plays/defaults")

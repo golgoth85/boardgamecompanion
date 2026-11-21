@@ -936,6 +936,11 @@ def web_plays() -> FileResponse:
     return _web_page()
 
 
+@app.get("/plays/players/{player_id}", include_in_schema=False)
+def web_player_profile(player_id: int) -> FileResponse:
+    return _web_page()
+
+
 @app.get("/crowdfunding", include_in_schema=False)
 def web_crowdfunding() -> FileResponse:
     return _web_page()

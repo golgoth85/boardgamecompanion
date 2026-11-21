@@ -21,7 +21,7 @@ export function shellRouteKey(pathname = window.location.pathname) {
   if (/^\/crowdfunding\/?$/.test(pathname)) return "crowdfunding";
   if (/^\/lists\/?$/.test(pathname)) return "lists";
   if (/^\/wishlist\/?$/.test(pathname)) return "wishlist";
-  if (/^\/(?:plays|completed)\/?$/.test(pathname)) return "plays";
+  if (/^\/(?:plays(?:\/players\/\d+)?|completed)\/?$/.test(pathname)) return "plays";
   if (/^\/assistant\/?$/.test(pathname)) return "assistant";
   if (/^\/(?:explore|categories|mechanics)\/?$/.test(pathname)) return "explore";
   if (/^\/reviews\/?$/.test(pathname)) return "reviews";

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import calendar
 import json
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from boardgamecompanion.database import Database
 from boardgamecompanion.personal_state import PersonalStateError, PersonalStateNotFound, _normalize_personal_date
+from boardgamecompanion.players import PlayerProfiles, PlayerResolver, name_key
 from boardgamecompanion.title_search import display_title, metadata_dict
 
 OUTCOMES = {"won", "lost", "draw"}
+STAT_PERIODS = ("day", "week", "month", "year", "all")
 MAX_PLAYERS = 20
 TEXT_LIMITS = {"activity": 500, "notes": 4000, "location": 120}
 
@@ -23,6 +26,64 @@ def suggested_play_mode(raw_metadata: Any) -> str | None:
     if names & {"semi-cooperative game", "traitor game"}:
         return None
     return "cooperative" if "cooperative game" in names else "competitive"
+
+
+def _player_won(play: dict[str, Any], player: dict[str, Any]) -> bool:
+    if play["play_mode"] == "cooperative":
+        return play["outcome"] == "won"
+    return bool(player.get("winner"))
+
+
+def _play_decided(play: dict[str, Any]) -> bool:
+    if play["play_mode"] == "cooperative":
+        return play["outcome"] is not None
+    return any(player.get("winner") for player in play["players"]) or play["outcome"] is not None
+
+
+def _month_start(value: date, shift: int = 0) -> date:
+    index = value.year * 12 + value.month - 1 + shift
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _period_range(period: str, anchor: date, first: date) -> tuple[date, date]:
+    if period == "day":
+        return anchor, anchor
+    if period == "week":
+        start = anchor - timedelta(days=anchor.weekday())
+        return start, start + timedelta(days=6)
+    if period == "month":
+        start = anchor.replace(day=1)
+        return start, start.replace(day=calendar.monthrange(start.year, start.month)[1])
+    if period == "year":
+        return date(anchor.year, 1, 1), date(anchor.year, 12, 31)
+    return min(first, date.today()), date.today()
+
+
+def _shift_anchor(period: str, start: date, step: int) -> date:
+    if period == "day":
+        return start + timedelta(days=step)
+    if period == "week":
+        return start + timedelta(days=7 * step)
+    if period == "month":
+        return _month_start(start, step)
+    return date(start.year + step, 1, 1)
+
+
+def _series_buckets(period: str, start: date, end: date) -> list[tuple[str, date, date]]:
+    """Sotto-periodi del grafico: giorni per settimana/mese, mesi per anno (o «sempre» se breve)."""
+    if period in {"week", "month"}:
+        return [(d.isoformat(), d, d) for d in (start + timedelta(days=i) for i in range((end - start).days + 1))]
+    if period == "year" or (period == "all" and (end.year * 12 + end.month) - (start.year * 12 + start.month) < 24):
+        buckets = []
+        month = start.replace(day=1)
+        while month <= end:
+            last = month.replace(day=calendar.monthrange(month.year, month.month)[1])
+            buckets.append((month.isoformat()[:7], month, last))
+            month = _month_start(month, 1)
+        return buckets
+    if period == "all":
+        return [(str(year), date(year, 1, 1), date(year, 12, 31)) for year in range(start.year, end.year + 1)]
+    return []
 
 
 class PlayError(PersonalStateError):
@@ -187,12 +248,21 @@ class PlayLog:
             raise PlayNotFound(f"Board game BGG #{bgg_id} not found")
         return int(row["id"])
 
+    @staticmethod
+    def _annotate(play: dict[str, Any], resolver: PlayerResolver) -> dict[str, Any]:
+        """Collega ogni nome al profilo fisso corrispondente, senza cambiare il nome registrato."""
+        for player in play["players"]:
+            profile = resolver.resolve(player.get("name"))
+            player["profile_id"] = profile["id"] if profile else None
+        return play
+
     def get(self, play_id: int) -> dict[str, Any]:
         with self.database.connect() as connection:
             row = connection.execute(self._SELECT + " WHERE p.id=?", (int(play_id),)).fetchone()
+            resolver = PlayerProfiles(self.database).resolver(connection)
         if row is None:
             raise PlayNotFound(f"Play #{play_id} not found")
-        return self._row(row)
+        return self._annotate(self._row(row), resolver)
 
     def create(self, bgg_id: int, values: dict[str, Any]) -> dict[str, Any]:
         if values.get("session_duration_minutes") is not None:
@@ -275,7 +345,8 @@ class PlayLog:
                     )
                 self._sync_progress(connection, game_id, now)
             rows = connection.execute(self._SELECT + " WHERE p.session_id=? ORDER BY p.session_round", (request_id,)).fetchall()
-        return {"session_id": request_id, "items": [self._row(row) for row in rows]}
+            resolver = PlayerProfiles(self.database).resolver(connection)
+        return {"session_id": request_id, "items": [self._annotate(self._row(row), resolver) for row in rows]}
 
     def update(self, play_id: int, values: dict[str, Any]) -> dict[str, Any]:
         data = self._validated(values, partial=True)
@@ -329,20 +400,43 @@ class PlayLog:
         bgg_id: int | None = None,
         player: str | None = None,
         q: str | None = None,
+        player_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
         where: list[str] = []
         params: list[Any] = []
+        profiles = PlayerProfiles(self.database)
+        resolver = profiles.resolver()
+        if player_id is not None:
+            keys = sorted(resolver.keys_for(player_id))
+            if not keys:
+                return {"items": [], "total": 0}
+            where.append(
+                "EXISTS (SELECT 1 FROM json_each(p.players_json) j "
+                f"WHERE bgc_name_key(json_extract(j.value,'$.name')) IN ({','.join('?' * len(keys))}))"
+            )
+            params.extend(keys)
+        if date_from:
+            where.append("p.played_on>=?")
+            params.append(date_from)
+        if date_to:
+            where.append("p.played_on<=?")
+            params.append(date_to)
         if bgg_id is not None:
             where.append("g.bgg_id=?")
             params.append(int(bgg_id))
         if player:
+            # Un nome che appartiene a un profilo cerca anche gli alias dello stesso profilo.
+            profile = resolver.resolve(player)
+            keys = sorted(resolver.keys_for(profile["id"])) if profile else [name_key(player)]
             where.append(
                 "EXISTS (SELECT 1 FROM json_each(p.players_json) j "
-                "WHERE lower(json_extract(j.value,'$.name'))=lower(?))"
+                f"WHERE bgc_name_key(json_extract(j.value,'$.name')) IN ({','.join('?' * len(keys))}))"
             )
-            params.append(player.strip())
+            params.extend(keys)
         if q:
             like = f"%{q.strip()}%"
             where.append(
@@ -362,7 +456,7 @@ class PlayLog:
                 self._SELECT + f" {clause} ORDER BY p.played_on DESC, p.id DESC LIMIT ? OFFSET ?",
                 (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
             ).fetchall()
-        return {"items": [self._row(row) for row in rows], "total": int(total)}
+        return {"items": [self._annotate(self._row(row), resolver) for row in rows], "total": int(total)}
 
     def defaults(self, bgg_id: int | None = None) -> dict[str, Any]:
         """What a new play can copy: the last play of this game, else the last play overall."""
@@ -396,15 +490,19 @@ class PlayLog:
             ).fetchall()
             locations = connection.execute(
                 """
-                SELECT location FROM game_plays WHERE COALESCE(location,'') != ''
-                GROUP BY lower(location) ORDER BY MAX(played_on) DESC LIMIT 10
+                SELECT location, COUNT(*) AS plays FROM game_plays WHERE COALESCE(location,'') != ''
+                GROUP BY lower(location) ORDER BY plays DESC, MAX(played_on) DESC LIMIT 12
                 """
             ).fetchall()
-        last = self._row(row) if row is not None else None
+            profiles = PlayerProfiles(self.database).list(connection)
+        resolver = PlayerResolver(profiles)
+        last = self._annotate(self._row(row), resolver) if row is not None else None
         return {
             "last_play": last,
             "same_game": same_game,
             "player_names": [item["name"] for item in names],
+            "guest_names": [item["name"] for item in names if resolver.resolve(item["name"]) is None],
+            "profiles": profiles,
             "locations": [item["location"] for item in locations],
             "suggested_mode": suggested_play_mode(game["metadata_json"]) if game else None,
         }
@@ -434,6 +532,7 @@ class PlayLog:
                 """,
                 (date(today.year - 1, today.month, 1).isoformat(),),
             ).fetchall()
+            resolver = PlayerProfiles(self.database).resolver(connection)
             player_totals: dict[str, dict[str, Any]] = {}
             for session in connection.execute(self._SELECT):
                 play = self._row(session)
@@ -441,12 +540,16 @@ class PlayLog:
                     name = player.get("name") or ""
                     if not name:
                         continue
-                    entry = player_totals.setdefault(name.casefold(), {"name": name, "plays": 0, "wins": 0})
-                    entry["name"] = min(entry["name"], name)
+                    profile = resolver.resolve(name)
+                    key = f"profile:{profile['id']}" if profile else name.casefold()
+                    entry = player_totals.setdefault(key, {"name": profile["name"] if profile else name,
+                                                           "profile_id": profile["id"] if profile else None,
+                                                           "plays": 0, "wins": 0})
+                    if not profile:
+                        entry["name"] = min(entry["name"], name)
                     entry["plays"] += 1
-                    won = play["outcome"] == "won" if play["play_mode"] == "cooperative" else bool(player.get("winner"))
-                    entry["wins"] += int(won)
-            players = sorted(player_totals.values(), key=lambda item: (-item["plays"], -item["wins"]))[:8]
+                    entry["wins"] += int(_player_won(play, player))
+            players = sorted(player_totals.values(), key=lambda item: (-item["plays"], -item["wins"]))[:12]
             games = connection.execute(
                 """
                 SELECT g.bgg_id, g.title, e.cover_url, e.metadata_json, COUNT(p.id) AS plays,
@@ -470,10 +573,7 @@ class PlayLog:
             "minutes": int(totals["minutes"] or 0) + int(session_minutes),
             "last_played_on": totals["last_played_on"],
             "months": [dict(row) for row in months],
-            "players": [
-                {"name": row["name"], "plays": int(row["plays"]), "wins": int(row["wins"] or 0)}
-                for row in players
-            ],
+            "players": players,
             "games_played": [
                 {
                     "bgg_id": int(row["bgg_id"]),
@@ -488,3 +588,163 @@ class PlayLog:
                 for row in games
             ],
         }
+
+    def _stat_plays(self, connection: Any, start: str | None, end: str | None) -> list[dict[str, Any]]:
+        where, params = [], []
+        if start:
+            where.append("p.played_on>=?")
+            params.append(start)
+        if end:
+            where.append("p.played_on<=?")
+            params.append(end)
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        plays = []
+        for row in connection.execute(self._SELECT + clause + " ORDER BY p.played_on, p.id", params):
+            play = self._row(row)
+            # Una sessione conta la sua durata una sola volta: si divide fra le partite che la compongono.
+            if play["session"]:
+                total = play["session"]["duration_minutes"] or 0
+                play["minutes"] = total / max(1, int(play["session"]["plays"] or 1))
+            else:
+                play["minutes"] = play["duration_minutes"] or 0
+            plays.append(play)
+        return plays
+
+    @staticmethod
+    def _aggregate(plays: list[dict[str, Any]], resolver: PlayerResolver, focus: set[str] | None) -> dict[str, Any]:
+        games: dict[int, dict[str, Any]] = {}
+        players: dict[str, dict[str, Any]] = {}
+        companions: dict[str, dict[str, Any]] = {}
+        locations: dict[str, dict[str, Any]] = {}
+        days: set[str] = set()
+        totals = {"plays": 0, "minutes": 0.0, "wins": 0, "decided": 0}
+        for play in plays:
+            names = [player for player in play["players"] if player.get("name")]
+            me = next((player for player in names if name_key(player["name"]) in focus), None) if focus else None
+            if focus and me is None:
+                continue
+            won = _player_won(play, me) if me else False
+            totals["plays"] += 1
+            totals["minutes"] += play["minutes"]
+            if me and _play_decided(play):
+                totals["decided"] += 1
+                totals["wins"] += int(won)
+            days.add(play["played_on"])
+            game = games.setdefault(play["bgg_id"], {
+                "bgg_id": play["bgg_id"], "title": play["title"], "has_cover": play["has_cover"],
+                "plays": 0, "minutes": 0.0, "wins": 0, "last_played_on": play["played_on"]})
+            game["plays"] += 1
+            game["minutes"] += play["minutes"]
+            game["wins"] += int(won)
+            game["last_played_on"] = max(game["last_played_on"], play["played_on"])
+            if play["location"]:
+                place = locations.setdefault(play["location"].casefold(), {"name": play["location"], "plays": 0})
+                place["plays"] += 1
+            for player in names:
+                profile = resolver.resolve(player["name"])
+                key = f"profile:{profile['id']}" if profile else name_key(player["name"])
+                entry = players.setdefault(key, {
+                    "name": profile["name"] if profile else player["name"],
+                    "profile_id": profile["id"] if profile else None,
+                    "plays": 0, "wins": 0, "minutes": 0.0})
+                entry["plays"] += 1
+                entry["wins"] += int(_player_won(play, player))
+                entry["minutes"] += play["minutes"]
+                if me is not None and player is not me:
+                    mate = companions.setdefault(key, {"name": entry["name"], "profile_id": entry["profile_id"], "plays": 0})
+                    mate["plays"] += 1
+
+        def ranked(items: dict[str, Any] | dict[int, Any], *keys: str) -> list[dict[str, Any]]:
+            result = sorted(items.values(), key=lambda item: tuple(-item[key] for key in keys))
+            for item in result:
+                if "minutes" in item:
+                    item["minutes"] = round(item["minutes"])
+            return result
+
+        return {
+            "totals": {"plays": totals["plays"], "minutes": round(totals["minutes"]), "games": len(games),
+                       "days": len(days), "players": len(players), "wins": totals["wins"],
+                       "decided": totals["decided"]},
+            "games": ranked(games, "plays", "minutes"),
+            "players": ranked(players, "plays", "wins"),
+            "companions": ranked(companions, "plays"),
+            "locations": ranked(locations, "plays"),
+        }
+
+    def stats(
+        self,
+        *,
+        period: str = "month",
+        anchor: str | None = None,
+        player_id: int | None = None,
+        player: str | None = None,
+    ) -> dict[str, Any]:
+        """Statistiche di un giorno, settimana (lun–dom), mese, anno o di tutto lo storico."""
+        if period not in STAT_PERIODS:
+            raise PlayError("period must be day, week, month, year or all")
+        try:
+            anchor_date = date.fromisoformat(anchor) if anchor else date.today()
+        except ValueError as exc:
+            raise PlayError("anchor must be a date") from exc
+        with self.database.connect() as connection:
+            resolver = PlayerProfiles(self.database).resolver(connection)
+            first_row = connection.execute("SELECT MIN(played_on) FROM game_plays").fetchone()[0]
+            first = date.fromisoformat(first_row) if first_row else date.today()
+            start, end = _period_range(period, anchor_date, first)
+            focus: set[str] | None = None
+            if player_id is not None:
+                focus = resolver.keys_for(player_id)
+                if not focus:
+                    raise PlayNotFound(f"Player #{player_id} not found")
+            elif player:
+                profile = resolver.resolve(player)
+                focus = resolver.keys_for(profile["id"]) if profile else {name_key(player)}
+            plays = self._stat_plays(connection, start.isoformat(), end.isoformat())
+            previous = None
+            prev_anchor = next_anchor = None
+            if period != "all":
+                prev_anchor = _shift_anchor(period, start, -1)
+                prev_start, prev_end = _period_range(period, prev_anchor, first)
+                previous = self._aggregate(
+                    self._stat_plays(connection, prev_start.isoformat(), prev_end.isoformat()), resolver, focus
+                )["totals"]
+                if prev_end < first:
+                    prev_anchor = None
+                next_anchor = _shift_anchor(period, start, 1)
+                if next_anchor > date.today():
+                    next_anchor = None
+        result = self._aggregate(plays, resolver, focus)
+        series = []
+        for key, bucket_start, bucket_end in _series_buckets(period, start, end):
+            low, high = bucket_start.isoformat(), bucket_end.isoformat()
+            subset = [play for play in plays if low <= play["played_on"] <= high]
+            bucket = self._aggregate(subset, resolver, focus)["totals"] if subset else {"plays": 0, "minutes": 0}
+            series.append({"key": key, "start": low, "end": high, "plays": bucket["plays"], "minutes": bucket["minutes"]})
+        return {
+            "period": period,
+            "anchor": anchor_date.isoformat(),
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "prev_anchor": prev_anchor.isoformat() if prev_anchor else None,
+            "next_anchor": next_anchor.isoformat() if next_anchor else None,
+            "first_played_on": first_row,
+            "previous": previous,
+            "series": series,
+            **result,
+        }
+
+    def player_overview(self, player_id: int) -> dict[str, Any]:
+        """Profilo con le statistiche di tutto lo storico del giocatore."""
+        profile = PlayerProfiles(self.database).get(player_id)
+        stats = self.stats(period="all", player_id=player_id)
+        with self.database.connect() as connection:
+            keys = sorted(PlayerProfiles(self.database).resolver(connection).keys_for(player_id))
+            row = connection.execute(
+                "SELECT MIN(p.played_on) AS first, MAX(p.played_on) AS last FROM game_plays p "
+                "WHERE EXISTS (SELECT 1 FROM json_each(p.players_json) j "
+                f"WHERE bgc_name_key(json_extract(j.value,'$.name')) IN ({','.join('?' * len(keys))}))",
+                keys,
+            ).fetchone()
+        return {"profile": profile, "first_played_on": row["first"], "last_played_on": row["last"],
+                "totals": stats["totals"], "games": stats["games"], "companions": stats["companions"],
+                "locations": stats["locations"]}

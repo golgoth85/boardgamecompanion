@@ -36,7 +36,7 @@ def test_play_log_records_sessions_and_syncs_progress(tmp_path: Path) -> None:
         "duration_minutes": 120,
     })
     assert first["player_count"] == 2
-    assert first["players"][0] == {"name": "Marco", "score": "42", "winner": True}
+    assert first["players"][0] == {"name": "Marco", "score": "42", "winner": True, "profile_id": None}
     assert first["activity"] == "Scenario 3"
     state = PersonalStateStore(database).get(1)
     assert state["played"] and state["played_at"] == "2026-10-01" and not state["completed"]
@@ -56,7 +56,7 @@ def test_play_log_records_sessions_and_syncs_progress(tmp_path: Path) -> None:
 
     summary = log.summary()
     assert summary["plays"] == 3 and summary["games"] == 1 and summary["minutes"] == 120
-    assert summary["players"][0] == {"name": "Marco", "plays": 2, "wins": 1}
+    assert summary["players"][0] == {"name": "Marco", "profile_id": None, "plays": 2, "wins": 1}
     assert summary["games_played"][0]["won"] == 1
 
     updated = log.update(first["id"], {"notes": "Tesa fino all'ultimo", "outcome": None})

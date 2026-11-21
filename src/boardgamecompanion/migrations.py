@@ -1855,6 +1855,25 @@ def _play_sessions(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX idx_game_plays_session ON game_plays(session_id, session_round)")
 
 
+def _player_profiles(connection: sqlite3.Connection) -> None:
+    # Profili dei giocatori fissi: le partite restano invariate e si collegano per nome/alias.
+    connection.execute(
+        """CREATE TABLE player_profiles (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            name_key TEXT NOT NULL UNIQUE,
+            aliases_json TEXT NOT NULL DEFAULT '[]',
+            description TEXT,
+            color TEXT,
+            photo BLOB,
+            photo_type TEXT CHECK(photo_type IS NULL OR photo_type IN ('image/jpeg', 'image/png', 'image/webp')),
+            photo_updated_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1885,6 +1904,7 @@ MIGRATIONS = (
     Migration(27, "catalog-gameplay-summaries", _catalog_gameplay_summaries),
     Migration(28, "play-modes", _play_modes),
     Migration(29, "play-sessions", _play_sessions),
+    Migration(30, "player-profiles", _player_profiles),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
