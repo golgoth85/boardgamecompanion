@@ -2237,6 +2237,8 @@ def get_italian_rulebook_search_service():
         provider = ItalianRulebookProvider(
             cloud_client(rag, "deepseek", rate_limiter=PersistentRateLimiter(database).acquire)
         )
+    from boardgamecompanion.official_site_discovery import PublisherSiteProvider
+
     discovery = get_rulebook_discovery_service()
     client = get_bgg_api_client()
     return ItalianRulebookSearchService(
@@ -2244,6 +2246,11 @@ def get_italian_rulebook_search_service():
         provider,
         query_for=discovery.query_for,
         versions=client.versions if client is not None else None,
+        # Curated Italian publisher sites (only those matching the game's publishers run).
+        official_providers=tuple(
+            item for item in discovery.providers
+            if isinstance(item, PublisherSiteProvider) and item.site.italian_site
+        ),
     )
 
 
@@ -2260,11 +2267,27 @@ def run_italian_rulebook_search(bgg_id: int) -> dict[str, object]:
     from boardgamecompanion.rulebooks import RulebookProviderError
 
     try:
-        return get_italian_rulebook_search_service().search(bgg_id)
+        result = get_italian_rulebook_search_service().search(bgg_id)
     except RulebookDiscoveryNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RulebookProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # An exact official Italian match approved by policy is fetched right away,
+    # exactly as the ordinary "Cerca automaticamente" button does.
+    approved = [
+        item for item in result["review_items"]
+        if item["status"] == "approved" and item.get("policy_action") == "unattended"
+    ][:1]
+    update_service = get_rulebook_update_service()
+    update_service.synchronize_approved_targets()
+    runs: list[dict[str, object]] = []
+    for item in approved:
+        try:
+            runs.append(update_service.run_review_now(str(item["id"])))
+        except RulebookUpdateError as exc:
+            runs.append({"review_item_id": item["id"], "outcome": "failed", "failure_message": str(exc)})
+    result["acquisition"] = runs
+    return result
 
 
 @app.post("/api/games/{bgg_id}/rulebook-discovery/run", tags=["rulebooks"])

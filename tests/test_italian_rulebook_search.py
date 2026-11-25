@@ -210,3 +210,67 @@ def test_rulebook_org_null_results_mean_no_match() -> None:
             return Response()
 
     assert RuleBookOrgProvider(Http()).discover(QUERY) == ()
+
+
+def test_official_italian_sites_run_first_and_skip_the_web(tmp_path: Path) -> None:
+    from boardgamecompanion.rulebooks import RulebookCandidate, RulebookSource
+
+    database = Database(tmp_path / "catalog.sqlite3")
+    database.initialize()
+    seed(database)
+    discovery = RulebookDiscoveryService(database, ())
+
+    class Official:
+        name = "official_site_cranio_creations"
+
+        def __init__(self) -> None:
+            self.queries: list[RulebookQuery] = []
+
+        def discover(self, query: RulebookQuery):
+            self.queries.append(query)
+            return (
+                RulebookCandidate(
+                    provider=self.name, source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+                    url="https://www.craniocreations.it/storage/Sagrada_ITA_Rules.pdf", language="it",
+                    official=True, confidence=90, title="Sagrada — Rules", game_title="Sagrada",
+                ),
+                RulebookCandidate(
+                    provider=self.name, source_kind=RulebookSource.OFFICIAL_LOCALIZER,
+                    url="https://www.craniocreations.it/storage/Sagrada_EN_Rules.pdf", language="en",
+                    official=True, confidence=90, title="Sagrada — Rules", game_title="Sagrada",
+                ),
+            )
+
+    class Broken:
+        name = "official_site_down"
+
+        def discover(self, query):
+            raise RulebookProviderError("down")
+
+    official = Official()
+    web = FakeWeb({}, {})
+    service = ItalianRulebookSearchService(
+        database, provider_with(web), query_for=discovery.query_for,
+        versions=lambda bgg_id: [{"name": "Sagrada", "languages": ["Italian"], "publishers": ["Cranio Creations"]}],
+        official_providers=(Broken(), official),
+    )
+    result = service.search(199561)
+
+    assert official.queries[0].italian_publishers == ("Cranio Creations",)
+    assert result["candidates_found"] == 1 and result["review_items"][0]["official"]
+    assert result["failures"][0]["provider"] == "official_site_down"
+    assert web.searches == [] and result["queries"] == []
+
+
+def test_publisher_site_reads_italian_from_the_pdf_name() -> None:
+    from boardgamecompanion.official_site_discovery import VERIFIED_PUBLISHER_SITES, PublisherSiteProvider, PublisherSiteResolver
+
+    site = next(item for item in VERIFIED_PUBLISHER_SITES if item.key == "cranio_creations")
+    query = RulebookQuery(bgg_id=199561, title="Sagrada", italian_publishers=("Cranio Creations",))
+    assert PublisherSiteResolver((site,)).resolve(query) == (site,)
+    candidate = PublisherSiteProvider(site)._candidate(
+        query, page_url="https://craniocreations.it/products/sagrada", title="Sagrada",
+        pdf_url="https://www.craniocreations.it/storage/media/Sagrada_ITA_Rules_compressed.pdf",
+        label="Scarica PDF", bgg_ids=set(), product_context=True,
+    )
+    assert candidate is not None and candidate.language == "it" and candidate.official

@@ -708,7 +708,7 @@ def test_production_provider_factory_limits_browser_fallback_to_official_hosts()
         value for name, value in providers.items()
         if name.startswith("official_site_")
     ]
-    assert len(generic) == 5
+    assert len(generic) == 6  # + Cranio Creations
     assert all(item.http.browser_fallback_hosts == frozenset() for item in generic)
 
     assert repos.http.browser_fallback_hosts == {"www.rprod.com", "rprod.com"}

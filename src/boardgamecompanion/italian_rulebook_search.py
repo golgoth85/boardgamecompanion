@@ -129,7 +129,8 @@ class ItalianRulebookProvider:
 
     def queries(self, query: RulebookQuery) -> list[str]:
         italian = (query.italian_title or query.title)[:65]
-        bgg = (query.original_title or query.title)[:60]
+        # board_games.title is BGG's primary name; original_title can be any edition's name.
+        bgg = query.title[:60]
         searches = [f'"{italian}" regolamento italiano pdf']
         if _plain(italian) != _plain(bgg):
             searches.append(f'"{bgg}" regolamento italiano pdf')
@@ -242,9 +243,11 @@ class ItalianRulebookSearchService:
         *,
         query_for: Callable[[int], RulebookQuery],
         versions: Callable[[int], list[dict[str, Any]]] | None = None,
+        official_providers: tuple[Any, ...] = (),
     ):
         self.database = database
         self.provider = provider
+        self.official_providers = tuple(official_providers)
         self.query_for = query_for
         self.versions = versions
 
@@ -287,7 +290,7 @@ class ItalianRulebookSearchService:
         return items
 
     def search(self, bgg_id: int) -> dict[str, Any]:
-        if self.provider is None:
+        if self.provider is None and not self.official_providers:
             raise RulebookProviderError(
                 "Ricerca web non configurata: serve DeepSeek come provider di ricerca nelle Impostazioni AI."
             )
@@ -301,7 +304,26 @@ class ItalianRulebookSearchService:
             italian_title = italian_title or found_title
             publishers = publishers or found_publishers
         query = replace(query, italian_title=italian_title, italian_publishers=tuple(publishers))
-        candidates = self.provider.discover(query)
+        # Official sites of the Italian publishers first: an exact match there can
+        # be downloaded under the usual policy. The web search runs only without one.
+        candidates: list[RulebookCandidate] = []
+        failures: list[dict[str, str]] = []
+        for official in self.official_providers:
+            try:
+                found = official.discover(query)
+            except Exception as exc:  # one site down must not stop the others
+                failures.append({"provider": str(official.name), "message": f"{type(exc).__name__}: {exc}"[:300]})
+                continue
+            candidates.extend(item for item in found if item.language.split("-", 1)[0] == "it")
+        web_used = False
+        if not candidates and self.provider is not None:
+            web_used = True
+            try:
+                candidates.extend(self.provider.discover(query))
+            except RulebookProviderError as exc:
+                if not self.official_providers:
+                    raise
+                failures.append({"provider": self.provider.name, "message": str(exc)[:300]})
         queue = RulebookReviewQueue(self.database)
         created = 0
         items = []
@@ -311,6 +333,9 @@ class ItalianRulebookSearchService:
             items.append({
                 "id": item["id"],
                 "status": item["status"],
+                "policy_action": item["policy_action"],
+                "official": candidate.official,
+                "provider": candidate.provider,
                 "created": bool(was_created),
                 "url": candidate.url,
                 "title": candidate.title,
@@ -321,7 +346,9 @@ class ItalianRulebookSearchService:
             "bgg_id": int(bgg_id),
             "italian_title": italian_title,
             "italian_publishers": list(publishers),
-            "queries": self.provider.queries(query),
+            "queries": self.provider.queries(query) if web_used and self.provider is not None else [],
+            "official_sites": [str(official.name) for official in self.official_providers],
+            "failures": failures,
             "candidates_found": len(candidates),
             "review_items_created": created,
             "review_items": items,

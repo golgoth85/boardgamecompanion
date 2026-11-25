@@ -1800,7 +1800,7 @@ def production_official_rulebook_providers(
                 max_attempts=max_attempts,
                 min_interval_seconds=min_interval_seconds,
                 rate_limiter=rate_limiter,
-                user_agent=SITE_USER_AGENT,
+                user_agent=None if site.browser_agent else SITE_USER_AGENT,
             ),
         )
         for site in VERIFIED_PUBLISHER_SITES

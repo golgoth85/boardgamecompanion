@@ -1354,8 +1354,11 @@ async function searchItalianRulebooks(items) {
       try {
         const result = await api(`/api/games/${item.bgg_id}/rulebook-italian-search`, {method: "POST"});
         const count = Number(result.candidates_found || 0);
+        const downloaded = (result.acquisition || []).some((run) => run.outcome === "created" || run.outcome === "unchanged");
         found += count ? 1 : 0;
-        if (row) row.querySelector("small").textContent = count
+        if (row) row.querySelector("small").textContent = downloaded
+          ? "Regolamento italiano ufficiale scaricato"
+          : count
           ? `${count} ${count === 1 ? "fonte italiana trovata" : "fonti italiane trovate"} · da verificare`
           : "Nessun regolamento italiano trovato";
       } catch (error) {
@@ -1367,7 +1370,7 @@ async function searchItalianRulebooks(items) {
     italianRulebookSearch = null;
   }
   showToast(found
-    ? `Regolamenti italiani trovati per ${found} ${found === 1 ? "gioco" : "giochi"}: sono in Fonti da verificare.`
+    ? `Regolamenti italiani trovati per ${found} ${found === 1 ? "gioco" : "giochi"}: gli ufficiali verificati si scaricano da soli, gli altri sono in Fonti da verificare.`
     : "Nessun regolamento italiano trovato.");
   await refreshItalianRulebooks();
 }
@@ -4675,10 +4678,14 @@ async function setupGameDiscovery(bggId, gameTitle) {
     try {
       const result = await api(`/api/games/${bggId}/rulebook-italian-search`, {method: "POST"});
       const found = Number(result.candidates_found || 0);
-      showToast(found
+      const downloaded = (result.acquisition || []).some((run) => run.outcome === "created" || run.outcome === "unchanged");
+      showToast(downloaded
+        ? "Regolamento italiano ufficiale scaricato dal sito dell'editore."
+        : found
         ? `${found === 1 ? "Trovato un regolamento italiano: controllalo" : `Trovati ${found} regolamenti italiani: controllali`} in Fonti da verificare.`
-        : "Nessun regolamento italiano trovato sul web.");
-      label.textContent = found ? "Trovato: da verificare" : "Riprova in italiano";
+        : "Nessun regolamento italiano trovato.");
+      label.textContent = downloaded ? "Scaricato" : found ? "Trovato: da verificare" : "Riprova in italiano";
+      if (downloaded) await renderDetail(bggId);
     } catch (error) {
       showToast(error.message, true);
       label.textContent = "Cerca in italiano";

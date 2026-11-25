@@ -50,6 +50,8 @@ class PublisherSite:
     download_hosts: frozenset[str] = frozenset()
     localizer: bool = True
     italian_site: bool = False
+    # Storefronts (e.g. Shopify) that throttle non-browser agents with HTTP 429.
+    browser_agent: bool = False
 
 
 # Domain ownership and publisher aliases are curated, never inferred from search
@@ -96,6 +98,18 @@ VERIFIED_PUBLISHER_SITES: tuple[PublisherSite, ...] = (
         italian_site=True,
     ),
     PublisherSite(
+        key="cranio_creations",
+        aliases=("Cranio Creations",),
+        hosts=frozenset({"craniocreations.it", "www.craniocreations.it"}),
+        search_templates=(
+            "https://craniocreations.it/products/{slug}",
+            "https://craniocreations.it/search?q={term}&type=product",
+        ),
+        product_path_parts=("/products/",),
+        italian_site=True,
+        browser_agent=True,
+    ),
+    PublisherSite(
         key="ghenos_games",
         aliases=("Ghenos Games", "Ghenos"),
         hosts=frozenset({"www.ghenosgames.com", "ghenosgames.com"}),
@@ -112,7 +126,7 @@ class PublisherSiteResolver:
         self.sites = sites
 
     def resolve(self, query: RulebookQuery) -> tuple[PublisherSite, ...]:
-        edition = {_match_text(name) for name in query.edition_publishers}
+        edition = {_match_text(name) for name in (*query.edition_publishers, *query.italian_publishers)}
         verified = {_match_text(name) for name in query.verified_publishers}
         # CSV version publisher is a useful *hint*, not independent proof.
         unverified = {_match_text(name) for name in query.publishers}
@@ -211,6 +225,7 @@ class PublisherSiteProvider:
             *query.verified_titles,
             query.title,
             query.original_title,
+            query.italian_title,
         )
         return tuple(dict.fromkeys(
             _match_text(item) for item in values if item and _match_text(item)
@@ -218,7 +233,7 @@ class PublisherSiteProvider:
 
     @staticmethod
     def _search_terms(query: RulebookQuery) -> tuple[str, ...]:
-        values = (query.title, query.original_title, *query.verified_titles)
+        values = (query.italian_title, query.title, query.original_title, *query.verified_titles)
         terms: list[str] = []
         for value in values:
             if not value:
@@ -327,8 +342,12 @@ class PublisherSiteProvider:
             bgg_id = None
             evidence.append("search_page_requires_review")
 
+        from boardgamecompanion.italian_rulebook_search import filename_language
+
+        named = filename_language(normalized)
         explicit_it = (
-            _language_from_url(normalized, label).split("-", 1)[0] == "it"
+            named == "it"
+            or _language_from_url(normalized, label).split("-", 1)[0] == "it"
             or bool(re.search(r"\b(?:italiano|italiana|italian|ita)\b", label, re.I))
             or bool(re.search(r"\b(?:regole|regolamento)\s+it\b", language_hint, re.I))
         )
@@ -346,6 +365,8 @@ class PublisherSiteProvider:
             bgg_id = None
         else:
             language = _language_from_url(normalized, label)
+            if language == "und" and named == "en":
+                language = "en"
             if language.split("-", 1)[0] not in {"it", "en"}:
                 return None
 
