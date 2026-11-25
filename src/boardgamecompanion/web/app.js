@@ -750,15 +750,85 @@ async function performGlobalSearch(query, target) {
           `).join("")}
         </section>
       ` : ""}
-      ${!games.length && !reference.length && !wishlist.length && !lists.length && !rulebooks.length && !crowdfunding.length && !sections.length
+      ${query.trim().length >= 2 ? bggRemoteSearchMarkup(query, {auto: !games.length && !reference.length && query.trim().length >= 3}) : ""}
+      ${!games.length && !reference.length && !wishlist.length && !lists.length && !rulebooks.length && !crowdfunding.length && !sections.length && query.trim().length < 2
         ? '<div class="empty">Nessun risultato.</div>'
         : ""}
     `;
     bindWishlistActions(target);
     bindReferenceActions(target);
+    const shownIds = new Set([...games, ...reference].map((item) => Number(item.bgg_id)));
+    bindBggRemoteSearch(target, {
+      render: (items) => {
+        const fresh = items.filter((item) => !shownIds.has(Number(item.bgg_id)));
+        return fresh.length
+          ? fresh.map(referenceSearchResult).join("")
+          : '<p class="muted bgg-remote-status">Su BoardGameGeek non ci sono altri titoli oltre a quelli già mostrati.</p>';
+      },
+      isCurrent: () => query === latestGlobalSearchQuery,
+      delay: 450,
+    });
   } catch (error) {
     target.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
+}
+
+// Ricerca su BoardGameGeek per i titoli assenti dal catalogo locale:
+// automatica quando localmente non c'è nulla, su richiesta negli altri casi.
+const bggRemoteRequests = new Map();
+
+function bggRemoteSearchMarkup(query, {auto = false, heading = "Su BoardGameGeek", className = "global-search-group"} = {}) {
+  return `
+    <section class="${className} bgg-remote" data-bgg-remote="${escapeHtml(query)}" data-bgg-remote-auto="${auto ? "true" : "false"}">
+      ${heading ? `<h3>${escapeHtml(heading)}</h3>` : ""}
+      <div class="bgg-remote-body">${auto
+        ? '<p class="muted bgg-remote-status">Non è nel catalogo locale: cerco su BoardGameGeek…</p>'
+        : `<button class="button button-ghost bgg-remote-button" type="button">${icon("search")}<span>Non lo trovi? Cerca “${escapeHtml(query)}” su BoardGameGeek</span></button>`}</div>
+    </section>`;
+}
+
+function bggRemoteSearch(query) {
+  const key = query.trim().toLocaleLowerCase("it");
+  if (!bggRemoteRequests.has(key)) {
+    const request = api(`/api/reference/bgg-search?q=${encodeURIComponent(query.trim())}&limit=12`)
+      .catch((error) => {
+        bggRemoteRequests.delete(key);
+        throw error;
+      });
+    bggRemoteRequests.set(key, request);
+  }
+  return bggRemoteRequests.get(key);
+}
+
+// render(items) restituisce il markup dei risultati; isCurrent() evita di scrivere risultati superati.
+function bindBggRemoteSearch(root, {render, isCurrent = () => true, delay = 0} = {}) {
+  root.querySelectorAll?.("[data-bgg-remote]").forEach((section) => {
+    const body = section.querySelector(".bgg-remote-body");
+    const query = section.dataset.bggRemote;
+    const run = async () => {
+      if (!isCurrent() || !section.isConnected) return;
+      body.innerHTML = '<p class="muted bgg-remote-status">Cerco su BoardGameGeek…</p>';
+      try {
+        const payload = await bggRemoteSearch(query);
+        if (!isCurrent() || !section.isConnected) return;
+        const items = (payload.items || []).filter((item) => !item.owned);
+        body.innerHTML = items.length
+          ? render(items)
+          : '<p class="muted bgg-remote-status">Nessun titolo trovato neppure su BoardGameGeek. Prova con il titolo originale o con meno parole.</p>';
+        bindWishlistActions(body);
+        bindReferenceActions(body);
+      } catch (error) {
+        if (!isCurrent() || !section.isConnected) return;
+        body.innerHTML = `<p class="integration-error bgg-remote-status">${escapeHtml(error.message)}</p>`;
+      }
+    };
+    section.querySelector(".bgg-remote-button")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void run();
+    });
+    if (section.dataset.bggRemoteAuto === "true") window.setTimeout(() => void run(), delay);
+  });
 }
 
 function referenceActionButtons(item) {
@@ -1144,7 +1214,10 @@ function setSettingsTab(name = "general") {
     saveSettings,
     saveTestSettings,
     onDiagnostics: () => void refreshDiagnostics(),
-    onRulebooks: () => void refreshRulebookCoverage(),
+    onRulebooks: () => {
+      void refreshRulebookCoverage();
+      void refreshItalianRulebooks();
+    },
   });
 }
 
@@ -1200,6 +1273,103 @@ async function refreshRulebookCoverage() {
   } catch (error) {
     list.innerHTML = `<li class="integration-error">${escapeHtml(error.message)}</li>`;
   }
+}
+
+// Giochi con regolamenti solo in altre lingue: ricerca mirata del regolamento italiano.
+const LANGUAGE_NAMES = {en: "inglese", fr: "francese", de: "tedesco", es: "spagnolo", nl: "olandese", pl: "polacco", un: "lingua non indicata"};
+let italianRulebookSearch = null;
+
+function italianRulebookMeta(item) {
+  const languages = (item.languages || []).map((code) => LANGUAGE_NAMES[code] || code).join(", ");
+  const searched = item.last_italian_search_at
+    ? `cercato in italiano il ${new Date(item.last_italian_search_at).toLocaleDateString("it-IT", {day: "numeric", month: "short"})}`
+    : "mai cercato in italiano";
+  return [item.expansion ? "Espansione" : "", languages ? `Solo ${languages}` : "", searched,
+    item.pending_italian ? `${item.pending_italian} in italiano da verificare` : ""].filter(Boolean).join(" · ");
+}
+
+async function refreshItalianRulebooks() {
+  const list = document.querySelector("#rulebookItalianList");
+  const all = document.querySelector("#rulebookItalianSearchAll");
+  if (!list) return;
+  try {
+    const data = await api("/api/rulebooks/without-italian");
+    const items = data.items || [];
+    list.innerHTML = items.length
+      ? items.map((item) => `
+          <li class="rulebook-missing-item" data-rulebook-italian="${item.bgg_id}">
+            <img src="${coverSrc(item.bgg_id)}" alt="" loading="lazy" referrerpolicy="no-referrer">
+            <span class="rulebook-missing-copy">
+              <a href="/games/${item.bgg_id}" data-nav>${escapeHtml(item.italian_title || item.title)}</a>
+              <small>${escapeHtml(italianRulebookMeta(item))}</small>
+            </span>
+            <button class="button button-ghost" type="button" data-rulebook-italian-search="${item.bgg_id}">${icon("search")}<span>Cerca IT</span></button>
+          </li>`).join("")
+      : '<li class="muted">Ogni gioco con regolamento ne ha uno in italiano.</li>';
+    list.querySelectorAll("a[data-nav]").forEach((link) => link.addEventListener("click", () => closeSettingsDialog()));
+    list.querySelectorAll("[data-rulebook-italian-search]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const item = items.find((entry) => String(entry.bgg_id) === button.dataset.rulebookItalianSearch);
+        if (item) void searchItalianRulebooks([item]);
+      });
+    });
+    if (all && !italianRulebookSearch) {
+      // Prima i giochi mai cercati, poi le ricerche più vecchie; al massimo 10 per giro.
+      const queue = [...items]
+        .filter((item) => !item.pending_italian)
+        .sort((a, b) => String(a.last_italian_search_at || "").localeCompare(String(b.last_italian_search_at || "")))
+        .slice(0, 10);
+      all.disabled = !queue.length;
+      all.textContent = queue.length ? `Cerca in italiano (${queue.length})` : "Cerca in italiano";
+      all.onclick = () => void searchItalianRulebooks(queue);
+    }
+  } catch (error) {
+    list.innerHTML = `<li class="integration-error">${escapeHtml(error.message)}</li>`;
+  }
+}
+
+async function searchItalianRulebooks(items) {
+  const all = document.querySelector("#rulebookItalianSearchAll");
+  if (italianRulebookSearch) return;
+  italianRulebookSearch = {stop: false};
+  if (all) {
+    all.disabled = false;
+    all.onclick = () => {
+      if (italianRulebookSearch) italianRulebookSearch.stop = true;
+      all.disabled = true;
+      all.textContent = "Interrompo…";
+    };
+  }
+  let found = 0;
+  try {
+    for (const [index, item] of items.entries()) {
+      if (italianRulebookSearch.stop) break;
+      const row = document.querySelector(`[data-rulebook-italian="${item.bgg_id}"]`);
+      const button = row?.querySelector("[data-rulebook-italian-search]");
+      if (button) {
+        button.disabled = true;
+        button.querySelector("span").textContent = "Cerco…";
+      }
+      if (all && items.length > 1) all.textContent = `Ferma (${index + 1} di ${items.length})`;
+      try {
+        const result = await api(`/api/games/${item.bgg_id}/rulebook-italian-search`, {method: "POST"});
+        const count = Number(result.candidates_found || 0);
+        found += count ? 1 : 0;
+        if (row) row.querySelector("small").textContent = count
+          ? `${count} ${count === 1 ? "fonte italiana trovata" : "fonti italiane trovate"} · da verificare`
+          : "Nessun regolamento italiano trovato";
+      } catch (error) {
+        showToast(`${item.title}: ${error.message}`, true);
+        if (/configurat/i.test(error.message)) break;
+      }
+    }
+  } finally {
+    italianRulebookSearch = null;
+  }
+  showToast(found
+    ? `Regolamenti italiani trovati per ${found} ${found === 1 ? "gioco" : "giochi"}: sono in Fonti da verificare.`
+    : "Nessun regolamento italiano trovato.");
+  await refreshItalianRulebooks();
 }
 
 async function searchMissingRulebooks(items) {
@@ -2463,8 +2633,7 @@ async function searchScannerGames(query, barcode) {
       }
     }
     if (local.status === "rejected" && reference.status === "rejected") throw local.reason;
-    results.innerHTML = `
-      ${games.size ? Array.from(games.values()).map((game) => `
+    const choice = (game) => `
         <button class="scanner-game-choice" type="button"
                 data-bgg="${escapeHtml(game.bgg_id)}" data-owned="${game.owned ? "true" : "false"}"
                 data-title="${escapeHtml(game.title)}"
@@ -2473,11 +2642,9 @@ async function searchScannerGames(query, barcode) {
           <strong>${escapeHtml(game.title)}</strong>
           <span class="muted">BGG #${escapeHtml(game.bgg_id)}${game.year_published ? ` · ${escapeHtml(game.year_published)}` : ""} · ${game.item_type === "expansion" ? "Espansione" : "Gioco base"}</span>
           <span>${game.owned ? "Associa alla copia in ludoteca" : "Aggiungi alla ludoteca con questo barcode"}</span>
-        </button>
-      `).join("") : '<p class="muted">Nessun gioco trovato. Prova con il titolo originale o con meno parole; per nuovi titoli serve il catalogo BGG locale importato.</p>'}
-      ${reference.status === "rejected" ? '<p class="integration-error">Catalogo BGG non disponibile. Puoi scegliere un gioco già in ludoteca o riprovare.</p>' : ""}
-    `;
-    results.querySelectorAll(".scanner-game-choice").forEach((button) => {
+        </button>`;
+    const bindChoices = (root) => root.querySelectorAll(".scanner-game-choice:not([data-bound])").forEach((button) => {
+      button.dataset.bound = "true";
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
@@ -2490,6 +2657,24 @@ async function searchScannerGames(query, barcode) {
           showToast(error.message, true);
         }
       });
+    });
+    results.innerHTML = `
+      ${games.size ? Array.from(games.values()).map(choice).join("")
+        : '<p class="muted">Nessun gioco trovato nel catalogo locale.</p>'}
+      ${value.length >= 2 ? bggRemoteSearchMarkup(value, {auto: !games.size && value.length >= 3, heading: "", className: "scanner-bgg-remote"}) : ""}
+      ${reference.status === "rejected" ? '<p class="integration-error">Catalogo BGG non disponibile. Puoi scegliere un gioco già in ludoteca o riprovare.</p>' : ""}
+    `;
+    bindChoices(results);
+    const isCurrent = () => results.isConnected && scannerResult.querySelector("#scannerGameSearch")?.value.trim() === value;
+    bindBggRemoteSearch(results, {
+      isCurrent,
+      render: (items) => {
+        const fresh = items.filter((item) => !games.has(Number(item.bgg_id)));
+        window.setTimeout(() => bindChoices(results));
+        return fresh.length
+          ? fresh.map((item) => choice({...item, title: item.name, item_type: item.is_expansion ? "expansion" : "standalone"})).join("")
+          : '<p class="muted bgg-remote-status">BoardGameGeek non ha altri titoli oltre a quelli già mostrati.</p>';
+      },
     });
   } catch (error) {
     results.innerHTML =
@@ -4233,6 +4418,9 @@ async function renderDetail(bggId) {
 
             <div class="simple-rulebook-actions">
               <button class="button button-primary" id="rulebookSearchAction" type="button">Cerca automaticamente</button>
+              ${rulebooks.length && !rulebooks.some((item) => String(item.language || "").split("-")[0] === "it")
+                ? `<button class="button button-ghost" id="rulebookItalianAction" type="button" title="Cerca sul web un PDF del regolamento in italiano">${icon("search")}<span>Cerca in italiano</span></button>`
+                : ""}
               <button class="button button-ghost" id="addDocument" type="button">Upload</button>
               ${firstRulebook ? `<a class="button button-ghost" href="/api/documents/${encodeURIComponent(firstRulebook.id)}/file" target="_blank" rel="noopener noreferrer">Apri</a>` : ""}
             </div>
@@ -4478,6 +4666,26 @@ async function setupGameDiscovery(bggId, gameTitle) {
       }
     }
   };
+
+  const italianButton = document.querySelector("#rulebookItalianAction");
+  italianButton?.addEventListener("click", async () => {
+    italianButton.disabled = true;
+    const label = italianButton.querySelector("span");
+    label.textContent = "Cerco in italiano…";
+    try {
+      const result = await api(`/api/games/${bggId}/rulebook-italian-search`, {method: "POST"});
+      const found = Number(result.candidates_found || 0);
+      showToast(found
+        ? `${found === 1 ? "Trovato un regolamento italiano: controllalo" : `Trovati ${found} regolamenti italiani: controllali`} in Fonti da verificare.`
+        : "Nessun regolamento italiano trovato sul web.");
+      label.textContent = found ? "Trovato: da verificare" : "Riprova in italiano";
+    } catch (error) {
+      showToast(error.message, true);
+      label.textContent = "Cerca in italiano";
+    } finally {
+      italianButton.disabled = false;
+    }
+  });
 
   button?.addEventListener("click", async () => {
     if (button.dataset.mode === "google") {
@@ -6136,9 +6344,9 @@ function playPlayersKey(play) {
     + `#${Number(play.player_count || 0)}`;
 }
 
-function playOutcomeMarkup(play) {
+function playOutcomeMarkup(play, {short = false} = {}) {
   if (!play.outcome) return "";
-  return `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" ? " di gruppo" : ""}</span>`;
+  return `<span class="play-outcome is-${play.outcome}">${PLAY_OUTCOMES[play.outcome]}${play.play_mode === "cooperative" && !short ? " di gruppo" : ""}</span>`;
 }
 
 // Gruppo: stesse partite di uno stesso gioco nello stesso giorno (una sessione o partite separate).
@@ -6186,6 +6394,12 @@ function groupPlaysByDay(plays) {
   return days;
 }
 
+// Il riepilogo a quadrati dice già "N vittorie su M": il conteggio delle partite sarebbe un doppione.
+function playResultCountsPlays(game) {
+  const plays = game.plays;
+  return plays.length > 1 && (plays[0].play_mode === "cooperative" || plays.every((play) => play.play_mode !== "competitive" && play.outcome));
+}
+
 function playResultSummary(game) {
   const plays = game.plays;
   const mode = plays[0].play_mode;
@@ -6200,7 +6414,7 @@ function playResultSummary(game) {
   if (mode === "cooperative" || plays.every((play) => play.play_mode !== "competitive" && play.outcome)) {
     const won = plays.filter((play) => play.outcome === "won").length;
     const decided = plays.filter((play) => play.outcome).length;
-    return `<span class="play-result-dots" role="img" aria-label="${won} vittorie su ${plays.length} partite">${plays.map((play, index) => `
+    return `<span class="play-result-dots${plays.length > 8 ? " is-many" : ""}" role="img" aria-label="${won} vittorie su ${plays.length} partite">${plays.map((play, index) => `
       <i class="is-${play.outcome || "unknown"}" title="Partita ${index + 1}: ${play.outcome ? PLAY_OUTCOMES[play.outcome] : "esito non indicato"}"></i>`).join("")}</span>
       <span class="play-result-text">${decided ? `${won} ${won === 1 ? "vittoria" : "vittorie"} su ${plays.length}` : `${plays.length} partite`}</span>`;
   }
@@ -6222,7 +6436,7 @@ function playRoundLine(play, index, game) {
   const mode = play.play_mode;
   const result = mode === "competitive"
     ? (play.players || []).filter((entry) => entry.winner || entry.score).map((entry) => playerNameLink(entry, {winner: entry.winner, score: entry.score, compact: true})).join("")
-    : playOutcomeMarkup(play);
+    : playOutcomeMarkup(play, {short: true});
   const activity = game.activities.length > 1 && play.activity ? `<span class="play-round-activity">${escapeHtml(play.activity)}</span>` : "";
   return `<li class="play-round-line">
       <span class="play-round-index">${index + 1}</span>
@@ -6242,7 +6456,7 @@ function playGameLine(game, day, {showGame = true} = {}) {
   const play = plays[0];
   const completed = plays.some((item) => item.completed_game);
   const facts = [
-    !single ? `<span class="play-fact"><b>${plays.length}</b> partite</span>` : "",
+    !single && !playResultCountsPlays(game) ? `<span class="play-fact"><b>${plays.length}</b> partite</span>` : "",
     game.minutes ? `<span class="play-fact">${icon("clock")}${escapeHtml(playDuration(game.minutes))}</span>` : "",
     game.location && !day.location ? `<span class="play-fact">${icon("pin")}${escapeHtml(game.location)}</span>` : "",
     completed ? `<span class="play-outcome is-completed">${icon("crown")}Completato</span>` : "",
@@ -8835,9 +9049,10 @@ function renderBggCatalogItems() {
   if (!grid || !currentBggCatalogItems) return;
   const listView = state.catalogView === "list";
   grid.className = `catalog-results bgg-catalog-results ${listView ? "catalog-results-list" : `catalog-results-cards catalog-columns-${state.cardsPerRow}`}`;
+  renderBggCatalogRemote();
   if (!currentBggCatalogItems.length) {
     grid.innerHTML = bggCatalogState.q
-      ? '<div class="empty catalog-empty">Nessun gioco trovato. Prova con il titolo originale o con meno parole.</div>'
+      ? '<div class="empty catalog-empty">Nessun gioco nel catalogo locale per questa ricerca.</div>'
       : '<div class="empty catalog-empty">Catalogo BGG vuoto: copia il dump <code>boardgames_ranks.csv</code> nella cartella di import, viene importato automaticamente. Soglie e stato sono nelle Impostazioni.</div>';
     return;
   }
@@ -8851,6 +9066,34 @@ function renderBggCatalogItems() {
     `
     : rows.map(([game, item]) => gameCard(game, [], {reference: item})).join("");
   bindBggCatalogCards(grid);
+}
+
+// Sotto i risultati del Catalogo: ricerca su BGG, automatica se il catalogo locale non trova nulla.
+function renderBggCatalogRemote() {
+  const container = document.querySelector("#bggCatalogRemote");
+  if (!container) return;
+  const query = (bggCatalogState.q || "").trim();
+  const show = query.length >= 2 && bggCatalogState.offset === 0;
+  container.hidden = !show;
+  if (!show) {
+    container.innerHTML = "";
+    return;
+  }
+  if (container.dataset.query === query && container.innerHTML) return;
+  container.dataset.query = query;
+  container.innerHTML = bggRemoteSearchMarkup(query, {
+    auto: !currentBggCatalogItems.length,
+    heading: "",
+    className: "bgg-remote-catalog",
+  });
+  bindBggRemoteSearch(container, {
+    render: (items) => `
+      <h2 class="bgg-remote-title">Trovati su BoardGameGeek</h2>
+      <div class="catalog-results catalog-results-cards catalog-columns-${state.cardsPerRow}">
+        ${items.map((item) => gameCard(referenceAsGame(item), [], {reference: item})).join("")}
+      </div>`,
+    isCurrent: () => (bggCatalogState.q || "").trim() === query,
+  });
 }
 
 function renderBggCatalogPagination() {
@@ -8979,6 +9222,7 @@ async function renderBggCatalog() {
       ${advancedSearchMarkup(bggCatalogState, {library: false})}
       <section class="catalog-results catalog-results-cards catalog-columns-${state.cardsPerRow}" id="bggCatalogGrid"></section>
       <nav class="pagination" id="bggCatalogPagination" aria-label="Paginazione" hidden></nav>
+      <div class="bgg-remote-slot" id="bggCatalogRemote" hidden></div>
     </section>
   `;
   const reload = () => {

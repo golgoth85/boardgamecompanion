@@ -10,7 +10,7 @@ from boardgamecompanion.italian_titles import ItalianTitleService, choose_italia
 from boardgamecompanion.title_search import display_title, is_edition_label, italian_title
 
 XML = b"""<items><item type="boardgame" id="7"><versions>
-<item><name type="primary" value="Creature e Reietti"/><link type="language" value="Italian"/></item>
+<item><name type="primary" value="Creature e Reietti"/><link type="language" value="Italian"/><link type="boardgamepublisher" value="Cranio Creations"/></item>
 <item><name type="primary" value="Creature e Reietti"/><link type="language" value="Italian"/></item>
 <item><name type="primary" value="Italian edition"/><link type="language" value="Italian"/></item>
 <item><name type="primary" value="Wesen und Ausgestossene"/><link type="language" value="German"/></item>
@@ -19,7 +19,7 @@ XML = b"""<items><item type="boardgame" id="7"><versions>
 
 def test_parse_versions_and_choose_italian_title() -> None:
     versions = _parse_versions(XML, expected_bgg_id=7)
-    assert versions[0] == {"name": "Creature e Reietti", "languages": ["Italian"]}
+    assert versions[0] == {"name": "Creature e Reietti", "languages": ["Italian"], "publishers": ["Cranio Creations"]}
     assert choose_italian_title(versions) == "Creature e Reietti"
     assert choose_italian_title([{"name": "Italian edition", "languages": ["Italian"]}]) is None
     assert choose_italian_title([{"name": "Das Spiel", "languages": ["German"]}]) is None

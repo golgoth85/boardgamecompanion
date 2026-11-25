@@ -48,6 +48,18 @@ def public_url(value: str) -> str:
     return url
 
 
+def _candidate_language(url: str, page: dict) -> str:
+    """The PDF name decides first: a page titled "regolamento" may link an English file."""
+    from boardgamecompanion.italian_rulebook_search import filename_language, text_language
+
+    return (
+        filename_language(url)
+        or (filename_language(url, page.get("title", "")) if url == page.get("url") else None)
+        or text_language(page.get("content", ""))
+        or _language_from(None, page.get("title", ""))
+    )
+
+
 class DeepSeekWeb:
     def __init__(self, client: CloudAIClient):
         self.client = client
@@ -93,7 +105,7 @@ class DeepSeekRulebookProvider:
             # Italian title (when BGG lists one) for the Italian rulebook, the BGG file
             # pages for community uploads, then an English search only if nothing
             # was found. At most four page reads. No model invents download links.
-            italian_title = shop_search_title(query.title, query.verified_titles)
+            italian_title = query.italian_title or shop_search_title(query.title, query.verified_titles)
             bgg_title = query.original_title or query.title
             candidates: list[RulebookCandidate] = []
             state = {"seen": set(), "fetched": 0}
@@ -141,7 +153,7 @@ class DeepSeekRulebookProvider:
                 candidates.append(RulebookCandidate(
                     provider=self.name,
                     source_kind=RulebookSource.COMMUNITY if community else RulebookSource.GENERIC,
-                    url=url, language=_language_from(None, page.get("title", "")),
+                    url=url, language=_candidate_language(url, page),
                     document_type="rulebook", official=False, confidence=70 if community else 40,
                     title=page["title"][:500], game_title=query.title,
                     metadata={"source_url": source, "identity_evidence": ["exact_title_only"],

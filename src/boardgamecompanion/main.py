@@ -2221,6 +2221,52 @@ def list_games_missing_rulebooks() -> dict[str, object]:
     }
 
 
+def get_italian_rulebook_search_service():
+    from boardgamecompanion.italian_rulebook_search import (
+        ItalianRulebookProvider,
+        ItalianRulebookSearchService,
+    )
+
+    database = get_database()
+    database.initialize()
+    rag = resolve_rag_settings(database)
+    provider = None
+    if rag.web_provider == "deepseek":
+        from boardgamecompanion.cloud_ai import cloud_client
+
+        provider = ItalianRulebookProvider(
+            cloud_client(rag, "deepseek", rate_limiter=PersistentRateLimiter(database).acquire)
+        )
+    discovery = get_rulebook_discovery_service()
+    client = get_bgg_api_client()
+    return ItalianRulebookSearchService(
+        database,
+        provider,
+        query_for=discovery.query_for,
+        versions=client.versions if client is not None else None,
+    )
+
+
+@app.get("/api/rulebooks/without-italian", tags=["rulebooks"])
+def list_games_without_italian_rulebook() -> dict[str, object]:
+    """Owned games whose rulebooks are all in other languages."""
+    items = get_italian_rulebook_search_service().games_without_italian()
+    return {"count": len(items), "items": items}
+
+
+@app.post("/api/games/{bgg_id}/rulebook-italian-search", tags=["rulebooks"])
+def run_italian_rulebook_search(bgg_id: int) -> dict[str, object]:
+    """Look for an Italian rulebook on the web; results always go to review."""
+    from boardgamecompanion.rulebooks import RulebookProviderError
+
+    try:
+        return get_italian_rulebook_search_service().search(bgg_id)
+    except RulebookDiscoveryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RulebookProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.post("/api/games/{bgg_id}/rulebook-discovery/run", tags=["rulebooks"])
 def run_game_rulebook_discovery(bgg_id: int) -> dict[str, object]:
     service = get_rulebook_discovery_service()

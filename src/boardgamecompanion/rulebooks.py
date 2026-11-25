@@ -403,9 +403,22 @@ class RulebookQuery:
     verified_titles: tuple[str, ...] = ()
     bgg_identity_verified: bool = False
     edition_publishers: tuple[str, ...] = ()
+    # Title and publishers of the Italian edition(s) on BGG, when known.
+    italian_title: str | None = None
+    italian_publishers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         bgg_id = _normalize_positive_identifier(self.bgg_id, field_name="bgg_id")
+        object.__setattr__(self, "italian_title", _clean_optional(self.italian_title))
+        object.__setattr__(
+            self,
+            "italian_publishers",
+            tuple(
+                value
+                for publisher in self.italian_publishers
+                if (value := _clean_optional(publisher, max_length=500)) is not None
+            ),
+        )
         title = str(self.title or "").strip()
         if not title:
             raise ValueError("title is required")

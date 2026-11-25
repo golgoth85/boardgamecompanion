@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -19,7 +19,9 @@ BGG_API_ORIGIN = "https://boardgamegeek.com"
 MAX_XML_BYTES = 2 * 1024 * 1024
 MAX_METADATA_BYTES = 256 * 1024
 MAX_THING_IDS = 20
-ITALIAN_TITLE_KEYS = ("italian_title", "italian_title_next_check_at", "italian_title_rule")
+ITALIAN_TITLE_KEYS = (
+    "italian_title", "italian_title_next_check_at", "italian_title_rule", "italian_rulebook_search_at",
+)
 BGG_IMAGE_HOSTS = frozenset(
     {"cf.geekdo-images.com", "cf.geekdo-static.com", "boardgamegeek.com"}
 )
@@ -170,6 +172,49 @@ class BggApiClient:
             f"{BGG_API_ORIGIN}/xmlapi2/thing?id={int(bgg_id)}"
             f"&comments=1&page={max(1, int(page))}&pagesize=100"
         )
+
+    def search(self, query: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Titles matching ``query`` on BGG (approved XML API2 ``search``).
+
+        Base games and expansions; an ID BGG lists under both types is
+        returned once and marked as an expansion.
+        """
+        text = " ".join(str(query or "").split())[:200]
+        if not text:
+            return []
+        content = self._request_xml(
+            f"{BGG_API_ORIGIN}/xmlapi2/search?"
+            + urlencode({"query": text, "type": "boardgame,boardgameexpansion"})
+        )
+        try:
+            root = ET.fromstring(content)
+        except (ET.ParseError, ValueError) as exc:
+            raise BggMetadataError("BGG search returned invalid XML") from exc
+        items: dict[int, dict[str, Any]] = {}
+        for node in root.findall("item"):
+            raw_id = (node.attrib.get("id") or "").strip()
+            if not raw_id.isdigit() or int(raw_id) <= 0:
+                continue
+            name_node = node.find("name")
+            name = _attribute(name_node)
+            if not name:
+                continue
+            year = _attribute(node.find("yearpublished"))
+            expansion = node.attrib.get("type") == "boardgameexpansion"
+            identifier = int(raw_id)
+            if identifier in items:
+                items[identifier]["is_expansion"] = items[identifier]["is_expansion"] or expansion
+                continue
+            items[identifier] = {
+                "bgg_id": identifier,
+                "name": name.strip(),
+                "primary": (name_node.attrib.get("type") if name_node is not None else None) == "primary",
+                "year_published": int(year) if year and year.lstrip("-").isdigit() else None,
+                "is_expansion": expansion,
+            }
+            if len(items) >= max(1, int(limit)):
+                break
+        return list(items.values())
 
     def hot(self, *, limit: int = 50) -> list[dict[str, Any]]:
         cap = max(1, min(int(limit), 100))
@@ -486,6 +531,13 @@ def _parse_versions(content: bytes, *, expected_bgg_id: int) -> list[dict[str, A
                     value
                     for link in node.findall("link")
                     if link.attrib.get("type") == "language"
+                    for value in (_attribute(link),)
+                    if value
+                ],
+                "publishers": [
+                    value
+                    for link in node.findall("link")
+                    if link.attrib.get("type") == "boardgamepublisher"
                     for value in (_attribute(link),)
                     if value
                 ],

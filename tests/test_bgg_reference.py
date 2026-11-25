@@ -601,3 +601,57 @@ def test_library_lists_italian_titles_and_sorts_by_last_added(database: Database
     reference.add_to_collection(224517)
     items = Catalog(database).list_games(owned=True, sort="added_desc")["items"]
     assert [item["bgg_id"] for item in items] == [224517, 28720]
+
+
+class FakeSearchClient(FakeThingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.searches: list[str] = []
+        self.batches: list[list[int]] = []
+
+    def search(self, query: str, *, limit: int = 50) -> list[dict]:
+        self.searches.append(query)
+        return [
+            {"bgg_id": 990001, "name": "Brass Monkeys", "year_published": 2026, "is_expansion": False, "primary": True},
+            {"bgg_id": 28720, "name": "Brass", "year_published": 2007, "is_expansion": False, "primary": True},
+            {"bgg_id": 224517, "name": "Brass: Birmingham", "year_published": 2018, "is_expansion": False, "primary": True},
+        ]
+
+    def things_with_xml(self, ids, *, skipped=None):
+        self.batches.append(list(ids))
+        return {bgg_id: ({**self._metadata(bgg_id), "bgg_users_rated": 5}, f'<item id="{bgg_id}"/>') for bgg_id in ids if bgg_id == 990001}
+
+
+def test_remote_search_adds_unknown_titles_and_ranks_exact_match_first(database: Database) -> None:
+    from boardgamecompanion import bgg_reference
+
+    bgg_reference._remote_search_cache.clear()
+    BggReferenceImporter(database).import_bytes(DUMP, "boardgames_ranks.csv")
+    catalog = BggReferenceCatalog(database)
+    client = FakeSearchClient()
+
+    items = catalog.remote_search("Brass", client, limit=10)
+
+    assert [item["bgg_id"] for item in items] == [28720, 224517, 990001]
+    # only the unknown title needed API details, in one batch
+    assert len(client.batches) == 1 and 990001 in client.batches[0]
+    added = catalog.detail(990001, None)
+    assert added is not None and added["thumbnail_url"] == "https://cf.geekdo-images.com/t.jpg"
+    # hidden from listings below the vote threshold, but searchable remotely again from cache
+    assert all(item["bgg_id"] != 990001 for item in catalog.search("brass monkeys"))
+    catalog.remote_search("brass", client, limit=10)
+    assert client.searches == ["Brass"]
+    bgg_reference._remote_search_cache.clear()
+
+
+def test_bgg_search_endpoint_requires_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from boardgamecompanion.routers import reference
+
+    monkeypatch.setattr(reference, "get_bgg_api_client", lambda: None)
+    monkeypatch.setattr(settings, "bgg_reference_dump_worker_enabled", False)
+    monkeypatch.setattr(settings, "bgg_reference_api_worker_enabled", False)
+    monkeypatch.setattr(settings, "config_dir", tmp_path / "config")
+    with TestClient(app) as client:
+        response = client.get("/api/reference/bgg-search", params={"q": "Brass"})
+    assert response.status_code == 503
+    assert "token" in response.json()["detail"]

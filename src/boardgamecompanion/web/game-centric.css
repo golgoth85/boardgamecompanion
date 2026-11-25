@@ -1133,7 +1133,7 @@ button.game-card,button.catalog-list-game{width:100%;padding:0;border:0;backgrou
 .play-row-title:hover,.play-row-title:focus-visible{color:var(--accent-2)}
 .play-row-activity{color:#dce4ed;font-size:.78rem}
 .play-row-facts{display:inline-flex;flex-wrap:wrap;gap:.3rem .55rem;color:var(--muted);font-size:.7rem}
-.play-outcome{display:inline-flex;align-items:center;gap:.2rem;padding:.08rem .45rem;border-radius:999px;font-weight:800}
+.play-outcome{display:inline-flex;white-space:nowrap;align-items:center;gap:.2rem;padding:.08rem .45rem;border-radius:999px;font-weight:800}
 .play-outcome .icon{width:.75rem;height:.75rem}
 .play-outcome.is-won{background:rgba(73,190,132,.12);color:#9fe3bd}
 .play-outcome.is-lost{background:rgba(232,105,132,.12);color:#f0bdc8}
@@ -1654,10 +1654,11 @@ a.play-chip:hover,button.play-chip:hover,a.play-chip:focus-visible,button.play-c
 .play-line-activity{color:#dce4ed;font-size:.75rem}
 .play-line-results{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .6rem;font-size:.7rem}
 .play-line-results:empty{display:none}
-.play-result-dots{display:inline-flex;gap:.18rem}
-.play-result-dots i{width:.62rem;height:.62rem;border-radius:3px;background:var(--surface-3)}
+.play-result-dots{display:inline-flex;flex-wrap:wrap;gap:.18rem;max-width:100%;min-width:0}
+.play-result-dots.is-many{flex-basis:100%}
+.play-result-dots i{flex:none;width:.62rem;height:.62rem;border-radius:3px;background:var(--surface-3)}
 .play-result-dots i.is-won{background:#3fbf83}
-.play-result-dots i.is-lost{background:transparent;box-shadow:inset 0 0 0 1.5px #e86984}
+.play-result-dots i.is-lost{background:#e05570}
 .play-result-dots i.is-draw{background:#8b97aa}
 .play-result-text{color:#dce4ed;font-weight:700}
 .play-line-actions{display:flex;gap:.15rem}

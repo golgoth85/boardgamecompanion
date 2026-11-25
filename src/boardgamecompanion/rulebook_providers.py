@@ -178,7 +178,7 @@ class ProviderHttpClient:
             raise
         except Exception as exc:
             raise ProviderHttpError(
-                "Provider browser fallback request failed"
+                f"Provider browser fallback request failed ({type(exc).__name__})"
             ) from exc
 
     def get(
@@ -1694,6 +1694,9 @@ class RuleBookOrgProvider:
         if not isinstance(payload, Mapping):
             raise RulebookProviderError("Community provider response must be an object")
         results = payload.get("results")
+        if results is None:
+            # rule-book.org answers {"results": null} when nothing matches.
+            return ()
         if not isinstance(results, list):
             raise RulebookProviderError("Community provider results must be a list")
         if len(results) > MAX_DISCOVERY_RESULTS:

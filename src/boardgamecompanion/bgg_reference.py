@@ -393,6 +393,8 @@ def _fts_query(query: str) -> str | None:
     return " ".join(f'"{token}"*' for token in tokens)
 
 
+logger = logging.getLogger(__name__)
+
 _VISIBLE_SQL = """
     g.removed_at IS NULL
     AND (
@@ -461,6 +463,11 @@ BROWSE_CACHE_SECONDS = 300
 # Esplora reads every stored /thing (hundreds of MB): kept longer and
 # refreshed in the background rather than on a user request.
 EXPLORE_CACHE_SECONDS = 900
+REMOTE_SEARCH_CACHE_SECONDS = 600
+REMOTE_SEARCH_LIMIT = 20
+_remote_search_cache: dict[tuple[str, str], tuple[float, list[int]]] = {}
+_remote_search_lock = threading.Lock()
+
 _browse_cache_lock = threading.Lock()
 _browse_cache: dict[tuple[str, int, bool], dict[str, Any]] = {}
 
@@ -935,6 +942,114 @@ class BggReferenceCatalog:
             in {normalize_title_text(name) for name in [row["name"], *(row["alt_names"] or "").split("\n")]}
         }
         return found.pop() if len(found) == 1 else None
+
+    def remote_search(
+        self, query: str, client: Any, *, limit: int = REMOTE_SEARCH_LIMIT
+    ) -> list[dict[str, Any]]:
+        """Titles found by BGG's own search, for games missing from the local catalog.
+
+        Unknown IDs get a minimal reference row (never visible in listings below
+        the vote threshold, but openable and addable); the best candidates
+        without API details are completed with one batched /thing request so the
+        results show covers and votes. Answers are cached for ten minutes.
+        """
+        text = " ".join(str(query or "").split())
+        key = (str(self.database.path), normalize_title_text(text))
+        if not key[1]:
+            return []
+        now = time.monotonic()
+        with _remote_search_lock:
+            cached = _remote_search_cache.get(key)
+        if cached is not None and now - cached[0] < REMOTE_SEARCH_CACHE_SECONDS:
+            return self._items_by_id(cached[1][:limit])
+
+        found = client.search(text, limit=400)
+        target = key[1]
+        ids = [int(item["bgg_id"]) for item in found]
+        names = {int(item["bgg_id"]): normalize_title_text(item["name"]) for item in found}
+
+        def ranked(rows: dict[int, Any]) -> list[int]:
+            return sorted(
+                ids,
+                key=lambda bgg_id: (
+                    bgg_id not in rows and bgg_id in known,
+                    names.get(bgg_id) != target,
+                    not str(names.get(bgg_id) or "").startswith(target),
+                    -int(rows[bgg_id]["users_rated"] or 0) if bgg_id in rows else 0,
+                    bgg_id,
+                ),
+            )
+
+        known: set[int] = set()
+        rows = self._remote_rows(ids)
+        with self.database.connect() as connection:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                known.update(
+                    int(row[0])
+                    for row in connection.execute(
+                        f"SELECT bgg_id FROM bgg_reference_games WHERE bgg_id IN ({placeholders})", chunk
+                    )
+                )
+        # Removed titles stay hidden; only the best unknown titles get a row.
+        best = [bgg_id for bgg_id in ranked(rows) if bgg_id in rows or bgg_id not in known][:limit]
+        by_id = {int(item["bgg_id"]): item for item in found}
+        new_rows = [bgg_id for bgg_id in best if bgg_id not in known]
+        if new_rows:
+            stamp = datetime.now(UTC).isoformat()
+            with self.database.transaction(immediate=True) as connection:
+                connection.executemany(
+                    """
+                    INSERT INTO bgg_reference_games(
+                        bgg_id, name, year_published, is_expansion, users_rated,
+                        source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 0, 'api', ?, ?)
+                    ON CONFLICT(bgg_id) DO NOTHING
+                    """,
+                    [
+                        (
+                            bgg_id, by_id[bgg_id]["name"], by_id[bgg_id]["year_published"],
+                            int(bool(by_id[bgg_id]["is_expansion"])), stamp, stamp,
+                        )
+                        for bgg_id in new_rows
+                    ],
+                )
+            rows = self._remote_rows(ids)
+        best = [bgg_id for bgg_id in best if bgg_id in rows]
+        missing = [bgg_id for bgg_id in best if rows[bgg_id]["api_checked_at"] is None]
+        if missing:
+            try:
+                details = client.things_with_xml(missing[:20])
+            except Exception as exc:  # covers and votes are a bonus, not a requirement
+                logger.warning("BGG search details failed: %s", type(exc).__name__)
+            else:
+                for bgg_id, (metadata, raw_xml) in details.items():
+                    self.store_api_detail(bgg_id, metadata, raw_xml)
+                rows = self._remote_rows(ids)
+                best = [bgg_id for bgg_id in ranked(rows) if bgg_id in rows][:limit]
+        with _remote_search_lock:
+            _remote_search_cache[key] = (time.monotonic(), best)
+            if len(_remote_search_cache) > 200:
+                oldest = min(_remote_search_cache, key=lambda item: _remote_search_cache[item][0])
+                _remote_search_cache.pop(oldest, None)
+        return self._items_by_id(best)
+
+    def _remote_rows(self, ids: list[int]) -> dict[int, Any]:
+        rows: dict[int, Any] = {}
+        with self.database.connect() as connection:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                for row in connection.execute(
+                    f"""
+                    SELECT bgg_id, users_rated, api_checked_at FROM bgg_reference_games
+                    WHERE bgg_id IN ({placeholders}) AND removed_at IS NULL
+                    """,
+                    chunk,
+                ):
+                    rows[int(row["bgg_id"])] = row
+        return rows
 
     def detail(self, bgg_id: int, client: Any | None = None) -> dict[str, Any] | None:
         """Reference row plus API details, fetching one /thing if never queried.

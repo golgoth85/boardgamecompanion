@@ -91,6 +91,12 @@ class RulebookDiscoveryService:
         if row is None:
             raise RulebookDiscoveryNotFound(f"Board game BGG #{bgg_id} not found")
         metadata = self.metadata_store.get(bgg_id) if self.metadata_store else None
+        with self.database.connect() as connection:
+            enrichment = connection.execute(
+                "SELECT json_extract(metadata_json, '$.italian_title') AS italian_title "
+                "FROM board_game_enrichments WHERE board_game_id = ?",
+                (row["id"],),
+            ).fetchone()
         publishers = _publishers(row["version_publishers"])
         if metadata:
             publishers.extend(str(value) for value in metadata["publishers"])
@@ -127,12 +133,17 @@ class RulebookDiscoveryService:
                 and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
                 else ()
             ),
+            italian_title=enrichment["italian_title"] if enrichment else None,
             bgg_identity_verified=bool(
                 metadata
                 and metadata.get("fetched_at")
                 and metadata.get("metadata", {}).get("bgg_id") == int(bgg_id)
             ),
         )
+
+    def query_for(self, bgg_id: int) -> RulebookQuery:
+        """Matching evidence for one game, as used by every provider."""
+        return self._query(bgg_id)
 
     def _claim(self, bgg_id: int, *, force: bool, now: datetime) -> tuple[int, str, int]:
         owner = str(uuid4())

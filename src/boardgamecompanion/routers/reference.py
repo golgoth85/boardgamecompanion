@@ -22,6 +22,7 @@ from boardgamecompanion.bgg_reference import (
     load_reference_settings,
     save_reference_settings,
 )
+from boardgamecompanion.bgg_metadata import BggMetadataError
 from boardgamecompanion.bgg_reference_worker import worker_status
 from boardgamecompanion.catalog import explore_fact_match, explore_facts
 from boardgamecompanion.description_translation import (
@@ -74,6 +75,27 @@ def reference_search(
     database.initialize()
     items = BggReferenceCatalog(database).search(q, limit=limit)
     return {"query": q, "items": items}
+
+
+@router.get("/api/reference/bgg-search")
+def reference_bgg_search(
+    q: str = Query(min_length=2, max_length=200),
+    limit: int = Query(default=12, ge=1, le=20),
+) -> dict[str, object]:
+    """Search BoardGameGeek itself, for titles missing from the local catalog."""
+    database = get_database()
+    database.initialize()
+    client = get_bgg_api_client()
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Ricerca su BGG non disponibile: serve il token dell'applicazione BGG nelle Impostazioni.",
+        )
+    try:
+        items = BggReferenceCatalog(database).remote_search(q, client, limit=limit)
+    except BggMetadataError as exc:
+        raise HTTPException(status_code=502, detail=f"BGG non ha risposto: {exc}") from exc
+    return {"query": q, "items": items, "source": "bgg"}
 
 
 @router.get("/api/reference/browse")
