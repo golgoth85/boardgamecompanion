@@ -323,3 +323,13 @@ def test_browser_fallback_drops_content_encoding() -> None:
     )
     response = client.get("https://craniocreations.it/products/sagrada", allowed_hosts={"craniocreations.it"})
     assert response.status_code == 200 and b"Sagrada" in response.content
+
+
+def test_side_material_is_not_the_rulebook() -> None:
+    from boardgamecompanion.italian_rulebook_search import side_material
+
+    assert side_material("https://x.ru/Kingdomino_Expansion_Print_Play_The_Court.pdf", ["kingdomino"])
+    assert side_material("https://x.it/Sagrada_FAQ_ITA.pdf", ["sagrada"])
+    assert not side_material("https://x.it/Sagrada_ITA_Rules.pdf", ["sagrada"])
+    # the game itself is an expansion: its own name is not a reason to drop it
+    assert not side_material("https://x.it/Sagrada_Expansion_regole.pdf", ["sagrada 5 6 player expansion"])

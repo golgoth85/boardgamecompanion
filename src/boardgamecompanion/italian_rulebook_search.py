@@ -121,6 +121,20 @@ def _slug_mentions(url: str, titles: list[str]) -> bool:
     return any(f" {title} " in f" {name} " for title in titles)
 
 
+_SIDE_MATERIAL = frozenset({
+    "expansion", "espansione", "promo", "printplay", "pnp", "faq", "errata", "scenario", "scenari",
+    "campaign", "campagna", "addon", "miniexpansion", "solo", "variant", "variante", "sheet", "scoresheet",
+})
+
+
+def side_material(url: str, titles: list[str]) -> bool:
+    """Expansion, promo, print & play or FAQ files, unless the game itself is one."""
+    name = " ".join(_tokens(unquote(urlsplit(url).path).rsplit("/", 1)[-1]))
+    words = set(name.split()) | ({"printplay"} if "print play" in name or "print and play" in name else set())
+    known = {word for title in titles for word in title.split()}
+    return bool((words & _SIDE_MATERIAL) - known)
+
+
 def pdf_identifies_game(url: str, title: str, titles: list[str]) -> bool:
     """A search hit that is itself a PDF: the game must be in its name, or in its
     title together with a rules word (in the title or the file name)."""
@@ -217,7 +231,7 @@ class ItalianRulebookProvider:
                     identified = pdf_identifies_game(url, title, titles)
                 else:
                     identified = page_mentions or _slug_mentions(url, titles)
-                if not identified:
+                if not identified or side_material(url, titles):
                     continue
                 community = _is_bgg_filepage(source) and _is_allowed_download(url)
                 evidence = ["title_in_source" if page_mentions else "title_in_file_name"]

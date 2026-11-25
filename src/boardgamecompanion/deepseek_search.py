@@ -49,9 +49,10 @@ def public_url(value: str) -> str:
 
 
 def _pdf_names_game(query: RulebookQuery, url: str, page: dict) -> bool:
-    from boardgamecompanion.italian_rulebook_search import _titles, pdf_identifies_game
+    from boardgamecompanion.italian_rulebook_search import _titles, pdf_identifies_game, side_material
 
-    return pdf_identifies_game(url, page.get("title", ""), _titles(query))
+    titles = _titles(query)
+    return pdf_identifies_game(url, page.get("title", ""), titles) and not side_material(url, titles)
 
 
 def _candidate_language(url: str, page: dict) -> str:
