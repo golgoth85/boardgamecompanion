@@ -42,14 +42,16 @@ _LANGUAGE_TOKENS = {
     "nl": {"nl", "dutch", "spelregels"},
     "pl": {"pl", "polish", "zasady", "instrukcja"},
 }
-_IT_WORDS = frozenset(
-    "il lo la gli le della delle dei degli del che per con una uno sono turno giocatore "
-    "giocatori carta carte partita ogni quando puoi deve essere anche nel nella".split()
-)
-_EN_WORDS = frozenset(
-    "the and of to with your each player players card cards turn game when you must "
-    "this that from into".split()
-)
+# Function words that tell languages apart; words shared by Italian, Spanish
+# and French ("la", "del", "con", "una", "le") are deliberately left out.
+_STOPWORDS = {
+    "it": frozenset("il gli della delle degli dei che sono nel nella anche questo questa quando ogni puoi deve "
+                    "essere giocatore giocatori carta carte partita turno pescare".split()),
+    "en": frozenset("the and of to with your each player players card cards turn game when you must this that from into".split()),
+    "es": frozenset("el los las que por para es jugador jugadores cartas turno partida cada puede debe".split()),
+    "fr": frozenset("les des est et pour dans une du joueur joueurs cartes tour partie chaque peut doit".split()),
+    "de": frozenset("der die das und ist mit spieler karten runde jede kann muss nicht".split()),
+}
 # Common suffixes of Italian publisher names, dropped from search queries.
 _PUBLISHER_NOISE = re.compile(r"\b(?:s\.?r\.?l\.?|s\.?p\.?a\.?|edizioni|editore|italia|italy)\b\.?", re.I)
 
@@ -86,13 +88,17 @@ def text_language(text: str) -> str | None:
     words = _tokens(text[:6000])
     if len(words) < 30:
         return None
-    italian = sum(word in _IT_WORDS for word in words)
-    english = sum(word in _EN_WORDS for word in words)
-    if italian >= 8 and italian > english * 2:
-        return "it"
-    if english >= 8 and english > italian * 2:
-        return "en"
+    scores = sorted(
+        ((sum(word in vocabulary for word in words), language) for language, vocabulary in _STOPWORDS.items()),
+        reverse=True,
+    )
+    (best, language), (second, _) = scores[0], scores[1]
+    if best >= 6 and best > second * 2:
+        return language
     return None
+
+
+_RULE_WORDS = re.compile(r"\b(?:regolamento|regole|istruzioni|manuale|rules|rulebook)\b", re.I)
 
 
 def _titles(query: RulebookQuery) -> list[str]:
@@ -113,6 +119,15 @@ def _mentions(haystack: str, titles: list[str]) -> bool:
 def _slug_mentions(url: str, titles: list[str]) -> bool:
     name = " ".join(_tokens(unquote(urlsplit(url).path)))
     return any(f" {title} " in f" {name} " for title in titles)
+
+
+def pdf_identifies_game(url: str, title: str, titles: list[str]) -> bool:
+    """A search hit that is itself a PDF: the game must be in its name, or in its
+    title together with a rules word (in the title or the file name)."""
+    if _slug_mentions(url, titles):
+        return True
+    name = " ".join(_tokens(unquote(urlsplit(url).path).rsplit("/", 1)[-1]))
+    return _mentions(title, titles) and bool(_RULE_WORDS.search(title) or _RULE_WORDS.search(name))
 
 
 def _publisher_name(value: str) -> str:
@@ -174,7 +189,9 @@ class ItalianRulebookProvider:
             title = page.get("title", "")
             content = page.get("content", "") or result.get("snippet", "")
             headings = " ".join(re.findall(r"^#+\s+(.+)$", content, re.M)[:10])
-            page_mentions = _mentions(f"{title} {headings} {content[:3000]}", titles)
+            # Identity from the title and headings only: a PDF body (catalogues,
+            # shop lists, ludoteca inventories) can mention dozens of games.
+            page_mentions = _mentions(f"{title} {headings}", titles)
             page_language = text_language(content)
             links = [source] if direct_pdf else []
             if not direct_pdf:
@@ -196,7 +213,11 @@ class ItalianRulebookProvider:
                     language = page_language
                 if language != "it":
                     continue
-                if not (page_mentions or _slug_mentions(url, titles) or _mentions(title, titles)):
+                if direct_pdf:
+                    identified = pdf_identifies_game(url, title, titles)
+                else:
+                    identified = page_mentions or _slug_mentions(url, titles)
+                if not identified:
                     continue
                 community = _is_bgg_filepage(source) and _is_allowed_download(url)
                 evidence = ["title_in_source" if page_mentions else "title_in_file_name"]

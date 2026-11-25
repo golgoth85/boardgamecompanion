@@ -709,7 +709,12 @@ def test_production_provider_factory_limits_browser_fallback_to_official_hosts()
         if name.startswith("official_site_")
     ]
     assert len(generic) == 6  # + Cranio Creations
-    assert all(item.http.browser_fallback_hosts == frozenset() for item in generic)
+    # Only storefronts that throttle non-browser agents (Cranio's Shopify) fall back.
+    assert all(
+        item.http.browser_fallback_hosts == (item.site.hosts if item.site.browser_agent else frozenset())
+        for item in generic
+    )
+    assert [item.site.key for item in generic if item.site.browser_agent] == ["cranio_creations"]
 
     assert repos.http.browser_fallback_hosts == {"www.rprod.com", "rprod.com"}
     assert asmodee.http.browser_fallback_hosts == {

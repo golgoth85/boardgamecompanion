@@ -166,9 +166,16 @@ class ProviderHttpClient:
                             raise ProviderHttpError("Provider response exceeds the byte limit")
                         chunks.append(chunk)
                     content = b"".join(chunks)
+                    # curl_cffi has already decoded the body: passing its
+                    # Content-Encoding on would make httpx decode it twice.
+                    headers = {
+                        key: value
+                        for key, value in dict(response.headers).items()
+                        if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+                    }
                     return httpx.Response(
                         int(response.status_code),
-                        headers=dict(response.headers),
+                        headers=headers,
                         content=content,
                         request=httpx.Request("GET", url),
                     )
@@ -264,7 +271,7 @@ class ProviderHttpClient:
             assert response is not None
             current_host = (urlsplit(current).hostname or "").lower()
             if (
-                response.status_code == 403
+                response.status_code in {403, 429}
                 and current_host in self.browser_fallback_hosts
             ):
                 response = self._browser_get_once(current)
@@ -1801,6 +1808,7 @@ def production_official_rulebook_providers(
                 min_interval_seconds=min_interval_seconds,
                 rate_limiter=rate_limiter,
                 user_agent=None if site.browser_agent else SITE_USER_AGENT,
+                browser_fallback_hosts=site.hosts if site.browser_agent else (),
             ),
         )
         for site in VERIFIED_PUBLISHER_SITES

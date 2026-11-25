@@ -274,3 +274,52 @@ def test_publisher_site_reads_italian_from_the_pdf_name() -> None:
         label="Scarica PDF", bgg_ids=set(), product_context=True,
     )
     assert candidate is not None and candidate.language == "it" and candidate.official
+
+
+def test_pdf_mentioning_the_game_in_its_body_is_not_its_rulebook() -> None:
+    web = FakeWeb(
+        {"regolamento italiano pdf": [{
+            "url": "https://www.example.it/uploads/elenco-giochi-in-ludoteca.pdf",
+            "title": "Il gioco astratto Quoridor è incredibilmente",
+            "content": ITALIAN_TEXT + " Sagrada, Azul, Quoridor, Catan",
+            "snippet": "",
+        }, {
+            "url": "https://www.example.it/uploads/regole.pdf",
+            "title": "Sagrada - regolamento",
+            "content": ITALIAN_TEXT,
+            "snippet": "",
+        }]},
+        {},
+    )
+    candidates = provider_with(web).discover(QUERY)
+    assert [item.url for item in candidates] == ["https://www.example.it/uploads/regole.pdf"]
+
+
+def test_spanish_text_is_not_italian() -> None:
+    spanish = (
+        "El juego se desarrolla en turnos. Cada jugador roba una carta y luego debe elegir una de las "
+        "acciones del tablero. Cuando el mazo se acaba la partida termina y el jugador con más puntos gana. "
+        "Para preparar el juego, mezclad las cartas y repartid cinco cartas a cada jugador. Los jugadores "
+        "que no pueden jugar pasan el turno por la izquierda."
+    )
+    assert text_language(spanish) == "es"
+
+
+def test_browser_fallback_drops_content_encoding() -> None:
+    import httpx
+
+    from boardgamecompanion.rulebook_providers import ProviderHttpClient
+
+    class Transport(httpx.BaseTransport):
+        def handle_request(self, request):
+            return httpx.Response(429 if "products" in str(request.url) else 200, content=b"ok")
+
+    def browser(url):
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<h1>Sagrada</h1>")
+
+    client = ProviderHttpClient(
+        client=httpx.Client(transport=Transport()), browser_fallback_hosts={"craniocreations.it"},
+        browser_fetch=browser, min_interval_seconds=0,
+    )
+    response = client.get("https://craniocreations.it/products/sagrada", allowed_hosts={"craniocreations.it"})
+    assert response.status_code == 200 and b"Sagrada" in response.content

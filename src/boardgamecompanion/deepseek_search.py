@@ -48,6 +48,12 @@ def public_url(value: str) -> str:
     return url
 
 
+def _pdf_names_game(query: RulebookQuery, url: str, page: dict) -> bool:
+    from boardgamecompanion.italian_rulebook_search import _titles, pdf_identifies_game
+
+    return pdf_identifies_game(url, page.get("title", ""), _titles(query))
+
+
 def _candidate_language(url: str, page: dict) -> str:
     """The PDF name decides first: a page titled "regolamento" may link an English file."""
     from boardgamecompanion.italian_rulebook_search import filename_language, text_language
@@ -137,6 +143,9 @@ class DeepSeekRulebookProvider:
                     state["fetched"] += 1
             # A title-only match is deliberately review-only: no inferred BGG ID.
             if not matching_title(query, page):
+                continue
+            if source.lower().split("?")[0].endswith(".pdf") and not _pdf_names_game(query, source, page):
+                # The PDF body can name the game among many others (catalogues, lists).
                 continue
             urls = [source]
             urls += re.findall(r'https://[^\s<>"\)\]]+', page.get("content", ""))[:100]
