@@ -21,7 +21,7 @@ from boardgamecompanion.migrations import _INVENTORY_COLUMNS
 
 PROTECTED = (
     "game_plays", "play_sessions", "game_progress", "player_profiles",
-    "game_documents", "document_parse_runs", "document_pages", "document_chunks",
+    "board_game_enrichments", "game_documents", "document_parse_runs", "document_pages", "document_chunks",
     "chunk_embeddings", "saved_game_lists", "saved_game_list_items", "personal_wishlist",
 )
 
