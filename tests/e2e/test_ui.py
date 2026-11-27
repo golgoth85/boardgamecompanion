@@ -387,21 +387,21 @@ def test_advanced_catalog_search_filters_by_play_context(browser, live_server):
         page.locator("#advancedSearchToggle").click()
         expect(details).to_have_attribute("open", "")
 
-        page.locator("#idealPlayers").fill("2")
-        page.locator("#idealPlayers").blur()
-        page.locator("#playerAge").fill("12")
-        page.locator("#playerAge").blur()
-        page.locator("#weightFilter").select_option("light")
-        page.locator("#maxMinutes").fill("60")
-        page.locator("#maxMinutes").blur()
-        page.locator("#minRating").fill("7")
-        page.locator("#minRating").blur()
+        details.locator('[data-advanced-key="idealPlayers"]').fill("2")
+        details.locator('[data-advanced-key="idealPlayers"]').blur()
+        details.locator('[data-advanced-key="playerAge"]').fill("12")
+        details.locator('[data-advanced-key="playerAge"]').blur()
+        details.locator('[data-advanced-key="weight"]').select_option("light")
+        details.locator('[data-advanced-key="maxMinutes"]').fill("60")
+        details.locator('[data-advanced-key="maxMinutes"]').blur()
+        details.locator('[data-advanced-key="minRating"]').fill("7")
+        details.locator('[data-advanced-key="minRating"]').blur()
 
         expect(page.locator(".game-card")).to_have_count(1)
         expect(page.locator(".card-title")).to_have_text("Synthetic Beta Expansion")
-        expect(page.get_by_text("Partite", exact=True)).to_have_count(0)
+        expect(details.locator('[data-advanced-key="played"]')).to_be_visible()
 
-        page.get_by_role("button", name="Azzera filtri avanzati").click()
+        details.locator("#resetAdvancedSearch").click()
         expect(page.locator(".game-card")).to_have_count(2)
     finally:
         context.close()
@@ -537,7 +537,7 @@ def test_pagination(browser, live_server, tmp_path: Path):
         expect(page.locator("#pageSizeFilter")).to_have_value("50")
         expect(page.locator("#pagination")).to_be_hidden()
         expect(page.locator("#ownedFilter")).to_have_count(0)
-        expect(page.locator(".catalog-density-label")).to_have_text(["Righe", "Pagina"])
+        expect(page.locator(".catalog-density-label")).to_have_text(["Carte per riga", "Pagina"])
 
         page.locator("#pageSizeFilter").select_option("20")
         expect(page.locator(".game-card")).to_have_count(20)
@@ -1268,18 +1268,19 @@ def test_mobile_admin_surfaces_do_not_overflow(browser, live_server):
         context.close()
 
 
-def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_server):
+def test_game_detail_keeps_local_facts_and_rulebook_actions(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.locator(".game-summary-rail")).to_be_visible()
-        expect(page.get_by_text("Giocatori", exact=True)).to_be_visible()
-        expect(page.get_by_text("Età ufficiale", exact=True)).to_be_visible()
-        expect(page.get_by_text("10+", exact=True)).to_be_visible()
+        summary = page.locator(".game-summary-rail")
+        expect(summary).to_be_visible()
+        expect(summary.get_by_text("Giocatori", exact=True)).to_be_visible()
+        expect(summary.get_by_text("Età ufficiale", exact=True)).to_be_visible()
+        expect(summary.get_by_text("10+", exact=True)).to_be_visible()
 
-        description = page.get_by_role("heading", name="Descrizione")
+        description = page.locator(".game-description-panel")
         rules = page.get_by_role("heading", name="Regolamento", exact=True)
         expect(description).to_be_visible()
         expect(rules).to_be_visible()
@@ -1290,6 +1291,7 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
 
         expect(page.locator(".cover-rating-overlay")).to_be_visible()
         expect(page.locator(".game-title-block")).to_be_visible()
+        expect(page.get_by_role("button", name="Registra partita")).to_be_visible()
 
         expect(page.locator("#gameDiscoveryStatus")).not_to_be_visible()
         expect(page.get_by_role("button", name="Cerca regolamento")).to_be_visible()
@@ -2391,6 +2393,8 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
             re.compile(r".*rag-highlight.*")
         )
         page.locator(".rag-document-jump").click()
+        expect(page.locator("#gameDocumentsDisclosure")).to_have_attribute("open", "")
+        expect(page.locator(".game-document-card")).to_be_focused()
         expect(page.locator(".game-document-card")).to_have_class(
             re.compile(r".*rag-highlight.*")
         )
@@ -3303,6 +3307,13 @@ def test_settings_save_bgg_independently_when_youtube_save_fails(browser, live_s
     context, page = new_page(browser)
     writes = []
     youtube_unavailable = True
+    waiting_bgg = []
+
+    def bgg_route(route):
+        if route.request.method == "GET" and not waiting_bgg:
+            waiting_bgg.append(route)
+        else:
+            route.continue_()
 
     def youtube_route(route):
         if youtube_unavailable and route.request.method == "PUT":
@@ -3312,11 +3323,17 @@ def test_settings_save_bgg_independently_when_youtube_save_fails(browser, live_s
 
     try:
         page.route("**/api/settings/youtube", youtube_route)
+        page.route("**/api/settings/bgg", bgg_route)
         page.on("request", lambda req: writes.append(urlsplit(req.url).path)
                 if req.method == "PUT" else None)
         page.goto(live_server)
         page.get_by_role("button", name="Impostazioni", exact=True).click()
         bgg = page.locator('[data-save-settings="bgg"]')
+        youtube = page.locator('[data-save-settings="youtube"]')
+        expect(youtube).to_be_enabled()
+        expect(page.locator("#bggUsername")).to_be_disabled()
+        assert waiting_bgg
+        waiting_bgg[0].continue_()
         expect(bgg).to_be_enabled()
         page.locator("#bggUsername").fill("utente-prova")
         bgg.click()
@@ -3325,7 +3342,6 @@ def test_settings_save_bgg_independently_when_youtube_save_fails(browser, live_s
         assert page.request.get(f"{live_server}/api/settings/bgg").json()["username"] == "utente-prova"
 
         page.locator("#youtubeApiKey").fill("chiave-sintetica")
-        youtube = page.locator('[data-save-settings="youtube"]')
         youtube.click()
         expect(page.locator('[data-settings-status="youtube"]')).to_contain_text("Errore YouTube simulato")
         expect(page.locator("#youtubeApiKey")).to_have_value("chiave-sintetica")

@@ -1628,6 +1628,32 @@ const settingsSections = {
   crowdfunding: ["/api/settings/crowdfunding", applyCrowdfundingSettingsToForm, saveCrowdfundingSettings],
 };
 
+const settingsFieldScopes = {
+  bgg: "#bggSettings .settings-grid",
+  youtube: "#youtubeSettings .settings-grid",
+  reference: "#referenceSettings .settings-grid",
+  crowdfunding: "#apifySettings .settings-grid",
+  rag: '[data-settings-panel="providers"] .settings-core-card, [data-settings-panel="providers"] .settings-provider-stack',
+};
+const settingsLoadingFields = new Map();
+
+function lockSettingsFields(name) {
+  const sections = Array.from(settingsForm.querySelectorAll(settingsFieldScopes[name]));
+  const controls = sections.flatMap((section) =>
+    Array.from(section.querySelectorAll("input:enabled, select:enabled, textarea:enabled, button:enabled")));
+  for (const section of sections) section.setAttribute("aria-busy", "true");
+  for (const control of controls) control.disabled = true;
+  settingsLoadingFields.set(name, {sections, controls});
+}
+
+function unlockSettingsFields(name) {
+  const pending = settingsLoadingFields.get(name);
+  if (!pending) return;
+  for (const section of pending.sections) section.removeAttribute("aria-busy");
+  for (const control of pending.controls) control.disabled = false;
+  settingsLoadingFields.delete(name);
+}
+
 function settingsSectionStatus(name, message = "", failed = false) {
   const status = settingsForm.querySelector(`[data-settings-status="${name}"]`);
   status.textContent = message;
@@ -1639,6 +1665,7 @@ async function openSettingsDialog(initialTab = "general") {
   settingsDialog.querySelectorAll(".settings-provider").forEach((section) => { section.open = false; });
   sectionSaveButtons.forEach((button) => {
     button.dataset.loaded = "false";
+    lockSettingsFields(button.dataset.saveSettings);
     settingsSectionStatus(button.dataset.saveSettings, "Caricamento…");
   });
   setSettingsTab(initialTab);
@@ -1653,12 +1680,14 @@ async function openSettingsDialog(initialTab = "general") {
       try {
         const data = await api(url);
         if (settingsLoadInstance !== instance) return;
+        unlockSettingsFields(name);
         apply(data);
         button.dataset.loaded = "true";
         button.disabled = settingsBusy;
         settingsSectionStatus(name);
       } catch (error) {
         if (settingsLoadInstance === instance) {
+          unlockSettingsFields(name);
           settingsSectionStatus(name, `Caricamento fallito. Riapri le impostazioni per riprovare. ${error.message}`, true);
         }
       }
@@ -10123,6 +10152,7 @@ settingsDialog.addEventListener("cancel", (event) => {
 
 settingsDialog.addEventListener("close", () => {
   settingsLoadInstance = null;
+  for (const name of settingsLoadingFields.keys()) unlockSettingsFields(name);
   settingsForm.reset();
   settingsForm.querySelectorAll("[data-verification-status]").forEach((status) => { status.textContent = ""; });
   currentBggSettings = null;
