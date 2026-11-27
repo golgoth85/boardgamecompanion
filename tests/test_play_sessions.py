@@ -144,12 +144,18 @@ def test_session_api(log, monkeypatch):
 
 
 def test_cursor_crosses_a_session_and_day_without_gaps(log):
-    for _ in range(9):
-        log.create(1, {"played_on": "2026-11-14"})
+    def add_ordinary_plays(date, count):
+        with log.database.transaction() as connection:
+            connection.executemany(
+                """INSERT INTO game_plays(board_game_id, played_on, created_at, updated_at)
+                    VALUES (1, ?, ?, ?)""",
+                [(date, date, date)] * count,
+            )
+
+    add_ordinary_plays("2026-11-14", 9)
     session = log.create_session(1, payload())
-    for _ in range(199):
-        log.create(1, {"played_on": "2026-11-15"})
-    first = log.list(limit=200, player=None, q="notte")
+    add_ordinary_plays("2026-11-15", 199)
+    first = log.list(limit=200, q="notte")
     cursor = first["next"]
     assert first["items"][-1]["session_round"] == 3
     log.create(1, {"played_on": "2026-11-16"})
