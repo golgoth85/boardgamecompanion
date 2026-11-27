@@ -92,9 +92,14 @@ def list_plays(
     date_to: str | None = Query(default=None, pattern=DATE_PATTERN),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    before_date: str | None = Query(default=None, pattern=DATE_PATTERN),
+    before_id: int | None = Query(default=None, ge=1),
 ) -> dict[str, object]:
+    if (before_date is None) != (before_id is None) or (before_date is not None and offset):
+        raise HTTPException(status_code=400, detail="Specify both cursor fields or use offset")
+    before = (before_date, before_id) if before_date is not None and before_id is not None else None
     return _log().list(bgg_id=bgg_id, player=player, q=q, player_id=player_id,
-                       date_from=date_from, date_to=date_to, limit=limit, offset=offset)
+                       date_from=date_from, date_to=date_to, limit=limit, offset=offset, before=before)
 
 
 @router.get("/api/plays/summary")

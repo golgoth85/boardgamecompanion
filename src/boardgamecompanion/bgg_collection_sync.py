@@ -11,7 +11,6 @@ from urllib.parse import urlencode
 
 import httpx
 
-from boardgamecompanion.copies import ensure_physical_copies_for_collection_entry
 from boardgamecompanion.database import Database
 
 BGG_API_ORIGIN = "https://boardgamegeek.com"
@@ -406,7 +405,7 @@ class BggCollectionSyncService:
         created = updated = unchanged = 0
         created_ids: list[int] = []
         all_ids: list[int] = []
-        with self.database.transaction() as connection:
+        with self.database.transaction(immediate=True) as connection:
             for item in items:
                 bgg_id = int(item["bgg_id"])
                 all_ids.append(bgg_id)
@@ -429,22 +428,20 @@ class BggCollectionSyncService:
                     ).fetchone()
                 if existing_entry is None:
                     existing_entry = connection.execute(
-                        "SELECT * FROM collection_entries WHERE board_game_id=? ORDER BY id LIMIT 1",
-                        (board_id,),
+                        """
+                        SELECT * FROM collection_entries
+                        WHERE board_game_id=? AND (? IS NULL OR coll_id IS NULL)
+                        ORDER BY own DESC, id LIMIT 1
+                        """,
+                        (board_id, coll_id),
                     ).fetchone()
-                entry_changed, entry_id = self._upsert_entry(
+                entry_changed = self._upsert_entry(
                     connection,
                     item,
                     board_id,
                     synced_at,
                     existing_entry,
                 )
-                ensure_physical_copies_for_collection_entry(
-                    connection,
-                    entry_id,
-                    synced_at,
-                )
-
                 if was_created:
                     created += 1
                     created_ids.append(bgg_id)
@@ -556,17 +553,17 @@ class BggCollectionSyncService:
             inserted = {**incoming, "first_seen_at": now}
             names = ", ".join(inserted)
             placeholders = ", ".join("?" for _ in inserted)
-            cursor = connection.execute(
+            connection.execute(
                 f"INSERT INTO collection_entries({names},created_at,updated_at) VALUES ({placeholders},?,?)",
                 (*inserted.values(), now, now),
             )
-            return True, int(cursor.lastrowid)
+            return True
 
         changed = False
         assignments: list[str] = []
         params: list[Any] = []
         for key, value in incoming.items():
-            if key in {"user_rating", "num_plays", "wishlist_priority"} and value is None:
+            if key in {"coll_id", "user_rating", "num_plays", "wishlist_priority"} and value is None:
                 continue
             if existing[key] != value:
                 changed = True
@@ -579,4 +576,4 @@ class BggCollectionSyncService:
                 f"UPDATE collection_entries SET {', '.join(assignments)} WHERE id=?",
                 params,
             )
-        return changed, int(existing["id"])
+        return changed

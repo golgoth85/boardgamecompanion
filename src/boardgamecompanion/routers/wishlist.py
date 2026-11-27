@@ -124,7 +124,7 @@ def _attach_current_data(database, items: list[dict[str, Any]]) -> None:
             item["campaign"] = {
                 key: campaign.get(key)
                 for key in (
-                    "status", "remaining_seconds", "funding_percent", "funds", "currency",
+                    "status", "campaign_end", "remaining_seconds", "funding_percent", "funds", "currency",
                     "backer_count", "creator", "description", "platform",
                 )
             }

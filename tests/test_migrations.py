@@ -22,7 +22,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
     database.initialize()
     second_version = database.schema_version()
 
-    assert first_version == LATEST_SCHEMA_VERSION == 30
+    assert first_version == LATEST_SCHEMA_VERSION == 31
     assert second_version == LATEST_SCHEMA_VERSION
 
     with database.connect() as connection:
@@ -67,7 +67,9 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         (28, "play-modes"),
         (29, "play-sessions"),
         (30, "player-profiles"),
+        (31, "game-library"),
     ]
+    assert "physical_copies" not in tables
     assert {
         "board_games",
         "collection_entries",
@@ -75,7 +77,7 @@ def test_initialize_records_schema_version_and_is_idempotent(tmp_path: Path) -> 
         "app_settings",
         "floppy_links",
         "floppy_sync_runs",
-        "physical_copies",
+        "barcode_product_hints",
         "game_documents",
         "rulebook_review_items",
         "rulebook_update_targets",
@@ -167,14 +169,6 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
         migrations = connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        copies = connection.execute(
-            """
-            SELECT pc.source_kind, pc.source_copy_index, g.bgg_id
-            FROM physical_copies pc
-            JOIN board_games g ON g.id = pc.board_game_id
-            WHERE g.bgg_id = 12345
-            """
-        ).fetchall()
 
     assert dict(game) == {
         "bgg_id": 12345,
@@ -186,13 +180,6 @@ def test_existing_pre_migration_database_is_adopted_without_data_loss(
     assert [row["version"] for row in migrations] == list(
         range(1, LATEST_SCHEMA_VERSION + 1)
     )
-    assert [dict(row) for row in copies] == [
-        {
-            "source_kind": "bgg_csv",
-            "source_copy_index": 1,
-            "bgg_id": 12345,
-        }
-    ]
 
 
 def test_v4_database_with_existing_review_upgrades_to_v5_without_loss(

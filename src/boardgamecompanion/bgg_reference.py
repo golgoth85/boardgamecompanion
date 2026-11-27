@@ -1157,7 +1157,7 @@ class BggReferenceCatalog:
                 ),
             )
 
-    def add_to_collection(self, bgg_id: int) -> dict[str, Any]:
+    def add_to_collection(self, bgg_id: int, *, verified_title: str | None = None) -> dict[str, Any]:
         """Promote a reference title into board_games as an owned collection entry.
 
         Idempotent: an existing board game or collection entry is never overwritten.
@@ -1176,7 +1176,7 @@ class BggReferenceCatalog:
             board = connection.execute(
                 "SELECT id FROM board_games WHERE bgg_id = ?", (bgg_id,)
             ).fetchone()
-            if reference is None and board is None:
+            if reference is None and board is None and verified_title is None:
                 raise BggReferenceError(f"BGG #{bgg_id} is not in the reference catalog")
             created_game = board is None
             if board is None:
@@ -1189,12 +1189,12 @@ class BggReferenceCatalog:
                     """,
                     (
                         bgg_id,
-                        reference["name"],
-                        reference["year_published"],
-                        "expansion" if reference["is_expansion"] else "standalone",
-                        reference["average"] or None,
-                        reference["bayes_average"] or None,
-                        reference["rank"] or None,
+                        reference["name"] if reference else verified_title,
+                        reference["year_published"] if reference else None,
+                        "expansion" if reference and reference["is_expansion"] else "standalone",
+                        (reference["average"] or None) if reference else None,
+                        (reference["bayes_average"] or None) if reference else None,
+                        (reference["rank"] or None) if reference else None,
                         now,
                         now,
                     ),
@@ -1211,8 +1211,8 @@ class BggReferenceCatalog:
                 connection.execute(
                     """
                     SELECT id FROM collection_entries
-                    WHERE board_game_id = ? AND own = 0 AND previously_owned = 1 AND COALESCE(wishlist, 0) = 0
-                    ORDER BY id LIMIT 1
+                    WHERE board_game_id = ? AND own = 0
+                    ORDER BY previously_owned DESC, first_seen_at DESC, id LIMIT 1
                     """,
                     (board_game_id,),
                 ).fetchone()
@@ -1221,8 +1221,8 @@ class BggReferenceCatalog:
             )
             if released is not None:
                 connection.execute(
-                    "UPDATE collection_entries SET own = 1, first_seen_at = ?, updated_at = ? WHERE id = ?",
-                    (now, now, released["id"]),
+                    "UPDATE collection_entries SET own = 1, updated_at = ? WHERE id = ?",
+                    (now, released["id"]),
                 )
             elif entry is None:
                 connection.execute(

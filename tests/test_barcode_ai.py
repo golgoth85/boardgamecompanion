@@ -194,8 +194,7 @@ def test_ai_product_does_not_auto_match_an_unowned_board_game(tmp_path: Path) ->
 
     assert result["resolution"] == "product_identified"
     assert result["auto_match"] is None
-    assert result["candidates"] == []
-    assert 900003 not in {item["bgg_id"] for item in result["candidates"]}
+    assert [(item["bgg_id"], item["owned"]) for item in result["candidates"]] == [(900003, False)]
 
 
 def test_identified_product_offers_reference_catalog_titles(tmp_path: Path) -> None:

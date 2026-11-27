@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 import httpx
 
 from boardgamecompanion.bgg_reference import BggReferenceCatalog
-from boardgamecompanion.copies import PhysicalCopyStore, normalize_barcode
+from boardgamecompanion.barcodes import BarcodeError, normalize_barcode
 from boardgamecompanion.database import Database
 from boardgamecompanion.title_search import game_title_terms
 
@@ -519,7 +519,8 @@ class BarcodeResolver:
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
                        e.cover_url,e.metadata_json,
-                       GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
+                       GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers,
+                       MAX(COALESCE(c.own,0)) AS owned
                 FROM board_games g
                 LEFT JOIN collection_entries c ON c.board_game_id=g.id
                 LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
@@ -529,7 +530,18 @@ class BarcodeResolver:
                 (bgg_id,),
             ).fetchone()
         if row is None:
-            return None
+            reference = self._reference_candidate(bgg_id)
+            if reference is None:
+                if product.get("source") != "verified_catalog":
+                    return None
+                return {
+                    "bgg_id": bgg_id, "title": product["title"], "year_published": None,
+                    "owned": False, "confidence": 1.0, "requires_barcode_confirmation": True,
+                }
+            return {
+                **reference, "title": reference["name"],
+                "cover_url": reference["thumbnail_url"], "confidence": 1.0,
+            }
         return {
             "bgg_id": int(row["bgg_id"]),
             "title": str(row["title"]),
@@ -537,10 +549,11 @@ class BarcodeResolver:
             "year_published": row["year_published"],
             "cover_url": row["cover_url"],
             "publishers": row["publishers"],
+            "owned": bool(row["owned"]),
             "confidence": 1.0,
         }
 
-    def _owned_candidates(self, product: dict[str, Any]) -> list[dict[str, Any]]:
+    def _local_candidates(self, product: dict[str, Any]) -> list[dict[str, Any]]:
         product_text = " ".join(
             str(product.get(key) or "")
             for key in ("title", "brand", "description")
@@ -550,11 +563,11 @@ class BarcodeResolver:
                 """
                 SELECT g.bgg_id,g.title,g.original_title,g.year_published,
                        e.cover_url,e.metadata_json,
-                       GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers
+                       GROUP_CONCAT(DISTINCT c.version_publishers) AS publishers,
+                       MAX(COALESCE(c.own,0)) AS owned
                 FROM board_games g
-                JOIN collection_entries c ON c.board_game_id=g.id
+                LEFT JOIN collection_entries c ON c.board_game_id=g.id
                 LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
-                WHERE COALESCE(c.own,0)=1
                 GROUP BY g.id
                 ORDER BY g.title COLLATE NOCASE
                 """
@@ -581,6 +594,7 @@ class BarcodeResolver:
                     "year_published": row["year_published"],
                     "cover_url": row["cover_url"],
                     "publishers": row["publishers"],
+                    "owned": bool(row["owned"]),
                     "confidence": round(score, 3),
                 }
             )
@@ -603,7 +617,7 @@ class BarcodeResolver:
             if verified_candidate is not None:
                 return [verified_candidate], verified_candidate
 
-        candidates = self._owned_candidates(product)
+        candidates = self._local_candidates(product)
         if product.get("requires_review"):
             # Weak fuzzy hits ("Il Regno di Valiria" vs an unrelated card game)
             # would hide the reference-catalogue search in the scanner.
@@ -622,7 +636,7 @@ class BarcodeResolver:
                 if second
                 else best_score
             )
-            if best_score >= 0.82 and margin >= 0.08:
+            if not product.get("requires_review") and best_score >= 0.82 and margin >= 0.08:
                 auto_match = best
         return candidates, auto_match
 
@@ -773,19 +787,35 @@ class BarcodeResolver:
         return found
 
     def lookup(self, barcode: str) -> dict[str, Any]:
-        local = PhysicalCopyStore(self.database).lookup_barcode(barcode)
-        if local["count"]:
+        normalized = normalize_barcode(barcode)
+        if normalized is None:
+            raise BarcodeError("Inserisci un barcode valido")
+        local = {"barcode": barcode, "normalized": normalized}
+        with self.database.connect() as connection:
+            hints = connection.execute(
+                """
+                SELECT g.bgg_id, g.title, g.year_published, e.cover_url,
+                       EXISTS(SELECT 1 FROM collection_entries c
+                              WHERE c.board_game_id=g.id AND c.own=1) AS owned
+                FROM barcode_product_hints h
+                JOIN board_games g ON g.id=h.board_game_id
+                LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id
+                WHERE h.barcode=?
+                ORDER BY g.title COLLATE NOCASE, g.bgg_id
+                """,
+                (normalized,),
+            ).fetchall()
+        if hints:
             return {
                 **local,
-                "resolution": "local_copy",
-                "product": None,
+                "resolution": "product_identified",
+                "product": {"source": "user_hint", "requires_review": True},
                 "auto_match": None,
-                "candidates": [],
+                "candidates": [{**dict(row), "owned": bool(row["owned"])} for row in hints],
                 "reference_candidates": [],
                 "external_lookup": "not_needed",
             }
 
-        normalized = str(local["normalized"])
         if not normalized.isdigit() or len(normalized) not in {8, 12, 13, 14}:
             return {
                 **local,
@@ -847,7 +877,7 @@ class BarcodeResolver:
 
         return {
             **local,
-            "resolution": "owned_game" if auto_match else "product_identified",
+            "resolution": "owned_game" if auto_match and auto_match.get("owned") else "product_identified",
             "product": product,
             "auto_match": auto_match,
             "candidates": candidates,

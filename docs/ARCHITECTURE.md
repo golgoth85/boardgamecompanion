@@ -22,23 +22,18 @@ Suggested fields:
 - community rating/rank/weight
 - source metadata snapshot
 
-### OwnedCopy
+### Ludoteca e riconoscimento del prodotto
 
-Represents the user's physical copy.
+`board_games.bgg_id` identifica il gioco nel catalogo locale. Il gioco è posseduto quando
+almeno una delle sue righe di provenienza in `collection_entries` ha `own=1`.
+Ludoteca, filtri e conteggi operano per gioco. `in_catalog` segnala la presenza nel
+catalogo locale, mentre `owned` (o `collection.own`) segnala il possesso.
 
-Suggested fields:
-
-- board-game ID
-- barcode/EAN/UPC
-- language
-- edition/version
-- publisher/localizer
-- acquisition date/source/price
-- inventory location
-- quantity
-- private notes
-
-This distinction is intentional: one BoardGame can have multiple physical copies or editions.
+La rimozione azzera il possesso senza cancellare documenti o partite. La conferma
+di aggiunta riattiva una riga esistente quando possibile e serializza richieste
+concorrenti. Il barcode viene risolto soltanto nel flusso di aggiunta. I codici
+immessi nelle versioni precedenti e recuperati dalla migrazione sono candidati
+da verificare; i codici prodotto delle versioni BGG non sono considerati GTIN.
 
 ### Document
 
@@ -71,6 +66,9 @@ cooperativo. Una sessione collega 2–20 partite dello stesso gioco tramite `ses
 La durata complessiva risiede in `play_sessions`, mentre le partite collegate non hanno una
 durata individuale. Statistiche generali e per gioco sommano il tempo della sessione una volta,
 finché esiste almeno una partita collegata. Il diario espone anche i risultati delle singole partite.
+`GET /api/plays` restituisce il cursore `next` quando ci sono altre righe. Il client
+riusa gli stessi filtri con `before_date` e `before_id`, accoda i dati e ricalcola i gruppi
+per giorno e gioco. Il cursore si basa su `played_on DESC, id DESC`.
 
 `POST /api/games/{bgg_id}/play-sessions` riceve dati comuni e un elenco di risultati:
 `winner_indices` identifica i partecipanti competitivi per posizione, `outcome` l'esito del

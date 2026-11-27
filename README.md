@@ -1,6 +1,6 @@
 # BoardGameCompanion
 
-Self-hosted companion for a physical board-game collection, designed for Docker/Unraid.
+Self-hosted companion for a board-game library, designed for Docker/Unraid.
 
 ## Current capabilities
 
@@ -20,8 +20,10 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Dedicated game detail pages at `/games/{bgg_id}`.
 - Preserve the BGG `objectid` as the canonical external identifier.
 - Idempotent imports backed by SQLite.
-- Store game metadata and collection-state/physical-copy fields exposed by BGG CSV.
-- Camera-first physical-copy barcode lookup and repeated barcode import with native BarcodeDetector plus a local ZXing fallback; manual entry remains available. Exact audited GTIN mappings are resolved through the verified catalog before network fallbacks, with versioned cache invalidation for corrected results. Unknown codes can also be identified through the configured web-search AI provider; AI proposals are review-only and matching BGG reference titles can be explicitly added to the collection from the scanner.
+- BGG CSV and XML synchronization keep game metadata and ownership. Each BGG object ID appears once in the library. CSV import works without a BGG token.
+- Product barcode recognition during **Aggiungi gioco**, with explicit confirmation and a saved-play history preserved on removal and reactivation.
+- **Cosa giochiamo stasera?** recommends up to three owned base games locally using box player counts, BGG polls, duration, complexity, language dependence and play history.
+- Per-section Settings saves, a paginated play diary and price availability and campaign deadlines in Wishlist.
 - Persist uploaded BGG CSV snapshots under `/data/import`.
 - REST API and OpenAPI/Swagger remain available.
 - Manual PDF archive plus guarded provider-independent rulebook fetch foundation.
@@ -33,7 +35,7 @@ Self-hosted companion for a physical board-game collection, designed for Docker/
 - Page-preserving PDF ingestion, deterministic chunking, embeddings/retrieval and page-cited rulebook Q&A.
 - Ollama and LM Studio (OpenAI-compatible API) RAG providers with model-currentness fingerprinting.
 
-Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner exposes the manual fallback instead.
+Browser camera access requires a secure context (HTTPS, or localhost); on plain LAN HTTP the scanner supports taking or selecting a photo and entering the code manually.
 
 Because the BGG CSV export does not contain cover-image URLs, placeholders remain the offline fallback. When an approved BGG application token is configured, BGC refreshes exact-ID metadata and displays BGG-hosted cover art.
 
@@ -232,16 +234,18 @@ POST /api/imports/bgg-csv
 multipart field: file
 ```
 
-The importer requires `objectid` and `objectname`. It retains the original row as source metadata and maps the useful BGG fields into the internal catalog.
+The importer requires `objectid` and `objectname`. It retains game and BGG collection metadata and ignores inventory fields. Repeated rows or quantities never increase the number of owned titles.
 
 Re-importing the exact same CSV re-validates the rows and leaves existing records unchanged. A later changed export updates matching records by BGG `objectid` / BGG collection `collid` without creating duplicates.
 
 Missing rows are **not deleted automatically**. This is intentional because an `owned` export is only a partial view of a BGG account and must not erase wishlist or other states imported from a broader export.
 
 
-## Barcode import
+## Aggiungere un gioco tramite barcode
 
-Choose **Importa barcode** from the top bar. On HTTPS or localhost the rear camera starts automatically; native `BarcodeDetector` is preferred and the bundled ZXing reader is the fallback. Unknown EAN/UPC values can be assigned to an existing unbarcoded physical copy or used to create a new copy for an owned game. If the audited and exact providers find nothing, the configured web-search AI can propose the product, and matching BGG reference titles can be added to the collection explicitly before the barcode is assigned. After each assignment, **Scansiona prossimo** continues the same import session. Manual barcode entry remains available when camera access is unavailable.
+Dalla Ludoteca apri **Aggiungi gioco** e seleziona **Scansiona barcode**. Su HTTPS o localhost la fotocamera compatibile parte automaticamente, con `BarcodeDetector` o ZXing locale. Su HTTP in LAN usa **Scatta foto** o l’inserimento manuale. Verifica titolo, anno e copertina, quindi conferma con **Aggiungi alla ludoteca**. I candidati ambigui richiedono una scelta. Se il codice resta sconosciuto puoi cercare il titolo a mano. Un titolo già in ludoteca non genera una nuova aggiunta.
+
+Nella scheda, **Documenti del gioco** apre tutti i PDF archiviati. **Apri regolamento** apre rapidamente il manuale principale. Le risposte dell’assistente citano la pagina del documento ed espongono i conflitti o l’assenza di evidenza.
 
 ## Rulebook updates
 

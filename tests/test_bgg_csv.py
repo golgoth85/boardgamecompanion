@@ -48,8 +48,6 @@ def test_catalog_preserves_bgg_and_collection_fields(tmp_path: Path) -> None:
     assert game["bgg_id"] == 900001
     assert game["players"] == {"min": 2, "max": 4}
     assert game["bgg"]["average_weight"] == 2.2
-    assert game["collection"]["barcode"] == "1234567890123"
-    assert game["collection"]["inventory_location"] == "Kallax A1"
     assert game["collection"]["language"] == "Italian"
 
 
@@ -80,7 +78,6 @@ def test_changed_export_updates_without_duplicates(tmp_path: Path) -> None:
         fieldnames = reader.fieldnames
 
     rows[0]["rating"] = "8.5"
-    rows[0]["invlocation"] = "Kallax B2"
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
@@ -95,4 +92,3 @@ def test_changed_export_updates_without_duplicates(tmp_path: Path) -> None:
     assert Catalog(database).stats()["total"] == 2
     assert game is not None
     assert game["collection"]["rating"] == 8.5
-    assert game["collection"]["inventory_location"] == "Kallax B2"

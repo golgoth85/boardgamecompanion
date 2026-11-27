@@ -167,18 +167,11 @@ def _game_dict(row, *, metadata: dict[str, Any] | None = None) -> dict[str, Any]
             "wishlist_priority": row["wishlist_priority"],
             "rating": row["user_rating"],
             "num_plays": row["num_plays"],
-            "barcode": row["barcode"],
             "language": row["version_languages"],
             "publishers": row["version_publishers"],
             "version_year": row["version_year_published"],
             "version_nickname": row["version_nickname"],
-            "inventory_location": row["inventory_location"],
-            "quantity": row["quantity"],
-            "acquisition_date": (
-                row["acquisition_date"]
-                if "acquisition_date" in row.keys()
-                else None
-            ),
+            "acquisition_date": row["acquisition_date"],
             "first_seen_at": (
                 row["first_seen_at"]
                 if "first_seen_at" in row.keys()
@@ -448,7 +441,11 @@ class Catalog:
     def _from_sql() -> str:
         return """
             FROM board_games g
-            LEFT JOIN collection_entries c ON c.board_game_id = g.id
+            LEFT JOIN collection_entries c ON c.id = (
+                SELECT entry.id FROM collection_entries entry
+                WHERE entry.board_game_id = g.id
+                ORDER BY entry.own DESC, entry.first_seen_at DESC, entry.id LIMIT 1
+            )
             LEFT JOIN board_game_enrichments e ON e.board_game_id = g.id
             LEFT JOIN game_progress p ON p.board_game_id = g.id
         """
@@ -456,13 +453,14 @@ class Catalog:
     @staticmethod
     def _select_sql() -> str:
         return """
-            SELECT g.*, c.coll_id, c.user_rating, c.num_plays, c.own,
+            SELECT g.*, c.coll_id, c.user_rating,
+                   (SELECT MAX(entry.num_plays) FROM collection_entries entry WHERE entry.board_game_id=g.id) AS num_plays,
+                   c.own,
                    c.for_trade, c.want, c.want_to_buy, c.want_to_play,
                    c.previously_owned, c.preordered, c.wishlist,
-                   c.wishlist_priority, c.barcode, c.version_languages,
+                   c.wishlist_priority, c.version_languages,
                    c.version_publishers, c.version_year_published,
-                   c.version_nickname, c.inventory_location, c.quantity,
-                   c.acquisition_date, c.first_seen_at,
+                   c.version_nickname, c.acquisition_date, c.first_seen_at,
                    p.played_at, p.completed_at, p.personal_rating,
                    e.source AS metadata_source, e.cover_url,
                    e.description AS enriched_description,
@@ -548,7 +546,7 @@ class Catalog:
         if played is not None:
             played_sql = (
                 "(p.played_at IS NOT NULL OR p.completed_at IS NOT NULL "
-                "OR COALESCE(c.num_plays,0) > 0)"
+                "OR EXISTS (SELECT 1 FROM collection_entries entry WHERE entry.board_game_id=g.id AND entry.num_plays>0))"
             )
             where.append(played_sql if played else f"NOT {played_sql}")
         if personal_rating_min is not None:
@@ -626,8 +624,8 @@ class Catalog:
     def remove_from_library(self, bgg_id: int) -> int:
         """Take a game out of the Ludoteca without deleting it.
 
-        Copies, barcodes, documents and progress stay in place, so adding the game
-        again restores them. Returns the number of collection entries released.
+        Documents and play history remain available after removal.
+        Returns the number of collection entries released.
         """
         now = datetime.now(UTC).isoformat()
         with self.database.transaction(immediate=True) as connection:
@@ -737,7 +735,6 @@ class Catalog:
                 """
             ).fetchall()
 
-        # Multiple physical copies must not inflate either result or facet counts.
         library: dict[int, Any] = {}
         for row in rows:
             library.setdefault(int(row["bgg_id"]), row)
@@ -1377,6 +1374,85 @@ class Catalog:
             },
         }
 
+    def ownership(self, bgg_ids: list[int]) -> dict[int, bool]:
+        if not bgg_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in bgg_ids)
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""SELECT g.bgg_id, EXISTS(
+                        SELECT 1 FROM collection_entries c WHERE c.board_game_id=g.id AND c.own=1
+                    ) AS owned FROM board_games g WHERE g.bgg_id IN ({placeholders})""",
+                bgg_ids,
+            ).fetchall()
+        return {row["bgg_id"]: bool(row["owned"]) for row in rows}
+
+    def tonight(
+        self, *, players: int | None, minutes: int | None,
+        weight: str | None, language: int | None,
+    ) -> dict[str, Any]:
+        """Proposte locali con vincoli verificabili e dati mancanti espliciti."""
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                {self._select_sql()},
+                (SELECT MAX(played_on) FROM game_plays WHERE board_game_id=g.id) AS last_play,
+                (SELECT d.id FROM game_documents d
+                 WHERE d.board_game_id=g.id AND d.document_type='rulebook'
+                 ORDER BY d.is_official DESC, (d.language='it' OR d.language LIKE 'it-%') DESC,
+                          d.updated_at DESC, d.id LIMIT 1) AS rulebook_id
+                {self._from_sql()}
+                WHERE c.own=1 AND COALESCE(g.item_type,'standalone') != 'expansion'
+                """
+            ).fetchall()
+
+        found = []
+        alternatives: set[str] = set()
+        fewest_misses: list[str] = []
+        for row in rows:
+            metadata = _metadata_from_row(row)
+            game = _game_dict(row, metadata=metadata)
+            raw_language = row["bgg_language_dependence"] or metadata.get("bgg_language_dependence")
+            facts = explore_facts({**dict(row), "bgg_language_dependence": raw_language}, game["title"])
+            box_min, box_max = facts["min_players"], facts["max_players"]
+            box_known = bool(box_min and box_max)
+            filters = {
+                "players": players is None or (box_known and box_min <= players <= box_max),
+                "minutes": minutes is None or explore_fact_match(facts, "max_minutes", minutes),
+                "weight": weight is None or explore_fact_match(facts, "weight", weight),
+                "language": language is None or (facts["language"] is not None and language_band(facts["language"]) <= language),
+            }
+            missed = [key for key, fits in filters.items() if not fits]
+            if missed:
+                if len(missed) == 1:
+                    alternatives.add(missed[0])
+                if not fewest_misses or (len(missed), missed) < (len(fewest_misses), fewest_misses):
+                    fewest_misses = missed
+                continue
+            if not box_known:
+                fit = "unknown"
+            elif players is None:
+                fit = "box"
+            elif _player_text_matches(row["bgg_best_players"], players):
+                fit = "ideal"
+            elif _player_text_matches(row["bgg_recommended_players"], players):
+                fit = "recommended"
+            elif row["bgg_best_players"] or row["bgg_recommended_players"]:
+                fit = "supported"
+            else:
+                fit = "box"
+            priority = {"ideal": 0, "recommended": 1, "supported": 2, "box": 2, "unknown": 3}
+            game["bgg"]["language_dependence"] = raw_language
+            game.update(player_fit=fit, last_play=row["last_play"], rulebook_id=row["rulebook_id"])
+            found.append(((priority[fit], row["last_play"] or "", facts["sort"]), game))
+        found.sort(key=lambda item: item[0])
+        return {
+            "items": [game for _, game in found[:3]],
+            "relaxable": sorted(alternatives),
+            "relax_together": [] if alternatives else fewest_misses,
+            "owned_standalone": len(rows),
+        }
+
     def assistant_candidates(self, *, limit: int = 220) -> list[dict[str, Any]]:
         with self.database.connect() as connection:
             rows = connection.execute(
@@ -1424,12 +1500,12 @@ class Catalog:
                 """
             ).fetchone()
             owned = connection.execute(
-                "SELECT COUNT(*) AS count FROM collection_entries WHERE own = 1"
+                "SELECT COUNT(DISTINCT board_game_id) AS count FROM collection_entries WHERE own = 1"
             ).fetchone()["count"]
             owned_types = connection.execute(
                 """
                 SELECT
-                    SUM(CASE WHEN COALESCE(g.item_type,'standalone') != 'expansion' THEN 1 ELSE 0 END)
+                    COUNT(DISTINCT CASE WHEN COALESCE(g.item_type,'standalone') != 'expansion' THEN g.id END)
                         AS standalone_owned,
                     SUM(CASE WHEN g.item_type = 'expansion' THEN 1 ELSE 0 END)
                         AS expansions_owned

@@ -146,9 +146,6 @@ def test_collection_sync_is_idempotent_and_does_not_delete_missing_owned_rows(tm
                JOIN collection_entries c ON c.board_game_id=g.id
                WHERE g.bgg_id=222"""
         ).fetchone()
-        copies = connection.execute(
-            "SELECT COUNT(*) AS count FROM physical_copies"
-        ).fetchone()["count"]
         first_seen = connection.execute(
             "SELECT first_seen_at FROM collection_entries ORDER BY id"
         ).fetchall()
@@ -156,7 +153,6 @@ def test_collection_sync_is_idempotent_and_does_not_delete_missing_owned_rows(tm
     assert all(row["first_seen_at"] for row in first_seen)
     assert dict(base) == {"item_type": "standalone", "own": 1, "coll_id": 9001}
     assert dict(expansion) == {"item_type": "expansion", "own": 1, "coll_id": 9002}
-    assert copies == 2
 
 
 def test_collection_sync_due_state_uses_last_success(tmp_path: Path) -> None:

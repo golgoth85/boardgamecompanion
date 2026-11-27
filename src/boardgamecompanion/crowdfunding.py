@@ -584,7 +584,9 @@ class CrowdfundingService:
 
         raw_status = str(item.get("raw_status") or "").strip().lower()
         status = "upcoming" if raw_status in {"upcoming", "prelaunch"} else "active"
-        if start is not None and start > now:
+        if raw_status in {"ended", "successful", "failed", "canceled", "cancelled", "suspended"}:
+            status = "ended"
+        elif start is not None and start > now:
             status = "upcoming"
         elif end is not None and end <= now:
             status = "ended"

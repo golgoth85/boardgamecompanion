@@ -20,11 +20,21 @@
       </a>
 
       <nav class="sidebar-nav" aria-label="Sezioni">
-        <section class="nav-group" aria-label="Sezioni principali">
+        <section class="nav-group" aria-label="La tua ludoteca">
           <a class="nav-item" href="/" data-nav data-route="catalog">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-shelf"/></svg></span>
             <span>Ludoteca</span>
           </a>
+          <a class="nav-item nav-completed" href="/plays" data-nav data-route="plays">
+            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-check-circle"/></svg></span>
+            <span>Partite</span>
+          </a>
+          <a class="nav-item" href="/lists" data-nav data-route="lists">
+            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-list"/></svg></span>
+            <span>Raccolte</span>
+          </a>
+        </section>
+        <section class="nav-group nav-group-divider" aria-label="Scopri giochi">
           <a class="nav-item" href="/bgg" data-nav data-route="bgg">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-globe"/></svg></span>
             <span>Catalogo</span>
@@ -41,21 +51,15 @@
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-bulb"/></svg></span>
             <span>Suggerimenti</span>
           </a>
-          <a class="nav-item" href="/crowdfunding" data-nav data-route="crowdfunding">
-            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-megaphone"/></svg></span>
-            <span>Crowdfunding</span>
-          </a>
-          <a class="nav-item" href="/lists" data-nav data-route="lists">
-            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-list"/></svg></span>
-            <span>Raccolte</span>
-          </a>
+        </section>
+        <section class="nav-group nav-group-divider" aria-label="Altre sezioni">
           <a class="nav-item" href="/wishlist" data-nav data-route="wishlist">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-heart"/></svg></span>
             <span>Wishlist</span>
           </a>
-          <a class="nav-item nav-completed" href="/plays" data-nav data-route="plays">
-            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-check-circle"/></svg></span>
-            <span>Partite</span>
+          <a class="nav-item" href="/crowdfunding" data-nav data-route="crowdfunding">
+            <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-megaphone"/></svg></span>
+            <span>Crowdfunding</span>
           </a>
           <a class="nav-item nav-ai" href="/assistant" data-nav data-route="assistant">
             <span class="nav-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/static/icons.svg#i-sparkle"/></svg></span>
@@ -186,18 +190,18 @@
           </div>
           <p class="muted">La sincronizzazione automatica importa i giochi posseduti; il CSV resta disponibile come import manuale.</p>
           <div class="settings-grid">
-            <label class="settings-field copy-span-2">
+            <label class="settings-field span-full">
               <span>Username BGG</span>
               <input id="bggUsername" type="text" autocomplete="username"
                      placeholder="Il tuo username BoardGameGeek">
             </label>
-            <label class="settings-field copy-span-2">
+            <label class="settings-field span-full">
               <span>BGG Application Token</span>
               <input id="bggApplicationToken" type="password" autocomplete="new-password"
                      placeholder="Inserisci o sostituisci il token">
               <small id="bggTokenHint" class="muted"></small>
             </label>
-            <label class="settings-check copy-span-2" id="clearTokenRow" hidden>
+            <label class="settings-check span-full" id="clearTokenRow" hidden>
               <input id="bggClearToken" type="checkbox">
               <span>Rimuovi il token BGG salvato</span>
             </label>
@@ -212,6 +216,12 @@
           <div class="settings-inline-actions">
             <button class="button button-ghost" id="importButton" type="button">Importa CSV BGG</button>
           </div>
+          <div class="settings-inline-actions">
+            <button class="button button-primary" type="button" data-save-settings="bgg">Salva BGG</button>
+            <button class="button button-ghost" id="saveTestSettings" type="button">Verifica token BGG</button>
+            <span data-settings-status="bgg" class="muted" role="status"></span>
+          </div>
+          <p class="muted" role="status" data-verification-status="bgg"></p>
         </section>
 
         <section class="settings-card" id="catalogPreferencesSettings">
@@ -258,6 +268,11 @@
             </label>
           </div>
           <p class="muted" id="referenceStatus" role="status">Caricamento…</p>
+          <div class="settings-inline-actions">
+            <button class="button button-primary" type="button" data-save-settings="reference">Salva catalogo</button>
+
+            <span data-settings-status="reference" class="muted" role="status"></span>
+          </div>
         </section>
 
         <section class="settings-card" id="youtubeSettings">
@@ -270,16 +285,21 @@
           </div>
           <p class="muted">La chiave YouTube Data API abilita la ricerca automatica. I video non vengono scaricati: vengono salvati solo ID e metadati pubblici.</p>
           <div class="settings-grid">
-            <label class="settings-field copy-span-2">
+            <label class="settings-field span-full">
               <span>YouTube Data API key</span>
               <input id="youtubeApiKey" type="password" autocomplete="new-password"
                      placeholder="Lascia vuoto per mantenerla invariata">
               <small id="youtubeApiKeyHint" class="muted"></small>
             </label>
-            <label class="settings-check copy-span-2" id="clearYoutubeApiKeyRow" hidden>
+            <label class="settings-check span-full" id="clearYoutubeApiKeyRow" hidden>
               <input id="youtubeClearApiKey" type="checkbox">
               <span>Rimuovi la YouTube API key salvata</span>
             </label>
+          </div>
+          <div class="settings-inline-actions">
+            <button class="button button-primary" type="button" data-save-settings="youtube">Salva YouTube</button>
+
+            <span data-settings-status="youtube" class="muted" role="status"></span>
           </div>
         </section>
       </div>
@@ -354,7 +374,7 @@
               <p class="muted">Domande, traduzioni, riassunti e assistente catalogo.</p>
               <div id="ragGenerationOrder" aria-label="Priorità risposte e testi"></div>
             </fieldset>
-            <label class="settings-field copy-span-2"><span>Ricerca web per regolamenti e prezzi</span>
+            <label class="settings-field span-full"><span>Ricerca web per regolamenti e prezzi</span>
               <select id="aiWebProvider"><option value="auto">Primo provider compatibile nelle priorità</option>
                 <option value="deepseek">DeepSeek Search e Fetch</option><option value="gemini">Gemini con Google Search</option></select>
               <small class="muted" id="aiWebProviderHint">La ricerca web è separata dall'indice locale.</small>
@@ -366,50 +386,50 @@
           <details class="settings-provider" id="descriptionPromptSettings">
             <summary><span><strong>Prompt delle descrizioni dei giochi</strong><small>Istruzioni date all'AI per scrivere le schede</small></span><span class="settings-provider-state" id="descriptionPromptState">Originale</span></summary>
             <div class="settings-provider-body"><div class="settings-grid">
-              <label class="settings-field copy-span-2"><span>Prompt</span>
+              <label class="settings-field span-full"><span>Prompt</span>
                 <textarea id="descriptionPromptText" class="description-prompt-text" rows="22" spellcheck="false"></textarea>
                 <small class="muted" id="descriptionPromptCount"></small>
               </label>
-              <div class="ai-provider-actions copy-span-2">
+              <div class="ai-provider-actions span-full">
                 <button type="button" class="button button-primary" id="descriptionPromptSave">Salva come modello</button>
                 <button type="button" class="button button-ghost" id="descriptionPromptRestore">Ripristina</button>
                 <button type="button" class="button button-ghost" id="descriptionPromptOriginal">Originale</button>
               </div>
-              <p class="muted copy-span-2" id="descriptionPromptStatus" role="status">«Ripristina» riporta il testo al modello salvato; «Originale» carica il prompt di fabbrica (poi va salvato). Le descrizioni già generate si aggiornano alla prossima apertura della scheda.</p>
+              <p class="muted span-full" id="descriptionPromptStatus" role="status">«Ripristina» riporta il testo al modello salvato; «Originale» carica il prompt di fabbrica (poi va salvato). Le descrizioni già generate si aggiornano alla prossima apertura della scheda.</p>
             </div></div>
           </details>
 
           <details class="settings-provider" id="deepseekSettings">
             <summary><span><strong>DeepSeek</strong><small>Risposte, traduzioni, suggerimenti e ricerca web</small></span><span class="settings-provider-state" id="deepseekState">Da configurare</span></summary>
             <div class="settings-provider-body"><div class="settings-grid">
-              <label class="settings-field copy-span-2"><span>Chiave API DeepSeek</span>
+              <label class="settings-field span-full"><span>Chiave API DeepSeek</span>
                 <input id="deepseekApiKey" type="password" autocomplete="new-password" placeholder="Incolla la chiave API">
                 <small id="deepseekApiKeyHint" class="muted"></small>
               </label>
-              <label class="settings-check copy-span-2" id="deepseekClearRow" hidden><input id="deepseekClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
-              <label class="settings-field copy-span-2"><span>Modello per risposte e testi</span><select id="deepseekGenerationModel"><option value="deepseek-flash">Flash · consigliato</option><option value="deepseek-v4-pro">Pro</option></select></label>
-              <div class="ai-provider-actions copy-span-2">
+              <label class="settings-check span-full" id="deepseekClearRow" hidden><input id="deepseekClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
+              <label class="settings-field span-full"><span>Modello per risposte e testi</span><select id="deepseekGenerationModel"><option value="deepseek-flash">Flash · consigliato</option><option value="deepseek-v4-pro">Pro</option></select></label>
+              <div class="ai-provider-actions span-full">
                 <button type="button" class="button button-ghost" id="deepseekVerify">Verifica chiave e carica modelli</button>
                 <button type="button" class="button button-primary" id="deepseekUse">Usa DeepSeek</button>
               </div>
-              <p class="muted copy-span-2" id="deepseekVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
+              <p class="muted span-full" id="deepseekVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
             </div></div>
           </details>
 
           <details class="settings-provider" id="groqSettings">
             <summary><span><strong>Groq</strong><small>Risposte, traduzioni e suggerimenti · ricerca web separata</small></span><span class="settings-provider-state" id="groqState">Da configurare</span></summary>
             <div class="settings-provider-body"><div class="settings-grid">
-              <label class="settings-field copy-span-2"><span>Chiave API Groq</span>
+              <label class="settings-field span-full"><span>Chiave API Groq</span>
                 <input id="groqApiKey" type="password" autocomplete="new-password" placeholder="Incolla la chiave API">
                 <small id="groqApiKeyHint" class="muted"></small>
               </label>
-              <label class="settings-check copy-span-2" id="groqClearRow" hidden><input id="groqClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
-              <label class="settings-field copy-span-2"><span>Modello per risposte e testi</span><select id="groqGenerationModel"><option value="openai/gpt-oss-120b">GPT-OSS 120B</option><option value="openai/gpt-oss-20b">GPT-OSS 20B · economico</option></select></label>
-              <div class="ai-provider-actions copy-span-2">
+              <label class="settings-check span-full" id="groqClearRow" hidden><input id="groqClearApiKey" type="checkbox"><span>Rimuovi la chiave salvata</span></label>
+              <label class="settings-field span-full"><span>Modello per risposte e testi</span><select id="groqGenerationModel"><option value="openai/gpt-oss-120b">GPT-OSS 120B</option><option value="openai/gpt-oss-20b">GPT-OSS 20B · economico</option></select></label>
+              <div class="ai-provider-actions span-full">
                 <button type="button" class="button button-ghost" id="groqVerify">Verifica chiave e carica modelli</button>
                 <button type="button" class="button button-primary" id="groqUse">Usa Groq</button>
               </div>
-              <p class="muted copy-span-2" id="groqVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
+              <p class="muted span-full" id="groqVerifyStatus" role="status">La verifica non salva la chiave. Usa Salva impostazioni per applicare le modifiche.</p>
             </div></div>
           </details>
 
@@ -420,7 +440,7 @@
             </summary>
             <div class="settings-provider-body">
               <div class="settings-grid">
-                <label class="settings-field copy-span-2"><span>URL</span><input id="ollamaUrl" type="url" placeholder="http://host:11434"></label>
+                <label class="settings-field span-full"><span>URL</span><input id="ollamaUrl" type="url" placeholder="http://host:11434"></label>
                 <label class="settings-field"><span>Modello embedding</span><input id="ollamaEmbeddingModel" type="text"></label>
                 <label class="settings-field"><span>Modello generation</span><input id="ollamaGenerationModel" type="text"></label>
               </div>
@@ -434,21 +454,21 @@
             </summary>
             <div class="settings-provider-body">
               <div class="settings-grid">
-                <label class="settings-field copy-span-2"><span>URL</span><input id="lmstudioUrl" type="url" placeholder="http://192.168.1.249:1234"></label>
+                <label class="settings-field span-full"><span>URL</span><input id="lmstudioUrl" type="url" placeholder="http://192.168.1.249:1234"></label>
                 <label class="settings-field"><span>Modello embedding</span><input id="lmstudioEmbeddingModel" type="text"></label>
                 <label class="settings-field"><span>Modello generation</span><input id="lmstudioGenerationModel" type="text"></label>
-                <label class="settings-field copy-span-2">
+                <label class="settings-field span-full">
                   <span>API key (opzionale)</span>
                   <input id="lmstudioApiKey" type="password" autocomplete="new-password" placeholder="Lascia vuoto per mantenerla invariata">
                   <small id="lmstudioApiKeyHint" class="muted"></small>
                 </label>
-                <label class="settings-check copy-span-2" id="clearLmstudioApiKeyRow" hidden>
+                <label class="settings-check span-full" id="clearLmstudioApiKeyRow" hidden>
                   <input id="lmstudioClearApiKey" type="checkbox"><span>Rimuovi la API key LM Studio salvata</span>
                 </label>
                 <label class="settings-field"><span>Timeout generation (s)</span><input id="lmstudioGenerationTimeout" type="number" min="1" max="900" step="1"></label>
                 <label class="settings-field"><span>Max token generation</span><input id="lmstudioGenerationMaxTokens" type="number" min="64" max="4096" step="1"></label>
-                <label class="settings-check copy-span-2"><input id="lmstudioDisableThinking" type="checkbox"><span>Disattiva thinking per Qwen3 durante le risposte RAG</span></label>
-                <label class="settings-check copy-span-2">
+                <label class="settings-check span-full"><input id="lmstudioDisableThinking" type="checkbox"><span>Disattiva thinking per Qwen3 durante le risposte RAG</span></label>
+                <label class="settings-check span-full">
                   <input id="lmstudioWolEnabled" type="checkbox">
                   <span>WoL automatico: riattiva il PC se LM Studio non è raggiungibile</span>
                 </label>
@@ -475,15 +495,15 @@
             </summary>
             <div class="settings-provider-body">
               <div class="settings-grid">
-                <label class="settings-field copy-span-2"><span>URL</span><input id="geminiUrl" type="url" placeholder="https://generativelanguage.googleapis.com"></label>
+                <label class="settings-field span-full"><span>URL</span><input id="geminiUrl" type="url" placeholder="https://generativelanguage.googleapis.com"></label>
                 <label class="settings-field"><span>Modello embedding</span><input id="geminiEmbeddingModel" type="text"></label>
                 <label class="settings-field"><span>Modello generation</span><input id="geminiGenerationModel" type="text"></label>
-                <label class="settings-field copy-span-2">
+                <label class="settings-field span-full">
                   <span>Gemini API key</span>
                   <input id="geminiApiKey" type="password" autocomplete="new-password" placeholder="Lascia vuoto per mantenerla invariata">
                   <small id="geminiApiKeyHint" class="muted"></small>
                 </label>
-                <label class="settings-check copy-span-2" id="clearGeminiApiKeyRow" hidden>
+                <label class="settings-check span-full" id="clearGeminiApiKeyRow" hidden>
                   <input id="geminiClearApiKey" type="checkbox"><span>Rimuovi la Gemini API key salvata</span>
                 </label>
               </div>
@@ -491,6 +511,11 @@
           </details>
 
         </div>
+          <div class="settings-inline-actions">
+            <button class="button button-primary" type="button" data-save-settings="rag">Salva AI e provider</button>
+
+            <span data-settings-status="rag" class="muted" role="status"></span>
+          </div>
       </div>
 
       <div class="settings-tab-panel" data-settings-panel="crowdfunding" hidden>
@@ -507,21 +532,23 @@
             Il token viene salvato solo lato server e non viene mai mostrato nuovamente in chiaro.
           </p>
           <div class="settings-grid">
-            <label class="settings-field copy-span-2">
+            <label class="settings-field span-full">
               <span>Apify API token</span>
               <input id="apifyToken" type="password" autocomplete="new-password"
                      placeholder="Incolla qui il token Apify">
               <small id="apifyTokenHint" class="muted"></small>
             </label>
-            <label class="settings-check copy-span-2" id="clearApifyTokenRow" hidden>
+            <label class="settings-check span-full" id="clearApifyTokenRow" hidden>
               <input id="apifyClearToken" type="checkbox">
               <span>Rimuovi il token Apify salvato</span>
             </label>
           </div>
           <div class="settings-inline-actions">
-            <button class="button button-primary" id="verifyApifyToken" type="button">Salva e verifica</button>
-            <span id="apifyVerifyStatus" class="muted"></span>
+            <button class="button button-primary" type="button" data-save-settings="crowdfunding">Salva Apify</button>
+            <button class="button button-ghost" id="verifyApifyToken" type="button">Verifica token Apify</button>
+            <span data-settings-status="crowdfunding" class="muted" role="status"></span>
           </div>
+          <p class="muted" role="status" data-verification-status="crowdfunding"></p>
         </section>
       </div>
 
@@ -543,11 +570,8 @@
         </section>
       </div>
 
-      <div id="settingsResult" class="import-result settings-result" hidden></div>
       <div class="dialog-actions settings-actions">
         <button class="button button-ghost" type="button" id="cancelSettings">Chiudi</button>
-        <button class="button button-ghost" type="submit" id="saveSettings">Salva</button>
-        <button class="button button-primary" type="button" id="saveTestSettings">Salva e verifica BGG</button>
       </div>
     </form>
   </dialog>
@@ -587,88 +611,42 @@
     </form>
   </dialog>
 
-  <dialog id="copyDialog" class="dialog" aria-labelledby="copyDialogTitle">
-    <form id="copyForm">
-      <div class="dialog-head">
-        <div>
-          <p class="eyebrow">Inventario</p>
-          <h2 id="copyDialogTitle">Copia fisica</h2>
-        </div>
-        <button class="icon-button" id="closeCopyDialog" type="button" aria-label="Chiudi copia">×</button>
+  <dialog id="tonightDialog" class="dialog" aria-labelledby="tonightTitle">
+    <div class="dialog-head">
+      <h2 id="tonightTitle">Cosa giochiamo stasera?</h2>
+      <button class="icon-button" id="closeTonight" type="button" aria-label="Chiudi proposte">×</button>
+    </div>
+    <form id="tonightForm">
+      <div class="settings-grid">
+        <label class="settings-field"><span>Giocatori</span><input name="players" type="number" min="1" max="99" step="1" placeholder="Qualsiasi"></label>
+        <label class="settings-field"><span>Minuti disponibili</span><input name="minutes" type="number" min="1" max="1440" step="1" placeholder="Qualsiasi"></label>
+        <label class="settings-field"><span>Complessità</span><select name="weight">
+          <option value="">Qualsiasi</option><option value="light">Leggera</option><option value="medium">Media</option><option value="heavy">Alta</option>
+        </select></label>
+        <label class="settings-field"><span>Dipendenza massima dalla lingua</span><select name="language">
+          <option value="">Qualsiasi</option><option value="1">Nessuna</option><option value="2">Poca</option><option value="3">Moderata</option><option value="4">Alta</option>
+        </select></label>
       </div>
-      <p class="muted" id="copyDialogSubtitle"></p>
-      <div class="copy-form-grid">
-        <label class="settings-field copy-span-2">
-          <span>Barcode / EAN / UPC</span>
-          <input id="copyBarcode" type="text" inputmode="numeric" autocomplete="off">
-        </label>
-        <label class="settings-field">
-          <span>Lingua</span>
-          <input id="copyLanguage" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field">
-          <span>Edizione</span>
-          <input id="copyEdition" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field copy-span-2">
-          <span>Editore / localizzatore</span>
-          <input id="copyPublishers" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field">
-          <span>Anno edizione</span>
-          <input id="copyVersionYear" type="number" min="1000" max="3000">
-        </label>
-        <label class="settings-field">
-          <span>Posizione</span>
-          <input id="copyLocation" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field">
-          <span>Data acquisto</span>
-          <input id="copyAcquisitionDate" type="date">
-        </label>
-        <label class="settings-field">
-          <span>Acquistato da</span>
-          <input id="copyAcquiredFrom" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field">
-          <span>Prezzo</span>
-          <input id="copyPrice" type="number" min="0" step="0.01">
-        </label>
-        <label class="settings-field">
-          <span>Valuta</span>
-          <input id="copyCurrency" type="text" maxlength="16" placeholder="EUR">
-        </label>
-        <label class="settings-field copy-span-2">
-          <span>Condizioni</span>
-          <input id="copyCondition" type="text" autocomplete="off">
-        </label>
-        <label class="settings-field copy-span-2">
-          <span>Note</span>
-          <textarea id="copyNotes" rows="3"></textarea>
-        </label>
-      </div>
-      <div id="copyResult" class="import-result" hidden></div>
-      <div class="dialog-actions">
-        <button class="button button-ghost" type="button" id="cancelCopyDialog">Annulla</button>
-        <button class="button button-primary" type="submit" id="saveCopy">Salva copia</button>
-      </div>
+      <div class="dialog-actions"><button class="button button-primary" type="submit">Trova giochi</button></div>
     </form>
+    <div id="tonightResults" class="tonight-results" aria-live="polite"></div>
   </dialog>
 
   <dialog id="scannerDialog" class="dialog scanner-dialog" aria-labelledby="scannerDialogTitle">
     <div class="dialog-head">
       <div>
-        <p class="eyebrow">Inventario rapido</p>
-        <h2 id="scannerDialogTitle">Aggiungi giochi con barcode</h2>
+        <h2 id="scannerDialogTitle">Aggiungi gioco</h2>
       </div>
       <button class="icon-button" id="closeScanner" type="button" aria-label="Chiudi scanner">×</button>
     </div>
+
+    <button class="button button-ghost" id="startLibraryScan" type="button">Scansiona barcode</button>
 
     <div id="cameraSection" class="scanner-camera">
       <video id="scannerVideo" playsinline muted></video>
       <div class="scanner-camera-actions">
         <button class="button button-ghost" id="toggleCamera" type="button">Avvia fotocamera</button>
-        <label class="button button-primary scanner-photo-button" id="scannerPhotoButton">
+        <label class="button button-primary scanner-photo-button" id="scannerPhotoButton" tabindex="0" role="button">
           Scatta foto
           <input id="scannerPhoto" type="file" accept="image/*" capture="environment" hidden>
         </label>
@@ -729,7 +707,7 @@
           <span>Lingua</span>
           <input id="documentLanguage" type="text" value="it" placeholder="it, en, de…">
         </label>
-        <label class="settings-field copy-span-2">
+        <label class="settings-field span-full">
           <span>Titolo</span>
           <input id="documentTitle" type="text" placeholder="Es. Regolamento italiano">
         </label>
@@ -741,11 +719,11 @@
           <span>Edizione</span>
           <input id="documentEdition" type="text" placeholder="Retail IT">
         </label>
-        <label class="settings-field copy-span-2">
+        <label class="settings-field span-full">
           <span>URL origine (opzionale)</span>
           <input id="documentSourceUrl" type="url" placeholder="https://editore.example/manuale.pdf">
         </label>
-        <label class="settings-check copy-span-2">
+        <label class="settings-check span-full">
           <input id="documentOfficial" type="checkbox">
           <span>Documento ufficiale</span>
         </label>

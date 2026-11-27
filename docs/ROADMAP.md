@@ -7,15 +7,14 @@ they must not be read as unfinished product milestones.
 
 ## Current product state
 
-BoardGameCompanion is a standalone, self-hosted companion for a physical board-game
-collection. The major product areas below are implemented on `main` and have
+BoardGameCompanion is a standalone, self-hosted companion for a board-game library. The major product areas below are implemented on `main` and have
 production evidence:
 
 - BGG collection synchronization, metadata enrichment, catalog search/filtering,
   rankings and Explore views;
 - personal ratings, played/completed state, lists, wishlist, global search and
   notifications;
-- barcode/copy workflow, including verified exact-GTIN resolution, fallback
+- barcode-assisted addition, including verified exact-GTIN resolution, fallback
   provider matching and an evidence-checked AI web fallback that proposes BGG
   reference titles for explicit promotion into the collection;
 - bidirectional localized/original title aliases in universal search;
@@ -91,9 +90,8 @@ the proposed title. AI results are always `requires_review`, never auto-matched
 to an unowned title, and are cached under the `v9` barcode namespace.
 
 The scanner also queries the BGG reference catalogue: an unidentified or
-AI-identified product can be explicitly added to the collection
-(`POST /api/reference/{bgg_id}/collection`) and then receive the barcode. This
-keeps automatic import out of scope while making new games reachable from a scan.
+AI-identified product can be explicitly added to the library
+(`POST /api/reference/{bgg_id}/collection`) after the user confirms the title.
 
 ## Expansions — major-only policy
 
@@ -152,9 +150,8 @@ not a blocker for normal product use.
 - BGC remains standalone for core board-game workflows.
 - BGG `objectid` is the canonical external game identity.
 - BGG version product codes are not UPC/EAN/ISBN identifiers.
-- The physical-copy invariant remains:
-
-  `barcode -> OwnedCopy -> BoardGame`
+- Il barcode serve a riconoscere un prodotto quando si aggiunge il gioco alla ludoteca.
+  L’identità del gioco e il suo possesso restano indipendenti dal barcode.
 
 - Rulebook auto-acquisition remains fail-closed: exact identity, trusted source and
   policy approval are required.

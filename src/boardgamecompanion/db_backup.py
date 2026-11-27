@@ -7,17 +7,21 @@ Non sovrascrive mai un file esistente.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from pathlib import Path
 
 
 def backup(source: Path, target: Path) -> dict[str, object]:
-    if target.exists():
-        raise SystemExit(f"{target} esiste già: scegli un altro nome")
     target.parent.mkdir(parents=True, exist_ok=True)
-    origin = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30)
+    origin = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
     try:
+        try:
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as exc:
+            raise SystemExit(f"{target} esiste già: scegli un altro nome") from exc
+        os.close(fd)
         copy = sqlite3.connect(target)
         try:
             origin.backup(copy)

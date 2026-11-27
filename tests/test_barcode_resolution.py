@@ -37,19 +37,24 @@ def _database(tmp_path: Path) -> Database:
     return database
 
 
-def test_existing_local_barcode_does_not_call_external_lookup(tmp_path: Path) -> None:
+def test_product_hint_is_review_only_and_reports_current_ownership(tmp_path: Path) -> None:
+    from boardgamecompanion.catalog import Catalog
+
     database = _database(tmp_path)
-    lookup = FakeLookup(
-        {"title": "Should not be used", "source": "upcitemdb"}
-    )
-
-    result = BarcodeResolver(database, product_lookup=lookup).lookup(
-        "1234567890123"
-    )
-
-    assert result["resolution"] == "local_copy"
-    assert result["count"] == 1
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO barcode_product_hints SELECT '1234567890123',id FROM board_games WHERE bgg_id=900001"
+        )
+    lookup = FakeLookup(error=AssertionError("a local hint needs no network"))
+    resolver = BarcodeResolver(database, product_lookup=lookup)
+    result = resolver.lookup("1234567890123")
+    assert result["product"]["requires_review"]
+    assert result["auto_match"] is None
+    assert result["candidates"][0]["owned"]
     assert lookup.calls == []
+
+    Catalog(database).remove_from_library(900001)
+    assert not resolver.lookup("1234567890123")["candidates"][0]["owned"]
 
 
 def test_unknown_barcode_resolves_owned_game_from_product_title(tmp_path: Path) -> None:
@@ -70,7 +75,6 @@ def test_unknown_barcode_resolves_owned_game_from_product_title(tmp_path: Path) 
         "4000000000001"
     )
 
-    assert result["count"] == 0
     assert result["resolution"] == "owned_game"
     assert result["auto_match"]["bgg_id"] == 900001
     assert result["auto_match"]["confidence"] >= 0.82
@@ -721,3 +725,25 @@ def test_v7_live_barcode_cache_is_ignored_after_verified_catalog_v8_upgrade(
     assert sagrada["external_lookup"] == "verified_catalog"
     assert sagrada["auto_match"]["bgg_id"] == 199561
     assert sagrada["auto_match"]["confidence"] == 1.0
+
+
+def test_audited_product_can_be_confirmed_without_a_bgg_dump_or_token(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from boardgamecompanion.catalog import Catalog
+    from boardgamecompanion.main import app
+    from boardgamecompanion.routers import reference
+
+    database = Database(tmp_path / "empty.sqlite3")
+    database.initialize()
+    resolver = BarcodeResolver(database, product_lookup=VerifiedBarcodeLookup())
+    product = resolver.lookup("8034055580424")["auto_match"]
+    assert product["confidence"] == 1 and product["requires_barcode_confirmation"]
+    assert Catalog(database).get_game(178900) is None
+
+    monkeypatch.setattr(reference, "get_database", lambda: database)
+    client = TestClient(app)
+    assert client.post("/api/reference/178900/collection?barcode=8034055581032").status_code == 422
+    assert client.post("/api/reference/178900/collection").status_code == 404
+    response = client.post("/api/reference/178900/collection?barcode=8034055580424")
+    assert response.status_code == 201 and response.json()["created_entry"]
+    assert Catalog(database).get_game(178900)["collection"]["own"]

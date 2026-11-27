@@ -141,3 +141,21 @@ def test_session_api(log, monkeypatch):
     invalid = deepcopy(data)
     invalid['rounds'] = [{}]
     assert client.post('/api/games/1/play-sessions', json=invalid).status_code == 422
+
+
+def test_cursor_crosses_a_session_and_day_without_gaps(log):
+    for _ in range(9):
+        log.create(1, {"played_on": "2026-11-14"})
+    session = log.create_session(1, payload())
+    for _ in range(199):
+        log.create(1, {"played_on": "2026-11-15"})
+    first = log.list(limit=200, player=None, q="notte")
+    cursor = first["next"]
+    assert first["items"][-1]["session_round"] == 3
+    log.create(1, {"played_on": "2026-11-16"})
+    second = log.list(limit=200, q="notte", before=(cursor["played_on"], cursor["id"]))
+    combined = first["items"] + second["items"]
+    assert len(combined) == len({item["id"] for item in combined}) == 211
+    assert [item["session_round"] for item in combined if item["session"]] == [3, 2, 1]
+    assert {item["id"] for item in combined if item["session"]} == {item["id"] for item in session["items"]}
+    assert "next" not in second

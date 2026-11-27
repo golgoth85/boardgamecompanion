@@ -156,6 +156,7 @@ def open_barcode_scanner(page) -> None:
     scanner_button = page.locator("#scannerButton")
     expect(scanner_button).to_be_visible()
     scanner_button.click()
+    page.locator("#startLibraryScan").click()
 
 
 def make_many_games_csv(path: Path, count: int = 30) -> Path:
@@ -1078,6 +1079,8 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
 
         page.locator("#bggUsername").fill("browser-user")
         page.locator("#bggApplicationToken").fill("browser-secret-bgg-token")
+        page.locator('[data-save-settings="bgg"]').click()
+        expect(page.locator('[data-settings-status="bgg"]')).to_have_text("Salvato.")
         page.get_by_role("tab", name="AI e provider").click()
         page.locator("#ragEmbeddingOrder").get_by_role("checkbox", name="Usa LM Studio", exact=True).check()
         page.locator("#ragEmbeddingOrder").get_by_role("button", name="Sposta LM Studio su", exact=True).click()
@@ -1092,9 +1095,9 @@ def test_settings_save_bgg_and_rag_without_revealing_secrets(browser, live_serve
         page.locator("#lmstudioGenerationModel").fill("qwen3-14b")
         page.locator("#lmstudioApiKey").fill("browser-secret-lmstudio-key")
         page.locator("#geminiApiKey").fill("browser-secret-gemini-key")
-        page.get_by_role("button", name="Salva", exact=True).click()
+        page.locator('[data-save-settings="rag"]').click()
 
-        expect(page.locator("#settingsResult")).to_contain_text("Impostazioni salvate")
+        expect(page.locator('[data-settings-status="rag"]')).to_have_text("Salvato.")
         bgg_response = page.request.get(f"{live_server}/api/settings/bgg")
         assert bgg_response.ok
         bgg_body = bgg_response.json()
@@ -1285,95 +1288,38 @@ def test_game_detail_is_game_centric_and_rules_are_secondary(browser, live_serve
         assert description_box is not None and rules_box is not None
         assert description_box["y"] < rules_box["y"]
 
-        expect(page.get_by_role("button", name="+ Aggiungi copia")).to_have_count(0)
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_have_count(0)
         expect(page.locator(".cover-rating-overlay")).to_be_visible()
         expect(page.locator(".game-title-block")).to_be_visible()
 
-        expect(page.locator("#ragPanel")).to_be_visible()
-        expect(page.locator("#ragQuestion")).to_be_visible()
-
-        technical = page.locator(".technical-game-details")
-        expect(technical).not_to_have_attribute("open", "")
-
         expect(page.locator("#gameDiscoveryStatus")).not_to_be_visible()
-        expect(page.get_by_role("button", name="Cerca automaticamente")).to_be_visible()
-        expect(page.get_by_role("button", name="Upload")).to_be_visible()
+        expect(page.get_by_role("button", name="Cerca regolamento")).to_be_visible()
+        expect(page.get_by_role("button", name="Carica PDF")).to_be_visible()
     finally:
         context.close()
 
 
-def test_physical_copy_data_remains_available_but_manual_ui_is_hidden(browser, live_server):
+def test_scanner_manual_search_reports_owned_without_writing(browser, live_server):
     context, page = new_page(browser)
     try:
         import_csv(page, live_server)
-        page.get_by_role("link", name="Apri Synthetic Alpha").click()
-
-        expect(page.get_by_text("1 copia registrata", exact=True)).to_have_count(0)
-        expect(page.locator(".physical-copy-card")).to_have_count(0)
-        expect(page.get_by_role("button", name="+ Aggiungi copia")).to_have_count(0)
-        expect(page.locator("#copyDialog")).not_to_be_visible()
-
-        response = page.request.get(f"{live_server}/api/games/900001/copies")
-        assert response.ok
-        items = response.json()["items"]
-        assert len(items) == 1
-        assert items[0]["barcode_normalized"] == "1234567890123"
-        assert items[0]["inventory_location"] == "Kallax A1"
-    finally:
-        context.close()
-
-
-def test_scanner_manual_lookup_finds_existing_copy(browser, live_server):
-    context, page = new_page(browser)
-    try:
-        import_csv(page, live_server)
-
+        writes = []
+        page.on("request", lambda request: writes.append(request.url)
+                if request.method == "POST" and request.url.endswith("/collection") else None)
+        _stub_unresolved_barcode_lookup(page, "4000000000999")
         open_barcode_scanner(page)
-        expect(page.locator("#scannerDialog")).to_be_visible()
-        page.locator("#scannerBarcode").fill("1234-5678-90123")
-        page.get_by_role("button", name="Cerca", exact=True).click()
-
-        expect(page.locator("#scannerResult")).to_contain_text("Copia trovata")
-        expect(page.locator("#scannerResult")).to_contain_text("Synthetic Alpha")
-        expect(page.locator("#scannerResult")).to_contain_text("1234567890123")
-        expect(page.get_by_role("link", name="Apri gioco")).to_be_visible()
-    finally:
-        context.close()
-
-
-def test_scanner_assigns_unknown_barcode_to_single_unbarcoded_copy(browser, live_server):
-    context, page = new_page(browser)
-    try:
-        import_csv(page, live_server)
-        _stub_unresolved_barcode_lookup(page, "222-222-222")
-
-        open_barcode_scanner(page)
-        page.locator("#scannerBarcode").fill("222-222-222")
-        page.get_by_role("button", name="Cerca", exact=True).click()
-
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
+        page.locator("#scannerManualFallback").evaluate("el => el.open = true")
+        page.locator("#scannerBarcode").fill("4000000000999")
+        page.locator("#lookupBarcode").click()
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto")
         page.locator("#scannerGameSearch").fill("Beta")
         page.locator("#scannerSearchGames").click()
-        expect(page.locator(".scanner-game-choice")).to_have_count(1)
-        expect(page.locator(".scanner-game-choice")).to_contain_text("Synthetic Beta Expansion")
-        page.locator(".scanner-game-choice").click()
-
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode importato")
-        expect(page.locator("#scannerResult")).to_contain_text("Synthetic Beta Expansion")
-        expect(page.get_by_role("button", name="Scansiona prossimo")).to_be_visible()
-        page.get_by_role("button", name="Scansiona prossimo").click()
-        expect(page.locator("#scannerBarcode")).to_have_value("")
-
-        response = page.request.get(f"{live_server}/api/games/900002/copies")
-        assert response.ok
-        items = response.json()["items"]
-        assert len(items) == 1
-        assert items[0]["barcode"] == "222-222-222"
-        assert items[0]["barcode_normalized"] == "222222222"
+        choice = page.locator("#scannerGameResults .scanner-game-choice")
+        expect(choice).to_contain_text("Synthetic Beta Expansion")
+        choice.click()
+        expect(page.locator(".scanner-success")).to_contain_text("Già nella tua ludoteca")
+        assert writes == []
     finally:
         context.close()
-
 
 
 def test_scanner_adds_reference_game_to_library(browser, live_server, tmp_path):
@@ -1395,11 +1341,13 @@ def test_scanner_adds_reference_game_to_library(browser, live_server, tmp_path):
         page.locator("#scannerGameSearch").fill("Brass")
         page.locator("#scannerGameSearch").press("Enter")
         choice = page.locator("#scannerGameResults .scanner-game-choice")
-        expect(choice).to_contain_text("Aggiungi alla ludoteca con questo barcode")
+        expect(choice).to_contain_text("Brass")
         choice.click()
         expect(page.locator(".scanner-success")).to_contain_text("Brass")
-        copies = page.request.get(f"{live_server}/api/games/28720/copies").json()["items"]
-        assert len(copies) == 1 and copies[0]["barcode"] == "4000000000999"
+        assert page.request.get(f"{live_server}/api/games/28720").status == 404
+        page.locator("#scannerConfirm").click()
+        expect(page.locator(".scanner-success")).to_contain_text("Aggiunto alla ludoteca")
+        assert page.request.get(f"{live_server}/api/games/28720").json()["collection"]["own"]
         page.locator("#closeScanner").click()
         expect(page.locator('a[href="/games/28720"]').first).to_be_visible()
     finally:
@@ -1411,7 +1359,7 @@ def test_mobile_sidebar_and_scanner_dialog_do_not_overflow(browser, live_server)
         page.goto(live_server)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
         expect(page.get_by_role("button", name="Apri navigazione")).to_be_visible()
-        expect(page.get_by_role("button", name="Scansiona barcode")).to_be_visible()
+        expect(page.get_by_role("button", name="Aggiungi gioco")).to_be_visible()
 
         page.get_by_role("button", name="Apri navigazione").click()
         page.wait_for_function(
@@ -1447,7 +1395,7 @@ def test_document_upload_list_download_and_dedup(browser, live_server):
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.get_by_text("Regolamento non presente", exact=True)).to_be_visible()
+        expect(page.get_by_text("Carica o cerca un PDF per abilitare le domande sulle regole.", exact=True)).to_be_visible()
         expect(page.locator(".game-document-card")).to_have_count(0)
 
         page.locator("#addDocument").click()
@@ -2113,7 +2061,7 @@ def test_barcode_scanner_starts_camera_and_native_lookup_automatically(browser, 
         open_barcode_scanner(page)
 
         expect(page.locator("#scannerDialog")).to_be_visible()
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto")
         expect(page.locator("#scannerBarcode")).to_have_value("8001234567890")
         assert page.evaluate("window.__bgcCameraRequests") == 1
         assert page.evaluate("window.__bgcNativeFormats") == [
@@ -2163,7 +2111,7 @@ def test_barcode_scanner_uses_zxing_when_native_detector_is_missing(browser, liv
         _stub_unresolved_barcode_lookup(page, "9781234567897")
         page.goto(live_server)
         open_barcode_scanner(page)
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto")
         expect(page.locator("#scannerBarcode")).to_have_value("9781234567897")
         assert page.evaluate("window.__bgcZxingFormats") == [1, 2, 3, 4]
         constraints = page.evaluate("window.__bgcZxingConstraints")
@@ -2200,7 +2148,7 @@ def test_manual_barcode_submit_wins_over_late_camera_detection(browser, live_ser
         page.locator("#scannerManualFallback").evaluate("(node) => { node.open = true; }")
         page.locator("#scannerBarcode").fill("1234567890123")
         page.locator("#lookupBarcode").click()
-        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto automaticamente")
+        expect(page.locator("#scannerResult")).to_contain_text("Barcode non riconosciuto")
         expect(page.locator("#scannerBarcode")).to_have_value("1234567890123")
 
         page.evaluate(
@@ -2411,7 +2359,7 @@ def test_rag_query_ui_renders_grounded_citations_and_conflicts(browser, live_ser
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator("#ragPanel")).to_be_visible()
-        expect(page.locator("#ragIndexStatus")).to_contain_text("Assistente disponibile")
+        expect(page.locator("#ragIndexStatus")).to_contain_text("Puoi fare una domanda sui documenti")
 
         page.locator("#ragQuestion").fill("Come si prepara?")
         page.locator("#ragAsk").click()
@@ -2558,9 +2506,12 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
 
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Assistente temporaneamente non disponibile"
+            "Preparazione interrotta"
         )
         expect(page.get_by_role("button", name="Riprova preparazione")).to_be_visible()
+        expect(page.locator("#ragAsk")).to_be_disabled()
+        page.get_by_role("button", name="Riprova preparazione").click()
+        expect(page.locator("#ragAsk")).to_be_enabled()
 
         page.locator("#ragQuestion").fill("Quando finisce il turno?")
         page.locator("#ragAsk").click()
@@ -2569,10 +2520,10 @@ def test_rag_not_found_can_prepare_full_document_index(browser, live_server):
         )
         page.locator(".rag-state-not-found .rag-prepare-index").click()
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Assistente disponibile"
+            "Puoi fare una domanda sui documenti"
         )
-        expect(page.locator(".toast")).to_contain_text("Assistente disponibile")
-        assert retry_calls == [True]
+        expect(page.locator(".toast")).to_contain_text("Richiesta di preparazione completata")
+        assert retry_calls == [True, True]
     finally:
         context.close()
 
@@ -2582,11 +2533,11 @@ def test_mobile_rag_query_panel_has_no_horizontal_overflow(browser, live_server)
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
-        expect(page.locator("#ragPanel")).to_be_visible()
+        expect(page.locator("#ragPanel")).to_have_count(0)
         expect(page.locator("#ragIndexStatus")).to_contain_text(
-            "Aggiungi un regolamento per rendere disponibile l’assistente"
+            "Carica o cerca un PDF per abilitare le domande"
         )
-        box = page.locator("#ragPanel").bounding_box()
+        box = page.locator("#gameRules").bounding_box()
         assert box is not None
         assert box["x"] >= 0
         assert box["x"] + box["width"] <= 391
@@ -2672,7 +2623,7 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         page.goto(f"{live_server}/games/900001")
         expect(page.locator(".detail-main h1")).to_have_text(malicious_title)
         expect(page.get_by_role("link", name="Cerca su Google")).to_have_count(0)
-        expect(page.get_by_role("button", name="Cerca automaticamente")).to_be_visible()
+        expect(page.get_by_role("button", name="Cerca regolamento")).to_be_visible()
         href = page.evaluate(
             "(value) => import('/static/app.js').then((m) => m.googleRulebookSearchUrl(value))",
             malicious_title,
@@ -2680,7 +2631,7 @@ def test_google_rulebook_query_injection_from_imported_csv(browser, live_server,
         query = parse_qs(urlsplit(href).query)["q"][0]
         assert query == '"Game site:example.invalid manual" regolamento italiano pdf'
         assert google_requests == []
-        expect(page.get_by_role("button", name="Upload")).to_be_visible()
+        expect(page.get_by_role("button", name="Carica PDF")).to_be_visible()
     finally:
         context.close()
 
@@ -2741,7 +2692,7 @@ def test_rulebook_search_uses_known_sources_then_google_only_after_clean_miss(
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
 
         panel = page.locator(".rules-simple")
-        action = panel.get_by_role("button", name="Cerca automaticamente")
+        action = panel.get_by_role("button", name="Cerca regolamento")
         expect(action).to_be_visible()
         expect(panel.get_by_role("link", name="Cerca su Google")).to_have_count(0)
 
@@ -2839,7 +2790,7 @@ def test_rulebook_search_allows_google_after_completed_miss_with_provider_failur
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        button = page.get_by_role("button", name="Cerca automaticamente")
+        button = page.get_by_role("button", name="Cerca regolamento")
         expect(button).to_be_visible()
         button.click()
         expect(page.locator("#toast")).to_contain_text(
@@ -2905,7 +2856,7 @@ def test_rulebook_search_candidates_keep_single_known_source_action(
             discovery_run,
         )
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        page.get_by_role("button", name="Cerca automaticamente").click()
+        page.get_by_role("button", name="Cerca regolamento").click()
         expect(page.locator("#toast")).to_contain_text(
             "Trovata una fonte da verificare"
         )
@@ -2924,7 +2875,7 @@ def test_rulebook_search_panel_is_readable_on_mobile(browser, live_server):
     try:
         import_csv(page, live_server)
         page.get_by_role("link", name="Apri Synthetic Alpha").click()
-        button = page.get_by_role("button", name="Cerca automaticamente")
+        button = page.get_by_role("button", name="Cerca regolamento")
         expect(button).to_be_visible()
         button.click(trial=True)
         rect = button.bounding_box()
@@ -3219,8 +3170,8 @@ def test_cloud_ai_settings_choose_models_and_preserve_index(browser, live_server
             expect(page.locator(f'#{provider}GenerationModel')).to_have_value('test-model-v1')
             page.locator(f'#{provider}Use').click()
         expect(page.locator('#aiWebProvider')).to_have_value('deepseek')
-        page.get_by_role('button', name='Salva', exact=True).click()
-        expect(page.locator('#settingsResult')).to_contain_text('Impostazioni salvate')
+        page.locator('[data-save-settings=rag]').click()
+        expect(page.locator('[data-settings-status=rag]')).to_have_text('Salvato.')
         response = page.request.get(f'{live_server}/api/settings/rag')
         data = response.json()
         assert 'browser-secret' not in response.text()
@@ -3344,5 +3295,44 @@ def test_play_session_has_independent_winners_and_one_duration(browser, live_ser
         summary = page.request.get(f"{live_server}/api/plays/summary").json()
         assert summary["plays"] == 3 and summary["minutes"] == 60
         assert {item["name"]: item["wins"] for item in summary["players"]} == {"Anna": 2, "Luca": 2}
+    finally:
+        context.close()
+
+
+def test_settings_save_bgg_independently_when_youtube_save_fails(browser, live_server):
+    context, page = new_page(browser)
+    writes = []
+    youtube_unavailable = True
+
+    def youtube_route(route):
+        if youtube_unavailable and route.request.method == "PUT":
+            route.fulfill(status=502, json={"detail": "Errore YouTube simulato"})
+        else:
+            route.continue_()
+
+    try:
+        page.route("**/api/settings/youtube", youtube_route)
+        page.on("request", lambda req: writes.append(urlsplit(req.url).path)
+                if req.method == "PUT" else None)
+        page.goto(live_server)
+        page.get_by_role("button", name="Impostazioni", exact=True).click()
+        bgg = page.locator('[data-save-settings="bgg"]')
+        expect(bgg).to_be_enabled()
+        page.locator("#bggUsername").fill("utente-prova")
+        bgg.click()
+        expect(page.locator('[data-settings-status="bgg"]')).to_have_text("Salvato.")
+        assert writes == ["/api/settings/bgg"]
+        assert page.request.get(f"{live_server}/api/settings/bgg").json()["username"] == "utente-prova"
+
+        page.locator("#youtubeApiKey").fill("chiave-sintetica")
+        youtube = page.locator('[data-save-settings="youtube"]')
+        youtube.click()
+        expect(page.locator('[data-settings-status="youtube"]')).to_contain_text("Errore YouTube simulato")
+        expect(page.locator("#youtubeApiKey")).to_have_value("chiave-sintetica")
+        assert not page.request.get(f"{live_server}/api/settings/youtube").json()["stored_api_key_configured"]
+        youtube_unavailable = False
+        youtube.click()
+        expect(page.locator('[data-settings-status="youtube"]')).to_have_text("Salvato.")
+        assert page.request.get(f"{live_server}/api/settings/youtube").json()["stored_api_key_configured"]
     finally:
         context.close()

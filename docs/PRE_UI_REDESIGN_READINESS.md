@@ -51,7 +51,7 @@ a reload does not expose Google before the known-source attempt has completed.
   canonicalization policy and are rendered as exact source substrings.
 - Provider/model currentness checks remain mandatory.
 - No implicit provider fallback is introduced.
-- Barcode mappings remain local `barcode -> OwnedCopy -> BoardGame`.
+- Vincolo storico sostituito dal flusso di aggiunta alla ludoteca. Vedi [architettura](ARCHITECTURE.md#ludoteca-e-riconoscimento-del-prodotto).
 - BGG metadata is cacheable enrichment, not a replacement for local catalog
   identity or physical-copy data.
 

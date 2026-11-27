@@ -405,6 +405,7 @@ class PlayLog:
         date_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        before: tuple[str, int] | None = None,
     ) -> dict[str, Any]:
         where: list[str] = []
         params: list[Any] = []
@@ -452,11 +453,23 @@ class PlayLog:
                 f"LEFT JOIN board_game_enrichments e ON e.board_game_id=g.id {clause}",
                 params,
             ).fetchone()[0]
+            if before:
+                where.append("(p.played_on, p.id) < (?, ?)")
+                params.extend(before)
+            clause = f"WHERE {' AND '.join(where)}" if where else ""
+            page_size = max(1, min(int(limit), 200))
             rows = connection.execute(
                 self._SELECT + f" {clause} ORDER BY p.played_on DESC, p.id DESC LIMIT ? OFFSET ?",
-                (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
+                (*params, page_size + 1, max(0, int(offset))),
             ).fetchall()
-        return {"items": [self._annotate(self._row(row), resolver) for row in rows], "total": int(total)}
+        payload = {
+            "items": [self._annotate(self._row(row), resolver) for row in rows[:page_size]],
+            "total": int(total),
+        }
+        if len(rows) > page_size:
+            last = rows[page_size - 1]
+            payload["next"] = {"played_on": last["played_on"], "id": last["id"]}
+        return payload
 
     def defaults(self, bgg_id: int | None = None) -> dict[str, Any]:
         """What a new play can copy: the last play of this game, else the last play overall."""

@@ -143,6 +143,6 @@ def test_db_backup_copies_consistently_and_never_overwrites(database: Database, 
     PlayLog(database).create(1, {"played_on": "2026-10-01"})
     target = tmp_path / "backups" / "copy.sqlite3"
     result = backup(database.path, target)
-    assert result["integrity"] == "ok" and result["plays"] == 1 and result["schema"] == 30
+    assert result["integrity"] == "ok" and result["plays"] == 1 and result["schema"] == database.schema_version()
     with pytest.raises(SystemExit):
         backup(database.path, target)

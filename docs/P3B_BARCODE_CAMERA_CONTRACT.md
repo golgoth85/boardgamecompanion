@@ -1,4 +1,6 @@
-# P3B — Camera-first barcode scanner contract
+# P3B — Contratto storico dello scanner barcode
+
+Documento storico. Il flusso corrente è «Aggiungi gioco → Scansiona barcode» e usa il barcode per riconoscere il prodotto. Vedi [README](../README.md#aggiungere-un-gioco-tramite-barcode).
 
 ## Purpose
 

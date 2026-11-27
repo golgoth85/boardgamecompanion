@@ -20,7 +20,7 @@ from boardgamecompanion.barcode_resolution import (
 )
 from boardgamecompanion.bgg_rulebook_search import _canonical_grounded_urls
 from boardgamecompanion.cloud_ai import CloudAIError
-from boardgamecompanion.copies import normalize_barcode
+from boardgamecompanion.barcodes import normalize_barcode
 from boardgamecompanion.deepseek_search import DeepSeekWeb
 from boardgamecompanion.gemini import validate_model_id
 from boardgamecompanion.rulebooks import canonical_http_url

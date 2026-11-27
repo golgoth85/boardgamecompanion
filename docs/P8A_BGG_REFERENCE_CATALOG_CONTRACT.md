@@ -7,7 +7,7 @@ personale) da usare per ricerca, autocompletamento, risoluzione di barcode e
 titoli, wishlist e abbinamento delle campagne crowdfunding, anche senza rete.
 
 Il catalogo di riferimento è separato da `board_games`: un titolo entra in
-`board_games` solo per azione dell'utente (copia fisica, wishlist, import
+`board_games` solo per azione dell'utente (aggiunta alla ludoteca, wishlist, import
 collezione). Le funzioni che oggi leggono `board_games` (catalogo, suggerimenti,
 espansioni, discovery regolamenti, notifiche) non vedono il catalogo di
 riferimento.

@@ -9,10 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from boardgamecompanion.copies import ensure_physical_copies_for_collection_entry
 from boardgamecompanion.database import Database
 
 REQUIRED_COLUMNS = {"objectid", "objectname"}
+INVENTORY_FIELDS = (
+    "acquiredfrom", "barcode", "conditiontext", "currvalue", "cv_currency",
+    "invdate", "invlocation", "pp_currency", "pricepaid", "quantity",
+)
 
 
 def _none_if_blank(value: str | None) -> str | None:
@@ -77,9 +80,22 @@ class BggCsvImporter:
         now = datetime.now(UTC).isoformat()
         created = updated = unchanged = 0
 
-        with self.database.transaction() as connection:
-            for row in rows:
-                status = self._upsert_row(connection, row, now)
+        # A single game can appear in several BGG collection rows. Pick one
+        # stable set of game metadata and preserve each distinct source entry.
+        games = {}
+        entries = {}
+        for row in rows:
+            bgg_id = _to_int(row["objectid"])
+            coll_id = _to_int(row.get("collid"))
+            existing = entries.get((bgg_id, coll_id))
+            if existing is None or _to_bool_int(row.get("own")) > _to_bool_int(existing.get("own")):
+                entries[bgg_id, coll_id] = row
+            if bgg_id not in games or _to_bool_int(row.get("own")) > _to_bool_int(games[bgg_id].get("own")):
+                games[bgg_id] = row
+
+        with self.database.transaction(immediate=True) as connection:
+            for (bgg_id, _), row in entries.items():
+                status = self._upsert_row(connection, games[bgg_id], row, now)
                 if status == "created":
                     created += 1
                 elif status == "updated":
@@ -140,6 +156,8 @@ class BggCsvImporter:
                 for key, value in source_row.items()
                 if key
             }
+            for field in INVENTORY_FIELDS:
+                row.pop(field, None)
             bgg_id = _to_int(row.get("objectid"))
             title = _none_if_blank(row.get("objectname"))
             if bgg_id is None or title is None:
@@ -150,7 +168,7 @@ class BggCsvImporter:
             raise BggCsvError("CSV contains no valid BGG collection rows")
         return rows
 
-    def _upsert_row(self, connection, row: dict[str, str], now: str) -> str:
+    def _upsert_row(self, connection, row: dict[str, str], entry: dict[str, str], now: str) -> str:
         bgg_id = _to_int(row.get("objectid"))
         assert bgg_id is not None
 
@@ -203,6 +221,7 @@ class BggCsvImporter:
             "SELECT id FROM board_games WHERE bgg_id = ?", (bgg_id,)
         ).fetchone()["id"]
 
+        row = entry
         coll_id = _to_int(row.get("collid"))
         collection_values = {
             "coll_id": coll_id,
@@ -221,18 +240,8 @@ class BggCsvImporter:
             "wishlist_priority": _to_int(row.get("wishlistpriority")),
             "wishlist_comment": _none_if_blank(row.get("wishlistcomment")),
             "public_comment": _none_if_blank(row.get("comment")),
-            "condition_text": _none_if_blank(row.get("conditiontext")),
-            "barcode": _none_if_blank(row.get("barcode")),
-            "price_paid": _to_float(row.get("pricepaid")),
-            "price_currency": _none_if_blank(row.get("pp_currency")),
-            "current_value": _to_float(row.get("currvalue")),
-            "current_value_currency": _none_if_blank(row.get("cv_currency")),
-            "acquisition_date": _none_if_blank(row.get("acquisitiondate")),
-            "acquired_from": _none_if_blank(row.get("acquiredfrom")),
-            "quantity": _to_int(row.get("quantity")),
             "private_comment": _none_if_blank(row.get("privatecomment")),
-            "inventory_location": _none_if_blank(row.get("invlocation")),
-            "inventory_date": _none_if_blank(row.get("invdate")),
+            "acquisition_date": _none_if_blank(row.get("acquisitiondate")),
             "version_publishers": _none_if_blank(row.get("version_publishers")),
             "version_languages": _none_if_blank(row.get("version_languages")),
             "version_year_published": _to_int(row.get("version_yearpublished")),
@@ -258,14 +267,9 @@ class BggCsvImporter:
             inserted_collection = {**collection_values, "first_seen_at": now}
             columns = ", ".join(inserted_collection)
             placeholders = ", ".join("?" for _ in inserted_collection)
-            cursor = connection.execute(
+            connection.execute(
                 f"INSERT INTO collection_entries ({columns}, created_at, updated_at) VALUES ({placeholders}, ?, ?)",
                 (*inserted_collection.values(), now, now),
-            )
-            ensure_physical_copies_for_collection_entry(
-                connection,
-                int(cursor.lastrowid),
-                now,
             )
             return "created"
 
@@ -275,16 +279,6 @@ class BggCsvImporter:
                 f"UPDATE collection_entries SET {assignments}, updated_at = ? WHERE id = ?",
                 (*collection_values.values(), now, existing_entry["id"]),
             )
-            ensure_physical_copies_for_collection_entry(
-                connection,
-                int(existing_entry["id"]),
-                now,
-            )
             return "updated"
 
-        ensure_physical_copies_for_collection_entry(
-            connection,
-            int(existing_entry["id"]),
-            now,
-        )
         return "unchanged"

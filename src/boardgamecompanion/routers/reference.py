@@ -22,6 +22,7 @@ from boardgamecompanion.bgg_reference import (
     load_reference_settings,
     save_reference_settings,
 )
+from boardgamecompanion.barcode_resolution import VerifiedBarcodeLookup
 from boardgamecompanion.bgg_metadata import BggMetadataError
 from boardgamecompanion.bgg_reference_worker import worker_status
 from boardgamecompanion.catalog import explore_fact_match, explore_facts
@@ -202,11 +203,19 @@ def reference_translate_description_it(bgg_id: int) -> dict[str, object]:
 
 
 @router.post("/api/reference/{bgg_id:int}/collection", status_code=201)
-def reference_add_to_collection(bgg_id: int) -> dict[str, object]:
+def reference_add_to_collection(
+    bgg_id: int, barcode: str | None = Query(default=None, min_length=1, max_length=64),
+) -> dict[str, object]:
     database = get_database()
     database.initialize()
+    verified_title = None
+    if barcode:
+        product = VerifiedBarcodeLookup().lookup(barcode)
+        if product is None or product["bgg_id"] != bgg_id:
+            raise HTTPException(status_code=422, detail="Il barcode non conferma questo gioco")
+        verified_title = product["title"]
     try:
-        return BggReferenceCatalog(database).add_to_collection(bgg_id)
+        return BggReferenceCatalog(database).add_to_collection(bgg_id, verified_title=verified_title)
     except BggReferenceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

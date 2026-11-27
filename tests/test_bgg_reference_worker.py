@@ -128,7 +128,15 @@ def test_budget_is_respected_and_resets_next_day(database: Database) -> None:
     assert worker(database, client, tomorrow).run_once()["requests"] == 2
 
 
-def test_candidates_admit_by_wishing_and_old_titles_are_left_alone(database: Database) -> None:
+def test_candidates_admit_by_wishing_and_old_titles_are_left_alone(database: Database, monkeypatch) -> None:
+    from boardgamecompanion import bgg_reference
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz):
+            return datetime(YEAR, 10, 24, 12, tzinfo=tz)
+
+    monkeypatch.setattr(bgg_reference, "datetime", FixedDateTime)
     client = FakeClient(
         13,
         {

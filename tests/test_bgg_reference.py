@@ -549,8 +549,6 @@ def test_explore_and_rankings_sources_groups_and_language(database: Database) ->
 
 
 def test_barcode_collection_add_preserves_nonowned_import(database: Database) -> None:
-    from boardgamecompanion.copies import PhysicalCopyStore
-
     BggReferenceImporter(database).import_bytes(DUMP, "ranks.csv")
     catalog = BggReferenceCatalog(database)
     catalog.add_to_collection(28720)
@@ -559,13 +557,10 @@ def test_barcode_collection_add_preserves_nonowned_import(database: Database) ->
     added = catalog.add_to_collection(28720)
     assert added["created_entry"] and not added["created_game"]
     assert not catalog.add_to_collection(28720)["created_entry"]
-    copies = PhysicalCopyStore(database)
-    copies.create(28720, {"barcode": "4000000000999"})
-    assert copies.lookup_barcode("4000000000999")["count"] == 1
     assert {g["bgg_id"]: g["owned"] for g in catalog.search("Brass")}[28720]
     with database.connect() as connection:
         rows = connection.execute("SELECT own, wishlist FROM collection_entries ORDER BY id").fetchall()
-    assert [(r["own"], r["wishlist"]) for r in rows] == [(0, 1), (1, 0)]
+    assert [(r["own"], r["wishlist"]) for r in rows] == [(1, 1)]
 
 
 def test_remove_from_library_keeps_the_game_and_readding_reuses_the_entry(database: Database) -> None:

@@ -379,7 +379,7 @@ class YouTubeTutorialService:
             rows = connection.execute(
                 """
                 SELECT g.bgg_id,g.title,
-                       COUNT(v.youtube_video_id) AS video_count,
+                       COUNT(DISTINCT v.youtube_video_id) AS video_count,
                        MAX(v.verified_at) AS last_verified_at,
                        s.last_attempt_at
                 FROM board_games g

@@ -1874,6 +1874,51 @@ def _player_profiles(connection: sqlite3.Connection) -> None:
     )
 
 
+# Le chiavi CSV di inventario non fanno più parte del catalogo.
+_INVENTORY_COLUMNS = {
+    "condition_text": "conditiontext", "barcode": "barcode",
+    "price_paid": "pricepaid", "price_currency": "pp_currency",
+    "current_value": "currvalue", "current_value_currency": "cv_currency",
+    "acquired_from": "acquiredfrom",
+    "quantity": "quantity", "inventory_location": "invlocation",
+    "inventory_date": "invdate",
+}
+
+
+def _game_library(connection: sqlite3.Connection) -> None:
+    connection.execute("""
+        CREATE TABLE barcode_product_hints (
+            barcode TEXT NOT NULL,
+            board_game_id INTEGER NOT NULL REFERENCES board_games(id) ON DELETE CASCADE,
+            PRIMARY KEY (barcode, board_game_id)
+        ) WITHOUT ROWID
+    """)
+    # Conserva i codici immessi dall'utente come suggerimenti da verificare.
+    # Le righe copiate da vecchi import non attestano che il codice sia un GTIN.
+    connection.execute("""
+        INSERT OR IGNORE INTO barcode_product_hints(barcode, board_game_id)
+        SELECT pc.barcode_normalized, pc.board_game_id
+        FROM physical_copies pc
+        LEFT JOIN collection_entries c ON c.id = pc.source_collection_entry_id
+        WHERE pc.barcode_normalized IS NOT NULL
+          AND (pc.source_kind = 'manual' OR (c.id IS NOT NULL AND pc.barcode IS NOT c.barcode))
+    """)
+    connection.execute("DROP TABLE physical_copies")
+    for column in _INVENTORY_COLUMNS:
+        connection.execute(f"ALTER TABLE collection_entries DROP COLUMN {column}")
+
+    paths = tuple(f"$.{key}" for key in _INVENTORY_COLUMNS.values())
+    placeholders = ", ".join("?" for _ in paths)
+    has_inventory = " OR ".join("json_type(source_metadata_json, ?) IS NOT NULL" for _ in paths)
+    for table in ("collection_entries", "board_games"):
+        connection.execute(
+            f"""UPDATE {table}
+                SET source_metadata_json = json_remove(source_metadata_json, {placeholders})
+                WHERE json_valid(source_metadata_json) AND ({has_inventory})""",
+            (*paths, *paths),
+        )
+
+
 MIGRATIONS = (
     Migration(1, "baseline-existing-schema", _baseline),
     Migration(2, "physical-copies", _physical_copies),
@@ -1905,6 +1950,7 @@ MIGRATIONS = (
     Migration(28, "play-modes", _play_modes),
     Migration(29, "play-sessions", _play_sessions),
     Migration(30, "player-profiles", _player_profiles),
+    Migration(31, "game-library", _game_library),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -1923,28 +1969,22 @@ def migrate(connection: sqlite3.Connection) -> int:
     connection.commit()
 
     applied = {
-        int(row["version"])
-        for row in connection.execute("SELECT version FROM schema_migrations").fetchall()
+        row["version"] for row in connection.execute("SELECT version FROM schema_migrations")
     }
-
-    for migration in MIGRATIONS:
-        if migration.version in applied:
-            continue
-
+    if any(migration.version not in applied for migration in MIGRATIONS):
         connection.execute("BEGIN IMMEDIATE")
         try:
-            migration.apply(connection)
-            connection.execute(
-                """
-                INSERT INTO schema_migrations (version, name, applied_at)
-                VALUES (?, ?, ?)
-                """,
-                (
-                    migration.version,
-                    migration.name,
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
+            applied = {
+                row["version"] for row in connection.execute("SELECT version FROM schema_migrations")
+            }
+            for migration in MIGRATIONS:
+                if migration.version in applied:
+                    continue
+                migration.apply(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                    (migration.version, migration.name, datetime.now(UTC).isoformat()),
+                )
             connection.commit()
         except Exception:
             connection.rollback()

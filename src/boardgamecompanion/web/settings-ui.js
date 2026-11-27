@@ -10,8 +10,6 @@ export function activateSettingsTab({
   name = "general",
   tabs,
   panels,
-  saveSettings,
-  saveTestSettings,
   onDiagnostics,
   onRulebooks,
 }) {
@@ -24,10 +22,6 @@ export function activateSettingsTab({
   for (const panel of panels || []) {
     panel.hidden = panel.dataset.settingsPanel !== active;
   }
-  if (saveSettings) {
-    saveSettings.hidden = active === "rulebooks" || active === "diagnostics";
-  }
-  if (saveTestSettings) saveTestSettings.hidden = active !== "general";
   if (active === "diagnostics") onDiagnostics?.();
   if (active === "rulebooks") onRulebooks?.();
   return active;
